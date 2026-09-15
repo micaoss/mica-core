@@ -1,6 +1,6 @@
 # 20260915-1059-package-versions Packages locked by their declared version
 
-- **status**: in_progress
+- **status**: completed
 - **priority**: P1
 - **owner**: vtv87o8e/mica-core
 - **createdAt**: 2026-09-15 10:59
