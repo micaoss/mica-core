@@ -24,9 +24,37 @@ fi
 # it lands. An untracked scratch file is deliberately out of scope. `sort -u`
 # and not `sort`: the refusal above is what keeps a conflicted tree out, and this
 # is the second half of the same statement -- one entry per path, whatever the
-# index holds.
-mapfile -t files < <(git ls-files '*.sh' 'scripts/build/*' | sort -u)
+# index holds. The workflows are in the list because a `run:` block that sets
+# pipefail is a script like any other, and the scan below reads lines.
+mapfile -t files < <(git ls-files '*.sh' 'scripts/build/*' '.github/workflows/*.yml' | sort -u)
 [ "${#files[@]}" -gt 0 ] || { echo "error: no shell scripts found; this lint would pass by finding nothing" >&2; exit 1; }
+
+# The readers that stop before their input does. Each one kills the writer on
+# its left with SIGPIPE, and under `pipefail` that is the pipeline's status --
+# so the same line passes or fails depending on how much the writer had already
+# pushed into the pipe buffer before the reader left. One regex, one name and
+# one remedy per entry, in the same order.
+READERS=(
+    '\|[[:space:]]*(command[[:space:]]+)?e?grep([[:space:]]+-[A-Za-z]*q[A-Za-z]*)+'
+    '\|[[:space:]]*(command[[:space:]]+)?e?grep([[:space:]]+-[A-Za-z]*m[A-Za-z]*)+[[:space:]]*[0-9]'
+    '\|[[:space:]]*head([[:space:]]|$)'
+    '\|[[:space:]]*sed[^|]*[0-9]+[[:space:]]*q'
+    '\|[[:space:]]*awk[^|]*[[:space:]]exit'
+)
+NAMES=(
+    'an early-exiting grep'
+    'a grep bounded by -m'
+    'head'
+    'a sed that quits'
+    'an awk that exits'
+)
+REMEDIES=(
+    "'grep -c ... >/dev/null'"
+    "'grep ...' and bound the result afterwards"
+    "'awk \"NR <= N\"'"
+    "'awk \"NR <= N\"'"
+    'an awk that reads to the end of its input'
+)
 
 scanned=0
 for f in "${files[@]}"; do
@@ -36,17 +64,18 @@ for f in "${files[@]}"; do
     # is indistinguishable, in the output, from a tree that is clean.
     grep -c 'pipefail' "${f}" >/dev/null || continue
     scanned=$((scanned + 1))
-    # A pipe, optional whitespace, then grep with -q among its flags; comment
-    # lines dropped afterwards so prose about the trap is not an instance of it.
-    hits="$(grep -nE '\|[[:space:]]*(command[[:space:]]+)?e?grep([[:space:]]+-[A-Za-z]*q[A-Za-z]*)+' "${f}" |
-        grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-    if [ -n "${hits}" ]; then
+    clean=1
+    for i in "${!READERS[@]}"; do
+        # A pipe, optional whitespace, then the reader; comment lines dropped
+        # afterwards so prose about the trap is not an instance of it.
+        hits="$(grep -nE "${READERS[${i}]}" "${f}" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+        [ -n "${hits}" ] || continue
+        clean=0
         while IFS= read -r h; do
-            fail "${f}:${h%%:*}: an early-exiting grep on the right of a pipe, in a file that sets pipefail: the pipeline reports failure when the pattern IS found. Use 'grep -c ... >/dev/null'"
+            fail "${f}:${h%%:*}: ${NAMES[${i}]} on the right of a pipe, in a file that sets pipefail: the pipeline reports failure exactly when the reader stops early. Use ${REMEDIES[${i}]}"
         done <<<"${hits}"
-    else
-        pass "${f} pipes nothing into an early-exiting grep"
-    fi
+    done
+    [ "${clean}" = 0 ] || pass "${f} pipes nothing into an early-exiting reader"
 done
 
 [ "${scanned}" -gt 0 ] || { echo "error: no file enabled pipefail; the scan matched nothing and would report clean" >&2; exit 1; }

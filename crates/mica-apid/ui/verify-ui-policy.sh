@@ -107,7 +107,10 @@ if grep -rnE '#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(' src --include='*.tsx' >/dev/n
 fi
 if grep -nE '#[0-9a-fA-F]{3,8}\b' src/styles.css >/dev/null 2>&1; then
     bad "src/styles.css carries a hex colour; the baseline is oklch:"
-    grep -nE '#[0-9a-fA-F]{3,8}\b' src/styles.css | head -20 | sed 's/^/    /' >&2
+    # `awk 'NR <= 20'`, not `| head -20`: head closes the pipe after its last
+    # line, grep dies of SIGPIPE, and under `pipefail` the report itself would
+    # end the script -- a failure that depends on how many hits there are.
+    grep -nE '#[0-9a-fA-F]{3,8}\b' src/styles.css | awk 'NR <= 20' | sed 's/^/    /' >&2
 fi
 
 # --- 6. features compose components; they do not hand-roll controls ---------
