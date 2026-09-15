@@ -225,7 +225,8 @@ fn collection_keeps_two_bootable_deployments_and_discards_stale_state_references
         let mut d: Value =
             serde_json::from_slice(include_bytes!("component-contracts/deployment.json")).unwrap();
         d["generation"] = json!(generation);
-        d["rootfs"]["version"] = json!(format!("root-{generation}"));
+        // A root's id changes only with its content.
+        d["rootfs"]["content"]["rootHash"] = json!(format!("{generation:064x}"));
         d["rootfs"]["id"] = json!(component_id(&d["rootfs"]).unwrap());
         let id = component_id(&d).unwrap();
         let bytes = serde_json::to_vec(&d).unwrap();

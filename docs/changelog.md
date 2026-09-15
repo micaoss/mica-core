@@ -20,6 +20,11 @@ user decision 2026-09-15, R0-R8):
 - `scripts/build/reuse.sh` checks the packages against the newest release under
   the rules, in CI and before a release: a package at its released version must
   keep its inputs and bytes, and a lower version is refused.
+- The rootfs component is `mica/rootfs/v2`, without a `version`: like the kernel
+  component, its id changes only with its content, so a root rebuilt from the
+  same inputs keeps its id. The release version stays in `mica/deployment/v2`.
+  The contract fixtures are regenerated. The root carries no
+  `/usr/share/mica/release-identity.env` any more, and micad reads none.
 
 ## 2026-09-15 07:02 [progress]
 

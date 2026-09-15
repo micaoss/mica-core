@@ -74,7 +74,6 @@ pub struct RootComponent {
     pub schema: String,
     pub id: String,
     pub arch: String,
-    pub version: String,
     pub content: VerityImage,
 }
 
@@ -240,7 +239,7 @@ impl Deployment {
         let k = &self.kernel;
         let r = &self.rootfs;
         require(
-            k.schema == "mica/kernel/v1" && r.schema == "mica/rootfs/v1",
+            k.schema == "mica/kernel/v1" && r.schema == "mica/rootfs/v2",
             "wrong component schema",
         )?;
         require(
@@ -251,7 +250,6 @@ impl Deployment {
         hash(&r.id)?;
         hash(&k.build_id)?;
         name(&k.release)?;
-        name(&r.version)?;
         require(k.boot.format == format, "wrong boot format")?;
         k.boot.artifact.validate(MAX_INTEGER)?;
         k.support.validate()?;

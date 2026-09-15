@@ -26,6 +26,9 @@ reused from the previous release under the rules.
   `mica.inputs`, in `ci.yml` (read-only) and `scripts/build/release.sh`.
 - R6: pool manifests carry only `mica.source-repo` and `mica.arch`.
 - R8: `make offline` warns that the guard did not run.
+- Combined (user, 2026-09-15): `mica/rootfs/v2` drops the rootfs `version`, so a
+  root's id depends only on its content; the contract fixtures are regenerated.
+  micad reads no `release-identity.env`.
 
 Acceptance: `make check`, `make pool` and the package gate pass; pushed with CI
 green; one release under the rules (a full build recording `mica.inputs`),

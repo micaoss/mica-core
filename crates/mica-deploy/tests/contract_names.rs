@@ -35,7 +35,7 @@ fn the_shared_descriptor_uses_the_mica_schemas() {
     let d = parse_deployment(PAYLOAD.as_bytes()).unwrap();
     assert_eq!(d.schema, "mica/deployment/v2");
     assert_eq!(d.kernel.schema, "mica/kernel/v1");
-    assert_eq!(d.rootfs.schema, "mica/rootfs/v1");
+    assert_eq!(d.rootfs.schema, "mica/rootfs/v2");
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn other_component_schemas_are_refused_with_correct_ids() {
     for (pointer, other) in [
         ("/schema", "mica/deployment/v1"),
         ("/kernel/schema", "mica/kernel/v2"),
-        ("/rootfs/schema", "mica/rootfs/v2"),
+        ("/rootfs/schema", "mica/rootfs/v1"),
     ] {
         let mut d = valid.clone();
         *d.pointer_mut(pointer).unwrap() = json!(other);

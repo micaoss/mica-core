@@ -28,7 +28,7 @@ public keys embedded in the signed kernel image or the device policy
 | Schema | What it signs |
 | --- | --- |
 | `mica/deployment/v2` | A deployment: its identity, its product, the components and the data policy |
-| `mica/kernel/v1`, `mica/rootfs/v1` | The kernel and root/support components and their verity parameters |
+| `mica/kernel/v1`, `mica/rootfs/v2` | The kernel and root/support components and their verity parameters; neither carries a version, so a component's id changes only with its content |
 | `mica/update-envelope/v1` | The envelope a published update travels in |
 | `mica/firmware/v1` | Firmware maintenance; kept apart, no deployment can carry firmware |
 

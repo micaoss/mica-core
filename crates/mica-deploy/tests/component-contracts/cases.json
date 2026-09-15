@@ -73,7 +73,7 @@
     "kernelRelease": "6.12.107",
     "supportId": "4b667330fb3b5b1701191406853acd959c4046abbdc330f8e4d8fc8525ce0924"
   },
-  "deploymentId": "7ef5225854a55b55906ea6fea26267225889379fe093dbfc2fb44116dca76f33",
+  "deploymentId": "142b536d5db0c108a463638c24fa1a1425b12ab222b351702f4b158c8a5ae697",
   "invalid": [
     {
       "name": "wrong-schema",
@@ -234,6 +234,11 @@
       "name": "invalid-product",
       "pointer": "/product",
       "value": "X64 dev"
+    },
+    {
+      "name": "rootfs-version",
+      "pointer": "/rootfs/version",
+      "value": "dev-1"
     }
   ],
   "product": {
@@ -323,9 +328,8 @@
           "version": 1
         }
       },
-      "id": "dc20e6d196c47645254f2fab98f24df0245c808c1c295ce18755693fb52daf21",
-      "schema": "mica/rootfs/v1",
-      "version": "dev-1"
+      "id": "8242e9827bee51a7af1755d70701641baadc0ab70a2d59477106a1c0b30364a6",
+      "schema": "mica/rootfs/v2"
     },
     "schema": "mica/deployment/v2",
     "version": "dev-1"
