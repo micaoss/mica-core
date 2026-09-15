@@ -123,6 +123,159 @@ call returns the task id; progress is published as `TaskChanged` and readable
 with `GetTask`. The queue keeps a bounded history and carries only the
 operation and the dot-path, never setting values.
 
+### 4.2 What the table above is measured against
+
+Each cell, measured. Both subtrees are the reconciler's own name:
+`"container"` (`crates/micad/src/reconciler/container.rs`) and
+`"mqtt"` (`crates/micad/src/reconciler/mqtt.rs`). The container
+executor is not a daemon — the engine is daemonless and the image carries no
+podman unit — so what the reconciler operates is the mount that makes Quadlet's
+directory readable, `pub const QUADLET_MOUNT_UNIT: &str = "etc-containers-systemd.mount";`
+(`crates/micad/src/reconciler/container.rs`), followed by
+`self.control.daemon_reload().await?;`
+(`crates/micad/src/reconciler/container.rs`), without which the mount
+is correct, the files are visible and no unit exists. The MQTT executor writes
+`const DEFAULT_CONFIG_PATH: &str = "/run/mica/mqtt-broker.toml";`
+(`crates/micad/src/reconciler/mqtt.rs`) and drives two units,
+`const BROKER_UNIT: &str = "mica-mqtt-broker.service";`
+(`crates/micad/src/reconciler/mqtt.rs`) and
+`const BRIDGE_UNIT: &str = "mica-mqttd.service";`
+(`crates/micad/src/reconciler/mqtt.rs`).
+
+**The `SshdReconciler` subtree contract:**
+`SshdReconciler` watches **`access.ssh` and nothing else**. `access.device` is
+**deliberately not watched.** A reader who finds the credential subtree missing
+should not reconstruct it as an oversight and add it back.
+
+This reconciler **does not write `/etc/shadow`**. It
+reads the marker beside it to decide whether password authentication may be
+offered (`access.md` §3.1), but the only writers of that file today are micad's
+transient-password bus method and `mica-shadow-reconcile` at boot.
+
+Every reconciler follows the same discipline:
+
+- **pure render, then compare, then write.** The render is a deterministic
+  function of the subtree; `apply` re-renders, compares against what is on disk,
+  and skips the write when the bytes match. These files live on DATA/state, so an
+  unconditional rewrite costs a flash write on every reconcile.
+- **read live state before acting.** Ask systemd for the unit's `ActiveState` and
+  unit-file state first, and issue only the calls that change something. A
+  converged system produces **zero** bus calls.
+- **restart on config change.** The one case that must not be a no-op: a daemon
+  that reads its configuration once at start, whose file changed under it, is
+  restarted. Otherwise the rewrite silently did not take effect.
+- **enablement is runtime-scoped** (`EnableUnitFiles` with `runtime = true`).
+  Persistent enablement needs `/etc/systemd/system` to be writable, and on the Mica OS
+  read-only root it is not — a persistent enable would fail with EROFS on device
+  while passing every test on a normal filesystem. micad reconciles the whole tree
+  at every start, so units return to their configured state each boot anyway.
+- **outcomes are named, never boolean** — `applied`, `unchanged`, `idle`,
+  `disabled`, `stopped`, `conflict`, `absent`, `plaintext-missing`. Several of
+  these are skips, and confusing two of them is how a broken image gets reported
+  as a healthy one.
+- **secrets reach the config file and nothing else** — not the live-state tree
+  (which is served over D-Bus), not a log line, not an error message.
+
+The settings/live-state split carries all of this: each reconciler publishes its status onto the live-state tree, which apid
+reads over the bus.
+
+### 4.3 The network reconciler: kinds, netdevs and teardown
+
+Everything above still holds for a physical interface: one `50-mica-<iface>.network`
+file, rendered, compared, swept. What schema v7 added is a `kind` on each
+`network` entry — physical, `vlan`, `bridge` or `wireguard` — and three things
+the reconciler has to do that a `.network` file alone cannot express.
+
+**A virtual link needs a `.netdev` as well.** The renderer is a second function
+beside the unit renderer: *"Render the `.netdev` unit that creates `iface`, for
+a kind that needs one"* (`crates/micad/src/reconciler/network.rs`),
+answering *"`None` for a physical entry, whose device the kernel already has"*
+(`crates/micad/src/reconciler/network.rs`). A VLAN's netdev carries
+`Kind=vlan` and its `[VLAN] Id=`, a bridge's `Kind=bridge`, and a tunnel's
+`Kind=wireguard` plus
+*"the `[WireGuard]` and `[WireGuardPeer]` sections of a tunnel's netdev"*
+(`crates/micad/src/reconciler/network.rs`).
+
+**Attachment is a line on the OTHER interface's unit.** A VLAN child is named
+by its parent and a bridge port by nothing of its own, because
+*"networkd creates a VLAN only when the parent's `.network` names it"*
+(`crates/micad/src/reconciler/network.rs`) — so the child's
+existence is a fact the PARENT's unit has to state, and `render_unit` takes the
+parent's VLAN children and the bridge that claimed this interface as arguments
+rather than reading them off the entry. A port carries no addressing:
+*"A port's addressing is the bridge's; validation has already refused an entry
+that tried to keep its own"*
+(`crates/micad/src/reconciler/network.rs`). Both relations are
+fail-closed before a single file is written — *"an undeclared parent is a VLAN
+that would never come up"*
+(`crates/micad/src/reconciler/network.rs`) — which is the same
+boundary argument the address validator makes: the settings file is writable
+without apid.
+
+**The sweep grew a teardown, because deleting a file is not deleting a device.**
+The sweep still deletes every `50-mica-` unit the pass did not write, now over
+both suffixes — *"Whether `file_name` is one this reconciler wrote:
+`50-mica-<iface>.network` or, for a virtual link, `50-mica-<iface>.netdev`"*
+(`crates/micad/src/reconciler/network.rs`) — and it then asks the
+kernel to drop the device, because *"Removing a `.netdev` file and reloading
+does not delete the device networkd built from it: networkd creates virtual
+devices, it does not reap them"*
+(`crates/micad/src/reconciler/network.rs`). The same delete covers a
+netdev whose properties changed: *"Devices whose netdev properties changed. They
+apply at creation only, so the device has to go and be built again"*
+(`crates/micad/src/reconciler/network.rs`). The deletes run
+*"Before the reload, so networkd builds the recreated devices back on the same
+pass that deleted them"* (`crates/micad/src/reconciler/network.rs`),
+and a failed delete in the sweep is logged rather than returned — the unit file
+is already gone and failing there would report every converged interface as
+unconverged.
+
+**A WireGuard private key never enters the settings tree.** The schema is
+explicit that it never will: *"There is no private-key field here and there
+never will be"* (`crates/micad-settings/src/model.rs`). The key lives
+in a file under the DATA/state directory that holds `settings.toml`, in
+`networkd-secrets/` — *"A sibling of `secrets/` rather than anything under it,
+and the name says so because the path is load-bearing"*
+(`crates/micad/src/wgkeys.rs`), a sibling and not a child because the
+identity module pins `secrets/` to 0700 on every pass and nothing below a 0700
+directory is traversable by the `systemd-network` user. The modes follow from
+who reads it: *"the key file is `root:systemd-network` 0640 under a sibling
+directory of the same ownership at 0750"*
+(`crates/micad/src/wgkeys.rs`). Generation is lazy and idempotent —
+*"Idempotent: an interface that already has a key keeps it, so a reconcile pass
+never rotates by accident"* (`crates/micad/src/wgkeys.rs`) — and
+each write is the store's usual shape: *"temp file beside the target, fsync,
+rename, fsync the directory"* (`crates/micad/src/wgkeys.rs`), with
+mode and group set on the temp file before the rename. The rendered unit names
+the file rather than carrying the key: *"`PrivateKeyFile=` names the key rather
+than carrying it"* (`crates/micad/src/reconciler/network.rs`), which
+matters because the netdev sits in networkd's world-readable runtime directory.
+Only the public half is ever published, into the live-state entry —
+`entry["publicKey"] = json!(self.keys.ensure(iface)?);`
+(`crates/micad/src/reconciler/network.rs`) — beside the `file`, `dhcp`
+and `kind` keys every entry carries: `"kind": kind_name(cfg.kind),`
+(`crates/micad/src/reconciler/network.rs`).
+
+This is the reconciler discipline's *"secrets reach the config file and nothing
+else"* rule applied to a secret the config file may not hold either: the key
+reaches its own file, and the module carries no logging statement at all.
+
+**Rotation is a bus method, not a settings write.** `RotateWireguardKey(iface)`
+answers the new public key, and it is a method for the reason the transient root
+password is: *"Deliberately not a setting, for the reason a transient root
+password is not one: a key that reached the settings tree would be persisted and
+served back out of it"* (`crates/micad/src/bus.rs`). It refuses an
+interface that is not a declared `network` entry of kind `wireguard`, runs under
+the same lock every mutating method takes, and then re-reconciles:
+*"The reconcilers are re-run afterwards so the tunnel's unit is re-rendered and
+networkd builds the device back around the key now on disk"*
+(`crates/micad/src/bus.rs`). The re-run is not optional, because
+*"networkd reads `PrivateKeyFile=` when it creates the device and never again"*
+(`crates/micad/src/reconciler/network.rs`) — a rotation that only
+rewrote the file would change what the public key says without changing what the
+tunnel uses. No `SettingsChanged` is emitted: nothing in the settings tree
+changed.
+
 ## 5. D-Bus interface
 
 Bus name `com.mica.micad`, object `/com/mica/micad`, interface
@@ -206,7 +359,12 @@ hashes. `mica-mqttd` has no exception.
 
 ## 8. Power, reset and recovery
 
-- `power.rs`: reboot and power-off through systemd; actions, not settings.
+- `power.rs`: reboot and power-off through `org.freedesktop.systemd1.Manager`;
+  actions, not settings. Each resolves the caller's unique bus name and **logs
+  the action with its source and records it in live state before invoking the
+  power control** — after the call there may be no system left to log on. The
+  record is live state under `power` (`{ last_action, requested_by }`), and the
+  settings documents, `SCHEMA_VERSION` included, are left as they were.
 - `reset.rs`: applies a staged reset tier — `configuration` (settings back to
   schema defaults), `application-data` (operator applications and their data),
   `full-factory` (first-boot state, keeping identity, calibration, META and both
