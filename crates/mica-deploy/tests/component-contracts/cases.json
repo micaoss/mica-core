@@ -1,4 +1,71 @@
 {
+  "archives": [
+    {
+      "archive": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature",
+        "/rootfs/content/image",
+        "/rootfs/content/signature"
+      ],
+      "name": "full",
+      "present": [],
+      "result": "accepted"
+    },
+    {
+      "archive": [
+        "/rootfs/content/image",
+        "/rootfs/content/signature"
+      ],
+      "name": "root-only-with-kernel-present",
+      "present": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature"
+      ],
+      "result": "accepted"
+    },
+    {
+      "archive": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature"
+      ],
+      "name": "kernel-only-with-root-present",
+      "present": [
+        "/rootfs/content/image",
+        "/rootfs/content/signature"
+      ],
+      "result": "accepted"
+    },
+    {
+      "archive": [
+        "/rootfs/content/image",
+        "/rootfs/content/signature"
+      ],
+      "name": "partial-with-an-absent-object",
+      "present": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image"
+      ],
+      "refusal": "deployment objects are incomplete",
+      "result": "refused"
+    },
+    {
+      "archive": [
+        "/rootfs/content/image",
+        "/rootfs/content/signature",
+        "unnamed"
+      ],
+      "name": "unnamed-object",
+      "present": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature"
+      ],
+      "result": "refused"
+    }
+  ],
   "context": {
     "arch": "amd64",
     "board": "x64",
@@ -6,7 +73,7 @@
     "kernelRelease": "6.12.107",
     "supportId": "4b667330fb3b5b1701191406853acd959c4046abbdc330f8e4d8fc8525ce0924"
   },
-  "deploymentId": "9764853ab36a7885e785ad884935a85c387654db7bb30314cf7d5a28c35f51bb",
+  "deploymentId": "7ef5225854a55b55906ea6fea26267225889379fe093dbfc2fb44116dca76f33",
   "invalid": [
     {
       "name": "wrong-schema",
@@ -162,6 +229,35 @@
       "name": "trailing-newline-hash",
       "pointer": "/kernel/buildId",
       "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n"
+    },
+    {
+      "name": "invalid-product",
+      "pointer": "/product",
+      "value": "X64 dev"
+    }
+  ],
+  "product": {
+    "file": "/usr/lib/mica/product.conf",
+    "fixture": "PRODUCT=x64-dev\nBOARD=x64\nPROFILE=dev\nFEATURES=\"micad mqtt containers\"\nCOMPONENTS=\"\"\n",
+    "key": "PRODUCT",
+    "product": "x64-dev"
+  },
+  "productCases": [
+    {
+      "device": "x64-dev",
+      "name": "matching-product",
+      "result": "accepted"
+    },
+    {
+      "device": "x64-minimal",
+      "name": "other-product",
+      "result": "refused"
+    },
+    {
+      "device": "x64-dev",
+      "name": "missing-product-field",
+      "remove": "/product",
+      "result": "refused"
     }
   ],
   "valid": {
@@ -204,6 +300,7 @@
         }
       }
     },
+    "product": "x64-dev",
     "rootfs": {
       "arch": "amd64",
       "content": {
@@ -230,7 +327,7 @@
       "schema": "mica/rootfs/v1",
       "version": "dev-1"
     },
-    "schema": "mica/deployment/v1",
+    "schema": "mica/deployment/v2",
     "version": "dev-1"
   }
 }

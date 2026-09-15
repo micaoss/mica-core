@@ -3,7 +3,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use mica_deploy::{
     boot::BootKind,
     components::{authenticate_deployment, component_id},
-    deployments::{BootBackend, BootReceipt, DeploymentStore, State},
+    deployments::{BootBackend, BootReceipt, DeploymentStore, State, Target},
     fit_env::{Record, encode},
 };
 use ring::{
@@ -215,8 +215,11 @@ fn seed(root: &Path, fit: bool, operation: &str) {
             .install(
                 &envelopes[2],
                 &[public],
-                if fit { "cx3576" } else { "x64" },
-                if fit { "arm64" } else { "amd64" },
+                &Target {
+                    board: if fit { "cx3576" } else { "x64" },
+                    arch: if fit { "arm64" } else { "amd64" },
+                    product: "x64-dev",
+                },
                 &root.join("objects"),
                 &serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())
                     .unwrap(),
@@ -262,8 +265,11 @@ fn run_operation(root: &Path, fit: bool, operation: &str) {
                 .install(
                     &fs::read(root.join("candidate.json")).unwrap(),
                     &[public],
-                    if fit { "cx3576" } else { "x64" },
-                    if fit { "arm64" } else { "amd64" },
+                    &Target {
+                        board: if fit { "cx3576" } else { "x64" },
+                        arch: if fit { "arm64" } else { "amd64" },
+                        product: "x64-dev",
+                    },
                     &root.join("objects"),
                     &serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())
                         .unwrap(),
@@ -526,8 +532,11 @@ fn invalid_update_preserves_both_installed_deployments() {
                 .install(
                     &envelope,
                     &[public],
-                    if fit { "cx3576" } else { "x64" },
-                    if fit { "arm64" } else { "amd64" },
+                    &Target {
+                        board: if fit { "cx3576" } else { "x64" },
+                        arch: if fit { "arm64" } else { "amd64" },
+                        product: "x64-dev",
+                    },
                     &root.path().join("objects"),
                     &serde_json::from_slice(
                         &fs::read(root.path().join("current-receipt.json")).unwrap()
@@ -562,8 +571,11 @@ fn install_requires_the_confirmed_running_receipt_and_reconciles_activation() {
             store.install(
                 &envelope,
                 &[public],
-                if fit { "cx3576" } else { "x64" },
-                if fit { "arm64" } else { "amd64" },
+                &Target {
+                    board: if fit { "cx3576" } else { "x64" },
+                    arch: if fit { "arm64" } else { "amd64" },
+                    product: "x64-dev",
+                },
                 &root.path().join("objects"),
                 receipt,
             )
@@ -660,8 +672,11 @@ fn replacement_capacity_uses_reclaimed_blocks_without_a_third_version() {
         let result = store.install(
             &envelope,
             &[public],
-            "cx3576",
-            "arm64",
+            &Target {
+                board: "cx3576",
+                arch: "arm64",
+                product: "x64-dev",
+            },
             &root.path().join("objects"),
             &receipt,
         );
@@ -728,8 +743,29 @@ fn an_unconfirmed_running_trial_cannot_retire_the_other_deployment() {
             .install(
                 &envelope,
                 &[public],
-                if fit { "cx3576" } else { "x64" },
-                if fit { "arm64" } else { "amd64" },
+                &Target {
+                    board: if fit { "cx3576" } else { "x64" },
+                    arch: if fit { "arm64" } else { "amd64" },
+                    product: "x64-minimal",
+                },
+                &root.path().join("objects"),
+                &current,
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("deployment targets another product")
+        );
+        let error = store
+            .install(
+                &envelope,
+                &[public],
+                &Target {
+                    board: if fit { "cx3576" } else { "x64" },
+                    arch: if fit { "arm64" } else { "amd64" },
+                    product: "x64-dev",
+                },
                 &root.path().join("objects"),
                 &current,
             )

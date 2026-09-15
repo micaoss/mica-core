@@ -33,6 +33,7 @@ struct Catalog {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Head {
     board: String,
+    product: String,
     channel: String,
     release_id: String,
     generation: u64,
@@ -70,6 +71,7 @@ pub struct CatalogRequest<'a> {
     pub source: &'a str,
     pub board: &'a str,
     pub arch: &'a str,
+    pub product: &'a str,
     pub channel: &'a str,
     pub now: i64,
     pub checkpoint: Option<&'a CatalogCheckpoint>,
@@ -123,7 +125,7 @@ pub fn verify_catalog(
     ensure!(serde_json::to_vec(&raw)? == payload, "noncanonical catalog");
     let catalog: Catalog = serde_json::from_value(raw)?;
     ensure!(
-        catalog.schema == "mica/catalog/v1"
+        catalog.schema == "mica/catalog/v2"
             && catalog.revision > 0
             && catalog.revision <= 9_007_199_254_740_991
             && catalog.releases.len() <= 128
@@ -191,19 +193,25 @@ pub fn verify_catalog(
         ensure!(
             generations.insert((
                 deployment.board.clone(),
+                deployment.product.clone(),
                 release.channel.clone(),
                 deployment.generation
             )),
-            "duplicate board/channel generation"
+            "duplicate board/product/channel generation"
         );
         let head = heads
-            .entry((deployment.board.clone(), release.channel.clone()))
+            .entry((
+                deployment.board.clone(),
+                deployment.product.clone(),
+                release.channel.clone(),
+            ))
             .or_insert((0, String::new()));
         if deployment.generation > head.0 {
             *head = (deployment.generation, release.id);
         }
         if deployment.board == request.board
             && deployment.arch == request.arch
+            && deployment.product == request.product
             && release.channel == request.channel
             && deployment.generation > request.highest_generation
             && selected
@@ -225,7 +233,7 @@ pub fn verify_catalog(
     );
     for head in catalog.channels {
         let expected = heads
-            .remove(&(head.board, head.channel))
+            .remove(&(head.board, head.product, head.channel))
             .context("unknown channel head")?;
         ensure!(
             expected == (head.generation, head.release_id),

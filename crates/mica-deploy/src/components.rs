@@ -86,6 +86,7 @@ pub struct Deployment {
     pub arch: String,
     pub generation: u64,
     pub version: String,
+    pub product: String,
     pub data_policy: String,
     pub kernel: KernelComponent,
     pub rootfs: RootComponent,
@@ -223,7 +224,7 @@ impl VerityImage {
 impl Deployment {
     fn validate(&self, raw: &Value) -> Result<()> {
         require(
-            self.schema == "mica/deployment/v1" && self.data_policy == "unchanged",
+            self.schema == "mica/deployment/v2" && self.data_policy == "unchanged",
             "unsupported deployment schema or DATA policy",
         )?;
         let (arch, format) = match self.board.as_str() {
@@ -235,6 +236,7 @@ impl Deployment {
         require(self.arch == arch, "board/architecture mismatch")?;
         integer(self.generation, MAX_INTEGER)?;
         name(&self.version)?;
+        name(&self.product)?;
         let k = &self.kernel;
         let r = &self.rootfs;
         require(
@@ -274,6 +276,23 @@ impl Deployment {
             },
         })
     }
+}
+
+/// Where the running root names the product it was built as.
+pub const PRODUCT_FILE: &str = "/usr/lib/mica/product.conf";
+
+/// The product of `/usr/lib/mica/product.conf`: its one unquoted `PRODUCT=<name>`
+/// line. Other keys are ignored; a missing, repeated or malformed line is refused.
+pub fn device_product(text: &str) -> Result<String> {
+    let mut found = None;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("PRODUCT=") {
+            require(found.is_none(), "product file names more than one product")?;
+            name(value).map_err(|_| ContractError("invalid product in the product file"))?;
+            found = Some(value.to_owned());
+        }
+    }
+    found.ok_or(ContractError("product file names no product"))
 }
 
 /// Parse the compact, key-sorted payload with a strict size and schema boundary.

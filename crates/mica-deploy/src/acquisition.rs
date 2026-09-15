@@ -25,6 +25,7 @@ pub struct Acquisition<'a> {
     pub keys: &'a [[u8; 32]],
     pub board: &'a str,
     pub arch: &'a str,
+    pub product: &'a str,
     pub max_bytes: u64,
 }
 #[derive(Debug, Serialize)]
@@ -157,6 +158,10 @@ impl Acquisition<'_> {
             deployment.board == self.board && deployment.arch == self.arch,
             "deployment targets another device"
         );
+        ensure!(
+            deployment.product == self.product,
+            "deployment targets another product"
+        );
         let state = self.store.effective_state()?;
         ensure!(state.candidate.is_none(), "another deployment is pending");
         ensure!(
@@ -205,6 +210,7 @@ impl Acquisition<'_> {
                 source,
                 board: self.board,
                 arch: self.arch,
+                product: self.product,
                 channel,
                 now,
                 checkpoint: previous.as_ref(),
@@ -273,6 +279,8 @@ impl Acquisition<'_> {
     /// MICAUPD1: descriptor length (u32 BE), signed descriptor, object count
     /// (u32 BE), then digest (64 ASCII), size (u64 BE), and exact object bytes.
     /// There are no filenames, directory entries, links, compression or padding.
+    /// An archive may carry any subset of the descriptor's objects (a root- or
+    /// kernel-only update); every object it does not carry must already be present.
     pub fn import(&self, input: &mut impl Read) -> Result<ReadyDeployment> {
         let mut magic = [0; 8];
         input.read_exact(&mut magic)?;
@@ -291,14 +299,15 @@ impl Acquisition<'_> {
         let mut required = catalog::artifacts(&deployment)?;
         let mut count = [0; 4];
         input.read_exact(&mut count)?;
+        let count = u32::from_be_bytes(count) as usize;
         ensure!(
-            u32::from_be_bytes(count) as usize == required.len(),
-            "archive object count mismatch"
+            count <= required.len(),
+            "archive carries more objects than the deployment names"
         );
         self.prepare()?;
         let missing = self.missing(&deployment)?;
         self.reserve_missing(&missing)?;
-        for _ in 0..required.len() {
+        for _ in 0..count {
             let mut sha = [0; 64];
             input.read_exact(&mut sha)?;
             let sha = String::from_utf8(sha.to_vec())?;

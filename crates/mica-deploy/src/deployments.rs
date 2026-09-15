@@ -82,6 +82,14 @@ pub struct DeploymentStore {
 }
 
 /// Resolve partition 1 on the disk containing the authenticated SYSTEM UUID.
+/// The device a deployment must name: the board and architecture of the signed
+/// boot policy and the product of the running root.
+pub struct Target<'a> {
+    pub board: &'a str,
+    pub arch: &'a str,
+    pub product: &'a str,
+}
+
 pub fn boot_partition(system: &Path, kind: crate::boot::BootKind, board: &str) -> Result<PathBuf> {
     use std::os::unix::fs::FileTypeExt;
     ensure!(
@@ -969,16 +977,19 @@ impl DeploymentStore {
         &self,
         envelope: &[u8],
         keys: &[[u8; 32]],
-        board: &str,
-        arch: &str,
+        target: &Target,
         objects: &Path,
         receipt: &BootReceipt,
     ) -> Result<State> {
         use crate::components::{authenticate_deployment, component_id};
         let deployment = authenticate_deployment(envelope, keys)?;
         ensure!(
-            deployment.board == board && deployment.arch == arch,
+            deployment.board == target.board && deployment.arch == target.arch,
             "deployment targets another device"
+        );
+        ensure!(
+            deployment.product == target.product,
+            "deployment targets another product"
         );
         ensure!(
             deployment.kernel.boot.format

@@ -7,7 +7,9 @@ use mica_deploy::{
     acquisition::Acquisition,
     boot::BootKind,
     components::BootIdentity,
-    deployments::{BootBackend, BootReceipt, DeploymentStore, SharedDataFailure, read_bounded},
+    deployments::{
+        BootBackend, BootReceipt, DeploymentStore, SharedDataFailure, Target, read_bounded,
+    },
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -168,6 +170,15 @@ fn require_mount(path: &str, filesystem: &str, writable: bool, number: u8) -> Re
     Ok(physical)
 }
 
+/// The product the running, dm-verity authenticated root was built as.
+fn product() -> Result<String> {
+    let text = read_bounded(Path::new(mica_deploy::components::PRODUCT_FILE), 4096)
+        .with_context(|| format!("read {}", mica_deploy::components::PRODUCT_FILE))?;
+    Ok(mica_deploy::components::device_product(
+        &String::from_utf8(text)?,
+    )?)
+}
+
 fn policy() -> Result<(Policy, Vec<[u8; 32]>)> {
     let policy: Policy = serde_json::from_slice(&read_bounded(
         Path::new("/run/mica/boot-policy.json"),
@@ -315,12 +326,14 @@ fn execute() -> Result<()> {
             | Action::Import { .. }
     ) {
         require_workspace()?;
+        let product = product()?;
         let acquisition = Acquisition {
             root: "/mica/updates".into(),
             store: &store,
             keys: &keys,
             board: &policy.identity.board,
             arch: &policy.identity.arch,
+            product: &product,
             max_bytes: cli.max_bytes,
         };
         let result = match cli.command {
@@ -377,8 +390,11 @@ fn execute() -> Result<()> {
             .install(
                 &read_bounded(&descriptor, 24576)?,
                 &keys,
-                &policy.identity.board,
-                &policy.identity.arch,
+                &Target {
+                    board: &policy.identity.board,
+                    arch: &policy.identity.arch,
+                    product: &product()?,
+                },
                 &objects,
                 &receipt,
             )

@@ -29,8 +29,8 @@ fn catalog() -> Value {
         let artifact = deployment.pointer(pointer).unwrap();
         objects.insert(artifact["sha256"].as_str().unwrap(), json!({"sha256":artifact["sha256"],"bytes":artifact["bytes"],"url":format!("https://updates.test/v1/objects/{}",artifact["sha256"].as_str().unwrap())}));
     }
-    json!({"schema":"mica/catalog/v1","revision":2,"issuedAt":"2026-09-09T00:00:00.000Z","expiresAt":"2026-09-10T00:00:00.000Z",
-        "channels":[{"board":"x64","channel":"stable","releaseId":"release-1","generation":1}],
+    json!({"schema":"mica/catalog/v2","revision":2,"issuedAt":"2026-09-09T00:00:00.000Z","expiresAt":"2026-09-10T00:00:00.000Z",
+        "channels":[{"board":"x64","product":"x64-dev","channel":"stable","releaseId":"release-1","generation":1}],
         "releases":[{"id":"release-1","channel":"stable","notes":"Test","deployment":String::from_utf8(signed(&deployment)).unwrap(),"objects":objects.values().collect::<Vec<_>>()}]})
 }
 fn verify(
@@ -46,6 +46,7 @@ fn verify(
             source: "https://updates.test/v1/manifest.json",
             board: "x64",
             arch: "amd64",
+            product: "x64-dev",
             channel: "stable",
             now: 1788915600,
             checkpoint,
@@ -74,6 +75,7 @@ fn authenticates_catalog_and_selects_only_a_new_exact_board_channel_deployment()
                 source: "https://updates.test/v1/manifest.json",
                 board: "virt-arm64",
                 arch: "arm64",
+                product: "x64-dev",
                 channel: "stable",
                 now: 1788915600,
                 checkpoint: None,
@@ -114,6 +116,7 @@ fn rejects_expiry_clock_rollback_equivocation_and_untrusted_signatures() {
                 source: "https://updates.test/v1/manifest.json",
                 board: "x64",
                 arch: "amd64",
+                product: "x64-dev",
                 channel: "stable",
                 now: 1788915600,
                 checkpoint: None,
@@ -137,6 +140,7 @@ fn rejects_missing_extra_substituted_objects_redirect_origins_and_inconsistent_h
         ("/channels/0/generation", json!(2)),
         ("/channels/0/releaseId", json!("missing")),
         ("/channels/0/board", json!("virt-arm64")),
+        ("/channels/0/product", json!("x64-minimal")),
     ] {
         let mut value = catalog();
         *value.pointer_mut(pointer).unwrap() = replacement;
@@ -155,4 +159,43 @@ fn rejects_missing_extra_substituted_objects_redirect_origins_and_inconsistent_h
         .unwrap()
         .push(duplicate);
     assert!(verify(&value, None, 0).is_err());
+}
+
+/// Heads and selection are keyed by board, product and channel: a device takes
+/// only its own product's release, and a head names a product.
+#[test]
+fn selects_only_the_device_product_and_keys_heads_by_product() {
+    let value = catalog();
+    let key: [u8; 32] = signer().public_key().as_ref().try_into().unwrap();
+    let request = |product| CatalogRequest {
+        source: "https://updates.test/v1/manifest.json",
+        board: "x64",
+        arch: "amd64",
+        product,
+        channel: "stable",
+        now: 1788915600,
+        checkpoint: None,
+        highest_generation: 0,
+    };
+    assert!(
+        verify_catalog(&signed(&value), &[key], &request("x64-dev"))
+            .unwrap()
+            .selected
+            .is_some()
+    );
+    assert!(
+        verify_catalog(&signed(&value), &[key], &request("x64-minimal"))
+            .unwrap()
+            .selected
+            .is_none()
+    );
+    let mut headless = value.clone();
+    headless["channels"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("product");
+    assert!(verify_catalog(&signed(&headless), &[key], &request("x64-dev")).is_err());
+    let mut v1 = value.clone();
+    v1["schema"] = json!("mica/catalog/v1");
+    assert!(verify_catalog(&signed(&v1), &[key], &request("x64-dev")).is_err());
 }

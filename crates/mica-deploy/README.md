@@ -21,7 +21,7 @@ assembly (`micaoss/mica-build`) imports both through `deps/packages/` and
 builds neither.
 
 `mica-runkit`, invoked as `init`, runs from the signed UKI or FIT. It validates the selected
-`mica/deployment/v1` envelope against the public keys embedded in that kernel,
+`mica/deployment/v2` envelope against the public keys embedded in that kernel,
 checks board/kernel associations, opens the authenticated SYSTEM and DATA
 partitions, and creates signed dm-verity mappings for root and support. Kernel
 modules and firmware come from the selected read-only support image before
@@ -54,9 +54,16 @@ running boot failure. `discard` clears the bounded acquisition workspace.
 Commands derive their trust and partition policy from the authenticated boot;
 there is no user-space trust override.
 
-Online distribution uses signed `mica/catalog/v1` metadata with revision and
-freshness checks. Offline `MICAUPD1` archives contain the same signed deployment
-and bounded digest/length-addressed objects. The installer preserves current and
+A deployment names the product it was built as (`x64-dev`, `x64-minimal`);
+acquisition and installation refuse one whose product differs from the
+`PRODUCT` of the running root's `/usr/lib/mica/product.conf`.
+
+Online distribution uses signed `mica/catalog/v2` metadata with revision and
+freshness checks, its channel heads keyed by board, product and channel.
+Offline `MICAUPD1` archives contain the same signed deployment and bounded
+digest/length-addressed objects: every object (`.micaupd`), or only the root
+objects (`.root.micaupd`) or only the kernel objects (`.kernel.micaupd`), in
+which case the objects the archive does not carry must already be present. The installer preserves current and
 fallback objects when acquisition, capacity checks or publication fail.
 
 Firmware is independently described by `mica/firmware/v1`. `firmware-readback`

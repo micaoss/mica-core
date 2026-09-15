@@ -33,7 +33,7 @@ fn envelope(schema: &str, key: &Ed25519KeyPair, payload: &[u8]) -> Vec<u8> {
 #[test]
 fn the_shared_descriptor_uses_the_mica_schemas() {
     let d = parse_deployment(PAYLOAD.as_bytes()).unwrap();
-    assert_eq!(d.schema, "mica/deployment/v1");
+    assert_eq!(d.schema, "mica/deployment/v2");
     assert_eq!(d.kernel.schema, "mica/kernel/v1");
     assert_eq!(d.rootfs.schema, "mica/rootfs/v1");
 }
@@ -43,7 +43,7 @@ fn other_component_schemas_are_refused_with_correct_ids() {
     let valid: Value = serde_json::from_str(PAYLOAD).unwrap();
     assert!(parse_deployment(&with_ids(valid.clone())).is_ok());
     for (pointer, other) in [
-        ("/schema", "mica/deployment/v2"),
+        ("/schema", "mica/deployment/v1"),
         ("/kernel/schema", "mica/kernel/v2"),
         ("/rootfs/schema", "mica/rootfs/v2"),
     ] {

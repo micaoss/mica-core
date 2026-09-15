@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-15 07:02 [progress]
+
+Update packages (task `20260915-0657-update-packages`, user decision
+2026-09-15):
+
+- A deployment descriptor is `mica/deployment/v2` with a signed `product`; the
+  device reads its own from `PRODUCT=` in `/usr/lib/mica/product.conf`, and
+  `check`, `fetch`, `import` and `install` refuse another product.
+- The catalog is `mica/catalog/v2`: channel heads, generation uniqueness and
+  selection are keyed by board, product and channel.
+- `import` accepts a MICAUPD1 archive carrying a subset of the descriptor's
+  objects (root-only or kernel-only updates) when the rest is already present.
+- The contract cases gain the product file, product cases and archive cases;
+  the fixtures are regenerated with product `x64-dev`.
+
 ## 2026-09-15 01:15 [progress]
 
 Release lock migration, stage 3 (`mica:docs/design/release-lock.md`):
