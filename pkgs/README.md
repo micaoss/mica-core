@@ -31,6 +31,8 @@ pkgs/<producer>/
 | Key | Meaning |
 | --- | --- |
 | `PACKAGES` | The packages the producer emits; one control template each |
+| `VERSION` | `<upstream>-<revision>`, the version of every package it emits |
+| `SOURCE_DATE_EPOCH` | Seconds; every mtime in its packages, bumped with `VERSION` |
 | `ENABLEMENT` | `<package>=<n>`: how many `multi-user.target.wants` links each package ships |
 | `CONTEXTS` | Extra build contexts, `<name>=<repository path>` (the units under `crates/*/dist`) |
 
@@ -62,11 +64,22 @@ producer's `CONTEXTS`; the build argument `MICA_BUILD_BASE` is the
 - **Packing at the target architecture.** `dpkg-shlibdeps` resolves the
   libraries of the container it runs in, so `pack.sh` refuses an architecture
   other than the container's.
-- **Version.** Every archive of one build is `<VERSION>+git<commit12>-1`
-  (`scripts/deb/version.sh`), with `.dirty` when the tree was not clean.
-- **Reproducibility.** `SOURCE_DATE_EPOCH` is the commit's timestamp; `pack.sh`
-  sets every mtime to it and owns everything by root. The package gate rebuilds a
-  producer on an empty cache and compares the bytes.
+- **Version.** `producer.env` declares `VERSION="<upstream>-<revision>"` for
+  every package of the producer; the upstream part is the crate version of its
+  binaries (`scripts/build/check.sh` asserts it), which also print it
+  (`--version`). A packaging-only change bumps the revision; a source change
+  bumps the crate version and the upstream part and resets the revision. No
+  commit, date or release is in a version or a control field. A dependency on
+  `micad` names micad's declared version literally, so a micad bump bumps the
+  revision of its dependents.
+- **Reproducibility.** `producer.env` declares `SOURCE_DATE_EPOCH`, bumped with
+  `VERSION`; `pack.sh` sets every mtime to it and owns everything by root. The
+  package gate rebuilds a producer on an empty cache and compares the bytes.
+- **Inputs.** `scripts/deb/inputs.sh` hashes the tracked files that determine a
+  producer's bytes per architecture into `_out/debs/<arch>/inputs.tsv`; a
+  release records it as each pool layer's `mica.inputs`, and
+  `scripts/build/reuse.sh` refuses a package whose inputs or bytes changed while
+  its version stayed the released one.
 - **Enablement is payload.** A unit that starts at boot is enabled by a
   `multi-user.target.wants` symlink inside the package, never by a maintainer
   script; `ENABLEMENT` states the count and the gate checks it.

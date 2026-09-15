@@ -18,6 +18,7 @@ rm -rf _out/debs/amd64 _out/debs/arm64
 make --no-print-directory pool
 
 echo "offline.sh: built $(git rev-parse HEAD)"
+echo "offline.sh: warning: the package versions were not checked against a release (scripts/build/reuse.sh needs the published release); CI and the release check them" >&2
 for arch in amd64 arm64; do
     echo "offline.sh: ${REPO_ROOT}/_out/debs/${arch}/pool ($(find "_out/debs/${arch}/pool" -maxdepth 1 -name '*.deb' | wc -l) archives)"
     echo "offline.sh: ${REPO_ROOT}/_out/debs/${arch}/Packages ${REPO_ROOT}/_out/debs/${arch}/SHA256SUMS ${REPO_ROOT}/_out/debs/${arch}/manifest.txt"

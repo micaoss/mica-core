@@ -29,13 +29,9 @@ done
 case "${ARCH}" in amd64 | arm64) ;; *) die "--arch must be amd64 or arm64" ;; esac
 
 DIR="${REPO_ROOT}/$(bash "${DEB}/producers.sh" --dir-for "${PRODUCER}")"
-PACKAGES="" CONTEXTS=""
+PACKAGES="" CONTEXTS="" VERSION="" SOURCE_DATE_EPOCH=""
 # shellcheck disable=SC1091
 . "${DIR}/producer.env"
-
-VERSION="$(bash "${DEB}/version.sh")"
-SOURCE_DATE_EPOCH="$(git -C "${REPO_ROOT}" log -1 --format=%ct)"
-SOURCE_COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
 SOURCE_REPO="${MICA_SOURCE_REPO:-$(basename "$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null)" .git)}"
 [[ "${SOURCE_REPO}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "cannot tell the repository name from origin; set MICA_SOURCE_REPO"
 
@@ -43,7 +39,7 @@ STAGE="${REPO_ROOT}/tmp/deb-${PRODUCER}-${ARCH}"
 rm -rf "${STAGE}"
 mkdir -p "${STAGE}"
 echo "build.sh: ${PRODUCER} ${ARCH}: prepare.sh"
-MICA_DEB_REPO_ROOT="${REPO_ROOT}" MICA_DEB_PRODUCER="${PRODUCER}" MICA_DEB_ARCH="${ARCH}" MICA_DEB_STAGE="${STAGE}" \
+MICA_DEB_VERSION="${VERSION}" MICA_DEB_REPO_ROOT="${REPO_ROOT}" MICA_DEB_PRODUCER="${PRODUCER}" MICA_DEB_ARCH="${ARCH}" MICA_DEB_STAGE="${STAGE}" \
     bash "${DIR}/prepare.sh"
 [ -n "$(ls -A "${STAGE}")" ] || die "${PRODUCER}/prepare.sh staged nothing"
 
@@ -85,12 +81,16 @@ docker buildx build --builder "${BUILDER}" --platform "linux/${ARCH}" \
     --build-arg "MICA_DEB_ARCH=${ARCH}" \
     --build-arg "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}" \
     --build-arg "MICA_DEB_SOURCE_REPO=${SOURCE_REPO}" \
-    --build-arg "MICA_DEB_SOURCE_COMMIT=${SOURCE_COMMIT}" \
     "${ARGS[@]}" \
     -f "${DIR}/Dockerfile" -o "type=local,dest=${POOL}" "${DIR}"
 
 for deb in "${EXPECTED[@]}"; do
     [ -f "${deb}" ] || { rm -f "${EXPECTED[@]}"; die "the build exported no ${deb#"${REPO_ROOT}"/}"; }
 done
+# The producer's inputs hash beside the pool, for the release's pool layers and the reuse guard.
+INPUTS="$(dirname "${POOL}")/inputs.tsv"
+hash="$(bash "${DEB}/inputs.sh" --producer "${PRODUCER}" --arch "${ARCH}")"
+{ [ -f "${INPUTS}" ] && awk -F'\t' -v p="${PRODUCER}" '$1 != p' "${INPUTS}"; printf '%s\t%s\n' "${PRODUCER}" "${hash}"; } | LC_ALL=C sort >"${INPUTS}.new"
+mv "${INPUTS}.new" "${INPUTS}"
 rm -rf "${STAGE}"
 printf '%s\n' "${EXPECTED[@]}"

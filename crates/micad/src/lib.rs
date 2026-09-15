@@ -5,7 +5,7 @@
 //! `com.mica.micad1`. Configuration comes from the environment:
 //!
 //! `--version` (or `-V`) is answered before any of the above is read: it prints
-//! `micad <crate version> (<build commit>)` and exits 0 without provisioning,
+//! `micad <package version>` and exits 0 without provisioning,
 //! connecting to a bus or writing a file (see [`main`]). Anything else on the
 //! command line is ignored.
 
@@ -59,8 +59,9 @@ pub fn main() -> anyhow::Result<()> {
     serve()
 }
 
-/// What the commit is reported as when the build supplied none.
-const UNKNOWN_COMMIT: &str = "unknown";
+/// What the package version is reported as when the build supplied none: an
+/// unpackaged build (`cargo run`, the Rust gate).
+const UNKNOWN_VERSION: &str = "unknown";
 
 /// Whether an argv (argv[1..]) is asking for the version.
 ///
@@ -73,25 +74,27 @@ fn wants_version(args: impl IntoIterator<Item = String>) -> bool {
         .any(|arg| arg == "--version" || arg == "-V")
 }
 
-/// The build commit, or [`UNKNOWN_COMMIT`], from whatever the build embedded.
+/// The package version, or [`UNKNOWN_VERSION`], from whatever the build embedded.
 ///
-/// Takes the embedded value as an argument rather than reading `option_env!`
-/// itself: the absent case is then reachable from a test in a binary that WAS
-/// built with a commit, which is the only build any of these tests ever run in.
-fn commit_or_unknown(embedded: Option<&'static str>) -> &'static str {
+/// Takes the embedded value as an argument so the absent case is reachable from
+/// a test in a binary that was built with a version.
+fn version_or_unknown(embedded: Option<&'static str>) -> &'static str {
     match embedded {
-        Some(commit) if !commit.trim().is_empty() => commit,
-        _ => UNKNOWN_COMMIT,
+        Some(version) if !version.trim().is_empty() => version,
+        _ => UNKNOWN_VERSION,
     }
 }
 
-/// The one line `--version` prints: `micad <version> (<commit>)`.
+/// The one line `--version` prints: `micad <package version>`.
+///
+/// The version is the producer's declared `VERSION` (`pkgs/<producer>/producer.env`),
+/// compiled in as `MICA_PACKAGE_VERSION` by `scripts/build/build-deb.sh`: the
+/// version of the package this binary ships in, and nothing about the commit.
 fn version_line() -> String {
     format!(
-        "{} {} ({})",
+        "{} {}",
         "micad",
-        env!("CARGO_PKG_VERSION"),
-        commit_or_unknown(option_env!("MICA_BUILD_COMMIT")),
+        version_or_unknown(option_env!("MICA_PACKAGE_VERSION")),
     )
 }
 
@@ -406,7 +409,7 @@ fn service_scan_enabled(dry_run: bool, scan_override: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        UNKNOWN_COMMIT, commit_or_unknown, service_scan_enabled, version_line, wants_version,
+        UNKNOWN_VERSION, service_scan_enabled, version_line, version_or_unknown, wants_version,
     };
 
     fn argv(args: &[&str]) -> Vec<String> {
@@ -456,47 +459,32 @@ mod tests {
         ])));
     }
 
-    /// Absent is `unknown`, never an error -- and empty counts as absent,
-    /// because `-e MICA_BUILD_COMMIT=` sets the variable to exactly that.
+    /// Absent is `unknown`, never an error, and empty counts as absent.
     #[test]
-    fn a_commit_the_build_did_not_supply_reports_unknown() {
-        assert_eq!(commit_or_unknown(None), UNKNOWN_COMMIT);
-        assert_eq!(commit_or_unknown(Some("")), UNKNOWN_COMMIT);
-        assert_eq!(commit_or_unknown(Some("   ")), UNKNOWN_COMMIT);
+    fn a_version_the_build_did_not_supply_reports_unknown() {
+        assert_eq!(version_or_unknown(None), UNKNOWN_VERSION);
+        assert_eq!(version_or_unknown(Some("")), UNKNOWN_VERSION);
+        assert_eq!(version_or_unknown(Some("   ")), UNKNOWN_VERSION);
     }
 
-    /// The positive control for the case above: a supplied value is passed
-    /// through untouched, `-dirty` suffix and all. A helper that returned
-    /// `unknown` for everything would satisfy the test above and nothing else.
+    /// The positive control: a supplied value is passed through untouched.
     #[test]
-    fn a_commit_the_build_did_supply_is_reported_verbatim() {
-        assert_eq!(commit_or_unknown(Some("00b674ec0ffe")), "00b674ec0ffe");
-        assert_eq!(
-            commit_or_unknown(Some("00b674ec0ffe-dirty")),
-            "00b674ec0ffe-dirty"
-        );
+    fn a_version_the_build_did_supply_is_reported_verbatim() {
+        assert_eq!(version_or_unknown(Some("0.1.1-1")), "0.1.1-1");
     }
 
-    /// The shape, not the values.
+    /// The shape: the binary, one space, one version token, one line.
     #[test]
-    fn the_version_line_names_the_binary_the_version_and_the_commit() {
+    fn the_version_line_names_the_binary_and_the_package_version() {
         let line = version_line();
-        assert!(line.starts_with("micad "), "got {line:?}");
+        let version = line
+            .strip_prefix("micad ")
+            .unwrap_or_else(|| panic!("got {line:?}"));
+        assert!(!version.is_empty(), "an empty version in {line:?}");
         assert!(
-            line.contains(env!("CARGO_PKG_VERSION")),
-            "the crate version is missing from {line:?}"
+            !version.contains(char::is_whitespace),
+            "the version must be one token, got {version:?}"
         );
-        let commit = line
-            .rsplit_once(" (")
-            .and_then(|(_, rest)| rest.strip_suffix(")"))
-            .unwrap_or_else(|| panic!("no parenthesised commit in {line:?}"));
-        assert!(!commit.is_empty(), "an empty commit in {line:?}");
-        assert!(
-            !commit.contains(char::is_whitespace),
-            "the commit must be one token, got {commit:?}"
-        );
-        // One line, so a smoke runner reading the first line reads all of it.
-        assert!(!line.contains('\n'), "got {line:?}");
     }
 
     /// The pin on the asymmetry: in production `MICAD_SCAN` is inert. A gate

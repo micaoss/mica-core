@@ -39,8 +39,7 @@ export function InformationPanel() {
             <Panel title={t('system.information.software.title')} description={t('system.information.software.description')} action={<Box className="size-5 text-muted-foreground" />}>
               <FactList facts={[
                 fact('system', t('system.information.software.system'), value.system, systemSummary(value), t),
-                fact('commitDate', t('system.information.software.commitDate'), value.system.commitDate ?? value.system, value.system.commitDate?.date, t),
-                fact('daemon', t('system.information.software.daemon'), value.daemon, join([value.daemon.name, value.daemon.version, value.daemon.commit]), t),
+                fact('daemon', t('system.information.software.daemon'), value.daemon, join([value.daemon.name, value.daemon.version]), t),
                 fact('deployment', t('system.information.software.deployment'), value.deployment, join([value.deployment.id, value.deployment.version]), t),
                 fact('uptime', t('system.information.software.uptime'), value.uptime, value.uptime.seconds === undefined ? undefined : formatUptime(value.uptime.seconds, t), t),
               ]} />
@@ -112,13 +111,9 @@ function watchdogSummary(device: WatchdogDevice, t: ReturnType<typeof useTransla
   return join([device.device, device.identity, device.state, device.timeoutSeconds === undefined ? undefined : t('system.information.telemetry.timeout', { seconds: device.timeoutSeconds }), bootstatus]) ?? device.device
 }
 
-/// The image's own provenance: version, package and the git stamp with its
-/// consistency verdict. An inconsistent stamp is stated, because it means the
-/// image was assembled from more than one tree.
+/// The image's own provenance: the system version and the package it is read from.
 function systemSummary(value: SystemInformation) {
-  const stamp = value.system.gitStamp
-  const git = stamp?.commit ? `git ${stamp.commit}${stamp.dirty ? ' (dirty)' : ''}${stamp.consistent ? ' (consistent)' : ' (inconsistent)'}` : undefined
-  return join([value.system.version, value.system.package, git])
+  return join([value.system.version, value.system.package])
 }
 
 function formatUptime(seconds: number, t: ReturnType<typeof useTranslation>['t']) {

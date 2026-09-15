@@ -11,7 +11,6 @@ ARG MICA_DEB_VERSION
 ARG MICA_DEB_ARCH
 ARG SOURCE_DATE_EPOCH
 ARG MICA_DEB_SOURCE_REPO
-ARG MICA_DEB_SOURCE_COMMIT
 RUN set -eu; \
     install -D -m 0755 /in/bin/mica-runkit /stage/usr/lib/mica/lifecycle/mica-runkit; \
     install -D -m 0644 /in/copyright       /stage/usr/share/doc/mica-lifecycle/copyright; \

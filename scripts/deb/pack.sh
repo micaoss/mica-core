@@ -6,10 +6,10 @@
 #   pack.sh --root <dir> --control <template> --version <v> --arch <amd64|arm64>
 #           --out <dir> [--maintainer-scripts <dir>]
 #
-# Requires SOURCE_DATE_EPOCH, MICA_DEB_SOURCE_REPO and MICA_DEB_SOURCE_COMMIT.
+# Requires SOURCE_DATE_EPOCH and MICA_DEB_SOURCE_REPO.
 # The template uses @VERSION@ and @ARCH@ and may use ${shlibs:Depends}; this
-# script writes Installed-Size, md5sums, Mica-Source-Repo and
-# Mica-Source-Commit, sets every mtime to SOURCE_DATE_EPOCH, owns everything by
+# script writes Installed-Size, md5sums and Mica-Source-Repo, sets every mtime
+# to SOURCE_DATE_EPOCH, owns everything by
 # root, and verifies the archive against the staged tree.
 set -euo pipefail
 
@@ -47,12 +47,6 @@ esac
 
 [ -n "${MICA_DEB_SOURCE_REPO:-}" ] ||
     die "MICA_DEB_SOURCE_REPO is unset. This packer records the source repository in the control file; scripts/deb/build.sh resolves it from the repository's origin and the producer Dockerfile must declare it as an ARG"
-[ -n "${MICA_DEB_SOURCE_COMMIT:-}" ] ||
-    die "MICA_DEB_SOURCE_COMMIT is unset. This packer records the source commit in the control file; scripts/deb/build.sh resolves it from HEAD and the producer Dockerfile must declare it as an ARG"
-[[ "${MICA_DEB_SOURCE_REPO}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
-    die "MICA_DEB_SOURCE_REPO='${MICA_DEB_SOURCE_REPO}' is not a repository name (letters, digits, dot, underscore, minus)"
-[[ "${MICA_DEB_SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ ]] ||
-    die "MICA_DEB_SOURCE_COMMIT='${MICA_DEB_SOURCE_COMMIT}' is not a full 40-hex commit id"
 
 [ -d "${ROOT}" ] || die "--root ${ROOT} is not a directory"
 [ -n "$(ls -A "${ROOT}")" ] || die "--root ${ROOT} is empty; a package with no payload installs nothing and reports success"
@@ -103,10 +97,11 @@ case "$(control_field Architecture "${CONTROL}")" in
 *'@ARCH@'*) ;;
 *) die "--control ${CONTROL} has an Architecture: that does not contain @ARCH@, so --arch ${ARCH} would be discarded and the template's own value shipped" ;;
 esac
-for f in Mica-Source-Repo Mica-Source-Commit; do
-    [ -z "$(control_field "${f}" "${CONTROL}")" ] ||
-        die "--control ${CONTROL} declares ${f}. That field is WRITTEN here from MICA_DEB_SOURCE_REPO and MICA_DEB_SOURCE_COMMIT; a written one is a value that stops matching the build the first time the archive is built from another checkout"
-done
+[ -z "$(control_field Mica-Source-Repo "${CONTROL}")" ] ||
+    die "--control ${CONTROL} declares Mica-Source-Repo. That field is WRITTEN here from MICA_DEB_SOURCE_REPO"
+[ -z "$(control_field Mica-Source-Commit "${CONTROL}")" ] ||
+    die "--control ${CONTROL} declares Mica-Source-Commit. A package carries no commit: its version names its bytes"
+
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
@@ -159,13 +154,12 @@ INSTALLED_SIZE="$(cd "${PKG_DIR}" && find . -mindepth 1 -path ./DEBIAN -prune -o
     END { print total + 0 }
 ')"
 [ -n "${INSTALLED_SIZE}" ] || die "could not measure the staged tree under ${ROOT}"
-awk -v size="${INSTALLED_SIZE}" -v repo="${MICA_DEB_SOURCE_REPO}" -v commit="${MICA_DEB_SOURCE_COMMIT}" '
+awk -v size="${INSTALLED_SIZE}" -v repo="${MICA_DEB_SOURCE_REPO}" '
     { line[NR] = $0; if (NF) last = NR }
     END {
         for (i = 1; i <= last; i++) print line[i]
         print "Installed-Size: " size
         print "Mica-Source-Repo: " repo
-        print "Mica-Source-Commit: " commit
     }
 ' "${WORK}/control" >"${WORK}/control.sized"
 install -m 0644 "${WORK}/control.sized" "${PKG_DIR}/DEBIAN/control"
@@ -205,13 +199,11 @@ got_arch="$(dpkg-deb --field "${DEB}" Architecture)"
 got_size="$(dpkg-deb --field "${DEB}" Installed-Size)"
 got_depends="$(dpkg-deb --field "${DEB}" Depends)"
 got_repo="$(dpkg-deb --field "${DEB}" Mica-Source-Repo)"
-got_commit="$(dpkg-deb --field "${DEB}" Mica-Source-Commit)"
 [ "${got_package}" = "${PACKAGE}" ] || die "${DEB} declares Package: ${got_package}, not ${PACKAGE}"
 [ "${got_version}" = "${VERSION}" ] || die "${DEB} declares Version: ${got_version}, not the --version ${VERSION} it was built with"
 [ "${got_arch}" = "${ARCH}" ] || die "${DEB} declares Architecture: ${got_arch}, not the --arch ${ARCH} it was built with"
 [ "${got_size}" = "${INSTALLED_SIZE}" ] || die "${DEB} declares Installed-Size: ${got_size}, but the staged tree measures ${INSTALLED_SIZE}"
 [ "${got_repo}" = "${MICA_DEB_SOURCE_REPO}" ] || die "${DEB} declares Mica-Source-Repo: ${got_repo}, not ${MICA_DEB_SOURCE_REPO}"
-[ "${got_commit}" = "${MICA_DEB_SOURCE_COMMIT}" ] || die "${DEB} declares Mica-Source-Commit: ${got_commit}, not ${MICA_DEB_SOURCE_COMMIT}"
 case "${got_depends}" in
 *'${'*) die "${DEB} declares Depends: ${got_depends}, which still carries an unexpanded substitution variable. APT would refuse it, or worse, parse the literal as a package name" ;;
 esac

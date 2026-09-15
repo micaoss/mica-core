@@ -16,9 +16,9 @@ use crate::redact;
 use crate::settings_api::SettingsApi;
 
 /// Snapshot schema for signed deployment and component evidence.
-pub const SCHEMA_VERSION: u64 = 5;
+pub const SCHEMA_VERSION: u64 = 6;
 /// Redaction allowlist for the native deployment schema.
-pub const REDACTION_SCHEMA_VERSION: u64 = 7;
+pub const REDACTION_SCHEMA_VERSION: u64 = 8;
 /// Persistent snapshot store in the system-owned DATA namespace.
 pub const DEFAULT_ROOT: &str = "/mica/diagnostics";
 /// The most snapshots retained; publishing one more removes the oldest.
@@ -155,24 +155,13 @@ fn schema() -> Rule {
         ])
     };
     let uptime = || obj(vec![("seconds", S)]);
-    let git_stamp = obj(vec![
-        ("commit", S),
-        ("dirty", S),
-        ("revision", S),
-        ("consistent", S),
-        ("stamps", arr(S)),
-    ]);
     let system_member = obj(vec![
         ("version", S),
         ("package", S),
-        ("gitStamp", git_stamp),
-        // The two times micad's system_info reports, which are different facts:
-        // `commitDate` is when the source was committed, `fileEpoch` is the
-        // pinned SOURCE_DATE_EPOCH every file in the image carries. A key that
-        // is not named here is DROPPED from every snapshot without a word, so
-        // renaming a field on that surface without renaming it here would ship
-        // snapshots that silently lost it.
-        ("commitDate", obj(vec![("date", S)])),
+        // `fileEpoch` is the pinned SOURCE_DATE_EPOCH every file in the image
+        // carries. A key that is not named here is DROPPED from every snapshot
+        // without a word, so renaming a field on that surface without renaming
+        // it here would ship snapshots that silently lost it.
         ("fileEpoch", obj(vec![("epoch", S), ("date", S)])),
     ]);
     let packages = obj(vec![
@@ -207,10 +196,7 @@ fn schema() -> Rule {
         ("release", release()),
         ("system", system_member),
         ("trust", trust),
-        (
-            "daemon",
-            obj(vec![("name", S), ("version", S), ("commit", S)]),
-        ),
+        ("daemon", obj(vec![("name", S), ("version", S)])),
         ("packages", packages),
         ("deployment", deployment()),
         ("uptime", uptime()),
@@ -1339,14 +1325,12 @@ mod tests {
                 "kernel": { "available": true, "release": "6.1.115-mica", "version": "#1 SMP" },
                 "release": { "available": true, "id": "debian" },
                 "system": {
-                    "available": true, "version": "0.1.0+git00b674ec0ffe-1", "package": "micad",
-                    "gitStamp": { "available": true, "commit": "00b674ec0ffe", "dirty": false, "revision": "1", "consistent": true, "stamps": ["git00b674ec0ffe-1"] },
-                    "commitDate": { "available": true, "date": "2026-09-02T00:00:00Z" },
+                    "available": true, "version": "0.1.1-1", "package": "micad",
                     "fileEpoch": { "available": true, "epoch": 1577836800, "date": "2020-01-01T00:00:00Z" },
                 },
-                "daemon": { "name": "micad", "version": "0.1.0", "commit": "00b674ec0ffe" },
+                "daemon": { "name": "micad", "version": "0.1.1-1" },
                 "packages": { "available": true, "count": 2, "micaCount": 1, "malformedRows": 0, "truncated": false,
-                    "entries": [{ "name": "micad", "version": "0.1.0+git00b674ec0ffe-1", "architecture": "arm64", "mica": true },
+                    "entries": [{ "name": "micad", "version": "0.1.1-1", "architecture": "arm64", "mica": true },
                                 { "name": "systemd", "version": "257.7-1", "architecture": "arm64", "mica": false }] },
                 "deployment": { "available": true, "id": "a".repeat(64), "confirmed": true },
                 "uptime": { "available": true, "seconds": 4242 },
@@ -1486,7 +1470,7 @@ mod tests {
     fn every_benign_member_survives_the_pass() {
         let (redacted, _) = redact_snapshot(fixture());
         for (pointer, expected) in [
-            ("/schemaVersion", json!(5)),
+            ("/schemaVersion", json!(6)),
             ("/collectedAt", json!("2026-09-02T00:00:00Z")),
             ("/release/board/model", json!("Vendor CX3576")),
             ("/release/kernel/release", json!("6.1.115-mica")),
@@ -1494,16 +1478,8 @@ mod tests {
                 "/system/machineId/id",
                 json!("0123456789abcdef0123456789abcdef"),
             ),
-            ("/system/system/gitStamp/commit", json!("00b674ec0ffe")),
-            (
-                "/system/system/commitDate/date",
-                json!("2026-09-02T00:00:00Z"),
-            ),
             ("/system/system/fileEpoch/epoch", json!(1_577_836_800)),
-            (
-                "/system/packages/entries/0/version",
-                json!("0.1.0+git00b674ec0ffe-1"),
-            ),
+            ("/system/packages/entries/0/version", json!("0.1.1-1")),
             ("/system/deployment/id", json!("a".repeat(64))),
             ("/boot/reset/reason", json!("watchdog")),
             (
@@ -1767,7 +1743,7 @@ mod tests {
             "slots":{"rootfs.0":{"boot_status":"good"}}
         }));
         let snapshot = Collector::new(&fake).collect().await.snapshot;
-        assert_eq!(snapshot["schemaVersion"], 5);
+        assert_eq!(snapshot["schemaVersion"], SCHEMA_VERSION);
         assert_eq!(snapshot["system"]["deployment"]["id"], id);
         assert_eq!(snapshot["boot"]["deployment"]["confirmed"], true);
         let update = &snapshot["boot"]["update"];

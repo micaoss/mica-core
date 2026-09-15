@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-09-15 10:59 [progress]
+
+Packages are locked by their declared version (task `20260915-1059-package-versions`,
+user decision 2026-09-15, R0-R8):
+
+- Every producer declares `VERSION="0.1.0-1"` and `SOURCE_DATE_EPOCH` in its
+  `producer.env`; the `VERSION` file and `scripts/deb/version.sh` are gone. No
+  version or control field carries a commit, date or release, and
+  `Mica-Source-Commit` is removed.
+- `micad --version` and `mica-apid --version` print the package version; micad's
+  system information reports it as the daemon version and no longer reports a
+  commit, a git stamp or a commit date. The diagnostic snapshot schema is 6 and
+  its redaction schema 8.
+- `scripts/deb/inputs.sh` hashes each producer's inputs per architecture; a
+  release records it as `mica.inputs` on each pool layer, and pool manifests
+  carry only `mica.source-repo` and `mica.arch`, so an unchanged pool keeps its
+  digest.
+- `scripts/build/reuse.sh` checks the packages against the newest release under
+  the rules, in CI and before a release: a package at its released version must
+  keep its inputs and bytes, and a lower version is refused.
+
 ## 2026-09-15 07:02 [progress]
 
 Update packages (task `20260915-0657-update-packages`, user decision

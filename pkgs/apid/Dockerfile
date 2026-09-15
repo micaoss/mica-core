@@ -13,7 +13,6 @@ ARG MICA_DEB_VERSION
 ARG MICA_DEB_ARCH
 ARG SOURCE_DATE_EPOCH
 ARG MICA_DEB_SOURCE_REPO
-ARG MICA_DEB_SOURCE_COMMIT
 RUN set -eu; \
     install -D -m 0755 /in/bin/mica-apid     /stage/usr/bin/mica-apid; \
     install -D -m 0644 /in/dist/apid.service /stage/usr/lib/systemd/system/apid.service; \

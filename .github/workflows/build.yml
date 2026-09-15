@@ -120,7 +120,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: mica-core-${{ matrix.arch }}
-          path: _out/debs/${{ matrix.arch }}/pool/*.deb
+          path: |
+            _out/debs/${{ matrix.arch }}/pool/*.deb
+            _out/debs/${{ matrix.arch }}/inputs.tsv
           if-no-files-found: error
   gate:
     needs: package
@@ -138,7 +140,19 @@ jobs:
           set -euo pipefail
           for arch in amd64 arm64; do
             mkdir -p "_out/debs/$arch/pool"
-            cp "_out/artifacts/mica-core-$arch/"*.deb "_out/debs/$arch/pool/"
+            cp "_out/artifacts/mica-core-$arch/pool/"*.deb "_out/debs/$arch/pool/"
+            cp "_out/artifacts/mica-core-$arch/inputs.tsv" "_out/debs/$arch/"
             bash scripts/deb/repo.sh --arch "$arch"
           done
           bash scripts/deb/package-gate.sh --no-reproduce
+      - name: The package versions against the latest release
+        # Read-only: a package at its released version must keep its inputs and
+        # bytes (scripts/build/reuse.sh). A release run leaves its own tag out.
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          case "$REF" in
+          refs/tags/*) bash scripts/build/reuse.sh --exclude "${REF#refs/tags/}" ;;
+          *) bash scripts/build/reuse.sh ;;
+          esac

@@ -101,6 +101,7 @@ class H(http.server.BaseHTTPRequestHandler):
         path = os.path.join(blobs if kind == "blobs" else manifests, ref)
         if kind == "manifests" and self.command == "PUT":
             open(path, "wb").write(body)
+            open(os.path.join(manifests, "sha256:" + hashlib.sha256(body).hexdigest()), "wb").write(body)
             open(os.path.join(root, "manifest-puts"), "a").write(ref + "\n")
             return self.send(201, b"", {"Docker-Content-Digest": "sha256:" + hashlib.sha256(body).hexdigest()})
         if not os.path.exists(path):
@@ -117,7 +118,7 @@ for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:${REGISTRY_PORT}/t
 # The fixture repository: this tree'"'"'s producers and release script, and a bare "remote".
 G="${T}/repo"
 mkdir -p "${G}"
-cp -a /src/Makefile /src/VERSION /src/scripts /src/pkgs /src/locks "${G}/"
+cp -a /src/Makefile /src/scripts /src/pkgs /src/locks "${G}/"
 (cd /src && cp -a --parents crates/*/dist "${G}/")
 printf "_out/\n" >"${G}/.gitignore"
 git -C "${G}" init -q -b main
@@ -130,19 +131,31 @@ git -C "${G}" remote add origin https://github.com/micaoss/mica-core.git
 git -C "${G}" update-ref refs/remotes/origin/main "${C}"
 TAG=20260914-0300
 git -C "${T}/remote.git" tag "${TAG}" "${C}"
-VERSION="$(tr -d "[:space:]" <"${G}/VERSION")"
-WANT="${VERSION}+git${C:0:12}-1"
 mapfile -t PKGS < <(bash "${G}/scripts/deb/producers.sh" | awk "{print \$3}" | tr "," "\n")
+declare -A WANT=() PRODUCER=()
+while read -r producer dir packages _enablement; do
+    v="$(sed -n "s/^VERSION=\"\\([^\"]*\\)\"\$/\\1/p" "${G}/${dir}/producer.env")"
+    for p in ${packages//,/ }; do WANT["${p}"]="${v}"; PRODUCER["${p}"]="${producer}"; done
+done < <(bash "${G}/scripts/deb/producers.sh")
 
-deb() { # <package> <arch> <commit> [version] -> into the pool
-    local p="$1" a="$2" c="$3" v="${4:-${WANT}}" d="${T}/stage/$1-$2"
-    rm -rf "${d}"; mkdir -p "${d}/DEBIAN" "${G}/_out/debs/${a}/pool"
-    printf "Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: x <x@example.invalid>\nDescription: fixture\nMica-Source-Repo: mica-core\nMica-Source-Commit: %s\n" "${p}" "${v}" "${a}" "${c}" >"${d}/DEBIAN/control"
-    dpkg-deb --root-owner-group -b "${d}" "${G}/_out/debs/${a}/pool/${p}_${WANT}_${a}.deb" >/dev/null
+deb() { # <package> <arch> [version] [control extra] [payload] -> into the pool, named at the declared version
+    local p="$1" a="$2" v="${3:-${WANT[$1]}}" extra="${4:-}" payload="${5:-fixture}" d="${T}/stage/$1-$2"
+    rm -rf "${d}"; mkdir -p "${d}/DEBIAN" "${d}/usr/share/${p}" "${G}/_out/debs/${a}/pool"
+    printf "%s\n" "${payload}" >"${d}/usr/share/${p}/payload"
+    touch -d @1789430400 "${d}/usr/share/${p}/payload" "${d}/usr/share/${p}" "${d}/usr/share" "${d}/usr" "${d}"
+    printf "Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: x <x@example.invalid>\nDescription: fixture\nMica-Source-Repo: mica-core\n%s" "${p}" "${v}" "${a}" "${extra}" >"${d}/DEBIAN/control"
+    SOURCE_DATE_EPOCH=1789430400 dpkg-deb --root-owner-group -b "${d}" "${G}/_out/debs/${a}/pool/${p}_${WANT[$1]}_${a}.deb" >/dev/null
 }
-pool() { rm -rf "${G}/_out"; for a in amd64 arm64; do for p in "${PKGS[@]}"; do deb "${p}" "${a}" "${C}"; done; done; }
-release_json() { # [draft]
-    printf "{\"tag_name\":\"%s\",\"html_url\":\"https://github.com/micaoss/mica-core/releases/tag/%s\",\"draft\":%s,\"assets\":[]}\n" "${TAG}" "${TAG}" "${1:-false}" >"${FAKE}/release.json"
+inputs() { # [hash of every producer] -> _out/debs/<arch>/inputs.tsv
+    for a in amd64 arm64; do
+        mkdir -p "${G}/_out/debs/${a}"
+        for p in "${PKGS[@]}"; do printf "%s\t%s\n" "${PRODUCER[${p}]}" "${1:-$(printf "%s-%s" "${PRODUCER[${p}]}" "${a}" | sha256sum | cut -d" " -f1)}"; done | LC_ALL=C sort -u >"${G}/_out/debs/${a}/inputs.tsv"
+    done
+}
+pool() { rm -rf "${G}/_out"; for a in amd64 arm64; do for p in "${PKGS[@]}"; do deb "${p}" "${a}"; done; done; inputs; }
+release_json() { # [draft] [tag]
+    local tag="${2:-${TAG}}"
+    printf "{\"tag_name\":\"%s\",\"html_url\":\"https://github.com/micaoss/mica-core/releases/tag/%s\",\"draft\":%s,\"assets\":[]}\n" "${tag}" "${tag}" "${1:-false}" >"${FAKE}/release.json"
 }
 run() { # <expect 0|1> <case> <needle> [tag]
     local want="$1" name="$2" needle="$3" tag="${4:-${TAG}}" rc=0 out
@@ -168,13 +181,14 @@ check "the release row names the tag and the commit" [ "$(sed -n 2p "${L}")" = "
 for a in amd64 arm64; do
     M="${FAKE}/registry/manifests/pool.${a}.${TAG}"
     check "the ${a} pool holds exactly the ${a} archives, titled with their real names" [ "$(jq -r "[.layers[] | select(.mediaType == \"application/vnd.mica.deb\") | .annotations[\"org.opencontainers.image.title\"]] | sort | join(\" \")" "${M}")" = "$(cd "${G}/_out/debs/${a}/pool" && ls | LC_ALL=C sort | tr "\n" " " | sed "s/ $//")" ]
-    check "the ${a} pool carries the source annotations" [ "$(jq -r "[.artifactType, .annotations[\"org.opencontainers.image.version\"], .annotations[\"org.opencontainers.image.revision\"], .annotations[\"mica.source-repo\"], .annotations[\"mica.source-commit\"], .annotations[\"mica.arch\"], (.annotations[\"org.opencontainers.image.created\"] != null)] | map(tostring) | join(\" \")" "${M}")" = "application/vnd.mica.pool ${TAG} ${C} mica-core ${C} ${a} true" ]
+    check "the ${a} pool carries only release-independent annotations" [ "$(jq -c "[.artifactType, .annotations]" "${M}")" = "[\"application/vnd.mica.pool\",{\"mica.source-repo\":\"mica-core\",\"mica.arch\":\"${a}\"}]" ]
+    check "every ${a} layer carries its producer inputs hash" [ "$(jq -r "[.layers[] | .annotations[\"mica.inputs\"] | test(\"^[0-9a-f]{64}\$\")] | all" "${M}")" = true ]
     check "the ${a} pool row names that manifest by digest" grep -qx "$(printf "pool\t%s\tghcr.io/micaoss/mica-core:pool.%s.%s@sha256:%s" "${a}" "${a}" "${TAG}" "$(sha256sum "${M}" | cut -d" " -f1)")" "${L}"
 done
 check "one package row per archive, its sha256 a layer of its pool" bash -c "
     [ \"\$(grep -c \"^package\" \"${L}\")\" = $(( ${#PKGS[@]} * 2 )) ] || exit 1
     grep \"^package\" \"${L}\" | while IFS=\$(printf \"\\t\") read -r _k p a v s; do
-        [ \"\${v}\" = \"${WANT}\" ] && [ \"\${s}\" = \"\$(sha256sum \"${G}/_out/debs/\${a}/pool/\${p}_${WANT}_\${a}.deb\" | cut -d\" \" -f1)\" ] &&
+        [ \"\${v}\" = \"0.1.0-1\" ] && [ \"\${s}\" = \"\$(sha256sum \"${G}/_out/debs/\${a}/pool/\${p}_\${v}_\${a}.deb\" | cut -d\" \" -f1)\" ] &&
             jq -e --arg d \"sha256:\${s}\" \"any(.layers[]; .digest == \\\$d)\" \"${FAKE}/registry/manifests/pool.\${a}.${TAG}\" >/dev/null || exit 1
     done"
 run 0 "a rerun finds both assets attached with the same bytes and uploads nothing" "already carries these assets"
@@ -200,22 +214,84 @@ n=mica-core.lock
 jq --arg n "${n}" ".assets += [{name: \$n, state: \"uploaded\", digest: \"sha256:$(printf "0%.0s" {1..64})\"}]" "${FAKE}/release.json" >"${FAKE}/r" && mv "${FAKE}/r" "${FAKE}/release.json"
 run 1 "an asset already attached with other bytes" "never replaced"
 fresh extra; pool; release_json
-jq ".assets += [{name: \"micad_${VERSION}.git${C:0:12}-1_amd64.deb\", state: \"uploaded\", digest: \"sha256:x\"}]" "${FAKE}/release.json" >"${FAKE}/r" && mv "${FAKE}/r" "${FAKE}/release.json"
+jq ".assets += [{name: \"micad_0.1.1-1_amd64.deb\", state: \"uploaded\", digest: \"sha256:x\"}]" "${FAKE}/release.json" >"${FAKE}/r" && mv "${FAKE}/r" "${FAKE}/release.json"
 run 1 "a release carrying anything but the lock and SHA256SUMS" "carries only"
-fresh missing; pool; release_json; rm "${G}/_out/debs/arm64/pool/micad_${WANT}_arm64.deb"
+fresh missing; pool; release_json; rm "${G}/_out/debs/arm64/pool/micad_${WANT[micad]}_arm64.deb"
 run 1 "a missing archive" "archives"
-fresh wrong-commit; pool; release_json; deb mica-deploy amd64 "$(printf "a%.0s" {1..40})"
-run 1 "an archive built from another commit" "Mica-Source-Commit"
-fresh wrong-version; pool; release_json; deb micad arm64 "${C}" "0.0.1+git000000000000-1"
+fresh commit-field; pool; release_json; deb mica-deploy amd64 "" "Mica-Source-Commit: $(printf "a%.0s" {1..40})
+"
+run 1 "an archive carrying Mica-Source-Commit" "carries no commit"
+fresh no-inputs; pool; release_json; rm "${G}/_out/debs/amd64/inputs.tsv"
+run 1 "a pool without the inputs hashes" "inputs.tsv does not exist"
+fresh wrong-version; pool; release_json; deb micad arm64 "0.1.0-2"
 run 1 "an archive of another version" "is Version"
 fresh wrong-tag; pool; release_json
 o="$(git -C "${G}" commit-tree -m other "${C}^{tree}")"
 git -C "${G}" push -q -f "${T}/remote.git" "${o}:refs/tags/${TAG}"
 run 1 "the tag names another commit" "not HEAD"
 git -C "${G}" push -q -f "${T}/remote.git" "${C}:refs/tags/${TAG}"
-fresh dirty; pool; release_json; echo change >>"${G}/VERSION"
+fresh dirty; pool; release_json; echo change >>"${G}/Makefile"
 run 1 "a dirty checkout" "uncommitted changes"
-git -C "${G}" checkout -q VERSION
+git -C "${G}" checkout -q Makefile
+
+# Reuse against a previous release (R5). The remote then holds two releases, so
+# these cases come last.
+fresh reuse; pool; release_json
+run 0 "a first release with no previous one publishes every package as new" "new"
+FIRST="${TAG}"
+TAG=20260914-0400
+git -C "${T}/remote.git" tag "${TAG}" "${C}"
+release_json false "${TAG}"; : >"${FAKE}/uploads"
+run 0 "an unchanged pool is reused by digest in the next release" "reused"
+for a in amd64 arm64; do
+    check "the ${a} pool of the next release is the same manifest under a new tag" cmp -s "${FAKE}/registry/manifests/pool.${a}.${FIRST}" "${FAKE}/registry/manifests/pool.${a}.${TAG}"
+done
+check "both locks name the same pool digests and packages" [ "$(grep -v "^release" "${FAKE}/download/${FIRST}/mica-core.lock" | sed "s/pool\.\(amd64\|arm64\)\.${FIRST}/pool.\1.X/")" = "$(grep -v "^release" "${FAKE}/download/${TAG}/mica-core.lock" | sed "s/pool\.\(amd64\|arm64\)\.${TAG}/pool.\1.X/")" ]
+TAG=20260914-0500
+git -C "${T}/remote.git" tag "${TAG}" "${C}"
+guard() { # <expect 0|1> <case> <needle>: scripts/build/reuse.sh alone against the latest release
+    local want="$1" name="$2" needle="$3" rc=0 out
+    out="$(cd "${G}" && MICA_RELEASE_REGISTRY="http://127.0.0.1:${REGISTRY_PORT}" MICA_RELEASE_GIT="${T}/remote.git" MICA_RELEASE_DOWNLOAD="file://${FAKE}/download" bash scripts/build/reuse.sh --exclude "${TAG}" 2>&1)" || rc=$?
+    if { [ "${want}" = 0 ] && [ "${rc}" = 0 ]; } || { [ "${want}" = 1 ] && [ "${rc}" != 0 ]; }; then
+        if [ "${out#*"${needle}"}" != "${out}" ]; then PASS=$((PASS + 1)); echo "PASS: ${name}"; return; fi
+    fi
+    FAIL=$((FAIL + 1)); echo "FAIL: ${name}: wanted exit ${want} with \"${needle}\", got ${rc}"; printf "%s\n" "${out}" | sed "s/^/    /"
+}
+pool; inputs "$(printf "f%.0s" {1..64})"
+guard 1 "inputs changed without a version bump are refused" "inputs of micad changed without a version bump"
+pool; deb micad amd64 "" "" "other bytes"
+guard 1 "the same version with other bytes is refused" "does not rebuild byte-identically"
+pool; deb micad amd64 "0.0.9-1"
+guard 1 "a version lower than the released one is refused" "lower than 0.1.0-1"
+pool; deb micad amd64 "0.1.0-2" "" "bumped bytes"
+guard 0 "a bumped version with other bytes and inputs is new" "amd64 micad 0.1.0-2 new"
+pool; mv "${FAKE}/registry/manifests" "${FAKE}/registry/manifests.gone"
+guard 1 "a previous pool that cannot be read back is refused" "cannot be read anonymously"
+rm -rf "${FAKE}/registry/manifests" && mv "${FAKE}/registry/manifests.gone" "${FAKE}/registry/manifests"
+
+# A release made before the rules (no mica.inputs on its layers) is not a
+# previous release: the newest one under the rules is compared, and with none
+# every package is new, even at a version below the old one.
+strip_inputs() { # <release>: rewrite its pools and lock as a release without mica.inputs
+    local r="$1" a m d
+    for a in amd64 arm64; do
+        m="${FAKE}/registry/manifests/pool.${a}.${r}"
+        jq -c "del(.layers[].annotations[\"mica.inputs\"])" "${m}" | tr -d "\n" >"${m}.new" && mv "${m}.new" "${m}"
+        d="sha256:$(sha256sum "${m}" | cut -d" " -f1)"; cp "${m}" "${FAKE}/registry/manifests/${d}"
+        sed -i "s#^pool\t${a}\t\(.*\)@sha256:[0-9a-f]*#pool\t${a}\t\1@${d}#" "${FAKE}/download/${r}/mica-core.lock"
+    done
+    (cd "${FAKE}/download/${r}" && sha256sum mica-core.lock >SHA256SUMS)
+}
+strip_inputs 20260914-0400; strip_inputs "${FIRST}"
+pool; inputs "$(printf "e%.0s" {1..64})"; deb micad amd64 "0.0.1-1"
+guard 0 "releases without mica.inputs are passed over and every package is new" "no release of micaoss/mica-core under the package-version rules"
+m="${FAKE}/registry/manifests/pool.amd64.20260914-0400"
+jq -c ".layers[0].annotations[\"mica.inputs\"] = \"$(printf "d%.0s" {1..64})\"" "${m}" | tr -d "\n" >"${m}.new" && mv "${m}.new" "${m}"
+d="sha256:$(sha256sum "${m}" | cut -d" " -f1)"; cp "${m}" "${FAKE}/registry/manifests/${d}"
+sed -i "s#^pool\tamd64\t\(.*\)@sha256:[0-9a-f]*#pool\tamd64\t\1@${d}#" "${FAKE}/download/20260914-0400/mica-core.lock"
+(cd "${FAKE}/download/20260914-0400" && sha256sum mica-core.lock >SHA256SUMS)
+pool
+guard 1 "a release whose layers carry mica.inputs only in part is refused" "carries mica.inputs on 1 layer(s)"
 
 echo "RESULT: ${PASS} passed, ${FAIL} failed"
 [ "${FAIL}" = 0 ]

@@ -2544,7 +2544,7 @@ pub(crate) async fn api_v1_storage_status(
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "The surface: `machineId`, `board`, `kernel`, `release`, `system` (version, `gitStamp`, `commitDate`, `fileEpoch`), `daemon`, `packages`, `deployment`, `uptime`; each an object carrying `available`", body = ResourceValue),
+        (status = 200, description = "The surface: `machineId`, `board`, `kernel`, `release`, `system` (version, `fileEpoch`), `daemon` (name, package version), `packages`, `deployment`, `uptime`; each an object carrying `available`", body = ResourceValue),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 500, description = "micad failed to observe (`micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),

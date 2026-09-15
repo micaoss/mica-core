@@ -73,12 +73,9 @@ pub fn main() -> anyhow::Result<()> {
     serve()
 }
 
-/// What the commit is reported as when the build supplied none.
-///
-/// A value and not a failure: a `--version` that exited non-zero because the
-/// plumbing did not reach it would turn "we do not know which commit" into
-/// "this binary is broken".
-const UNKNOWN_COMMIT: &str = "unknown";
+/// What the package version is reported as when the build supplied none: an
+/// unpackaged build (`cargo run`, the Rust gate).
+const UNKNOWN_VERSION: &str = "unknown";
 
 /// Whether an argv (argv[1..]) is asking for the version.
 ///
@@ -98,35 +95,27 @@ fn wants_openapi(args: impl IntoIterator<Item = String>) -> bool {
     args.into_iter().any(|arg| arg == "--openapi")
 }
 
-/// The build commit, or [`UNKNOWN_COMMIT`], from whatever the build embedded.
+/// The package version, or [`UNKNOWN_VERSION`], from whatever the build embedded.
 ///
 /// Takes the embedded value as an argument so the absent case is reachable from
-/// a test in a binary that was built with a commit.
-fn commit_or_unknown(embedded: Option<&'static str>) -> &'static str {
+/// a test in a binary that was built with a version.
+fn version_or_unknown(embedded: Option<&'static str>) -> &'static str {
     match embedded {
-        Some(commit) if !commit.trim().is_empty() => commit,
-        _ => UNKNOWN_COMMIT,
+        Some(version) if !version.trim().is_empty() => version,
+        _ => UNKNOWN_VERSION,
     }
 }
 
-/// The one line `--version` prints: `mica-apid <version> (<commit>)`.
+/// The one line `--version` prints: `mica-apid <package version>`.
 ///
-/// The version is `micad/apid/Cargo.toml`'s `[package] version` by way of
-/// Cargo's own `CARGO_PKG_VERSION`, which is the same file
-/// `verify/src/smoke-pins.ts` reads to decide what this binary must report:
-/// one value, two readers, no copy.
-///
-/// The commit is `MICA_BUILD_COMMIT`, passed in by `micad/hack/build-target.sh`
-/// from the host. Not discovered here and no `build.rs`: inside
-/// `localhost/mica-build-rust` with that build's own mount, `git rev-parse
-/// HEAD` exits 128, because the checkout is a git worktree and `/src/.git`
-/// points at a gitdir outside the mount.
+/// The version is the producer's declared `VERSION` (`pkgs/<producer>/producer.env`),
+/// compiled in as `MICA_PACKAGE_VERSION` by `scripts/build/build-deb.sh`: the
+/// version of the package this binary ships in, and nothing about the commit.
 fn version_line() -> String {
     format!(
-        "{} {} ({})",
+        "{} {}",
         "mica-apid",
-        env!("CARGO_PKG_VERSION"),
-        commit_or_unknown(option_env!("MICA_BUILD_COMMIT")),
+        version_or_unknown(option_env!("MICA_PACKAGE_VERSION")),
     )
 }
 
@@ -226,7 +215,7 @@ async fn serve() -> anyhow::Result<()> {
 /// HTTP suite.
 #[cfg(test)]
 mod version_tests {
-    use super::{UNKNOWN_COMMIT, commit_or_unknown, version_line, wants_openapi, wants_version};
+    use super::{UNKNOWN_VERSION, version_line, version_or_unknown, wants_openapi, wants_version};
 
     fn argv(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| (*s).to_string()).collect()
@@ -296,51 +285,31 @@ mod version_tests {
         }
     }
 
-    /// Absent is `unknown` and never an error, and empty counts as absent,
-    /// because `-e MICA_BUILD_COMMIT=` sets the variable to exactly that.
+    /// Absent is `unknown`, never an error, and empty counts as absent.
     #[test]
-    fn a_commit_the_build_did_not_supply_reports_unknown() {
-        assert_eq!(commit_or_unknown(None), UNKNOWN_COMMIT);
-        assert_eq!(commit_or_unknown(Some("")), UNKNOWN_COMMIT);
-        assert_eq!(commit_or_unknown(Some("   ")), UNKNOWN_COMMIT);
+    fn a_version_the_build_did_not_supply_reports_unknown() {
+        assert_eq!(version_or_unknown(None), UNKNOWN_VERSION);
+        assert_eq!(version_or_unknown(Some("")), UNKNOWN_VERSION);
+        assert_eq!(version_or_unknown(Some("   ")), UNKNOWN_VERSION);
     }
 
-    /// The positive control: a supplied value is passed through untouched,
-    /// `-dirty` suffix and all. A helper that returned `unknown` for everything
-    /// would satisfy the case above and nothing else.
+    /// The positive control: a supplied value is passed through untouched.
     #[test]
-    fn a_commit_the_build_did_supply_is_reported_verbatim() {
-        assert_eq!(commit_or_unknown(Some("00b674ec0ffe")), "00b674ec0ffe");
-        assert_eq!(
-            commit_or_unknown(Some("00b674ec0ffe-dirty")),
-            "00b674ec0ffe-dirty"
-        );
+    fn a_version_the_build_did_supply_is_reported_verbatim() {
+        assert_eq!(version_or_unknown(Some("0.1.1-1")), "0.1.1-1");
     }
 
-    /// The shape, not the values.
-    ///
-    /// No assertion here that the version equals `micad/apid/Cargo.toml`:
-    /// `CARGO_PKG_VERSION` is that file, so the comparison would be a value
-    /// against itself. It is made from outside instead, by
-    /// `verify/src/smoke-pins.ts`, which parses the manifest independently.
+    /// The shape: the binary, one space, one version token, one line.
     #[test]
-    fn the_version_line_names_the_binary_the_version_and_the_commit() {
+    fn the_version_line_names_the_binary_and_the_package_version() {
         let line = version_line();
-        assert!(line.starts_with("mica-apid "), "got {line:?}");
+        let version = line
+            .strip_prefix("mica-apid ")
+            .unwrap_or_else(|| panic!("got {line:?}"));
+        assert!(!version.is_empty(), "an empty version in {line:?}");
         assert!(
-            line.contains(env!("CARGO_PKG_VERSION")),
-            "the crate version is missing from {line:?}"
+            !version.contains(char::is_whitespace),
+            "the version must be one token, got {version:?}"
         );
-        let commit = line
-            .rsplit_once(" (")
-            .and_then(|(_, rest)| rest.strip_suffix(")"))
-            .unwrap_or_else(|| panic!("no parenthesised commit in {line:?}"));
-        assert!(!commit.is_empty(), "an empty commit in {line:?}");
-        assert!(
-            !commit.contains(char::is_whitespace),
-            "the commit must be one token, got {commit:?}"
-        );
-        // One line, so a smoke runner reading the first line reads all of it.
-        assert!(!line.contains('\n'), "got {line:?}");
     }
 }

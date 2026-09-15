@@ -15,10 +15,13 @@ Documentation: [architecture](docs/architecture.md),
 
 ## Deliverables
 
-Seven Debian packages, each for `amd64` and `arm64`, all at one version
-`<VERSION>+git<commit12>-1` (`VERSION` is `0.1.0`, and every crate's version
-must equal it). Each archive records the repository and full commit that
-built it in its `Mica-Source-Repo` and `Mica-Source-Commit` control fields.
+Seven Debian packages, each for `amd64` and `arm64`. Each producer declares its
+packages' version, `<upstream>-<revision>`, and `SOURCE_DATE_EPOCH` in
+`pkgs/<producer>/producer.env`; the upstream part is the crate version of the
+binaries it ships. A release never changes a version: a package is rebuilt only
+when its version is bumped, and an unchanged one keeps its bytes from release to
+release. Each archive records its repository in `Mica-Source-Repo` and carries
+no commit.
 
 | Package | Built from | Installs | Starts at boot | Depends on |
 | --- | --- | --- | --- | --- |

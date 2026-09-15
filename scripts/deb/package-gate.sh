@@ -5,7 +5,7 @@
 #
 # Per architecture, read out of the archives with dpkg-deb in the mica-build-env base image:
 #   - the pool holds exactly the packages the producers declare, all
-#     Architecture <arch>, all with one <VERSION>+git<commit12>[.dirty]-1 stamp;
+#     Architecture <arch>, each at its producer's declared VERSION;
 #   - no Replaces, and no non-directory path shipped by two packages;
 #   - a dependency on a package built here names its exact pool version;
 #   - a non-empty /usr/share/doc/<package>/copyright;
@@ -53,11 +53,16 @@ cleanup() {
 }
 trap cleanup EXIT
 printf '%s\n' "${ROWS[@]}" >"${WORK}/producers.tsv"
+for row in "${ROWS[@]}"; do
+    read -r producer dir packages _enablement <<<"${row}"
+    version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "${REPO_ROOT}/${dir}/producer.env")"
+    for p in ${packages//,/ }; do printf '%s %s\n' "${p}" "${version}"; done
+done >"${WORK}/versions.tsv"
 
 LOG="${WORK}/static.log"
 status=0
 docker run --rm -i --label ai-agent=true \
-    -v "${DIST}:/dist:ro" -v "${WORK}/producers.tsv:/producers.tsv:ro" \
+    -v "${DIST}:/dist:ro" -v "${WORK}/producers.tsv:/producers.tsv:ro" -v "${WORK}/versions.tsv:/versions.tsv:ro" \
     --entrypoint /bin/bash "${IMAGE}" -s "${ARCHES[@]}" <<'INNER' 2>&1 | tee "${LOG}" || status=1
 set -euo pipefail
 PASS=0
@@ -65,15 +70,15 @@ FAIL=0
 pass() { PASS=$((PASS + 1)); echo "PASS: $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "FAIL: $1"; }
 
-declare -A WANTS=()
+declare -A WANTS=() DECLARED=()
 LOCAL=" "
 while read -r _producer _dir packages enablement; do
     for p in ${packages//,/ }; do LOCAL="${LOCAL}${p} "; done
     for e in ${enablement//,/ }; do WANTS["${e%%=*}"]="${e#*=}"; done
 done </producers.tsv
 EXPECTED="$(printf '%s\n' ${LOCAL} | LC_ALL=C sort | tr '\n' ' ')"
+while read -r p v; do DECLARED["${p}"]="${v}"; done </versions.tsv
 
-STAMPS=" "
 ARCHIVES=0
 for arch in "$@"; do
     pool="/dist/${arch}/pool"
@@ -92,12 +97,8 @@ for arch in "$@"; do
         a="$(dpkg-deb --field "${deb}" Architecture)"
         if [ "${a}" = "${arch}" ]; then pass "${name} ${arch}: Architecture ${a}"; else fail "${name} ${arch}: Architecture ${a}"; fi
 
-        stamp="${version##*+}"
-        if [[ "${stamp}" =~ ^git[0-9a-f]{12}(\.dirty)?-[0-9]+$ ]]; then
-            STAMPS="${STAMPS}${stamp} "
-        else
-            fail "${name} ${arch}: version ${version} carries no git<commit12>-<rev> stamp"
-        fi
+        if [ "${version}" = "${DECLARED[${name}]:-}" ]; then pass "${name} ${arch}: version ${version} is its producer's declared version"; else fail "${name} ${arch}: version ${version}, its producer declares ${DECLARED[${name}]:-none}"; fi
+        if [ -z "$(dpkg-deb --field "${deb}" Mica-Source-Commit)" ]; then pass "${name} ${arch}: no Mica-Source-Commit"; else fail "${name} ${arch}: carries Mica-Source-Commit"; fi
 
         if [ -z "$(dpkg-deb --field "${deb}" Replaces)" ]; then pass "${name} ${arch}: no Replaces"; else fail "${name} ${arch}: declares Replaces"; fi
 
@@ -145,8 +146,6 @@ for arch in "$@"; do
     done
     unset VER OWNER
 done
-n="$(printf '%s\n' ${STAMPS} | LC_ALL=C sort -u | grep -c .)"
-if [ "${n}" = 1 ]; then pass "one git stamp across every archive ($(printf '%s\n' ${STAMPS} | sort -u))"; else fail "the archives carry ${n} git stamps:${STAMPS% }"; fi
 echo "GATE ${PASS} ${FAIL} ${ARCHIVES}"
 INNER
 

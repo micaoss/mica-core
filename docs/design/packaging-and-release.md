@@ -65,13 +65,35 @@ A producer is a directory under `pkgs/` (`pkgs/README.md` is the contract):
 `build.sh` then runs the producer's `Dockerfile` in the base image **of the
 target architecture**, because `dpkg-shlibdeps` resolves dependencies against
 the libraries of the container it runs in. The Dockerfile stages files and calls
-`scripts/deb/pack.sh`, which sets every mtime to `SOURCE_DATE_EPOCH` (the
-commit's timestamp), owns everything by root, and writes `Installed-Size`,
-`md5sums`, `Mica-Source-Repo` and `Mica-Source-Commit`. Archives land in
-`_out/debs/<arch>/pool/`; `scripts/deb/repo.sh` indexes a pool.
+`scripts/deb/pack.sh`, which sets every mtime to `SOURCE_DATE_EPOCH`, owns
+everything by root, and writes `Installed-Size`, `md5sums` and
+`Mica-Source-Repo`. Archives land in `_out/debs/<arch>/pool/`; `build.sh`
+records the producer's inputs hash (`scripts/deb/inputs.sh`) in
+`_out/debs/<arch>/inputs.tsv`, and `scripts/deb/repo.sh` indexes a pool.
 
-Every archive of one build carries the version `<VERSION>+git<commit12>-1`
-(`.dirty` when the tree was not clean; a dirty archive is never released).
+Versions follow `mica:docs/decisions/2026-09-15-package-versions.md`. Each
+producer declares `VERSION="<upstream>-<revision>"` and `SOURCE_DATE_EPOCH` in
+its `producer.env`; the upstream part is the crate version of the binaries it
+ships, compiled into them as the version `--version` and micad's system
+information report. A release never changes a version and nothing in a package
+names a commit, so a package's bytes change only with its version:
+
+- **Bump.** A packaging-only change bumps the revision; a source change bumps
+  the crate version and the upstream part and resets the revision. A `micad`
+  bump bumps the revision of `mica-apid`, `mica-mqttd` and `mica-mqtt-broker`,
+  which depend on its exact version.
+- **Guard.** `scripts/build/reuse.sh` reads, anonymously, the lock and pools of
+  the newest release whose pool layers carry `mica.inputs` (a release made
+  before these rules carries none and is passed over; with none, every package
+  is new). A package at its released version must have the same inputs hash
+  (the pool layer's `mica.inputs`) and rebuild to the same sha256, else it is
+  refused ("inputs of <package> changed without a version bump", or a
+  byte-identical rebuild is required); a higher version is new; a lower one is
+  refused. `ci.yml` runs it read-only and the release runs it before pushing.
+  The inputs are the producer's tracked files, the crates its binaries depend
+  on (test trees aside), the workspace manifest and lock, the packing tooling
+  and the architecture; the build-env images are not inputs, since the
+  byte-identical rebuild catches a toolchain that changes bytes.
 
 ## 3. Gates
 
@@ -137,16 +159,18 @@ are never created locally.
    gates the downloaded archives again, and runs
    `scripts/build/release.sh <tag>`.
 3. `release.sh` checks the checkout is clean, on `origin/main`, and named by the
-   tag; checks every archive (package set, architecture, version, source
-   repository and commit); then:
+   tag; checks every archive (package set, architecture, declared version,
+   source repository, no commit); runs `scripts/build/reuse.sh` against the
+   previous release; then:
    - pushes the pools `ghcr.io/micaoss/mica-core:pool.<arch>.<tag>` through the
      registry API with the workflow's token (`packages: write`): one OCI
      manifest per architecture, artifact type `application/vnd.mica.pool`, an
      empty config, one layer per archive (media type `application/vnd.mica.deb`,
-     `org.opencontainers.image.title` the file name with its real `+`), and the
-     annotations `org.opencontainers.image.revision`, `.created` (the commit
-     time), `.source`, `.version` (the tag), `mica.source-repo`,
-     `mica.source-commit` and `mica.arch`. A tag that already holds another
+     `org.opencontainers.image.title` the file name with its real `+`, and
+     `mica.inputs` the producer's inputs hash), and only the release-independent
+     manifest annotations `mica.source-repo` and `mica.arch`, so a pool whose
+     packages did not change is the same manifest under the release's new tag.
+     A tag that already holds another
      manifest is refused; each manifest and every layer are read back with no
      credential;
    - writes `mica-core.lock`: the release row, `pool amd64` and `pool arm64` by

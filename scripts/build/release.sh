@@ -3,7 +3,10 @@
 # Release <tag> of this repository, as mica:docs/design/release-lock.md
 # describes a release:
 #   - the OCI pools ghcr.io/micaoss/<repository>:pool.<arch>.<tag>, one manifest
-#     per architecture with one layer per archive, read back anonymously;
+#     per architecture with one layer per archive, read back anonymously. Every
+#     package is at its producer's declared version and passes scripts/build/reuse.sh
+#     against the previous release, so an unchanged pool is the same manifest
+#     under a new tag;
 #   - then the release assets <repository>.lock (release, pool and package rows)
 #     and SHA256SUMS listing only it, read back anonymously.
 # Nothing published is ever replaced.
@@ -27,8 +30,6 @@ TAG="$1"
 cd "${REPO_ROOT}"
 [ -z "$(git status --porcelain)" ] || die "the checkout has uncommitted changes; only a clean HEAD is released"
 COMMIT="$(git rev-parse HEAD)"
-C12="${COMMIT:0:12}"
-VERSION="$(tr -d '[:space:]' <VERSION)"
 ORIGIN="$(git remote get-url origin)"
 [[ "${ORIGIN}" =~ github\.com[:/]([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)$ ]] || die "origin ${ORIGIN} is not a GitHub repository"
 SLUG="${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}"
@@ -47,9 +48,15 @@ bash scripts/build/locks.sh check >/dev/null
 ROWS_TEXT="$(bash scripts/deb/producers.sh)" || die "scripts/deb/producers.sh failed"
 mapfile -t ROWS <<<"${ROWS_TEXT}"
 PACKAGES=()
+declare -A WANT=() PRODUCER_OF=()
 for row in "${ROWS[@]}"; do
-    read -r _producer _dir packages _enablement <<<"${row}"
-    for p in $(printf '%s' "${packages}" | tr ',' ' '); do PACKAGES+=("${p}"); done
+    read -r producer dir packages _enablement <<<"${row}"
+    version="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "${dir}/producer.env")"
+    for p in $(printf '%s' "${packages}" | tr ',' ' '); do
+        PACKAGES+=("${p}")
+        WANT["${p}"]="${version}"
+        PRODUCER_OF["${p}"]="${producer}"
+    done
 done
 [ "${#PACKAGES[@]}" -gt 0 ] || die "scripts/deb/producers.sh declares no package"
 
@@ -57,26 +64,31 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 mkdir -p "${WORK}/assets" "${WORK}/download"
 
-WANT="${VERSION}+git${C12}-1"
 for arch in "${ARCHES[@]}"; do
     dir="_out/debs/${arch}/pool"
-    : >"${WORK}/archives.${arch}.tsv" # file TAB package TAB sha256 TAB size
+    inputs="_out/debs/${arch}/inputs.tsv"
+    [ -f "${inputs}" ] || die "${inputs} does not exist; the pool was not built by scripts/deb/build.sh"
+    : >"${WORK}/archives.${arch}.tsv" # file TAB package TAB sha256 TAB size TAB inputs
     mapfile -t debs < <(find "${dir}" -maxdepth 1 -type f -name '*.deb' 2>/dev/null | LC_ALL=C sort)
     [ "${#debs[@]}" -eq "${#PACKAGES[@]}" ] || die "${dir} holds ${#debs[@]} archives; ${#PACKAGES[@]} (${PACKAGES[*]}) are released per architecture"
     for p in "${PACKAGES[@]}"; do
-        deb="${dir}/${p}_${WANT}_${arch}.deb"
-        [ -f "${deb}" ] || die "${deb} does not exist; every package is released at ${WANT}"
+        deb="${dir}/${p}_${WANT[${p}]}_${arch}.deb"
+        [ -f "${deb}" ] || die "${deb} does not exist; ${p} is released at its declared version ${WANT[${p}]}"
         field() { dpkg-deb --field "${deb}" "$1"; }
         [ "$(field Package)" = "${p}" ] || die "${deb} is Package $(field Package), not ${p}"
-        [ "$(field Version)" = "${WANT}" ] || die "${deb} is Version $(field Version), not ${WANT}"
+        [ "$(field Version)" = "${WANT[${p}]}" ] || die "${deb} is Version $(field Version), not ${WANT[${p}]}"
         [ "$(field Architecture)" = "${arch}" ] || die "${deb} is Architecture $(field Architecture), not ${arch}"
         [ "$(field Mica-Source-Repo)" = "${REPOSITORY}" ] || die "${deb} carries Mica-Source-Repo $(field Mica-Source-Repo), not ${REPOSITORY}"
-        [ "$(field Mica-Source-Commit)" = "${COMMIT}" ] || die "${deb} carries Mica-Source-Commit $(field Mica-Source-Commit), not HEAD ${COMMIT}"
-        printf '%s\t%s\t%s\t%s\n' "${deb}" "${p}" "$(sha256sum "${deb}" | cut -d' ' -f1)" "$(stat -c %s "${deb}")" >>"${WORK}/archives.${arch}.tsv"
+        [ -z "$(field Mica-Source-Commit)" ] || die "${deb} carries Mica-Source-Commit; a package carries no commit"
+        hash="$(awk -F'\t' -v p="${PRODUCER_OF[${p}]}" '$1 == p { print $2 }' "${inputs}")"
+        [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || die "${inputs} records no inputs hash for ${PRODUCER_OF[${p}]}"
+        printf '%s\t%s\t%s\t%s\t%s\n' "${deb}" "${p}" "$(sha256sum "${deb}" | cut -d' ' -f1)" "$(stat -c %s "${deb}")" "${hash}" >>"${WORK}/archives.${arch}.tsv"
     done
 done
 
 [ -n "${GH_TOKEN:-}" ] || die "GH_TOKEN must be set; releasing is CI's, with its own token"
+bash scripts/build/reuse.sh --exclude "${TAG}" >"${WORK}/reuse.txt" || die "the packages do not pass the version guard against the previous release"
+sed 's/^/release.sh: /' "${WORK}/reuse.txt"
 git merge-base --is-ancestor "${COMMIT}" origin/main 2>/dev/null || die "${COMMIT} is not on origin/main; only a commit of main is released"
 
 tag_commit() { # the commit the tag names at GIT_URL, read anonymously
@@ -136,18 +148,17 @@ push_blob() { # <file> <digest>
 printf '{}' >"${WORK}/config.json"
 CONFIG_DIGEST="sha256:$(sha256sum "${WORK}/config.json" | cut -d' ' -f1)"
 push_blob "${WORK}/config.json" "${CONFIG_DIGEST}"
-CREATED="$(TZ=UTC git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd)"
 private="GHCR creates a new package private; make ${OCI_REF} public in the package settings, then run this again"
 ANON_TOKEN="$(oci_token "repository:${OCI_NAME}:pull" anonymous || true)"
 declare -A POOL_DIGEST=()
 
 for arch in "${ARCHES[@]}"; do
     tag="pool.${arch}.${TAG}"
-    while IFS=$'\t' read -r file _p sha _size; do
+    while IFS=$'\t' read -r file _p sha _size _inputs; do
         push_blob "${file}" "sha256:${sha}"
     done <"${WORK}/archives.${arch}.tsv"
-    jq -Rn --arg config "${CONFIG_DIGEST}" --arg version "${TAG}" --arg revision "${COMMIT}" --arg arch "${arch}" \
-        --arg source "https://github.com/${SLUG}" --arg created "${CREATED}" --arg repository "${REPOSITORY}" '{
+    # Release-independent: an unchanged pool is byte-identical in every release.
+    jq -Rn --arg config "${CONFIG_DIGEST}" --arg arch "${arch}" --arg repository "${REPOSITORY}" '{
         schemaVersion: 2,
         mediaType: "application/vnd.oci.image.manifest.v1+json",
         artifactType: "application/vnd.mica.pool",
@@ -156,15 +167,10 @@ for arch in "${ARCHES[@]}"; do
             mediaType: "application/vnd.mica.deb",
             digest: ("sha256:" + .[2]),
             size: (.[3] | tonumber),
-            annotations: {"org.opencontainers.image.title": (.[0] | split("/") | last)}
+            annotations: {"org.opencontainers.image.title": (.[0] | split("/") | last), "mica.inputs": .[4]}
         }],
         annotations: {
-            "org.opencontainers.image.revision": $revision,
-            "org.opencontainers.image.created": $created,
-            "org.opencontainers.image.source": $source,
-            "org.opencontainers.image.version": $version,
             "mica.source-repo": $repository,
-            "mica.source-commit": $revision,
             "mica.arch": $arch
         }
     }' <"${WORK}/archives.${arch}.tsv" | jq -c . | tr -d '\n' >"${WORK}/manifest.${arch}.json"
@@ -191,7 +197,7 @@ for arch in "${ARCHES[@]}"; do
     code="$(oci_curl "${ANON_TOKEN}" -sS -o "${WORK}/anonymous.json" -w '%{http_code}' -H "Accept: ${MANIFEST_TYPE}" "${REGISTRY}/v2/${OCI_NAME}/manifests/${tag}")"
     [ "${code}" = 200 ] || die "${OCI_REF}:${tag} cannot be read anonymously (HTTP ${code}); ${private}"
     [ "sha256:$(sha256sum "${WORK}/anonymous.json" | cut -d' ' -f1)" = "${digest}" ] || die "${OCI_REF}:${tag} reads anonymously as another manifest"
-    while IFS=$'\t' read -r file _p sha _size; do
+    while IFS=$'\t' read -r file _p sha _size _inputs; do
         oci_curl "${ANON_TOKEN}" -fsSL -o "${WORK}/layer" "${REGISTRY}/v2/${OCI_NAME}/blobs/sha256:${sha}" || die "the layer of ${file} cannot be read anonymously; ${private}"
         [ "$(sha256sum "${WORK}/layer" | cut -d' ' -f1)" = "${sha}" ] || die "the layer of ${file} reads anonymously with other bytes"
     done <"${WORK}/archives.${arch}.tsv"
@@ -205,7 +211,7 @@ done
     printf 'release\t%s\t%s\t%s\n' "${REPOSITORY}" "${TAG}" "${COMMIT}"
     for arch in "${ARCHES[@]}"; do printf 'pool\t%s\t%s:pool.%s.%s@%s\n' "${arch}" "${OCI_REF}" "${arch}" "${TAG}" "${POOL_DIGEST[${arch}]}"; done
     for arch in "${ARCHES[@]}"; do
-        while IFS=$'\t' read -r _file p sha _size; do printf 'package\t%s\t%s\t%s\t%s\n' "${p}" "${arch}" "${WANT}" "${sha}"; done <"${WORK}/archives.${arch}.tsv"
+        while IFS=$'\t' read -r _file p sha _size _inputs; do printf 'package\t%s\t%s\t%s\t%s\n' "${p}" "${arch}" "${WANT[${p}]}" "${sha}"; done <"${WORK}/archives.${arch}.tsv"
     done | LC_ALL=C sort -t$'\t' -k2,2 -k3,3
 } >"${WORK}/assets/${LOCK}"
 result="$(bash scripts/build/check-lock.sh lock "${WORK}/assets/${LOCK}")" || die "the lock this release writes is ${result}"

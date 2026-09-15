@@ -345,7 +345,6 @@ export const zhCN: Translation = {
         title: '软件与启动',
         description: '镜像构建、守护进程、签名部署和单调运行时间。',
         system: '系统镜像',
-        commitDate: '源提交日期',
         daemon: 'micad',
         deployment: '部署',
         primary: '主槽位',

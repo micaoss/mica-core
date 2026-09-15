@@ -59,9 +59,8 @@ async fn the_system_info_route_answers_micads_surface_read_only() {
     fake.set_system_info(json!({
         "machineId": { "available": true, "id": "0123456789abcdef0123456789abcdef" },
         "board": { "available": false, "detail": "no device-tree model" },
-        "system": { "available": true, "version": "0.1.0+git00b674ec0ffe-1", "package": "micad",
-                    "gitStamp": { "available": true, "commit": "00b674ec0ffe", "dirty": false, "consistent": true } },
-        "packages": { "available": true, "count": 1, "entries": [{ "name": "micad", "version": "0.1.0+git00b674ec0ffe-1", "architecture": "arm64", "mica": true }] },
+        "system": { "available": true, "version": "0.1.1-1", "package": "micad" },
+        "packages": { "available": true, "count": 1, "entries": [{ "name": "micad", "version": "0.1.1-1", "architecture": "arm64", "mica": true }] },
         "slot": { "available": true, "booted": "rootfs.0" },
         "uptime": { "available": true, "seconds": 99 },
         // A field the live denylist covers must not pass through this
@@ -75,7 +74,7 @@ async fn the_system_info_route_answers_micads_surface_read_only() {
     let info = body_json(response).await;
     assert_eq!(info["machineId"]["id"], "0123456789abcdef0123456789abcdef");
     assert_eq!(info["board"]["available"], false);
-    assert_eq!(info["system"]["gitStamp"]["commit"], "00b674ec0ffe");
+    assert_eq!(info["system"]["version"], "0.1.1-1");
     assert_eq!(info["packages"]["entries"][0]["name"], "micad");
     assert_eq!(info["slot"]["booted"], "rootfs.0");
     assert_eq!(info["uptime"]["seconds"], 99);

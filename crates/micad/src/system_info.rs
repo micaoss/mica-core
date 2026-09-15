@@ -38,11 +38,6 @@ pub const KERNEL_RELEASE_PATH: &str = "proc/sys/kernel/osrelease";
 pub const KERNEL_VERSION_PATH: &str = "proc/sys/kernel/version";
 /// Seconds since boot, relative to the root.
 pub const UPTIME_PATH: &str = "proc/uptime";
-/// The device identity the composition writes, relative to the root.
-pub const RELEASE_IDENTITY_PATH: &str = "usr/share/mica/release-identity.env";
-/// The key in [`RELEASE_IDENTITY_PATH`] carrying the source commit's date,
-/// as `rootfs/compose/compose-install.sh` spells it.
-pub const COMMIT_DATE_KEY: &str = "COMMIT_DATE";
 /// The baked update configuration — the mandatory member of the `meta/` public
 /// set, and therefore the evidence that this image was built by a pipeline
 /// that provisions a trust anchor at all. Relative to the observer's root.
@@ -61,8 +56,7 @@ pub const MAX_MANIFEST_ROWS: usize = 4096;
 
 /// The packages whose manifest row names the system (image) version, in
 /// order of preference: the system metapackage where the image has one, and
-/// the management daemon otherwise. Both are mica rows and therefore carry the
-/// pool's git stamp.
+/// the management daemon otherwise.
 const SYSTEM_VERSION_PACKAGES: [&str; 2] = ["mica-system", "micad"];
 
 /// One row of the manifest.
@@ -70,7 +64,7 @@ const SYSTEM_VERSION_PACKAGES: [&str; 2] = ["mica-system", "micad"];
 pub struct PackageRow {
     /// Debian package name.
     pub name: String,
-    /// Debian version string, which for mica rows ends in the git stamp.
+    /// Debian version string.
     pub version: String,
     /// Debian architecture.
     pub architecture: String,
@@ -94,26 +88,6 @@ pub struct Manifest {
     pub malformed: usize,
     /// Whether rows beyond the cap were dropped.
     pub truncated: bool,
-}
-
-/// The `+git<commit>[.dirty]-<rev>` stamp at the end of a mica package version.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitStamp {
-    /// The abbreviated commit, 12 lowercase hex characters.
-    pub commit: String,
-    /// Whether the pool was built from a dirty tree.
-    pub dirty: bool,
-    /// The Debian revision after the stamp.
-    pub revision: String,
-}
-
-impl GitStamp {
-    /// The stamp as it is spelled in the version string, `git<commit>[.dirty]-<rev>`.
-    #[must_use]
-    pub fn spelled(&self) -> String {
-        let dirty = if self.dirty { ".dirty" } else { "" };
-        format!("git{}{}-{}", self.commit, dirty, self.revision)
-    }
 }
 
 /// Parse the manifest text: `#` lines and blank lines are skipped, every
@@ -141,34 +115,6 @@ pub fn parse_manifest(text: &str) -> Manifest {
         });
     }
     manifest
-}
-
-/// The git stamp at the end of `version`, or `None` when the version does not
-/// end in one. The shape is `verify`'s: `+git` followed by twelve lowercase
-/// hex characters, an optional `.dirty`, then `-<digits>`.
-#[must_use]
-pub fn parse_git_stamp(version: &str) -> Option<GitStamp> {
-    let (_, stamp) = version.rsplit_once("+git")?;
-    let (head, revision) = stamp.rsplit_once('-')?;
-    if revision.is_empty() || !revision.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let (commit, dirty) = match head.strip_suffix(".dirty") {
-        Some(commit) => (commit, true),
-        None => (head, false),
-    };
-    if commit.len() != 12
-        || !commit
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return None;
-    }
-    Some(GitStamp {
-        commit: commit.to_string(),
-        dirty,
-        revision: revision.to_string(),
-    })
 }
 
 /// Parse `os-release`: `KEY=value` lines, values optionally double- or
@@ -252,9 +198,6 @@ pub struct SystemInfoEvidence {
     /// The manifest file's mtime in seconds since the epoch: the pinned
     /// `SOURCE_DATE_EPOCH` every file in the image carries, not a build date.
     pub file_epoch: Option<u64>,
-    /// [`COMMIT_DATE_KEY`] as the release identity states it — the date of
-    /// the commit the image's git stamp names.
-    pub commit_date: Option<String>,
     /// Whole seconds since boot.
     pub uptime_seconds: Option<u64>,
     /// The grade of this image's signing material, or `None` when the baked
@@ -277,23 +220,21 @@ impl Default for SystemInfoEvidence {
             os_release: BTreeMap::new(),
             manifest: None,
             file_epoch: None,
-            commit_date: None,
             uptime_seconds: None,
             trust: None,
         }
     }
 }
 
-/// This daemon's own identity, as its build embedded it — the same two
-/// values `micad --version` prints, read from the same place.
+/// This daemon's own identity, as its build embedded it — the values
+/// `micad --version` prints, read from the same place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonIdentity {
     /// The daemon's name, `micad`: the executable, not the package.
     pub name: &'static str,
-    /// `CARGO_PKG_VERSION`.
+    /// The package version, `MICA_PACKAGE_VERSION`, or `unknown` for an
+    /// unpackaged build.
     pub version: &'static str,
-    /// `MICA_BUILD_COMMIT`, when the build supplied one.
-    pub commit: Option<&'static str>,
 }
 
 impl DaemonIdentity {
@@ -302,8 +243,9 @@ impl DaemonIdentity {
     pub fn this_build() -> Self {
         Self {
             name: "micad",
-            version: env!("CARGO_PKG_VERSION"),
-            commit: option_env!("MICA_BUILD_COMMIT").filter(|commit| !commit.trim().is_empty()),
+            version: option_env!("MICA_PACKAGE_VERSION")
+                .filter(|version| !version.trim().is_empty())
+                .unwrap_or("unknown"),
         }
     }
 }
@@ -416,20 +358,6 @@ impl HostSystemInfo {
         (Some(parse_manifest(&text)), epoch)
     }
 
-    /// [`COMMIT_DATE_KEY`] from the release identity, trimmed; `None` when
-    /// the file is absent or states nothing for the key. That file is
-    /// `KEY=VALUE`, the shape [`parse_os_release`] already reads, so it is
-    /// parsed by the same function rather than by a second parser that could
-    /// come to disagree with it. The value is reported as written: it is
-    /// `git show -s --format=%cI`'s output, and `verify`'s
-    /// `packed-release-identity` is what holds an image to that shape.
-    fn commit_date(&self) -> Option<String> {
-        let text = std::fs::read_to_string(self.path(RELEASE_IDENTITY_PATH)).ok()?;
-        let value = parse_os_release(&text).remove(COMMIT_DATE_KEY)?;
-        let value = value.trim().to_string();
-        (!value.is_empty()).then_some(value)
-    }
-
     /// The grade of the signing material this image was built from.
     fn trust(&self) -> Option<TrustGrade> {
         if !self.path(BAKED_META_MANIFEST_PATH).is_file() {
@@ -470,7 +398,6 @@ impl SystemInfoSource for HostSystemInfo {
                 .unwrap_or_default(),
             manifest,
             file_epoch,
-            commit_date: self.commit_date(),
             uptime_seconds: self.uptime_seconds(),
             trust: self.trust(),
         })
@@ -570,11 +497,7 @@ pub fn info_json(
             absent(format!("/{MANIFEST_PATH} is absent")),
         ),
         Some(manifest) => (
-            system_json(
-                manifest,
-                evidence.file_epoch,
-                evidence.commit_date.as_deref(),
-            ),
+            system_json(manifest, evidence.file_epoch),
             packages_json(manifest),
         ),
     };
@@ -616,7 +539,6 @@ pub fn info_json(
         "daemon": {
             "name": daemon.name,
             "version": daemon.version,
-            "commit": daemon.commit,
         },
         "packages": packages,
         "deployment": deployment,
@@ -625,41 +547,11 @@ pub fn info_json(
 }
 
 /// The `system` member: the image version by way of the system package's
-/// manifest row, the git stamp the mica rows share, the date of the commit
-/// that stamp names, and the pinned file epoch the root carries.
-fn system_json(manifest: &Manifest, file_epoch: Option<u64>, commit_date: Option<&str>) -> Json {
+/// manifest row, and the pinned file epoch the root carries.
+fn system_json(manifest: &Manifest, file_epoch: Option<u64>) -> Json {
     let version_row = SYSTEM_VERSION_PACKAGES
         .iter()
         .find_map(|name| manifest.rows.iter().find(|row| row.name == *name));
-    let mut stamps: Vec<String> = manifest
-        .rows
-        .iter()
-        .filter(|row| row.is_mica())
-        .map(|row| {
-            parse_git_stamp(&row.version)
-                .map_or_else(|| "unstamped".to_string(), |stamp| stamp.spelled())
-        })
-        .collect();
-    stamps.sort();
-    stamps.dedup();
-    let consistent = stamps.len() == 1 && stamps[0] != "unstamped";
-    let stamp = version_row.and_then(|row| parse_git_stamp(&row.version));
-    let git_stamp = match &stamp {
-        Some(stamp) => json!({
-            "available": true,
-            "commit": stamp.commit,
-            "dirty": stamp.dirty,
-            "revision": stamp.revision,
-            "consistent": consistent,
-            "stamps": stamps,
-        }),
-        None => json!({
-            "available": false,
-            "detail": "the system package's version carries no +git stamp",
-            "consistent": consistent,
-            "stamps": stamps,
-        }),
-    };
     let mut root = serde_json::Map::new();
     match version_row {
         Some(row) => {
@@ -678,41 +570,8 @@ fn system_json(manifest: &Manifest, file_epoch: Option<u64>, commit_date: Option
             );
         }
     }
-    root.insert("gitStamp".to_string(), git_stamp);
-    root.insert(
-        "commitDate".to_string(),
-        commit_date_json(commit_date, stamp.as_ref()),
-    );
     root.insert("fileEpoch".to_string(), file_epoch_json(file_epoch));
     Json::Object(root)
-}
-
-/// The `system.commitDate` member: when the commit the image's stamp names
-/// was committed, as `rootfs/compose/compose-install.sh` recorded it.
-fn commit_date_json(commit_date: Option<&str>, stamp: Option<&GitStamp>) -> Json {
-    let Some(date) = commit_date else {
-        return absent(format!(
-            "/{RELEASE_IDENTITY_PATH} states no {COMMIT_DATE_KEY}; it is written by \
-             rootfs/compose/compose-install.sh from the commit the pool's git stamp names, so a \
-             root without it was composed by something else or before the field existed"
-        ));
-    };
-    let mut node = serde_json::Map::new();
-    node.insert("available".to_string(), json!(true));
-    node.insert("date".to_string(), json!(date));
-    if let Some(stamp) = stamp
-        && stamp.dirty
-    {
-        node.insert(
-            "detail".to_string(),
-            json!(format!(
-                "the pool this image was composed from carries a .dirty stamp, so this is when \
-                 commit {} was committed and the tree that was packaged was not exactly it",
-                stamp.commit
-            )),
-        );
-    }
-    Json::Object(node)
 }
 
 /// The `system.fileEpoch` member: the mtime every file in this root carries.
@@ -762,16 +621,15 @@ mod tests {
 
     const MANIFEST: &str = "#package\tversion\tarchitecture\n\
         base-files\t13.8\tarm64\n\
-        mica-apid\t0.1.0+git00b674ec0ffe-1\tarm64\n\
-        mica-deploy\t0.1.0+git00b674ec0ffe-1\tarm64\n\
-        micad\t0.1.0+git00b674ec0ffe-1\tarm64\n\
+        mica-apid\t0.1.1-1\tarm64\n\
+        mica-deploy\t0.1.1-1\tarm64\n\
+        micad\t0.1.1-1\tarm64\n\
         systemd\t257.7-1\tarm64\n";
 
     fn daemon() -> DaemonIdentity {
         DaemonIdentity {
             name: "micad",
-            version: "0.1.0",
-            commit: Some("00b674ec0ffe"),
+            version: "0.1.1-1",
         }
     }
 
@@ -798,11 +656,6 @@ mod tests {
             b"#1 SMP PREEMPT Mon Sep 1 00:00:00 UTC 2026\n",
         );
         write(UPTIME_PATH, b"12345.67 8888.00\n");
-        write(
-            RELEASE_IDENTITY_PATH,
-            b"# What this device is, for native deployment status.\nBOARD=cx3576\nPROFILE=dev\n\
-              VERSION=0.1.0+git00b674ec0ffe-1\nCOMMIT_DATE=2026-09-01T12:34:56+08:00\n",
-        );
         // PRODUCTION-shaped: the baked public set's required member is there
         // and no marker is beside it, because that is the released state. A
         // test that wants the development branch writes the marker itself.
@@ -820,7 +673,7 @@ mod tests {
         assert_eq!(manifest.malformed, 0);
         assert!(!manifest.truncated);
         assert_eq!(manifest.rows[1].name, "mica-apid");
-        assert_eq!(manifest.rows[1].version, "0.1.0+git00b674ec0ffe-1");
+        assert_eq!(manifest.rows[1].version, "0.1.1-1");
         assert_eq!(manifest.rows[1].architecture, "arm64");
         assert!(manifest.rows[1].is_mica());
         assert!(!manifest.rows[0].is_mica());
@@ -848,30 +701,6 @@ mod tests {
     }
 
     #[test]
-    fn the_git_stamp_is_the_verify_shape_and_nothing_else() {
-        let stamp = parse_git_stamp("0.1.0+git00b674ec0ffe-1").expect("a clean stamp");
-        assert_eq!(stamp.commit, "00b674ec0ffe");
-        assert!(!stamp.dirty);
-        assert_eq!(stamp.revision, "1");
-        assert_eq!(stamp.spelled(), "git00b674ec0ffe-1");
-
-        let dirty = parse_git_stamp("1.13+git00b674ec0ffe.dirty-3").expect("a dirty stamp");
-        assert!(dirty.dirty);
-        assert_eq!(dirty.spelled(), "git00b674ec0ffe.dirty-3");
-
-        for shapeless in [
-            "257.7-1",
-            "1.0+git00b674ec0ff-1",
-            "1.0+gitZZb674ec0ffe-1",
-            "1.0+git00b674ec0ffe",
-            "1.0+git00b674ec0ffe-x",
-            "1.0+git00b674ec0ffe-",
-        ] {
-            assert_eq!(parse_git_stamp(shapeless), None, "{shapeless}");
-        }
-    }
-
-    #[test]
     fn os_release_values_lose_their_quotes() {
         let fields = parse_os_release("A=\"x y\"\nB='z'\nC=plain\n# c\n\nD\n");
         assert_eq!(fields["A"], "x y");
@@ -889,8 +718,7 @@ mod tests {
     }
 
     /// The assembly over a full fixture tree: every seam read from where it
-    /// lives, the commit date read from the release identity, and the pinned
-    /// file epoch read from the manifest's mtime.
+    /// lives, and the pinned file epoch read from the manifest's mtime.
     #[tokio::test]
     async fn a_full_root_yields_every_member_available() {
         let root = fixture_root();
@@ -919,27 +747,12 @@ mod tests {
         assert_eq!(info["release"]["versionId"], "13");
         assert_eq!(info["system"]["available"], true);
         assert_eq!(info["system"]["package"], "micad");
-        assert_eq!(info["system"]["version"], "0.1.0+git00b674ec0ffe-1");
-        assert_eq!(info["system"]["gitStamp"]["commit"], "00b674ec0ffe");
-        assert_eq!(info["system"]["gitStamp"]["dirty"], false);
-        assert_eq!(info["system"]["gitStamp"]["consistent"], true);
-        assert_eq!(
-            info["system"]["gitStamp"]["stamps"],
-            json!(["git00b674ec0ffe-1"])
-        );
-        // The commit date is the release identity's, verbatim -- a fact about
-        // the source, not about this run and not about any file's mtime.
-        assert_eq!(info["system"]["commitDate"]["available"], true);
-        assert_eq!(
-            info["system"]["commitDate"]["date"],
-            "2026-09-01T12:34:56+08:00"
-        );
-        // A clean stamp carries no caveat.
-        assert!(info["system"]["commitDate"]["detail"].is_null());
+        assert_eq!(info["system"]["version"], "0.1.1-1");
+        assert!(info["system"]["gitStamp"].is_null());
+        assert!(info["system"]["commitDate"].is_null());
         // The file epoch is the manifest's mtime, which the fixture wrote just
         // now: a real epoch, rendered RFC 3339 beside it. On a composed image
-        // it is the pinned SOURCE_DATE_EPOCH instead, which is why it is not
-        // the commit date and is not named like one.
+        // it is the pinned SOURCE_DATE_EPOCH instead.
         let epoch = info["system"]["fileEpoch"]["epoch"]
             .as_u64()
             .expect("file epoch");
@@ -952,7 +765,8 @@ mod tests {
             info["system"]
         );
         assert_eq!(info["daemon"]["name"], "micad");
-        assert_eq!(info["daemon"]["commit"], "00b674ec0ffe");
+        assert_eq!(info["daemon"]["version"], "0.1.1-1");
+        assert!(info["daemon"]["commit"].is_null());
         assert_eq!(info["packages"]["count"], 5);
         assert_eq!(info["packages"]["micaCount"], 3);
         assert_eq!(info["packages"]["entries"][3]["name"], "micad");
@@ -997,7 +811,7 @@ mod tests {
             );
         }
         // The daemon's own identity needs no file and is always there.
-        assert_eq!(info["daemon"]["version"], "0.1.0");
+        assert_eq!(info["daemon"]["version"], "0.1.1-1");
     }
 
     /// A machine id that is not the systemd shape is absent evidence, not a
@@ -1040,95 +854,6 @@ mod tests {
         let info = info_json(&evidence, None, &daemon());
         assert_eq!(info["board"]["model"], "Intel Corporation NUC13ANHi5");
         assert_eq!(info["board"]["source"], "dmi");
-    }
-
-    /// Two stamps in one manifest is a half-rebuilt pool, and the surface
-    /// says so rather than picking one.
-    #[test]
-    fn inconsistent_stamps_are_reported_not_hidden() {
-        let manifest = parse_manifest(
-            "mica-apid\t0.1.0+git00b674ec0ffe-1\tarm64\n\
-             micad\t0.1.0+gitffffffffffff.dirty-1\tarm64\n",
-        );
-        let system = system_json(&manifest, None, Some("2026-09-01T12:34:56+08:00"));
-        assert_eq!(system["gitStamp"]["consistent"], false);
-        assert_eq!(
-            system["gitStamp"]["stamps"],
-            json!(["git00b674ec0ffe-1", "gitffffffffffff.dirty-1"])
-        );
-        assert_eq!(system["gitStamp"]["dirty"], true);
-        assert_eq!(system["fileEpoch"]["available"], false);
-        assert!(
-            system["fileEpoch"]["detail"]
-                .as_str()
-                .is_some_and(|d| !d.is_empty())
-        );
-    }
-
-    /// A `.dirty` stamp means the packaged tree is not the commit the date
-    /// belongs to, and the field SAYS so instead of reading like a plain
-    /// timestamp of the source that shipped.
-    #[test]
-    fn a_dirty_stamp_is_stated_beside_the_commit_date() {
-        let manifest = parse_manifest("micad\t0.1.0+gitffffffffffff.dirty-1\tarm64\n");
-        let system = system_json(&manifest, Some(1_577_836_800), Some("2026-09-01T00:00:00Z"));
-        assert_eq!(system["commitDate"]["available"], true);
-        assert_eq!(system["commitDate"]["date"], "2026-09-01T00:00:00Z");
-        assert!(
-            system["commitDate"]["detail"]
-                .as_str()
-                .is_some_and(|d| d.contains("ffffffffffff") && d.contains(".dirty")),
-            "{}",
-            system["commitDate"]
-        );
-    }
-
-    /// A root whose identity states no commit date says so. It must not fall
-    /// back to the pinned file epoch -- which is a real value, is present in
-    /// the same member, and would read as a build date that is 2020-01-01 on
-    /// every image this repository has ever produced.
-    #[tokio::test]
-    async fn an_identity_without_a_commit_date_is_absent_and_never_the_file_epoch() {
-        let root = fixture_root();
-        std::fs::write(
-            root.path().join(RELEASE_IDENTITY_PATH),
-            "BOARD=cx3576\nPROFILE=dev\nVERSION=0.1.0+git00b674ec0ffe-1\n",
-        )
-        .expect("write");
-        let evidence = HostSystemInfo::at(root.path())
-            .observe()
-            .await
-            .expect("observe");
-        assert_eq!(evidence.commit_date, None);
-        let info = info_json(&evidence, None, &daemon());
-        assert_eq!(info["system"]["commitDate"]["available"], false);
-        assert!(
-            info["system"]["commitDate"]["detail"]
-                .as_str()
-                .is_some_and(|d| d.contains(COMMIT_DATE_KEY)),
-            "{}",
-            info["system"]["commitDate"]
-        );
-        assert!(info["system"]["commitDate"]["date"].is_null());
-        // The file epoch is still reported, under its own name.
-        assert_eq!(info["system"]["fileEpoch"]["available"], true);
-    }
-
-    /// An identity stating the key with nothing after it is absence, not an
-    /// empty string that renders as a blank date.
-    #[tokio::test]
-    async fn an_empty_commit_date_is_absence() {
-        let root = fixture_root();
-        std::fs::write(
-            root.path().join(RELEASE_IDENTITY_PATH),
-            "BOARD=cx3576\nCOMMIT_DATE=\n",
-        )
-        .expect("write");
-        let evidence = HostSystemInfo::at(root.path())
-            .observe()
-            .await
-            .expect("observe");
-        assert_eq!(evidence.commit_date, None);
     }
 
     /// The unavailable default refuses rather than inspecting the host.

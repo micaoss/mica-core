@@ -10,7 +10,6 @@ ARG MICA_DEB_VERSION
 ARG MICA_DEB_ARCH
 ARG SOURCE_DATE_EPOCH
 ARG MICA_DEB_SOURCE_REPO
-ARG MICA_DEB_SOURCE_COMMIT
 RUN set -eu; \
     install -D -m 0755 /in/bin/mica-sftp-server /stage/usr/lib/sftp-server; \
     install -D -m 0644 /in/copyright            /stage/usr/share/doc/mica-sftp-server/copyright; \

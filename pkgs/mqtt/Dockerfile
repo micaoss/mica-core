@@ -14,7 +14,6 @@ ARG MICA_DEB_VERSION
 ARG MICA_DEB_ARCH
 ARG SOURCE_DATE_EPOCH
 ARG MICA_DEB_SOURCE_REPO
-ARG MICA_DEB_SOURCE_COMMIT
 RUN set -eu; \
     install -D -m 0755 /in/bin/mica-mqttd                /stage/mqttd/usr/bin/mica-mqttd; \
     install -D -m 0644 /in/dist/mica-mqttd.service       /stage/mqttd/usr/lib/systemd/system/mica-mqttd.service; \

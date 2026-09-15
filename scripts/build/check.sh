@@ -13,19 +13,27 @@ if [ -z "${MICA_APID_UI_DIST_DIR:-}" ]; then
     export MICA_APID_UI_DIST_DIR="${REPO_ROOT}/_out/apid-ui/dist"
 fi
 
-# THE REPOSITORY VERSION AND THE CRATE VERSION AGREE. scripts/deb/version.sh
-# stamps every archive from ${REPO_ROOT}/VERSION; the binaries report the crate
-# version from their manifests. Two numbers, one release: a drift between them
-# is a package whose version is not the version the binary inside it prints.
-declared="$(tr -d '[:space:]' <"${REPO_ROOT}/VERSION")"
-for m in crates/*/Cargo.toml; do
-    name="$(sed -n '/^\[package\]/,/^\[/ s/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${m}" | head -n1)"
-    [ -n "${name}" ] || continue
-    v="$(sed -n '/^\[package\]/,/^\[/ s/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${m}" | head -n1)"
-    [ "${v}" = "${declared}" ] || {
-        echo "error: ${m} declares ${name} at version '${v}' and ${REPO_ROOT}/VERSION declares '${declared}'. The package pool is stamped from VERSION and the binaries report the crate version; move whichever is behind" >&2
+# EVERY PRODUCER'S VERSION IS ITS BINARIES' CRATE VERSION. pkgs/<producer>/producer.env
+# declares VERSION=<upstream>-<revision>; the upstream part must be the version of
+# the crate of every binary the producer ships (its prepare.sh --bins), so the
+# version a package carries is the version its binaries were built as.
+metadata="$(cargo metadata --locked --no-deps --format-version 1)"
+for env_file in pkgs/*/producer.env; do
+    producer="$(basename "$(dirname "${env_file}")")"
+    declared="$(sed -n 's/^VERSION="\([^"]*\)"$/\1/p' "${env_file}")"
+    upstream="${declared%-*}"
+    bins="$(sed -n 's/.*--bins "\([^"]*\)".*/\1/p' "pkgs/${producer}/prepare.sh")"
+    [ -n "${declared}" ] && [ -n "${bins}" ] || {
+        echo "error: ${env_file} declares no VERSION or pkgs/${producer}/prepare.sh names no --bins" >&2
         exit 1
     }
+    for bin in ${bins}; do
+        crate="$(jq -r --arg b "${bin}" '.packages[] | select(any(.targets[]; .name == $b and (.kind | index("bin")))) | "\(.name) \(.version)"' <<<"${metadata}")"
+        [ "${crate#* }" = "${upstream}" ] || {
+            echo "error: ${env_file} declares ${declared}, but ${bin} is built from ${crate:-no crate}; the upstream part of a producer's version is its binaries' crate version" >&2
+            exit 1
+        }
+    done
 done
 
 cargo fmt --all --check

@@ -11,7 +11,6 @@ ARG MICA_DEB_VERSION
 ARG MICA_DEB_ARCH
 ARG SOURCE_DATE_EPOCH
 ARG MICA_DEB_SOURCE_REPO
-ARG MICA_DEB_SOURCE_COMMIT
 RUN set -eu; \
     install -D -m 0755 /in/bin/micad                /stage/usr/bin/micad; \
     install -D -m 0644 /in/dist/micad.service       /stage/usr/lib/systemd/system/micad.service; \

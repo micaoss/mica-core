@@ -43,9 +43,8 @@ for b in "${ALL_BINARIES[@]}"; do
 done
 case "$(uname -m)" in x86_64) HOST_ARCH=amd64 ;; aarch64 | arm64) HOST_ARCH=arm64 ;; *) die "unsupported host $(uname -m)" ;; esac
 
-COMMIT="$(git -C "${REPO_ROOT}" rev-parse --short=12 HEAD)"
-[ -z "$(git -C "${REPO_ROOT}" status --porcelain)" ] || COMMIT="${COMMIT}-dirty"
-MICA_BUILD_COMMIT="${MICA_BUILD_COMMIT:-${COMMIT}}"
+# The declared package version, compiled into the binaries (scripts/deb/build.sh).
+[[ "${MICA_DEB_VERSION:-}" =~ ^[0-9][A-Za-z0-9.+~]*-[A-Za-z0-9.+~]+$ ]] || die "MICA_DEB_VERSION '${MICA_DEB_VERSION:-}' is not the producer's declared version"
 TARGET_DIR="${REPO_ROOT}/_out/target-deb/${PRODUCER}"
 CARGO_CACHE="${REPO_ROOT}/_out/cargo"
 mkdir -p "${CARGO_CACHE}/registry" "${CARGO_CACHE}/git" "${TARGET_DIR}"
@@ -68,7 +67,7 @@ docker run --rm --label ai-agent=true --platform "linux/${HOST_ARCH}" \
     -v "${CARGO_CACHE}/git:/usr/local/cargo/git" \
     -w /src \
     -e "TARGET=${TRIPLE}" -e "ELF_ARCH=${ELF_ARCH}" -e "BINS=${BINS}" \
-    -e "CARGO_TARGET_DIR=/target" -e "MICA_BUILD_COMMIT=${MICA_BUILD_COMMIT}" \
+    -e "CARGO_TARGET_DIR=/target" -e "MICA_PACKAGE_VERSION=${MICA_DEB_VERSION}" \
     "${APID_UI_ARGS[@]}" \
     --entrypoint /bin/bash "${RUST_IMAGE}" -c '
         set -euo pipefail

@@ -29,12 +29,11 @@ docker run --rm --label ai-agent=true -v "${DIST}:/dist" -w /dist -e "ARCH=${ARC
         [ -s Packages ] || { echo "repo.sh: error: dpkg-scanpackages wrote nothing" >&2; exit 1; }
         printf "pool/%s\n" "${debs[@]}" | xargs sha256sum >SHA256SUMS
         {
-            printf "#package\tversion\tarchitecture\tinstalled-size\tsha256\tfile\tsource-repo\tsource-commit\n"
+            printf "#package\tversion\tarchitecture\tinstalled-size\tsha256\tfile\tsource-repo\n"
             for d in "${debs[@]}"; do
                 f() { dpkg-deb --field "pool/${d}" "$1"; }
-                [ -n "$(f Mica-Source-Commit)" ] || { echo "repo.sh: error: pool/${d} carries no Mica-Source-Commit" >&2; exit 1; }
-                printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$(f Package)" "$(f Version)" "$(f Architecture)" "$(f Installed-Size)" \
-                    "$(sha256sum "pool/${d}" | cut -d" " -f1)" "pool/${d}" "$(f Mica-Source-Repo)" "$(f Mica-Source-Commit)"
+                printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$(f Package)" "$(f Version)" "$(f Architecture)" "$(f Installed-Size)" \
+                    "$(sha256sum "pool/${d}" | cut -d" " -f1)" "pool/${d}" "$(f Mica-Source-Repo)"
             done
         } >manifest.txt
         echo "repo.sh: ${ARCH}: ${#debs[@]} package(s)"

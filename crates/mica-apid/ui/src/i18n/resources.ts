@@ -552,7 +552,6 @@ export const en = {
         title: 'Software and boot',
         description: 'Image build, daemon, signed deployment and monotonic uptime.',
         system: 'System image',
-        commitDate: 'Source commit date',
         daemon: 'micad',
         deployment: 'Deployment',
         primary: 'primary',
