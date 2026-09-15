@@ -1,0 +1,50 @@
+name: release
+# Runs only when a release is published; nothing here runs on a push. The
+# release is cut first with `gh release create <YYYYMMDD-HHMM> --target <commit
+# of main>`. The release's tag is gated, built, packed and gated for both
+# architectures (build.yml), then scripts/build/release.sh pushes those archives
+# as the pools ghcr.io/micaoss/mica-core:pool.<arch>.<tag>, reads them back with
+# no credential, and attaches mica-core.lock and SHA256SUMS to that release.
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: refs/tags/${{ github.event.release.tag_name }}
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: mica-core-*
+          path: _out/artifacts
+      - name: The gated archives of this run
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            mkdir -p "_out/debs/$arch/pool"
+            cp "_out/artifacts/mica-core-$arch/"*.deb "_out/debs/$arch/pool/"
+            bash scripts/deb/repo.sh --arch "$arch"
+          done
+          rm -rf _out/artifacts
+          bash scripts/deb/package-gate.sh --no-reproduce
+      - name: Attach the archives and download them back anonymously
+        run: bash scripts/build/release.sh "$TAG"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}

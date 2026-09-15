@@ -1,0 +1,235 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource/barlow/latin-400.css";
+@import "@fontsource/barlow/latin-500.css";
+@import "@fontsource/barlow/latin-600.css";
+@import "@fontsource/barlow/latin-700.css";
+@import "@fontsource/barlow-condensed/latin-600.css";
+@import "@fontsource/barlow-condensed/latin-700.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-strong: var(--accent-strong);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--danger);
+  --color-success: var(--success);
+  --color-success-background: var(--success-background);
+  --color-warning: var(--warning);
+  --color-warning-background: var(--warning-background);
+  --color-danger: var(--danger);
+  --color-danger-background: var(--danger-background);
+  --color-chrome: var(--chrome);
+  --color-chrome-foreground: var(--chrome-foreground);
+  --color-chrome-muted: var(--chrome-muted);
+  --color-chrome-border: var(--chrome-border);
+  --color-chrome-hover: var(--chrome-hover);
+  --color-chrome-active: var(--chrome-active);
+  --color-chrome-active-foreground: var(--chrome-active-foreground);
+  --color-logo: var(--logo);
+  --color-logo-foreground: var(--logo-foreground);
+  --color-terminal: var(--terminal);
+  --color-terminal-foreground: var(--terminal-foreground);
+  --color-terminal-border: var(--terminal-border);
+  --color-terminal-accent: var(--terminal-accent);
+  --font-sans: "Barlow", system-ui, sans-serif;
+  --font-condensed: "Barlow Condensed", "Barlow", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, "Cascadia Code", "Liberation Mono", monospace;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --shadow-card: var(--card-shadow);
+}
+
+/* The Klein palette of the approved prototype, stated in the same values the
+   prototype states them in. `--muted` carries its `--m-hover` role: the tint
+   behind table headers, neutral tags, tab strips and hovered rows. */
+:root,
+.light {
+  color-scheme: light;
+  --radius: 6px;
+  --background: oklch(0.9603 0.0080 98.88);
+  --surface: oklch(1.0000 0 0);
+  --popover: oklch(1.0000 0 0);
+  --foreground: oklch(0.1763 0.0681 270.84);
+  --muted-foreground: oklch(0.4233 0.0808 273.56);
+  --border: oklch(0.7627 0.0479 275.79);
+  --muted: oklch(0.9272 0.0177 279.05);
+  --secondary: oklch(0.9272 0.0177 279.05);
+  --accent: oklch(0.9272 0.0177 279.05);
+  --accent-soft: oklch(0.9094 0.0363 273.69);
+  --accent-strong: oklch(0.2880 0.1432 262.86);
+  --primary: oklch(0.3785 0.1954 263.23);
+  --primary-hover: oklch(0.3164 0.1559 262.77);
+  --primary-foreground: oklch(1.0000 0 0);
+  --input: oklch(0.7627 0.0479 275.79);
+  --ring: oklch(0.3785 0.1954 263.23);
+  --success: oklch(0.4653 0.1128 153.42);
+  --success-background: oklch(0.9296 0.0389 155.90);
+  --warning: oklch(0.4645 0.0988 73.24);
+  --warning-background: oklch(0.9105 0.1220 91.60);
+  --danger: oklch(0.4888 0.1901 26.38);
+  --danger-background: oklch(0.9108 0.0414 14.25);
+  --skeleton: oklch(0.9058 0.0207 276.94);
+  --chrome: oklch(0.3785 0.1954 263.23);
+  --chrome-foreground: oklch(1.0000 0 0);
+  --chrome-muted: oklch(0.8314 0.0635 272.08);
+  --chrome-border: oklch(0.4861 0.1815 264.76);
+  --chrome-hover: oklch(0.4514 0.1905 263.88);
+  --chrome-active: oklch(1.0000 0 0);
+  --chrome-active-foreground: oklch(0.3785 0.1954 263.23);
+  --logo: oklch(1.0000 0 0);
+  --logo-foreground: oklch(0.3785 0.1954 263.23);
+  /* The transcript pane is a terminal in both themes, so its surface does not
+     follow the light/dark switch; it is still a token rather than four literals
+     buried in a rule. */
+  --terminal: oklch(0.1723 0.0176 244.83);
+  --terminal-foreground: oklch(0.9268 0.0104 247.90);
+  --terminal-border: oklch(0.3072 0.0234 249.66);
+  --terminal-accent: oklch(0.8664 0.1734 145.02);
+  --card-shadow: none;
+  --shadow-sm: 0 1px 2px color-mix(in srgb, oklch(0.2899 0.0036 286.17) 14%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, oklch(0.2899 0.0036 286.17) 22%, transparent);
+  --chart-1: var(--primary);
+  --chart-2: var(--success);
+  --chart-3: var(--warning);
+  --chart-4: var(--danger);
+  --chart-5: var(--muted-foreground);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.1508 0.0327 272.52);
+  --surface: oklch(0.2086 0.0533 274.49);
+  --popover: oklch(0.2086 0.0533 274.49);
+  --foreground: oklch(0.9649 0.0109 274.89);
+  --muted-foreground: oklch(0.7499 0.0512 275.00);
+  --border: oklch(0.3335 0.0659 274.18);
+  --muted: oklch(0.2593 0.0675 273.65);
+  --secondary: oklch(0.2593 0.0675 273.65);
+  --accent: oklch(0.2593 0.0675 273.65);
+  --accent-soft: oklch(0.2679 0.0881 271.97);
+  --accent-strong: oklch(0.8506 0.0738 274.60);
+  --primary: oklch(0.5811 0.2018 268.46);
+  --primary-hover: oklch(0.6390 0.1753 268.97);
+  --primary-foreground: oklch(1.0000 0 0);
+  --input: oklch(0.3335 0.0659 274.18);
+  --ring: oklch(0.7029 0.1549 271.35);
+  --success: oklch(0.7981 0.1300 156.25);
+  --success-background: oklch(0.2727 0.0466 159.88);
+  --warning: oklch(0.8362 0.1496 85.55);
+  --warning-background: oklch(0.2797 0.0477 86.71);
+  --danger: oklch(0.7626 0.1418 18.29);
+  --danger-background: oklch(0.2522 0.0603 16.06);
+  --skeleton: oklch(0.2657 0.0724 273.86);
+  --chrome: oklch(0.1881 0.0469 273.64);
+  --chrome-foreground: oklch(0.9649 0.0109 274.89);
+  --chrome-muted: oklch(0.6884 0.0656 275.55);
+  --chrome-border: oklch(0.3041 0.0707 273.80);
+  --chrome-hover: oklch(0.2593 0.0675 273.65);
+  --chrome-active: oklch(0.5811 0.2018 268.46);
+  --chrome-active-foreground: oklch(1.0000 0 0);
+  --logo: oklch(0.5811 0.2018 268.46);
+  --logo-foreground: oklch(1.0000 0 0);
+  /* The transcript pane is a terminal in both themes, so its surface does not
+     follow the light/dark switch; it is still a token rather than four literals
+     buried in a rule. */
+  --terminal: oklch(0.1723 0.0176 244.83);
+  --terminal-foreground: oklch(0.9268 0.0104 247.90);
+  --terminal-border: oklch(0.3072 0.0234 249.66);
+  --terminal-accent: oklch(0.8664 0.1734 145.02);
+  --card-shadow: none;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .5);
+  --shadow-lg: 0 0 0 1px rgb(255 255 255 / .08), 0 20px 50px rgb(0 0 0 / .7);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+
+/* Everything below is a token, a document default, or one of the two decorative
+   marks the approved prototype draws. Component geometry lives in the shadcn
+   primitives under src/shared/components/ui/, never here: matching the utility
+   classes a primitive emits is a rule that disappears silently when the
+   primitive is regenerated, and reaching into it through [data-slot] is the
+   parallel styling system the UI library policy forbids. */
+
+* { box-sizing: border-box; }
+html { min-width: 320px; min-height: 100%; background: var(--background); }
+body { min-width: 320px; margin: 0; background: var(--background); color: var(--foreground); font: 500 15px/1.45 var(--font-sans); }
+button, input, select, textarea { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+svg.lucide { stroke-width: 1.5; }
+code { border-radius: 3px; background: var(--muted); padding: 1px 4px; font: 500 .87em/1.4 var(--font-mono); }
+
+/* The product mark. A 28px rounded tile with one condensed glyph; not a
+   component, and never interactive. */
+.logo-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--logo);
+  color: var(--logo-foreground);
+  font: 600 15px/1 var(--font-condensed);
+}
+
+/* The sign-in plate: a square hairline box with registration marks drawn
+   outside its corners, as the approved prototype frames it. */
+.auth-plate .corner { position: absolute; width: 11px; height: 11px; color: var(--muted-foreground); }
+.auth-plate .corner::before,
+.auth-plate .corner::after { position: absolute; background: currentColor; content: ""; }
+.auth-plate .corner::before { top: 0; left: 5px; width: 1px; height: 100%; }
+.auth-plate .corner::after { top: 5px; left: 0; width: 100%; height: 1px; }
+.auth-plate .corner.tl { top: -6px; left: -6px; }
+.auth-plate .corner.tr { top: -6px; right: -6px; }
+.auth-plate .corner.bl { bottom: -6px; left: -6px; }
+.auth-plate .corner.br { bottom: -6px; right: -6px; }
+
+/* iOS zooms a focused input below 16px. Applied to the document rather than to
+   the input primitive so regenerating that primitive cannot drop it. */
+@media (max-width: 580px) {
+  input, select, textarea { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

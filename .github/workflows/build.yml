@@ -1,0 +1,144 @@
+name: build
+# Called by ci.yml and release.yml. The gates run once on amd64; every package
+# is then built, packed and gated for amd64 and arm64 on that architecture's own
+# runner (the Rust image compiles natively there, no emulation), kept as the
+# artifacts mica-core-<arch>, and a final job gates both pools together. `ref`
+# is what every job checks out (release.yml passes the release's tag; empty is
+# the triggering commit).
+#
+# Caches only speed the build: every gate still runs. Each job restores the
+# third-party cargo artifacts, the cargo registry and the bun package cache
+# under a key made of locks/mica-build-env.lock, the Cargo manifests and lock and
+# bun.lock, so any change to those misses. Only a push to main saves, after the
+# workspace crates' own artifacts are pruned (scripts/build/cache-prune.sh), so
+# pull request and release runs read what main wrote and never write.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - name: The locks against their releases
+        run: make deps
+      - name: Restore the dependency caches
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            _out/cargo/registry/index
+            _out/cargo/registry/cache
+            _out/cargo/git/db
+            _out/rust-gate
+            _out/b3-rust
+            _out/apid-ui/home/.bun/install/cache
+          key: check-${{ runner.arch }}-${{ hashFiles('locks/mica-build-env.lock', 'Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'crates/mica-apid/ui/bun.lock') }}
+      - name: The check container network
+        run: docker network inspect traefik >/dev/null 2>&1 || docker network create --label ai-agent=true traefik
+      - name: Lint, the build-env loader, the UI build contract, the Rust gate, boot/shutdown and IO faults
+        run: make check
+      - name: The shipped D-Bus policy against a real dbus-daemon
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus python3
+          # Root, because the test drops to an unprivileged uid to prove the
+          # policy refuses it; the runner user is not root.
+          sudo make dbus-policy-test
+      - name: Prune the caches to third-party dependencies
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        run: sudo bash scripts/build/cache-prune.sh _out/rust-gate _out/b3-rust
+      - name: Save the dependency caches
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            _out/cargo/registry/index
+            _out/cargo/registry/cache
+            _out/cargo/git/db
+            _out/rust-gate
+            _out/b3-rust
+            _out/apid-ui/home/.bun/install/cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+  package:
+    needs: check
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      MICA_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - name: The locks against their releases
+        run: make deps
+      - name: Restore the dependency caches
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            _out/cargo/registry/index
+            _out/cargo/registry/cache
+            _out/cargo/git/db
+            _out/target-deb
+            _out/apid-ui/home/.bun/install/cache
+          key: package-${{ matrix.arch }}-${{ hashFiles('locks/mica-build-env.lock', 'Cargo.lock', 'Cargo.toml', 'crates/*/Cargo.toml', 'crates/mica-apid/ui/bun.lock') }}
+      - name: Every producer
+        run: make deb MICA_ARCH="$MICA_ARCH"
+      - name: Index the pool
+        run: bash scripts/deb/repo.sh --arch "$MICA_ARCH"
+      - name: Gate, with a no-cache rebuild
+        run: bash scripts/deb/package-gate.sh --arch "$MICA_ARCH"
+      - name: Prune the caches to third-party dependencies
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        run: sudo bash scripts/build/cache-prune.sh _out/target-deb
+      - name: Save the dependency caches
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            _out/cargo/registry/index
+            _out/cargo/registry/cache
+            _out/cargo/git/db
+            _out/target-deb
+            _out/apid-ui/home/.bun/install/cache
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mica-core-${{ matrix.arch }}
+          path: _out/debs/${{ matrix.arch }}/pool/*.deb
+          if-no-files-found: error
+  gate:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: mica-core-*
+          path: _out/artifacts
+      - name: Gate over both architectures
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            mkdir -p "_out/debs/$arch/pool"
+            cp "_out/artifacts/mica-core-$arch/"*.deb "_out/debs/$arch/pool/"
+            bash scripts/deb/repo.sh --arch "$arch"
+          done
+          bash scripts/deb/package-gate.sh --no-reproduce

@@ -1,0 +1,11 @@
+# mica-lock v1
+release	mica-build-env	20260914-2042	0123456789abcdef0123456789abcdef01234567
+image	upstream	debian:trixie-slim	386	docker.io/library/debian:trixie-slim@sha256:1111111111111111111111111111111111111111111111111111111111111111
+image	upstream	debian:trixie-slim	amd64	docker.io/library/debian:trixie-slim@sha256:1111111111111111111111111111111111111111111111111111111111111111
+image	upstream	debian:trixie-slim	arm64	docker.io/library/debian:trixie-slim@sha256:1111111111111111111111111111111111111111111111111111111111111111
+image	upstream	docker/dockerfile:1-labs	amd64	docker.io/docker/dockerfile:1-labs@sha256:2222222222222222222222222222222222222222222222222222222222222222
+source	bun	amd64	1.4.2	3333333333333333333333333333333333333333333333333333333333333333	https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64.zip
+source	bun	arm64	1.4.2	4444444444444444444444444444444444444444444444444444444444444444	https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-aarch64.zip
+source	podman	all	5.8.6	5555555555555555555555555555555555555555555555555555555555555555	https://github.com/containers/podman/archive/refs/tags/v5.8.6.tar.gz
+git	linux	https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git	v6.12.107	0123456789abcdef0123456789abcdef01234567
+git	u-boot	https://source.denx.de/u-boot/u-boot.git	v2025.01	89abcdef0123456789abcdef0123456789abcdef

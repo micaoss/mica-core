@@ -1,0 +1,21 @@
+# mica-lock v1
+release	mica-build-env	20260914-2042	0123456789abcdef0123456789abcdef01234567
+image	mica-build-env	base	amd64	ghcr.io/micaoss/mica-build-env@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1
+image	mica-build-env	base	arm64	ghcr.io/micaoss/mica-build-env@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2
+image	mica-build-env	base	index	ghcr.io/micaoss/mica-build-env:base.20260914-2042@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0
+image	mica-build-env	c	amd64	ghcr.io/micaoss/mica-build-env@sha256:ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc1
+image	mica-build-env	c	arm64	ghcr.io/micaoss/mica-build-env@sha256:ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc2
+image	mica-build-env	c	index	ghcr.io/micaoss/mica-build-env:c.20260914-2042@sha256:ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc0
+image	mica-build-env	go	amd64	ghcr.io/micaoss/mica-build-env@sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd1
+image	mica-build-env	go	arm64	ghcr.io/micaoss/mica-build-env@sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd2
+image	mica-build-env	go	index	ghcr.io/micaoss/mica-build-env:go.20260914-2042@sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd0
+image	mica-build-env	rust	amd64	ghcr.io/micaoss/mica-build-env@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee1
+image	mica-build-env	rust	arm64	ghcr.io/micaoss/mica-build-env@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee2
+image	mica-build-env	rust	index	ghcr.io/micaoss/mica-build-env:rust.20260914-2042@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0
+image	upstream	debian:trixie-slim	386	docker.io/library/debian:trixie-slim@sha256:7777777777777777777777777777777777777777777777777777777777777777
+image	upstream	debian:trixie-slim	amd64	ghcr.io/micaoss/mica-build-env:debian-trixie-slim@sha256:7777777777777777777777777777777777777777777777777777777777777777
+image	upstream	debian:trixie-slim	arm64	docker.io/library/debian:trixie-slim@sha256:7777777777777777777777777777777777777777777777777777777777777777
+image	upstream	docker/dockerfile:1-labs	amd64	docker.io/docker/dockerfile:1-labs@sha256:8888888888888888888888888888888888888888888888888888888888888888
+image	upstream	docker/dockerfile:1-labs	arm64	docker.io/docker/dockerfile:1-labs@sha256:8888888888888888888888888888888888888888888888888888888888888888
+image	upstream	registry:3.1.1	amd64	docker.io/library/registry:3.1.1@sha256:9999999999999999999999999999999999999999999999999999999999999999
+image	upstream	registry:3.1.1	arm64	docker.io/library/registry:3.1.1@sha256:9999999999999999999999999999999999999999999999999999999999999999

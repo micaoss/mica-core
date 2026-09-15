@@ -1,0 +1,67 @@
+[Unit]
+Description=mica API daemon (serves the web dashboard)
+After=network.target micad.service
+Wants=micad.service
+# StateDirectory below lives under /var/lib; apid persists its TLS material,
+# its login-backoff counters and its audit ring there and must
+# not start against an unmounted STATE — counters written to a tmpfs standing
+# in for an unmounted STATE would reset on the next power cycle, which is the
+# exact bypass the persistence exists to close.
+RequiresMountsFor=/var/lib/mica /mica
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mica-apid
+Restart=on-failure
+StateDirectory=mica/apid
+# 0700, not the systemd default 0755: the directory holds the TLS private
+# key, the session-cookie signing key, the login-backoff counters and the
+# audit trail. Every file inside is 0600; the directory matches. apid's own
+# ensure_state_dir creates it 0700 when it creates it at all — this makes the
+# systemd-created case agree.
+StateDirectoryMode=0700
+
+# Sandboxing for the network-facing daemon. apid stays root to bind 80/443
+# and to read its StateDirectory, but it execs nothing, needs no home, no
+# realtime, no writable-executable mappings, and speaks only unix (bus to
+# micad) and inet sockets.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# /run/mica, so that a credential recovery can SPEND the presence assertion it
+# used. apid still never creates one —
+# micad writes /run/mica/presence from a board-declared physical action and apid
+# only reads it — but unlinking a file needs write on its DIRECTORY, and
+# ProtectSystem=strict below makes /run read-only. Declared as a
+# RuntimeDirectory rather than added to ReadWritePaths= because ReadWritePaths=
+# binds at unit start and /run/mica does not exist on an ordinary boot: the
+# directory would be missing exactly when the assertion is not, and the spend
+# would fail with EROFS on the one path it exists for.
+RuntimeDirectory=mica
+# NOT removed when apid stops. /run/mica is micad's directory — the presence
+# marker, the rendered mqtt broker config, the timezone — and a unit that
+# deleted it on every restart would take micad's runtime state with it.
+RuntimeDirectoryPreserve=yes
+
+# The filesystem, read-only independently of dm-verity. apid writes exactly
+# four trees: its StateDirectory (TLS material, the session signing key, the
+# login-backoff counters, the audit ring), the UI and diagnostics stores, and
+# /run/mica, where its only write is the removal of a spent presence assertion.
+# StateDirectory=mica/apid and RuntimeDirectory=mica above already exempt
+# /var/lib/mica/apid and /run/mica from strict. mica-data-layout creates the two
+# DATA directories before this unit starts.
+ProtectSystem=strict
+ReadWritePaths=/mica/ui /mica/diagnostics
+
+[Install]
+WantedBy=multi-user.target

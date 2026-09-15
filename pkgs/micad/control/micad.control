@@ -1,0 +1,10 @@
+Package: micad
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: mica build <mica@example.invalid>
+Section: admin
+Priority: optional
+Depends: default-dbus-system-bus | dbus-system-bus, mica-system, ${shlibs:Depends}
+Description: Mica OS management daemon
+ Owns the device settings, converges system services to them and serves the
+ root-only com.mica.micad D-Bus interface. Starts at boot.

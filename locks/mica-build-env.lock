@@ -1,0 +1,35 @@
+# mica-lock v1
+release	mica-build-env	20260915-0138	f7b896b79dd0d20bb6d04844acc71a4e2d433ab0
+image	mica-build-env	base	amd64	ghcr.io/micaoss/mica-build-env@sha256:45c187e0f42c124b5ca6e15521375d208ec2353952f5f42d6f228ec975db64cd
+image	mica-build-env	base	arm64	ghcr.io/micaoss/mica-build-env@sha256:d1d735177d7137d87c102bd25374db18469606b141b25187012e59cf4406546f
+image	mica-build-env	base	index	ghcr.io/micaoss/mica-build-env:base.20260915-0138@sha256:32579e57a7158bc27110f8c31813e5f67c6dc2272107c03c7d56f8486ec17390
+image	mica-build-env	c	amd64	ghcr.io/micaoss/mica-build-env@sha256:7a9aebfee59f37f1a01d168def338fc8c454c19d532280e16b9b923fb7514e11
+image	mica-build-env	c	arm64	ghcr.io/micaoss/mica-build-env@sha256:141ce24ee92de3412e25544483adce314d8035e4827a717a0faab016a3ffc000
+image	mica-build-env	c	index	ghcr.io/micaoss/mica-build-env:c.20260915-0138@sha256:c03e58d936a86d9fb1fe8f7e0c5419b9f314b8fc92a5b75c74e3d635d7908ee6
+image	mica-build-env	go	amd64	ghcr.io/micaoss/mica-build-env@sha256:bf15bd19fa11d5860c97462536956da20480ae512410ddca6cfb9ae1c27491f8
+image	mica-build-env	go	arm64	ghcr.io/micaoss/mica-build-env@sha256:8558be489056dc6272ada1b8d9acd5e5567f6d4d0a3239f87c9695d59b5d3662
+image	mica-build-env	go	index	ghcr.io/micaoss/mica-build-env:go.20260915-0138@sha256:150423079a8984739c67c528a014fc1d30542113156ad54e464cc595697e96e0
+image	mica-build-env	rust	amd64	ghcr.io/micaoss/mica-build-env@sha256:bae0d9a24aa940cda76ddb5796fa9b33519e0f94346d39af6566cc08cfb79f05
+image	mica-build-env	rust	arm64	ghcr.io/micaoss/mica-build-env@sha256:257d2929d75234096966fd26a7b6ca2565e07a95a4b23b2fe53b1a01c746bebb
+image	mica-build-env	rust	index	ghcr.io/micaoss/mica-build-env:rust.20260915-0138@sha256:8b2925793ae8999208e1ac5c91ed545cffc963782ff923e317d3649234509537
+image	upstream	alpine:3.24.1	amd64	docker.io/library/alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+image	upstream	alpine:3.24.1	arm64	docker.io/library/alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+image	upstream	debian:trixie-slim	386	docker.io/library/debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+image	upstream	debian:trixie-slim	amd64	docker.io/library/debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+image	upstream	debian:trixie-slim	arm64	docker.io/library/debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+image	upstream	docker/dockerfile:1	amd64	docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+image	upstream	docker/dockerfile:1	arm64	docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+image	upstream	docker/dockerfile:1-labs	amd64	docker.io/docker/dockerfile:1-labs@sha256:63e440b412b6acba117974e793b7e7f702e58ee65e044bdff1b8d388ee0d853b
+image	upstream	docker/dockerfile:1-labs	arm64	docker.io/docker/dockerfile:1-labs@sha256:63e440b412b6acba117974e793b7e7f702e58ee65e044bdff1b8d388ee0d853b
+image	upstream	docker:28-cli	amd64	docker.io/library/docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d
+image	upstream	docker:28-cli	arm64	docker.io/library/docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d
+image	upstream	moby/buildkit:v0.33.0	amd64	docker.io/moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+image	upstream	moby/buildkit:v0.33.0	arm64	docker.io/moby/buildkit:v0.33.0@sha256:6c2fa84a6b61ccd72899dde4239f8d5717f05f9a8ca6f3cad185fb1a95a94de3
+image	upstream	registry:3.1.1	amd64	docker.io/library/registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33
+image	upstream	registry:3.1.1	arm64	docker.io/library/registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33
+image	upstream	rhysd/actionlint:1.7.12	amd64	docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+image	upstream	rhysd/actionlint:1.7.12	arm64	docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+image	upstream	tonistiigi/binfmt:qemu-v10.2.3	amd64	docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+image	upstream	tonistiigi/binfmt:qemu-v10.2.3	arm64	docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+image	upstream	ubuntu:24.04	amd64	docker.io/library/ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+image	upstream	ubuntu:24.04	arm64	docker.io/library/ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517

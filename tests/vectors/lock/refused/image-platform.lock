@@ -1,0 +1,3 @@
+# mica-lock v1
+release	mica-build-env	20260914-2042	0123456789abcdef0123456789abcdef01234567
+image	mica-build-env	base	amd64-v2	ghcr.io/micaoss/mica-build-env@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

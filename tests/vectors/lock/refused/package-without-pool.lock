@@ -1,0 +1,4 @@
+# mica-lock v1
+release	mica-core	20260914-2042	0123456789abcdef0123456789abcdef01234567
+pool	amd64	ghcr.io/micaoss/mica-core:pool.amd64.20260914-2042@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+package	mica-apid	arm64	0.1.0+git0123456789ab-1	2222222222222222222222222222222222222222222222222222222222222222

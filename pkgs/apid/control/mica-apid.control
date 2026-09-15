@@ -1,0 +1,10 @@
+Package: mica-apid
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: mica build <mica@example.invalid>
+Section: admin
+Priority: optional
+Depends: micad (= @VERSION@), mica-system, ${shlibs:Depends}
+Description: Mica OS HTTPS API and web dashboard
+ Serves the management API and the built-in web UI over HTTPS and changes the
+ device only through micad. Starts at boot.

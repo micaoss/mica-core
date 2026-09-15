@@ -1,0 +1,10 @@
+Package: mica-deploy
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: mica build <mica@example.invalid>
+Section: admin
+Priority: optional
+Depends: ${shlibs:Depends}, mount
+Description: Mica OS signed deployment client
+ Acquires, installs, confirms and rolls back signed file deployments and
+ manages native boot records.

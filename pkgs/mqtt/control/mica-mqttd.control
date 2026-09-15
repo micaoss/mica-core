@@ -1,0 +1,10 @@
+Package: mica-mqttd
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: mica build <mica@example.invalid>
+Section: admin
+Priority: optional
+Depends: micad (= @VERSION@), passwd, ${shlibs:Depends}
+Description: Mica OS MQTT application-data bridge
+ Publishes the item trees of enrolled com.mica.* applications to MQTT and,
+ in full mode, carries writes back. Started by micad when MQTT is enabled.
