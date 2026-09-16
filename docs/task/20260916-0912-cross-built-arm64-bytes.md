@@ -68,13 +68,38 @@ different-size metric it is noisier (12) than the comparison under
 investigation (5). The one artifact unique to cross is `.note.package`, the
 cross linker naming itself.
 
-Residual, stated rather than hidden: the `.text` delta of the real comparison
-is 17 times the control's, so something beyond naming contributes, most
-plausibly different `crt` and `libgcc` objects out of the cross package. That
-is a link input, not code generation. Proving the machine code identical
-byte-for-byte is not possible while the disambiguator perturbs every symbol, so
-the claim is bounded: cross versus native provides **no additional evidence**
-of code generation divergence beyond what changing one metadata string does.
+The `.text` delta is fully accounted for, and it is not code:
+
+| | released (native) | local (cross) | delta |
+| --- | --- | --- | --- |
+| `.text` | 5106740 | 5094644 | -12096 |
+| distinct function bodies | 11726 | 11723 | -3 |
+| bytes of function bodies | 5073656 | 5073784 | **+128** |
+| padding, alignment and linker glue | 33084 | 20860 | -12224 |
+
+So the 12 KB is layout: the three missing bodies are the three missing linker
+erratum stubs (8 against 5), and 12224 bytes of the difference are non-function
+bytes inside `.text`. The function content differs by 128 bytes in 5.07 MB.
+
+The `crt`/`libgcc` hypothesis is **refuted**, not assumed: the 278 non-Rust
+`FUNC` symbols are the same 278 names in both binaries, every one at the same
+size, 8696 bytes in total on each side. The cross package contributes the same
+runtime as the native one.
+
+Bounded claim, stated rather than overstated: 128 bytes of function content
+remain unexplained, and proving the machine code identical is not possible
+while the disambiguator perturbs every symbol. But the residue is smaller than
+what changing one metadata string produces on this same station, so cross
+versus native shows **no code-generation difference above that noise floor**.
+
+## Why this is not a reproducibility problem
+
+The native build reproduces itself exactly. Release `20260916-0916` rebuilt the
+six unchanged packages under a *different build-env* and the guard reused all
+twelve at their published sha256, including the very hashes a local cross build
+cannot produce (`micad` arm64 `13570a0f…`, `mica-deploy` arm64 `f804db20…`).
+Nothing about these packages is unstable: the local toolchain path simply is
+not the published one.
 
 ## Decisions (coordinator, 2026-09-16)
 
