@@ -40,6 +40,7 @@ READERS=(
     '\|[[:space:]]*head([[:space:]]|$)'
     '\|[[:space:]]*sed[^|]*[0-9]+[[:space:]]*q'
     '\|[[:space:]]*awk[^|]*[[:space:]]exit'
+    '\|[[:space:]]*read([[:space:]]|$)'
 )
 NAMES=(
     'an early-exiting grep'
@@ -47,6 +48,7 @@ NAMES=(
     'head'
     'a sed that quits'
     'an awk that exits'
+    'a bare read'
 )
 REMEDIES=(
     "'grep -c ... >/dev/null'"
@@ -54,6 +56,7 @@ REMEDIES=(
     "'awk \"NR <= N\"'"
     "'awk \"NR <= N\"'"
     'an awk that reads to the end of its input'
+    "a 'while ... read' loop that runs to the end, or a command substitution"
 )
 
 scanned=0
