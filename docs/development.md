@@ -36,6 +36,32 @@ archives.
 (`make rust-gate`, `make boot-shutdown-test`, ...) run one suite each.
 `boot-shutdown-test` and `file-transaction-faults` need an x86-64 host.
 
+### A local archive is not the published archive
+
+`scripts/build/build-deb.sh` runs the rust image on the **host** architecture
+and cross-compiles to the target (`--target aarch64-unknown-linux-gnu`, linked
+with `aarch64-linux-gnu-gcc`). On an x86-64 workstation the arm64 archives are
+therefore cross-built, while CI builds them natively on an arm64 runner. The
+two do not produce the same bytes: measured on 2026-09-16, the six packages at
+`0.1.0-1` rebuilt byte-identically on amd64 and all six differed on arm64,
+because a cross build carries the cross linker's `.note.package` and a
+different cargo crate disambiguator. The compilers are the same
+(`.comment` is identical), and the same station with the previous build-env
+lock produces the same bytes, so this is not a toolchain change.
+
+What follows for anyone comparing a local build to a release:
+
+- The published archives are the native ones. A locally built arm64 archive is
+  a valid archive and is not the one a release carries.
+- `scripts/build/reuse.sh` run locally cannot validate the arm64 half on an
+  x86-64 station; every arm64 package will look changed. CI is the authority:
+  its `gate` job runs the same guard over natively built artifacts.
+- `make offline` on an x86-64 station produces arm64 archives that differ from
+  the released ones. That is what offline means here.
+- amd64 is unaffected: a local amd64 archive does reproduce the released bytes.
+
+`docs/task/20260916-0912-cross-built-arm64-bytes.md` holds what is still open.
+
 ## 3. Working with cargo
 
 The Rust gate is `scripts/gate/rust-gate.sh`: it builds the UI, then runs
