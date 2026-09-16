@@ -1,17 +1,20 @@
 # mica-lock v1
-release	mica-build-env	20260915-0138	f7b896b79dd0d20bb6d04844acc71a4e2d433ab0
-image	mica-build-env	base	amd64	ghcr.io/micaoss/mica-build-env@sha256:45c187e0f42c124b5ca6e15521375d208ec2353952f5f42d6f228ec975db64cd
-image	mica-build-env	base	arm64	ghcr.io/micaoss/mica-build-env@sha256:d1d735177d7137d87c102bd25374db18469606b141b25187012e59cf4406546f
-image	mica-build-env	base	index	ghcr.io/micaoss/mica-build-env:base.20260915-0138@sha256:32579e57a7158bc27110f8c31813e5f67c6dc2272107c03c7d56f8486ec17390
-image	mica-build-env	c	amd64	ghcr.io/micaoss/mica-build-env@sha256:7a9aebfee59f37f1a01d168def338fc8c454c19d532280e16b9b923fb7514e11
-image	mica-build-env	c	arm64	ghcr.io/micaoss/mica-build-env@sha256:141ce24ee92de3412e25544483adce314d8035e4827a717a0faab016a3ffc000
-image	mica-build-env	c	index	ghcr.io/micaoss/mica-build-env:c.20260915-0138@sha256:c03e58d936a86d9fb1fe8f7e0c5419b9f314b8fc92a5b75c74e3d635d7908ee6
-image	mica-build-env	go	amd64	ghcr.io/micaoss/mica-build-env@sha256:bf15bd19fa11d5860c97462536956da20480ae512410ddca6cfb9ae1c27491f8
-image	mica-build-env	go	arm64	ghcr.io/micaoss/mica-build-env@sha256:8558be489056dc6272ada1b8d9acd5e5567f6d4d0a3239f87c9695d59b5d3662
-image	mica-build-env	go	index	ghcr.io/micaoss/mica-build-env:go.20260915-0138@sha256:150423079a8984739c67c528a014fc1d30542113156ad54e464cc595697e96e0
-image	mica-build-env	rust	amd64	ghcr.io/micaoss/mica-build-env@sha256:bae0d9a24aa940cda76ddb5796fa9b33519e0f94346d39af6566cc08cfb79f05
-image	mica-build-env	rust	arm64	ghcr.io/micaoss/mica-build-env@sha256:257d2929d75234096966fd26a7b6ca2565e07a95a4b23b2fe53b1a01c746bebb
-image	mica-build-env	rust	index	ghcr.io/micaoss/mica-build-env:rust.20260915-0138@sha256:8b2925793ae8999208e1ac5c91ed545cffc963782ff923e317d3649234509537
+release	mica-build-env	20260916-0735	bf347e224b692e05302c3a1085ef72c4b666f59f
+image	mica-build-env	base	amd64	ghcr.io/micaoss/mica-build-env@sha256:813e9f1b8c9e41ec23b5ee87968362dd19fac7d59bac1923aaefa1c8b8bf93e0
+image	mica-build-env	base	arm64	ghcr.io/micaoss/mica-build-env@sha256:1f56780949c64c34f5233b554f602f400d9ebabef7310ac727a67d5530bc0968
+image	mica-build-env	base	index	ghcr.io/micaoss/mica-build-env:base.20260916-0735@sha256:23c0ac307fff92ab87c3bedf755edceaf96ef7544938a22ee9b196fbaffe0e5a
+image	mica-build-env	bsp	amd64	ghcr.io/micaoss/mica-build-env@sha256:191da570d1f6d9c3d9a8f20281cc4da0e2256bdcd5b818341b6d4fe73216b87a
+image	mica-build-env	bsp	arm64	ghcr.io/micaoss/mica-build-env@sha256:8636703cebab93efa5888705f56918d17386f950397cd7891b53260911987d67
+image	mica-build-env	bsp	index	ghcr.io/micaoss/mica-build-env:bsp.20260916-0735@sha256:dddef7c590c9ea0b52c3bcd07108466a73e02a49252e9ae1a5e07d333b572a3e
+image	mica-build-env	c	amd64	ghcr.io/micaoss/mica-build-env@sha256:5c76388bf2f96209c22f096d400bc8f67b8fc134645df98444080faffacbd944
+image	mica-build-env	c	arm64	ghcr.io/micaoss/mica-build-env@sha256:cc86ad8da5a0f9e29a72bfeb4a60c4370ed49b80bbfe4888b49a3b9cd8558d08
+image	mica-build-env	c	index	ghcr.io/micaoss/mica-build-env:c.20260916-0735@sha256:722c07d3705c650c41eb9907df80b64bb6543f9720a9a9c730b081bf64903c57
+image	mica-build-env	go	amd64	ghcr.io/micaoss/mica-build-env@sha256:2fb25d90bf66a16e17241b4be886648b01ab54fb925b9c3e8d18dd58685d1998
+image	mica-build-env	go	arm64	ghcr.io/micaoss/mica-build-env@sha256:1919f15ace57ff8783a03d0be13a287c310d5da257990262df1c88cf927c6025
+image	mica-build-env	go	index	ghcr.io/micaoss/mica-build-env:go.20260916-0735@sha256:bd7399d5f51fcf1f19b13b6211c03eb7d34c924cf2616b4533ee328441b7d9c9
+image	mica-build-env	rust	amd64	ghcr.io/micaoss/mica-build-env@sha256:0a7b5a19b26cfe57217fb83b27038c0d15690eae0c41d3f115419115adfb00d6
+image	mica-build-env	rust	arm64	ghcr.io/micaoss/mica-build-env@sha256:a89e70f79932638284b671481837ddc348195bba2b6004b987f211a89fae68cc
+image	mica-build-env	rust	index	ghcr.io/micaoss/mica-build-env:rust.20260916-0735@sha256:c3c349c4dfddf73d3bd9e62a1a5435e284974abe9f502865af7a8488e0ea7917
 image	upstream	alpine:3.24.1	amd64	docker.io/library/alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 image	upstream	alpine:3.24.1	arm64	docker.io/library/alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 image	upstream	debian:trixie-slim	386	docker.io/library/debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132

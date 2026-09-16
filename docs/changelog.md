@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-16 09:12 [progress]
+
+The build env moves to mica-build-env `20260916-0735`:
+
+- `locks/mica-build-env.lock` is that release's asset unchanged and
+  `locks/pins/mica-build-env.pin` records it with the trust hash
+  `7df0af68761a63c6517b37a739a57ce947da53fbe558aba2646368e53724bf0a`. The
+  images mica-core reads are base and rust; the new `bsp` image is for the
+  board repositories and is never read here.
+- The packages rebuild byte-identically under the new images: on amd64 all six
+  at `0.1.0-1` reproduce the bytes released as `20260915-1135`. On arm64 they do
+  not, but the cause is not the images: the same station with the old
+  `20260915-0138` lock produces exactly the same arm64 bytes, because
+  `docker buildx build --platform linux/arm64` on an amd64 host is QEMU
+  emulation while the released archives were built natively. The record
+  `docs/task/20260916-0912-emulated-arm64-bytes.md` holds what is still unknown.
+
 ## 2026-09-16 08:12 [progress]
 
 `mica-apid` is `0.1.0-2`, and the inputs hash stops counting check-only files:
