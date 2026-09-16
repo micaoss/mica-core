@@ -60,11 +60,17 @@ mapfile -t CRATES < <(jq -r --arg bins "${BINS}" '
 PATHS=("${DIR}" pkgs/copyright Cargo.toml Cargo.lock .cargo/config.toml
     scripts/deb/build.sh scripts/deb/pack.sh scripts/build/build-deb.sh "${CRATES[@]}")
 for c in ${CONTEXTS}; do PATHS+=("${c#*=}"); done
-# Tests, benches and the UI's own test and end-to-end files build nothing a package carries.
+# Tests, benches, the UI's own test and end-to-end files, and the check-only
+# tooling beside them build nothing a package carries. They are excluded because
+# the hash is a guard over the bytes: repository housekeeping must not look like
+# a package that changed and force a version bump
+# (mica:docs/decisions/2026-09-15-package-versions.md, Rationale).
 EXCLUDE=(':(exclude,glob)crates/*/tests/**' ':(exclude,glob)crates/*/benches/**'
     ':(exclude,glob)crates/mica-apid/ui/e2e/**' ':(exclude,glob)crates/mica-apid/ui/**/*.test.ts'
     ':(exclude,glob)crates/mica-apid/ui/**/*.test.tsx' ':(exclude,glob)crates/mica-apid/ui/src/shared/testing/**'
-    ':(exclude,glob)crates/mica-apid/ui/vitest.config.ts' ':(exclude,glob)crates/*/src/tests.rs'
+    ':(exclude,glob)crates/mica-apid/ui/vitest.config.ts' ':(exclude,glob)crates/mica-apid/ui/playwright.config.ts'
+    ':(exclude,glob)crates/mica-apid/ui/eslint.config.js' ':(exclude,glob)crates/mica-apid/ui/verify-ui-policy.sh'
+    ':(exclude,glob)crates/mica-apid/ui/run.sh' ':(exclude,glob)crates/*/src/tests.rs'
     ':(exclude,glob)crates/*/src/tests/**')
 
 manifest() {

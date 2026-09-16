@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-09-16 08:12 [progress]
+
+`mica-apid` is `0.1.0-2`, and the inputs hash stops counting check-only files:
+
+- The pipefail fix in `crates/mica-apid/ui/verify-ui-policy.sh` changed a file
+  inside the apid crate tree, so the inputs guard refused the package at its
+  released version. The script builds nothing the package carries, so it, the
+  UI's `run.sh`, `eslint.config.js` and `playwright.config.ts` are now excluded
+  from `scripts/deb/inputs.sh` alongside the test files -- repository
+  housekeeping must not look like a package that changed
+  (`mica:docs/decisions/2026-09-15-package-versions.md`, Rationale).
+- Narrowing the manifest changes the hash too, so `pkgs/apid/producer.env`
+  declares `VERSION="0.1.0-2"` with its epoch unchanged; the archive's bytes are
+  the same as `0.1.0-1` apart from the version. Every other producer stays at
+  `0.1.0-1`, and `micad (= 0.1.0-1)` is unchanged in its dependents.
+
 ## 2026-09-15 10:59 [progress]
 
 Packages are locked by their declared version (task `20260915-1059-package-versions`,

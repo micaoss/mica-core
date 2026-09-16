@@ -185,10 +185,13 @@ for a in amd64 arm64; do
     check "every ${a} layer carries its producer inputs hash" [ "$(jq -r "[.layers[] | .annotations[\"mica.inputs\"] | test(\"^[0-9a-f]{64}\$\")] | all" "${M}")" = true ]
     check "the ${a} pool row names that manifest by digest" grep -qx "$(printf "pool\t%s\tghcr.io/micaoss/mica-core:pool.%s.%s@sha256:%s" "${a}" "${a}" "${TAG}" "$(sha256sum "${M}" | cut -d" " -f1)")" "${L}"
 done
+# A fixture is always named at the version its producer declares, so a row naming
+# any other version finds no archive: the version in a row is checked against
+# producer.env without this test carrying a version of its own.
 check "one package row per archive, its sha256 a layer of its pool" bash -c "
     [ \"\$(grep -c \"^package\" \"${L}\")\" = $(( ${#PKGS[@]} * 2 )) ] || exit 1
     grep \"^package\" \"${L}\" | while IFS=\$(printf \"\\t\") read -r _k p a v s; do
-        [ \"\${v}\" = \"0.1.0-1\" ] && [ \"\${s}\" = \"\$(sha256sum \"${G}/_out/debs/\${a}/pool/\${p}_\${v}_\${a}.deb\" | cut -d\" \" -f1)\" ] &&
+        [ -f \"${G}/_out/debs/\${a}/pool/\${p}_\${v}_\${a}.deb\" ] && [ \"\${s}\" = \"\$(sha256sum \"${G}/_out/debs/\${a}/pool/\${p}_\${v}_\${a}.deb\" | cut -d\" \" -f1)\" ] &&
             jq -e --arg d \"sha256:\${s}\" \"any(.layers[]; .digest == \\\$d)\" \"${FAKE}/registry/manifests/pool.\${a}.${TAG}\" >/dev/null || exit 1
     done"
 run 0 "a rerun finds both assets attached with the same bytes and uploads nothing" "already carries these assets"
