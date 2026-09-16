@@ -52,6 +52,8 @@ The control is two local cross builds of `micad` that differ only in
 `-C metadata` -- same station, same image, same toolchain, same source -- and
 they already reproduce every signal the cross-against-native comparison shows:
 
+The noise floor, and the evidence for the workspace rule below:
+
 | | cross local vs native released | two local builds, only `-C metadata` differs |
 | --- | --- | --- |
 | `.text` | 5106740 vs 5094644 (-12096) | 5093188 vs 5093892 (+704) |
@@ -87,10 +89,26 @@ size, 8696 bytes in total on each side. The cross package contributes the same
 runtime as the native one.
 
 Bounded claim, stated rather than overstated: 128 bytes of function content
-remain unexplained, and proving the machine code identical is not possible
-while the disambiguator perturbs every symbol. But the residue is smaller than
-what changing one metadata string produces on this same station, so cross
-versus native shows **no code-generation difference above that noise floor**.
+remain **unattributed**, and they are unattributable at this resolution --
+attributing them means holding `-C metadata` constant first, which costs the
+same seven version bumps as option (a) and buys a weaker answer. They are not
+chased (coordinator, 2026-09-16): whatever they are, they do not change whether
+(a) is the fix. If the residue ever grows, that is a new observation and a new
+record.
+
+So: cross versus native shows **no code-generation difference above the noise
+floor** that one metadata string produces on this same station.
+
+## The rule this generalises to
+
+**A byte comparison of two Rust artifacts built with different `-C metadata` is
+not evidence of a code difference.** The disambiguator is part of every mangled
+symbol, and changing it alone moves `.text`, changes function counts, duplicates
+`drop_glue` differently and moves linker erratum stubs -- more, by the
+different-size metric, than the phenomenon this record investigated. Hold it
+constant before the comparison means anything; if you cannot, the only honest
+statement is that the difference is below the noise floor. Taken workspace-wide
+by the coordinator on 2026-09-16.
 
 ## Why this is not a reproducibility problem
 
@@ -117,10 +135,14 @@ not the published one.
   trade for that today. **Take it at the next round in which these packages
   bump for another reason**; if no such round arrives in reasonable time,
   propose it deliberately (coordinator, 2026-09-16).
-- The `-C metadata` control below says the residue is stamps and link inputs,
-  so a cheaper fix than moving the whole build may exist: pinning what the
-  linker stamps. Not investigated; it would have to survive the same
-  measurement.
+- The cheaper fix -- pinning what the linker stamps and fixing `-C metadata` --
+  is **refused as the wrong trade**, not as impossible: it changes
+  `build-deb.sh` or `.cargo/config.toml`, both in the inputs hash, so it costs
+  the same seven bumps while being the weaker fix. Option (a) needs no theory
+  about which stamps matter, because it makes host equal target, the
+  configuration `mica-podman` measured reproducing **with Rust**.
+- The bound stated in `docs/development.md` is **provisional**, not permanent:
+  option (a) closes it whenever it is taken.
 - Making CI cross-build arm64 is **refused**: it would make the two agree by
   lowering the published artifact to the local one.
 - The bound is stated instead, in `docs/development.md`: the published archives

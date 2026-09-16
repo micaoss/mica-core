@@ -60,7 +60,11 @@ What follows for anyone comparing a local build to a release:
   the released ones. That is what offline means here.
 - amd64 is unaffected: a local amd64 archive does reproduce the released bytes.
 
-`docs/task/20260916-0912-cross-built-arm64-bytes.md` holds what is still open.
+This bound is **provisional**. Building the pool on the target platform
+everywhere would close it, and it is deferred only because it would cost a
+version bump on every package and change nothing that ships;
+`docs/task/20260916-0912-cross-built-arm64-bytes.md` holds the measurements and
+the decision.
 
 ## 3. Working with cargo
 
