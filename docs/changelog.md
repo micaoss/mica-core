@@ -18,6 +18,12 @@ The device side follows the 2026-09-16 board rename (`x64` to `uefi-x64`,
   listed as refused, and `board_vocabulary` drives it through both readers. The
   shared fixtures were regenerated: `deploymentId` is
   `7091da552d8cd8359568dc7803c0e78d46626597c15f665b85c5f0c4818409cf`.
+- `mica-deploy` and `mica-lifecycle` are `0.1.0-2`: both are built from the
+  `mica-deploy` crate, so the rename moved their inputs hashes (deploy
+  `acd29506…` to `12b8966d…`, lifecycle `2ddf75e8…` to `0061a4d4…`, measured
+  against the pool of `20260916-0916`). `micad`, `mica-apid`, `mica-mqttd`,
+  `mica-mqtt-broker` and `mica-sftp-server` are unchanged, and their inputs
+  hashes are bit-for-bit what that release published.
 
 ## 2026-09-16 09:12 [progress]
 
