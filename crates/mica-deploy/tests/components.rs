@@ -39,11 +39,15 @@ fn shared_golden_identity_and_paths() {
 
 #[test]
 fn board_formats_tree_levels_and_object_integrity() {
-    for board in ["x64", "virt-arm64", "cx3576", "s905x5m"] {
+    for board in ["uefi-x64", "uefi-arm64", "cx3576", "s905x5m"] {
         for (blocks, tree_blocks) in [(1, 0), (128, 1), (129, 3), (16385, 132)] {
             let mut v: Value = serde_json::from_str(PAYLOAD).unwrap();
-            let arch = if board == "x64" { "amd64" } else { "arm64" };
-            let format = if ["x64", "virt-arm64"].contains(&board) {
+            let arch = if board == "uefi-x64" {
+                "amd64"
+            } else {
+                "arm64"
+            };
+            let format = if ["uefi-x64", "uefi-arm64"].contains(&board) {
                 "uki"
             } else {
                 "fit"

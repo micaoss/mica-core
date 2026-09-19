@@ -42,8 +42,8 @@ pub fn parse_firmware(payload: &[u8]) -> Result<Firmware> {
         "unsupported firmware schema"
     );
     let arch = match firmware.board.as_str() {
-        "x64" => "amd64",
-        "virt-arm64" | "cx3576" | "s905x5m" => "arm64",
+        "uefi-x64" => "amd64",
+        "uefi-arm64" | "cx3576" | "s905x5m" => "arm64",
         _ => anyhow::bail!("unsupported firmware board"),
     };
     ensure!(firmware.arch == arch, "firmware architecture mismatch");
@@ -97,8 +97,8 @@ pub fn parse_firmware(payload: &[u8]) -> Result<Firmware> {
         }
         Target::Efi { partition, path } => {
             let name = match firmware.board.as_str() {
-                "x64" => "BOOTX64.EFI",
-                "virt-arm64" => "BOOTAA64.EFI",
+                "uefi-x64" => "BOOTX64.EFI",
+                "uefi-arm64" => "BOOTAA64.EFI",
                 _ => anyhow::bail!("invalid EFI board"),
             };
             ensure!(

@@ -227,8 +227,8 @@ impl Deployment {
             "unsupported deployment schema or DATA policy",
         )?;
         let (arch, format) = match self.board.as_str() {
-            "x64" => ("amd64", "uki"),
-            "virt-arm64" => ("arm64", "uki"),
+            "uefi-x64" => ("amd64", "uki"),
+            "uefi-arm64" => ("arm64", "uki"),
             "cx3576" | "s905x5m" => ("arm64", "fit"),
             _ => return Err(ContractError("unsupported board")),
         };

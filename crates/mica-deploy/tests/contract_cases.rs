@@ -129,12 +129,12 @@ fn the_product_file_names_the_device_product() {
     );
     for text in [
         "",
-        "BOARD=x64\n",
+        "BOARD=uefi-x64\n",
         "PRODUCT=\n",
-        "PRODUCT=\"x64-dev\"\n",
-        "PRODUCT=x64 dev\n",
-        "PRODUCT=x64-dev\nPRODUCT=x64-minimal\n",
-        "BOARD=x64\nFEATURES=\"micad mqtt containers\"\n",
+        "PRODUCT=\"uefi-x64-dev\"\n",
+        "PRODUCT=uefi-x64 dev\n",
+        "PRODUCT=uefi-x64-dev\nPRODUCT=uefi-x64-prod\n",
+        "BOARD=uefi-x64\nFEATURES=\"micad mqtt containers\"\n",
     ] {
         assert!(device_product(text).is_err(), "{text:?}");
     }
@@ -150,7 +150,7 @@ fn product_cases() {
             root: dir.path().join("updates"),
             store: &store,
             keys: &keys,
-            board: "x64",
+            board: "uefi-x64",
             arch: "amd64",
             product: case["device"].as_str().unwrap(),
             max_bytes: 1024 * 1024,
@@ -180,9 +180,9 @@ fn archive_cases() {
             root: dir.path().join("updates"),
             store: &store,
             keys: &keys,
-            board: "x64",
+            board: "uefi-x64",
             arch: "amd64",
-            product: "x64-dev",
+            product: "uefi-x64-dev",
             max_bytes: 1024 * 1024,
         };
         fs::create_dir_all(acq.objects()).unwrap();
@@ -221,5 +221,45 @@ fn archive_cases() {
                 );
             }
         }
+    }
+}
+
+/// The BOARD VOCABULARY of `cases.json`, driven through both readers that match
+/// on a board name. The names are data here rather than a literal each
+/// repository happens to spell the same way: the assembly keeps these same
+/// fixture bytes, so a board renamed on one side and not the other fails a gate
+/// instead of reaching a device (the 2026-09-16 rename reached a published
+/// image because nothing stated the vocabulary in a form a gate reads).
+/// The retired `x64` and `virt-arm64` are listed as refused, which is what
+/// "no aliases" means in practice.
+#[test]
+fn board_vocabulary() {
+    for case in cases()["boards"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let accepted = case["result"] == "accepted";
+
+        let backend = mica_deploy::boot::BootKind::for_board(name);
+        assert_eq!(backend.is_ok(), accepted, "BootKind::for_board({name})");
+        if accepted {
+            let want = match case["backend"].as_str().unwrap() {
+                "uefi" => mica_deploy::boot::BootKind::Uefi,
+                _ => mica_deploy::boot::BootKind::UbootFit,
+            };
+            assert_eq!(backend.unwrap(), want, "backend of {name}");
+        }
+
+        let mut d: Value = serde_json::from_str(PAYLOAD).unwrap();
+        d["board"] = json!(name);
+        d["arch"] = json!(case["arch"]);
+        d["kernel"]["board"] = json!(name);
+        d["kernel"]["arch"] = json!(case["arch"]);
+        d["kernel"]["boot"]["format"] = json!(case["format"]);
+        d["rootfs"]["arch"] = json!(case["arch"]);
+        d["kernel"]["id"] = component_id(&d["kernel"]).unwrap().into();
+        d["rootfs"]["id"] = component_id(&d["rootfs"]).unwrap().into();
+        let parsed = mica_deploy::components::parse_deployment(
+            serde_json::to_string(&d).unwrap().as_bytes(),
+        );
+        assert_eq!(parsed.is_ok(), accepted, "parse_deployment board {name}");
     }
 }

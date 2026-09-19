@@ -66,14 +66,58 @@
       "result": "refused"
     }
   ],
+  "boards": [
+    {
+      "arch": "amd64",
+      "backend": "uefi",
+      "format": "uki",
+      "name": "uefi-x64",
+      "result": "accepted"
+    },
+    {
+      "arch": "arm64",
+      "backend": "uefi",
+      "format": "uki",
+      "name": "uefi-arm64",
+      "result": "accepted"
+    },
+    {
+      "arch": "arm64",
+      "backend": "uboot-fit",
+      "format": "fit",
+      "name": "cx3576",
+      "result": "accepted"
+    },
+    {
+      "arch": "arm64",
+      "backend": "uboot-fit",
+      "format": "fit",
+      "name": "s905x5m",
+      "result": "accepted"
+    },
+    {
+      "arch": "amd64",
+      "backend": "uefi",
+      "format": "uki",
+      "name": "x64",
+      "result": "refused"
+    },
+    {
+      "arch": "arm64",
+      "backend": "uefi",
+      "format": "uki",
+      "name": "virt-arm64",
+      "result": "refused"
+    }
+  ],
   "context": {
     "arch": "amd64",
-    "board": "x64",
+    "board": "uefi-x64",
     "kernelBuildId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "kernelRelease": "6.12.107",
     "supportId": "4b667330fb3b5b1701191406853acd959c4046abbdc330f8e4d8fc8525ce0924"
   },
-  "deploymentId": "142b536d5db0c108a463638c24fa1a1425b12ab222b351702f4b158c8a5ae697",
+  "deploymentId": "7091da552d8cd8359568dc7803c0e78d46626597c15f665b85c5f0c4818409cf",
   "invalid": [
     {
       "name": "wrong-schema",
@@ -243,23 +287,23 @@
   ],
   "product": {
     "file": "/usr/lib/mica/product.conf",
-    "fixture": "PRODUCT=x64-dev\nBOARD=x64\nPROFILE=dev\nFEATURES=\"micad mqtt containers\"\nCOMPONENTS=\"\"\n",
+    "fixture": "PRODUCT=uefi-x64-dev\nBOARD=uefi-x64\nPROFILE=dev\nFEATURES=\"micad mqtt containers\"\nCOMPONENTS=\"\"\n",
     "key": "PRODUCT",
-    "product": "x64-dev"
+    "product": "uefi-x64-dev"
   },
   "productCases": [
     {
-      "device": "x64-dev",
+      "device": "uefi-x64-dev",
       "name": "matching-product",
       "result": "accepted"
     },
     {
-      "device": "x64-minimal",
+      "device": "uefi-x64-prod",
       "name": "other-product",
       "result": "refused"
     },
     {
-      "device": "x64-dev",
+      "device": "uefi-x64-dev",
       "name": "missing-product-field",
       "remove": "/product",
       "result": "refused"
@@ -267,12 +311,12 @@
   ],
   "valid": {
     "arch": "amd64",
-    "board": "x64",
+    "board": "uefi-x64",
     "dataPolicy": "unchanged",
     "generation": 1,
     "kernel": {
       "arch": "amd64",
-      "board": "x64",
+      "board": "uefi-x64",
       "boot": {
         "artifact": {
           "bytes": 100000,
@@ -281,7 +325,7 @@
         "format": "uki"
       },
       "buildId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "id": "c3c93697034c53ee6425f96b58eca37de6e9c46159a890fc97d4de161d3238d3",
+      "id": "f6f85b8cd250a537e4a0f5947b2d2d74eb6e1e60d558412feb48b2450093d74a",
       "release": "6.12.107",
       "schema": "mica/kernel/v1",
       "support": {
@@ -305,7 +349,7 @@
         }
       }
     },
-    "product": "x64-dev",
+    "product": "uefi-x64-dev",
     "rootfs": {
       "arch": "amd64",
       "content": {

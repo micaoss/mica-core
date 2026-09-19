@@ -69,9 +69,9 @@ fn offline_archive_authenticates_before_staging_and_never_publishes_partial_desc
         root: dir.path().join("updates"),
         store: &store,
         keys: &keys,
-        board: "x64",
+        board: "uefi-x64",
         arch: "amd64",
-        product: "x64-dev",
+        product: "uefi-x64-dev",
         max_bytes: 1024 * 1024,
     };
     let ready = acq.import(&mut Cursor::new(&archive)).unwrap();
@@ -99,9 +99,9 @@ fn only_the_micaupd1_magic_is_an_archive() {
         root: dir.path().join("updates"),
         store: &store,
         keys: &keys,
-        board: "x64",
+        board: "uefi-x64",
         arch: "amd64",
-        product: "x64-dev",
+        product: "uefi-x64-dev",
         max_bytes: 1024 * 1024,
     };
     for magic in [&b"MICAUPD2"[..], b"micaupd1", b"MICAUP01"] {
@@ -127,9 +127,13 @@ fn interrupted_corrupt_oversized_and_foreign_archives_cannot_become_ready() {
             root: dir.path().join("updates"),
             store: &store,
             keys: &keys,
-            board: if case == "board" { "cx3576" } else { "x64" },
+            board: if case == "board" {
+                "cx3576"
+            } else {
+                "uefi-x64"
+            },
             arch: "amd64",
-            product: "x64-dev",
+            product: "uefi-x64-dev",
             max_bytes: if case == "budget" { 100 } else { 1024 * 1024 },
         };
         let mut input = archive.clone();
@@ -171,9 +175,9 @@ fn one_existing_destination_does_not_hide_other_destinations_for_the_same_digest
         root: dir.path().join("updates"),
         store: &store,
         keys: &keys,
-        board: "x64",
+        board: "uefi-x64",
         arch: "amd64",
-        product: "x64-dev",
+        product: "uefi-x64-dev",
         max_bytes: 1024 * 1024,
     };
     acq.import(&mut Cursor::new(archive)).unwrap();
@@ -189,9 +193,9 @@ fn discard_is_bounded_to_acquisition_files_and_checks_all_paths_before_removing_
         root: dir.path().join("updates"),
         store: &store,
         keys: &keys,
-        board: "x64",
+        board: "uefi-x64",
         arch: "amd64",
-        product: "x64-dev",
+        product: "uefi-x64-dev",
         max_bytes: 1024 * 1024,
     };
     let ready = acq.import(&mut Cursor::new(&archive)).unwrap();
@@ -222,7 +226,7 @@ fn online_catalog_and_resumed_objects_converge_on_the_offline_ready_format() {
     let source = format!("http://{}/v1/manifest.json", listener.local_addr().unwrap());
     let object_url = format!("http://{}/v1/objects/{sha}", listener.local_addr().unwrap());
     let payload = serde_json::to_vec(&json!({"schema":"mica/catalog/v2","revision":1,"issuedAt":"2026-09-09T00:00:00.000Z","expiresAt":"2026-09-10T00:00:00.000Z",
-        "channels":[{"board":"x64","product":"x64-dev","channel":"stable","releaseId":"test","generation":1}],
+        "channels":[{"board":"uefi-x64","product":"uefi-x64-dev","channel":"stable","releaseId":"test","generation":1}],
         "releases":[{"id":"test","channel":"stable","notes":"Resume test","deployment":descriptor,"objects":[{"sha256":sha,"bytes":12288,"url":object_url}]}]})).unwrap();
     let signer = Ed25519KeyPair::from_seed_unchecked(&[9; 32]).unwrap();
     let catalog = format!(
@@ -267,9 +271,9 @@ fn online_catalog_and_resumed_objects_converge_on_the_offline_ready_format() {
         root: dir.path().join("updates"),
         store: &store,
         keys: &keys,
-        board: "x64",
+        board: "uefi-x64",
         arch: "amd64",
-        product: "x64-dev",
+        product: "uefi-x64-dev",
         max_bytes: 2 * 1024 * 1024,
     };
     fs::create_dir_all(acq.root.join("downloads")).unwrap();
@@ -331,7 +335,7 @@ fn serve(
 
 fn signed_catalog(key: &[u8; 32], descriptor: &str, sha: &str, object_url: &str) -> String {
     let payload = serde_json::to_vec(&json!({"schema":"mica/catalog/v2","revision":1,"issuedAt":"2026-09-09T00:00:00.000Z","expiresAt":"2026-09-10T00:00:00.000Z",
-        "channels":[{"board":"x64","product":"x64-dev","channel":"stable","releaseId":"test","generation":1}],
+        "channels":[{"board":"uefi-x64","product":"uefi-x64-dev","channel":"stable","releaseId":"test","generation":1}],
         "releases":[{"id":"test","channel":"stable","notes":"Transfer test","deployment":descriptor,"objects":[{"sha256":sha,"bytes":12288,"url":object_url}]}]})).unwrap();
     let signer = Ed25519KeyPair::from_seed_unchecked(&[9; 32]).unwrap();
     format!(
@@ -402,9 +406,9 @@ fn acquisition<'a>(
         root: dir.path().join("updates"),
         store,
         keys,
-        board: "x64",
+        board: "uefi-x64",
         arch: "amd64",
-        product: "x64-dev",
+        product: "uefi-x64-dev",
         max_bytes: 2 * 1024 * 1024,
     }
 }

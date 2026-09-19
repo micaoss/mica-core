@@ -30,7 +30,7 @@ fn catalog() -> Value {
         objects.insert(artifact["sha256"].as_str().unwrap(), json!({"sha256":artifact["sha256"],"bytes":artifact["bytes"],"url":format!("https://updates.test/v1/objects/{}",artifact["sha256"].as_str().unwrap())}));
     }
     json!({"schema":"mica/catalog/v2","revision":2,"issuedAt":"2026-09-09T00:00:00.000Z","expiresAt":"2026-09-10T00:00:00.000Z",
-        "channels":[{"board":"x64","product":"x64-dev","channel":"stable","releaseId":"release-1","generation":1}],
+        "channels":[{"board":"uefi-x64","product":"uefi-x64-dev","channel":"stable","releaseId":"release-1","generation":1}],
         "releases":[{"id":"release-1","channel":"stable","notes":"Test","deployment":String::from_utf8(signed(&deployment)).unwrap(),"objects":objects.values().collect::<Vec<_>>()}]})
 }
 fn verify(
@@ -44,9 +44,9 @@ fn verify(
         &[key],
         &CatalogRequest {
             source: "https://updates.test/v1/manifest.json",
-            board: "x64",
+            board: "uefi-x64",
             arch: "amd64",
-            product: "x64-dev",
+            product: "uefi-x64-dev",
             channel: "stable",
             now: 1788915600,
             checkpoint,
@@ -73,9 +73,9 @@ fn authenticates_catalog_and_selects_only_a_new_exact_board_channel_deployment()
             &[key],
             &CatalogRequest {
                 source: "https://updates.test/v1/manifest.json",
-                board: "virt-arm64",
+                board: "uefi-arm64",
                 arch: "arm64",
-                product: "x64-dev",
+                product: "uefi-x64-dev",
                 channel: "stable",
                 now: 1788915600,
                 checkpoint: None,
@@ -114,9 +114,9 @@ fn rejects_expiry_clock_rollback_equivocation_and_untrusted_signatures() {
             &[[0; 32]],
             &CatalogRequest {
                 source: "https://updates.test/v1/manifest.json",
-                board: "x64",
+                board: "uefi-x64",
                 arch: "amd64",
-                product: "x64-dev",
+                product: "uefi-x64-dev",
                 channel: "stable",
                 now: 1788915600,
                 checkpoint: None,
@@ -139,8 +139,8 @@ fn rejects_missing_extra_substituted_objects_redirect_origins_and_inconsistent_h
         ("/releases/0/deployment", json!("{}")),
         ("/channels/0/generation", json!(2)),
         ("/channels/0/releaseId", json!("missing")),
-        ("/channels/0/board", json!("virt-arm64")),
-        ("/channels/0/product", json!("x64-minimal")),
+        ("/channels/0/board", json!("uefi-arm64")),
+        ("/channels/0/product", json!("uefi-x64-prod")),
     ] {
         let mut value = catalog();
         *value.pointer_mut(pointer).unwrap() = replacement;
@@ -169,7 +169,7 @@ fn selects_only_the_device_product_and_keys_heads_by_product() {
     let key: [u8; 32] = signer().public_key().as_ref().try_into().unwrap();
     let request = |product| CatalogRequest {
         source: "https://updates.test/v1/manifest.json",
-        board: "x64",
+        board: "uefi-x64",
         arch: "amd64",
         product,
         channel: "stable",
@@ -178,13 +178,13 @@ fn selects_only_the_device_product_and_keys_heads_by_product() {
         highest_generation: 0,
     };
     assert!(
-        verify_catalog(&signed(&value), &[key], &request("x64-dev"))
+        verify_catalog(&signed(&value), &[key], &request("uefi-x64-dev"))
             .unwrap()
             .selected
             .is_some()
     );
     assert!(
-        verify_catalog(&signed(&value), &[key], &request("x64-minimal"))
+        verify_catalog(&signed(&value), &[key], &request("uefi-x64-prod"))
             .unwrap()
             .selected
             .is_none()
@@ -194,8 +194,8 @@ fn selects_only_the_device_product_and_keys_heads_by_product() {
         .as_object_mut()
         .unwrap()
         .remove("product");
-    assert!(verify_catalog(&signed(&headless), &[key], &request("x64-dev")).is_err());
+    assert!(verify_catalog(&signed(&headless), &[key], &request("uefi-x64-dev")).is_err());
     let mut v1 = value.clone();
     v1["schema"] = json!("mica/catalog/v1");
-    assert!(verify_catalog(&signed(&v1), &[key], &request("x64-dev")).is_err());
+    assert!(verify_catalog(&signed(&v1), &[key], &request("uefi-x64-dev")).is_err());
 }

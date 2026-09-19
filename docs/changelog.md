@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-19 10:30 [fix]
+
+The device side follows the 2026-09-16 board rename (`x64` to `uefi-x64`,
+`virt-arm64` to `uefi-arm64`; `cx3576` and `s905x5m` unchanged):
+
+- Every board match in `mica-deploy` named the retired spellings, and the
+  assembly signs the new ones -- the published
+  `mica-uefi-x64-dev-20260919-2103.micaupd` envelope decodes to
+  `"board":"uefi-x64"`. `BootKind::for_board` runs in `mica-runkit` as PID 1,
+  so such a device does not boot, rather than merely failing to update.
+- New names only, no aliases: `boot.rs`, `components.rs` and `firmware.rs`
+  (board-to-architecture and the EFI file name), the six test files and the
+  three shared fixtures. All four sites fail closed, so a device refuses and
+  never mis-targets.
+- `cases.json` now carries the board vocabulary as data, with the retired names
+  listed as refused, and `board_vocabulary` drives it through both readers. The
+  shared fixtures were regenerated: `deploymentId` is
+  `7091da552d8cd8359568dc7803c0e78d46626597c15f665b85c5f0c4818409cf`.
+
 ## 2026-09-16 09:12 [progress]
 
 The build env moves to mica-build-env `20260916-0735`:

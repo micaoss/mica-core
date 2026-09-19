@@ -22,7 +22,7 @@ pub enum BootKind {
 impl BootKind {
     pub fn for_board(board: &str) -> anyhow::Result<Self> {
         match board {
-            "x64" | "virt-arm64" => Ok(Self::Uefi),
+            "uefi-x64" | "uefi-arm64" => Ok(Self::Uefi),
             "cx3576" | "s905x5m" => Ok(Self::UbootFit),
             _ => anyhow::bail!("unsupported boot backend board"),
         }

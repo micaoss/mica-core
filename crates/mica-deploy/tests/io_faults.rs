@@ -216,9 +216,9 @@ fn seed(root: &Path, fit: bool, operation: &str) {
                 &envelopes[2],
                 &[public],
                 &Target {
-                    board: if fit { "cx3576" } else { "x64" },
+                    board: if fit { "cx3576" } else { "uefi-x64" },
                     arch: if fit { "arm64" } else { "amd64" },
-                    product: "x64-dev",
+                    product: "uefi-x64-dev",
                 },
                 &root.join("objects"),
                 &serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())
@@ -266,9 +266,9 @@ fn run_operation(root: &Path, fit: bool, operation: &str) {
                     &fs::read(root.join("candidate.json")).unwrap(),
                     &[public],
                     &Target {
-                        board: if fit { "cx3576" } else { "x64" },
+                        board: if fit { "cx3576" } else { "uefi-x64" },
                         arch: if fit { "arm64" } else { "amd64" },
-                        product: "x64-dev",
+                        product: "uefi-x64-dev",
                     },
                     &root.join("objects"),
                     &serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())
@@ -533,9 +533,9 @@ fn invalid_update_preserves_both_installed_deployments() {
                     &envelope,
                     &[public],
                     &Target {
-                        board: if fit { "cx3576" } else { "x64" },
+                        board: if fit { "cx3576" } else { "uefi-x64" },
                         arch: if fit { "arm64" } else { "amd64" },
-                        product: "x64-dev",
+                        product: "uefi-x64-dev",
                     },
                     &root.path().join("objects"),
                     &serde_json::from_slice(
@@ -572,9 +572,9 @@ fn install_requires_the_confirmed_running_receipt_and_reconciles_activation() {
                 &envelope,
                 &[public],
                 &Target {
-                    board: if fit { "cx3576" } else { "x64" },
+                    board: if fit { "cx3576" } else { "uefi-x64" },
                     arch: if fit { "arm64" } else { "amd64" },
-                    product: "x64-dev",
+                    product: "uefi-x64-dev",
                 },
                 &root.path().join("objects"),
                 receipt,
@@ -675,7 +675,7 @@ fn replacement_capacity_uses_reclaimed_blocks_without_a_third_version() {
             &Target {
                 board: "cx3576",
                 arch: "arm64",
-                product: "x64-dev",
+                product: "uefi-x64-dev",
             },
             &root.path().join("objects"),
             &receipt,
@@ -744,9 +744,9 @@ fn an_unconfirmed_running_trial_cannot_retire_the_other_deployment() {
                 &envelope,
                 &[public],
                 &Target {
-                    board: if fit { "cx3576" } else { "x64" },
+                    board: if fit { "cx3576" } else { "uefi-x64" },
                     arch: if fit { "arm64" } else { "amd64" },
-                    product: "x64-minimal",
+                    product: "uefi-x64-prod",
                 },
                 &root.path().join("objects"),
                 &current,
@@ -762,9 +762,9 @@ fn an_unconfirmed_running_trial_cannot_retire_the_other_deployment() {
                 &envelope,
                 &[public],
                 &Target {
-                    board: if fit { "cx3576" } else { "x64" },
+                    board: if fit { "cx3576" } else { "uefi-x64" },
                     arch: if fit { "arm64" } else { "amd64" },
-                    product: "x64-dev",
+                    product: "uefi-x64-dev",
                 },
                 &root.path().join("objects"),
                 &current,

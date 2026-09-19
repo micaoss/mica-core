@@ -2,16 +2,16 @@
   "publicKey": "G+jEfxAFk8CpuNHu873raymIboK1ouPTSPLNKE6xfYk=",
   "records": [
     {
-      "envelope": "{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"f9534d95ea93b8e5604c955799120d5ce580d63ef0273978a0aabbec7066fe19\",\"payload\":\"eyJhcmNoIjoiYW1kNjQiLCJhcnRpZmFjdCI6eyJieXRlcyI6MTA0ODU3Niwic2hhMjU2IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9LCJib2FyZCI6Ing2NCIsImdlbmVyYXRpb24iOjEsImlkIjoiMjZiYzEyNjcyNzc4ZWY4NGE0ZTg3ZDgwNTAyZjZkN2NjZjBlZGI4YTgzYTI5MTVhYWYxY2ZlNzNhMWI3NDA2MyIsInNjaGVtYSI6Im1pY2EvZmlybXdhcmUvdjEiLCJ0YXJnZXQiOnsiZm9ybWF0IjoiZWZpIiwicGFydGl0aW9uIjoxLCJwYXRoIjoiRUZJL0JPT1QvQk9PVFg2NC5FRkkifSwidmVyc2lvbiI6ImZpcm13YXJlLTEifQ==\",\"signature\":\"S0HRuHWSKS6m2dKRcJX11t39Lt4sPm0QkZ6gMfJsjQDVUs1WNK9fYq87HHoGk76l+AXTeo44SO2FcT4XedvtCg==\"}",
+      "envelope": "{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"f9534d95ea93b8e5604c955799120d5ce580d63ef0273978a0aabbec7066fe19\",\"payload\":\"eyJhcmNoIjoiYW1kNjQiLCJhcnRpZmFjdCI6eyJieXRlcyI6MTA0ODU3Niwic2hhMjU2IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9LCJib2FyZCI6InVlZmkteDY0IiwiZ2VuZXJhdGlvbiI6MSwiaWQiOiJhNjBkNGFhNTMzY2Y4YmU3YjYxYjA2NTlkZGQ4YzMyODQzMGNiMDI4NjUwMjZkOWY3ODJmM2VlN2I4MmY0NWZlIiwic2NoZW1hIjoibWljYS9maXJtd2FyZS92MSIsInRhcmdldCI6eyJmb3JtYXQiOiJlZmkiLCJwYXJ0aXRpb24iOjEsInBhdGgiOiJFRkkvQk9PVC9CT09UWDY0LkVGSSJ9LCJ2ZXJzaW9uIjoiZmlybXdhcmUtMSJ9\",\"signature\":\"XkELayEWkr8HKYhS2/n3PR7NpYOcboDVgDvtv0NOmFm3VMN3CBjTaV+2+bREAzLmDXDt8ME7GcHiLHcMDtXDBg==\"}",
       "manifest": {
         "arch": "amd64",
         "artifact": {
           "bytes": 1048576,
           "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         },
-        "board": "x64",
+        "board": "uefi-x64",
         "generation": 1,
-        "id": "26bc12672778ef84a4e87d80502f6d7ccf0edb8a83a2915aaf1cfe73a1b74063",
+        "id": "a60d4aa533cf8be7b61b0659ddd8c328430cb02865026d9f782f3ee7b82f45fe",
         "schema": "mica/firmware/v1",
         "target": {
           "format": "efi",
@@ -22,16 +22,16 @@
       }
     },
     {
-      "envelope": "{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"f9534d95ea93b8e5604c955799120d5ce580d63ef0273978a0aabbec7066fe19\",\"payload\":\"eyJhcmNoIjoiYXJtNjQiLCJhcnRpZmFjdCI6eyJieXRlcyI6MTA0ODU3Niwic2hhMjU2IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9LCJib2FyZCI6InZpcnQtYXJtNjQiLCJnZW5lcmF0aW9uIjoxLCJpZCI6IjhhOTE1NTYzMjJhMDc4Yzc4MDE2MWZiZDc1MzBhNmY1NmZmOGJlODY1ZWYyOTY0ZWJiNWY2NjM4NTFlNzM5ZDkiLCJzY2hlbWEiOiJtaWNhL2Zpcm13YXJlL3YxIiwidGFyZ2V0Ijp7ImZvcm1hdCI6ImVmaSIsInBhcnRpdGlvbiI6MSwicGF0aCI6IkVGSS9CT09UL0JPT1RBQTY0LkVGSSJ9LCJ2ZXJzaW9uIjoiZmlybXdhcmUtMSJ9\",\"signature\":\"EGvPas9DepqixUHTsWgzCmlbYehDyk+atpHwqeTaORHtyLUuuKrWM2rksVj00yQGAsW/I+5ccd9qzn6fko4VDQ==\"}",
+      "envelope": "{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"f9534d95ea93b8e5604c955799120d5ce580d63ef0273978a0aabbec7066fe19\",\"payload\":\"eyJhcmNoIjoiYXJtNjQiLCJhcnRpZmFjdCI6eyJieXRlcyI6MTA0ODU3Niwic2hhMjU2IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9LCJib2FyZCI6InVlZmktYXJtNjQiLCJnZW5lcmF0aW9uIjoxLCJpZCI6IjY3NDZlNzc1ZmYyMzA0OGY4YWMzZThkNWMyZTk0YmY0NmVhNTk0ZGUyMmQ3NDY0NWM1YjMzZWY0MmY2NTJmMDIiLCJzY2hlbWEiOiJtaWNhL2Zpcm13YXJlL3YxIiwidGFyZ2V0Ijp7ImZvcm1hdCI6ImVmaSIsInBhcnRpdGlvbiI6MSwicGF0aCI6IkVGSS9CT09UL0JPT1RBQTY0LkVGSSJ9LCJ2ZXJzaW9uIjoiZmlybXdhcmUtMSJ9\",\"signature\":\"bP8NSeFFxbm5C/HH5LN25lS41OgfshM5CQNnw3UOS/g3Zp1G3WiYhaYGAnTaw29iKS+uHG7L6dY5i92JvWOuBA==\"}",
       "manifest": {
         "arch": "arm64",
         "artifact": {
           "bytes": 1048576,
           "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         },
-        "board": "virt-arm64",
+        "board": "uefi-arm64",
         "generation": 1,
-        "id": "8a91556322a078c780161fbd7530a6f56ff8be865ef2964ebb5f663851e739d9",
+        "id": "6746e775ff23048f8ac3e8d5c2e94bf46ea594de22d74645c5b33ef42f652f02",
         "schema": "mica/firmware/v1",
         "target": {
           "format": "efi",
