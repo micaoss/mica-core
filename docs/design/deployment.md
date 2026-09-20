@@ -86,6 +86,37 @@ and synced, and the fault suite (`scripts/gate/file-ab-faults/`) interrupts the
 real transaction code before and after each observed IO operation to prove
 recovery.
 
+### What "confirmed" means, and what it deliberately does not
+
+`confirm` is not a statement that the product works. It removes the trial
+counter, promotes the slot to `current`, and makes returning to the fallback an
+explicit operator action. So the question it answers is narrower and sharper:
+**can this slot still be reached and still be changed** -- because a slot that
+can be updated can be repaired without the fallback, and one that cannot must be
+handed back while the trial counter still exists.
+
+The boot health gate that calls it (`mica-system-base:/usr/lib/mica/mica-health`,
+required set in `/etc/mica/health.conf`) checks exactly that: the boot
+transaction finished (`boot-settled`), micad answers on the system bus, and apid
+answers `https://127.0.0.1/healthz`. Failed units are **reported** to micad and
+never fatal, and `systemctl is-system-running = degraded` passes.
+
+That boundary is deliberate in both directions:
+
+- Requiring `running` would refuse to confirm a boot where one unrelated unit
+  failed, and hand the device to the fallback for a cosmetic fault. Rollback is
+  a blunt instrument -- it discards the whole deployment -- so it must not be
+  triggered by anything the next update could fix.
+- `boot-settled` treats `starting` with **no other running jobs** as settled,
+  because the gate is itself a job of the boot transaction: while it runs,
+  `is-system-running` cannot be anything else. A capture taken during the gate
+  therefore shows `starting` with `systemctl --failed` empty, and that is the
+  gate working, not a slot confirmed early.
+
+So "good" means recoverable, not healthy. A unit that fails after the gate has
+run is a normal fault to be fixed by configuration or by the next deployment;
+it is not a reason to lose the deployment that is running.
+
 ### 3.1 Policy on top: micad
 
 micad adds what an operator decides (`crates/micad/src/update_*.rs`): the
