@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-20 10:30 [progress]
+
+The shared fixtures say more about themselves:
+
+- `envelope.json` and `catalog.json` carry `envelopeWireOrder`: the stored
+  object is sorted for readability and the wire form is `schema`, `keyId`,
+  `payload`, `signature`, which a reader requires and a re-serialised `Value`
+  breaks. This repository knew and had not said it in the bytes.
+- Every one of the 33 `invalid` cases in `cases.json` now names the rule it
+  fires, measured and asserted, and the three whose mutation more than one rule
+  would refuse are marked `alsoRefusedBy`. A refused-vector that could be
+  refused by two rules tests neither.
+
 ## 2026-09-20 01:00 [progress]
 
 The update protocol becomes bytes both sides verify:

@@ -132,166 +132,202 @@
     {
       "name": "wrong-schema",
       "pointer": "/schema",
+      "refusal": "unsupported deployment schema or DATA policy",
       "value": "mica/update-catalog/v1"
     },
     {
+      "alsoRefusedBy": true,
       "name": "wrong-board",
       "pointer": "/board",
+      "refusal": "board/architecture mismatch",
       "value": "cx3576"
     },
     {
+      "alsoRefusedBy": true,
       "name": "wrong-arch",
       "pointer": "/arch",
+      "refusal": "board/architecture mismatch",
       "value": "arm64"
     },
     {
+      "alsoRefusedBy": true,
       "name": "traversal",
       "pointer": "/kernel/id",
+      "refusal": "invalid digest",
       "value": "../../root"
     },
     {
       "name": "unknown-field",
       "pointer": "/extra",
+      "refusal": "unknown, missing or invalid fields",
       "value": "ignored"
     },
     {
       "name": "kernel-substitution",
       "pointer": "/kernel/id",
+      "refusal": "component identity mismatch",
       "value": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "name": "root-substitution",
       "pointer": "/rootfs/id",
+      "refusal": "component identity mismatch",
       "value": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "name": "support-substitution",
       "pointer": "/kernel/support/image/sha256",
+      "refusal": "component identity mismatch",
       "value": "2222222222222222222222222222222222222222222222222222222222222222"
     },
     {
       "name": "unsafe-release",
       "pointer": "/kernel/release",
+      "refusal": "invalid identifier",
       "value": "../../modules"
     },
     {
       "name": "unsafe-version",
       "pointer": "/version",
+      "refusal": "invalid identifier",
       "value": "x\ninit=/bin/sh"
     },
     {
       "name": "unsafe-integer",
       "pointer": "/generation",
+      "refusal": "invalid integer",
       "value": 9007199254740992
     },
     {
       "name": "float",
       "pointer": "/generation",
+      "refusal": "unknown, missing or invalid fields",
       "value": 1.5
     },
     {
       "name": "zero-generation",
       "pointer": "/generation",
+      "refusal": "invalid integer",
       "value": 0
     },
     {
       "name": "unsupported-policy",
       "pointer": "/dataPolicy",
+      "refusal": "unsupported deployment schema or DATA policy",
       "value": "migrate"
     },
     {
       "name": "wrong-boot-format",
       "pointer": "/kernel/boot/format",
+      "refusal": "wrong boot format",
       "value": "fit"
     },
     {
       "name": "verity-version",
       "pointer": "/rootfs/content/verity/version",
+      "refusal": "unsupported verity geometry",
       "value": 0
     },
     {
       "name": "algorithm",
       "pointer": "/rootfs/content/verity/algorithm",
+      "refusal": "unsupported verity geometry",
       "value": "sha512"
     },
     {
       "name": "block-size",
       "pointer": "/rootfs/content/verity/dataBlockSize",
+      "refusal": "unsupported verity geometry",
       "value": 512
     },
     {
       "name": "hash-block-size",
       "pointer": "/rootfs/content/verity/hashBlockSize",
+      "refusal": "unsupported verity geometry",
       "value": 8192
     },
     {
       "name": "zero-blocks",
       "pointer": "/rootfs/content/verity/dataBlocks",
+      "refusal": "invalid integer",
       "value": 0
     },
     {
       "name": "overlap",
       "pointer": "/rootfs/content/verity/hashOffset",
+      "refusal": "hash tree must immediately follow data",
       "value": 4096
     },
     {
       "name": "unaligned",
       "pointer": "/rootfs/content/verity/hashOffset",
+      "refusal": "hash tree must immediately follow data",
       "value": 8193
     },
     {
       "name": "truncated-tree",
       "pointer": "/rootfs/content/image/bytes",
+      "refusal": "image length does not match verity tree",
       "value": 8192
     },
     {
       "name": "extra-image-data",
       "pointer": "/rootfs/content/image/bytes",
+      "refusal": "image length does not match verity tree",
       "value": 16384
     },
     {
       "name": "uppercase-hash",
       "pointer": "/rootfs/content/rootHash",
+      "refusal": "invalid digest",
       "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     },
     {
       "name": "invalid-salt",
       "pointer": "/rootfs/content/verity/salt",
+      "refusal": "invalid digest",
       "value": "00"
     },
     {
       "name": "zero-signature",
       "pointer": "/rootfs/content/signature/bytes",
+      "refusal": "invalid integer",
       "value": 0
     },
     {
       "name": "large-signature",
       "pointer": "/rootfs/content/signature/bytes",
+      "refusal": "invalid integer",
       "value": 65537
     },
     {
       "name": "free-verity-options",
       "pointer": "/rootfs/content/verity/options",
+      "refusal": "unknown, missing or invalid fields",
       "value": "ignore_corruption"
     },
     {
       "name": "trailing-newline-name",
       "pointer": "/version",
+      "refusal": "invalid identifier",
       "value": "dev\n"
     },
     {
       "name": "trailing-newline-hash",
       "pointer": "/kernel/buildId",
+      "refusal": "invalid digest",
       "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n"
     },
     {
       "name": "invalid-product",
       "pointer": "/product",
+      "refusal": "invalid identifier",
       "value": "X64 dev"
     },
     {
       "name": "rootfs-version",
       "pointer": "/rootfs/version",
+      "refusal": "unknown, missing or invalid fields",
       "value": "dev-1"
     }
   ],

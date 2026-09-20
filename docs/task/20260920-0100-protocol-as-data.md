@@ -92,6 +92,29 @@ implementations drift.** It found two things:
    vector usually forgets to carry". It was already there, and it is what makes
    the positive case mean anything.
 
+## Every negative names the rule it fires (2026-09-20)
+
+An edited vector found in this workspace could be refused by two rules, and
+**a refused-vector that could be refused by two rules tests neither**. Applied
+to this repository's own negatives, which mica-build reads: the 33 `invalid`
+cases in `cases.json` were asserted with `is_err()` and named no rule. Each now
+carries a `refusal` field -- the message the rule actually produces, measured
+rather than assumed -- and `tests/components.rs` asserts it.
+
+Three cases are marked `alsoRefusedBy`, because their mutation is refused by
+more than one rule and the fixture format carries one pointer and one value, so
+they cannot be made minimal without a second field:
+
+| case | fires | also would fire |
+| --- | --- | --- |
+| `wrong-board` | `board/architecture mismatch` | component target mismatch, wrong boot format |
+| `wrong-arch` | `board/architecture mismatch` | component target mismatch |
+| `traversal` | `invalid digest` | component identity mismatch |
+
+Naming which rule wins is what keeps them honest: a reader now sees that
+`wrong-board` does **not** test "this board is unknown", which is what its name
+suggests and what a reader would otherwise assume.
+
 ## Not done, deliberately
 
 The reader accepts v2 only. No v1 acceptance, no aliases, no transition path:
