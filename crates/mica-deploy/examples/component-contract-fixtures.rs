@@ -34,5 +34,6 @@ fn main() -> anyhow::Result<()> {
     fs::write(directory.join("envelope.json"), generated.envelope)?;
     fs::write(directory.join("firmware.json"), generated.firmware)?;
     fs::write(directory.join("cases.json"), generated.cases)?;
+    fs::write(directory.join("catalog.json"), generated.catalog)?;
     Ok(())
 }

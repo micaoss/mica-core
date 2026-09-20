@@ -31,12 +31,13 @@ pub const FIRMWARE_KEY_LABEL: &str =
 /// The envelope schema every signed record carries.
 pub const ENVELOPE_SCHEMA: &str = "mica/update-envelope/v1";
 
-/// The four files, as their exact bytes.
+/// The five files, as their exact bytes.
 pub struct Fixtures {
     pub deployment: String,
     pub envelope: String,
     pub firmware: String,
     pub cases: String,
+    pub catalog: String,
 }
 
 /// The Ed25519 key a label names.
@@ -62,7 +63,7 @@ fn pretty(value: &Value) -> String {
     text
 }
 
-/// Derive the four files from the unsigned parts of `cases` and `firmware`.
+/// Derive the five files from the unsigned parts of `cases` and `firmware`.
 pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
     let mut cases = cases.clone();
     let valid = cases["valid"].as_object_mut().expect("valid descriptor");
@@ -82,11 +83,13 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
     let deployment = serde_json::to_string(&valid).expect("canonical descriptor");
 
     let deployment_key = key(DEPLOYMENT_KEY_LABEL);
-    let envelope: Value =
-        serde_json::from_str(&sign(&deployment_key, deployment.as_bytes())).expect("envelope");
+    // The signed envelope as BYTES, not as a Value: its four fields are in the
+    // order the readers require, which is not the order a Value serializes in.
+    let signed_deployment = sign(&deployment_key, deployment.as_bytes());
+    let envelope_value: Value = serde_json::from_str(&signed_deployment).expect("envelope");
     let envelope = pretty(&json!({
         "publicKey": STANDARD.encode(deployment_key.public_key().as_ref()),
-        "envelope": envelope,
+        "envelope": envelope_value,
     }));
 
     let firmware_key = key(FIRMWARE_KEY_LABEL);
@@ -106,10 +109,65 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
         "records": records,
     }));
 
+    // The catalog vector: one signed `mica/catalog/v2` document serving exactly
+    // the golden deployment, at the source and instant `cases.json` names. It
+    // is what an online update looks like on the wire, so a server
+    // implementation has bytes to verify itself against rather than a schema
+    // string it spells from memory.
+    let input = &cases["catalog"];
+    let source = input["source"].as_str().expect("catalog source");
+    let origin = source
+        .strip_suffix("/v1/manifest.json")
+        .expect("a source URL ends in /v1/manifest.json");
+    let mut objects = std::collections::BTreeMap::new();
+    for pointer in [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature",
+        "/rootfs/content/image",
+        "/rootfs/content/signature",
+    ] {
+        let artifact = valid.pointer(pointer).expect("artifact");
+        let sha = artifact["sha256"].as_str().expect("sha256").to_owned();
+        let url = format!("{origin}/v1/objects/{sha}");
+        objects.insert(
+            sha.clone(),
+            json!({"sha256": sha, "bytes": artifact["bytes"], "url": url}),
+        );
+    }
+    let payload = serde_json::to_vec(&json!({
+        "schema": "mica/catalog/v2",
+        "revision": input["revision"],
+        "issuedAt": input["issuedAt"],
+        "expiresAt": input["expiresAt"],
+        "channels": [{
+            "board": valid["board"],
+            "product": valid["product"],
+            "channel": input["channel"],
+            "releaseId": input["releaseId"],
+            "generation": valid["generation"],
+        }],
+        "releases": [{
+            "id": input["releaseId"],
+            "channel": input["channel"],
+            "notes": input["notes"],
+            "deployment": signed_deployment,
+            "objects": objects.values().collect::<Vec<_>>(),
+        }],
+    }))
+    .expect("canonical catalog");
+    let catalog = pretty(&json!({
+        "publicKey": STANDARD.encode(deployment_key.public_key().as_ref()),
+        "source": source,
+        "now": input["now"],
+        "envelope": serde_json::from_str::<Value>(&sign(&deployment_key, &payload)).expect("envelope"),
+    }));
+
     Fixtures {
         deployment,
         envelope,
         firmware,
         cases: pretty(&cases),
+        catalog,
     }
 }

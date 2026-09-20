@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-20 01:00 [progress]
+
+The update protocol becomes bytes both sides verify:
+
+- `crates/mica-deploy/tests/component-contracts/catalog.json` is a fifth shared
+  fixture from the same test-only generator: one signed `mica/catalog/v2`
+  document serving the golden deployment from a real source URL, with its
+  objects at `<origin>/v1/objects/<sha256>`. `tests/contract_protocol.rs`
+  verifies it through `verify_catalog`.
+- `cases.json` gains a `schemas` block, accepted and refused strings, driven
+  through all three readers. `mica/catalog/v1`, `mica/deployment/v1` and
+  `mica/rootfs/v1` are named as refused because a second update server
+  (`micaoss/mica-fleet` `apps/updates`) implements them today; the reader takes
+  v2 only, with no aliases.
+- Building the vector caught that field order is part of the wire contract: an
+  envelope re-serialised from a `Value` sorts its four fields alphabetically and
+  is refused as `noncanonical envelope`. No prose said so.
+
 ## 2026-09-19 10:30 [fix]
 
 The device side follows the 2026-09-16 board rename (`x64` to `uefi-x64`,

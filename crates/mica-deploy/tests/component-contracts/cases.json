@@ -110,6 +110,16 @@
       "result": "refused"
     }
   ],
+  "catalog": {
+    "channel": "stable",
+    "expiresAt": "2026-10-19T00:00:00Z",
+    "issuedAt": "2026-09-19T00:00:00Z",
+    "notes": "The shared catalog vector: one release, the golden deployment.",
+    "now": 1789862400,
+    "releaseId": "release-1",
+    "revision": 1,
+    "source": "https://updates.example/v1/manifest.json"
+  },
   "context": {
     "arch": "amd64",
     "board": "uefi-x64",
@@ -309,6 +319,38 @@
       "result": "refused"
     }
   ],
+  "schemas": {
+    "accepted": {
+      "catalog": "mica/catalog/v2",
+      "deployment": "mica/deployment/v2",
+      "envelope": "mica/update-envelope/v1",
+      "firmware": "mica/firmware/v1",
+      "kernel": "mica/kernel/v1",
+      "rootfs": "mica/rootfs/v2"
+    },
+    "refused": {
+      "catalog": [
+        "mica/catalog/v1",
+        "mica/catalog/v3",
+        "mica/update-catalog/v1"
+      ],
+      "deployment": [
+        "mica/deployment/v1",
+        "mica/deployment/v3"
+      ],
+      "envelope": [
+        "mica/update-envelope/v2",
+        "mica/envelope/v1"
+      ],
+      "kernel": [
+        "mica/kernel/v2"
+      ],
+      "rootfs": [
+        "mica/rootfs/v1",
+        "mica/rootfs/v3"
+      ]
+    }
+  },
   "valid": {
     "arch": "amd64",
     "board": "uefi-x64",
