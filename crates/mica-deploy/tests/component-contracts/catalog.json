@@ -5,6 +5,7 @@
     "schema": "mica/update-envelope/v1",
     "signature": "9gzfIMBXKnZDzpNfkO9YrDzRJ+OQg9YMV05K4a2Rm+orh5k2g8SsM27E3KbuZPu6oEmZMna2ynvMABddqrpjCQ=="
   },
+  "envelopeWireOrder": "the envelope object is stored sorted for readability; the WIRE FORM is schema, keyId, payload, signature, and a reader refuses any other order as `noncanonical envelope`. Rebuild the order before authenticating.",
   "now": 1789862400,
   "publicKey": "ImjnQQz69ZhxwgZsU6/UcR4DOddVZB/EBPC8Bq4w+BA=",
   "source": "https://updates.example/v1/manifest.json"

@@ -69,6 +69,29 @@ excluded for the same reason tests are -- a producer compiles its binaries with
 `cargo build --bin`, which never builds an example -- and `mica-deploy` and
 `mica-lifecycle` are `0.1.0-3`, which is what narrowing the manifest costs once.
 
+## What the second implementation found (2026-09-20)
+
+mica-build built a second reader for the vector rather than trusting the byte
+comparison, and the sentence behind that is worth keeping:
+`deploy-pool.sh --check` **proves both repositories hold the same bytes; it
+cannot prove both read them the same way, and the protocol is exactly where two
+implementations drift.** It found two things:
+
+1. **The stored envelope is tidy and the wire form is not.** A `Value`
+   re-serialises the four fields alphabetically; the reader re-serialises and
+   compares against the bytes it was handed, so only `schema, keyId, payload,
+   signature` authenticates. A consumer must rebuild that order before feeding
+   the fixture to a reader -- which this repository already knew, because the
+   same trap produced a `noncanonical envelope` refusal while the vector was
+   being built, and `tests/components.rs` has carried an `ordered_envelope`
+   helper for it. **Knowing it and not saying it in the bytes is what made the
+   next consumer debug it.** `envelope.json` and `catalog.json` now carry an
+   `envelopeWireOrder` field saying so, so the warning arrives with the file
+   rather than in a document somebody may not read.
+2. **A tampered signature is refused**, which mica-build called "the half a
+   vector usually forgets to carry". It was already there, and it is what makes
+   the positive case mean anything.
+
 ## Not done, deliberately
 
 The reader accepts v2 only. No v1 acceptance, no aliases, no transition path:

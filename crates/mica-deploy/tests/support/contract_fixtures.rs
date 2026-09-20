@@ -31,6 +31,15 @@ pub const FIRMWARE_KEY_LABEL: &str =
 /// The envelope schema every signed record carries.
 pub const ENVELOPE_SCHEMA: &str = "mica/update-envelope/v1";
 
+/// What `envelopeWireOrder` says in every fixture that carries an envelope.
+///
+/// The stored object is tidy; the wire form is not. `authenticate_payload`
+/// re-serialises the envelope and compares it against the bytes it was given,
+/// so a consumer must rebuild this order before feeding a fixture to a reader.
+pub const WIRE_ORDER: &str = "the envelope object is stored sorted for readability; the WIRE FORM is \
+     schema, keyId, payload, signature, and a reader refuses any other order \
+     as `noncanonical envelope`. Rebuild the order before authenticating.";
+
 /// The five files, as their exact bytes.
 pub struct Fixtures {
     pub deployment: String,
@@ -87,8 +96,15 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
     // order the readers require, which is not the order a Value serializes in.
     let signed_deployment = sign(&deployment_key, deployment.as_bytes());
     let envelope_value: Value = serde_json::from_str(&signed_deployment).expect("envelope");
+    // THE OBJECT BELOW IS STORED TIDY AND IS NOT THE WIRE FORM. A reader
+    // re-serialises the envelope and compares it against the bytes it was
+    // handed, so the four fields must arrive in the declared order; a `Value`
+    // sorts them alphabetically and is refused as `noncanonical envelope`. The
+    // note says so in the bytes, because the alternative is each new consumer
+    // learning it by debugging (mica-build hit it on 2026-09-20).
     let envelope = pretty(&json!({
         "publicKey": STANDARD.encode(deployment_key.public_key().as_ref()),
+        "envelopeWireOrder": WIRE_ORDER,
         "envelope": envelope_value,
     }));
 
@@ -160,6 +176,7 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
         "publicKey": STANDARD.encode(deployment_key.public_key().as_ref()),
         "source": source,
         "now": input["now"],
+        "envelopeWireOrder": WIRE_ORDER,
         "envelope": serde_json::from_str::<Value>(&sign(&deployment_key, &payload)).expect("envelope"),
     }));
 
