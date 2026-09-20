@@ -35,6 +35,9 @@ pub struct Settings {
     /// MQTT broker and bridge policy.
     #[serde(default)]
     pub mqtt: MqttSettings,
+    /// Bluetooth adapter policy and the devices this device trusts.
+    #[serde(default)]
+    pub bluetooth: BluetoothSettings,
     /// NTP server and presentation-timezone settings.
     #[serde(default)]
     pub time: TimeSettings,
@@ -53,6 +56,7 @@ impl Default for Settings {
             provisioning: ProvisioningSettings::default(),
             wifi: WifiSettings::default(),
             container: ContainerSettings::default(),
+            bluetooth: BluetoothSettings::default(),
             mqtt: MqttSettings::default(),
             time: TimeSettings::default(),
             reset: None,
@@ -172,6 +176,336 @@ pub struct ContainerSettings {
     /// Whether the Quadlet directory is bound from STATE and container units
     /// may run.
     pub enabled: bool,
+    /// The containers this device runs, by name.
+    ///
+    /// Empty and skipped when empty, so a device that declares none writes the
+    /// document it wrote before containers could be declared at all.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub units: BTreeMap<String, ContainerUnit>,
+}
+
+/// One container, as the fields a Quadlet `.container` unit needs.
+///
+/// A deliberately small subset of Quadlet's surface: enough to declare a
+/// container, and no field the renderer would have to keep honest forever for
+/// nobody. Unknown keys are refused like everywhere else.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContainerUnit {
+    /// The image reference, tag included.
+    pub image: String,
+    /// The command to run instead of the image's own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+    /// Environment variables passed into the container.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub environment: BTreeMap<String, String>,
+    /// Ports published from the host.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub publish: Vec<PublishedPort>,
+    /// Host paths mounted into the container.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<VolumeMount>,
+    /// What systemd does when the container exits.
+    #[serde(default)]
+    pub restart: RestartPolicy,
+    /// Whether the unit starts at boot.
+    #[serde(rename = "autoStart", default)]
+    pub auto_start: bool,
+}
+
+/// One published port: a host port, the container port behind it, and the
+/// protocol.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishedPort {
+    /// The port on the host.
+    pub host: u16,
+    /// The port inside the container.
+    pub container: u16,
+    /// `tcp` or `udp`.
+    #[serde(default)]
+    pub protocol: PortProtocol,
+}
+
+/// The transport a published port carries.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum PortProtocol {
+    /// TCP.
+    #[default]
+    Tcp,
+    /// UDP.
+    Udp,
+}
+
+impl PortProtocol {
+    /// The spelling podman takes in a `PublishPort=` line.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tcp => "tcp",
+            Self::Udp => "udp",
+        }
+    }
+}
+
+/// One bind mount from the device into the container.
+///
+/// **The host path is bounded to `/mica/`** by [`validate_container_units`].
+/// A bind of `/` or `/etc` hands the device's root filesystem to whatever the
+/// image runs, and the settings file is writable without apid, so the bound is
+/// stated here rather than only on the write path.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VolumeMount {
+    /// The path on the device.
+    pub host: String,
+    /// Where it appears inside the container.
+    pub container: String,
+    /// Whether the container sees it read-only.
+    #[serde(rename = "readOnly", default)]
+    pub read_only: bool,
+}
+
+/// What systemd does when a container exits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RestartPolicy {
+    /// Leave it stopped.
+    #[default]
+    No,
+    /// Restart it when it fails.
+    OnFailure,
+    /// Restart it whenever it stops.
+    Always,
+}
+
+impl RestartPolicy {
+    /// The spelling systemd takes in a `Restart=` line.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::No => "no",
+            Self::OnFailure => "on-failure",
+            Self::Always => "always",
+        }
+    }
+}
+
+/// The prefix every container volume's host path must sit under.
+///
+/// DATA, and nothing else. `/mica/` is the operator's half of the device;
+/// everything outside it is either the signed read-only root or the management
+/// plane's own state.
+pub const CONTAINER_VOLUME_ROOT: &str = "/mica/";
+
+/// The longest a container name may be.
+///
+/// It becomes `<name>.container` and then a unit name, and a name that cannot
+/// be a unit is a container that can be declared and never started.
+const MAX_CONTAINER_NAME_LEN: usize = 64;
+
+/// Refuse a container map no device could run.
+///
+/// Four rules, each of them a configuration Quadlet would accept and the
+/// device could not use:
+///
+/// - a name that is not a unit name fragment;
+/// - an empty image reference;
+/// - one host port published by two containers, which is two units racing for
+///   the same listener;
+/// - a volume whose host path is not under [`CONTAINER_VOLUME_ROOT`], or that
+///   climbs out of it with `..`.
+///
+/// # Errors
+///
+/// Returns the sentence the refusal carries.
+pub fn validate_container_units(units: &BTreeMap<String, ContainerUnit>) -> Result<(), String> {
+    let mut claimed: BTreeMap<(u16, PortProtocol), &str> = BTreeMap::new();
+    for (name, unit) in units {
+        if name.is_empty() || name.len() > MAX_CONTAINER_NAME_LEN {
+            return Err(format!(
+                "container name {name:?} is empty or longer than {MAX_CONTAINER_NAME_LEN} characters"
+            ));
+        }
+        if !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(format!(
+                "container name {name:?} contains a character a systemd unit name cannot have; use letters, digits, `-` and `_`"
+            ));
+        }
+        if unit.image.trim().is_empty() {
+            return Err(format!("container {name:?} declares no image"));
+        }
+        for port in &unit.publish {
+            if let Some(other) = claimed.insert((port.host, port.protocol), name) {
+                return Err(format!(
+                    "containers {other:?} and {name:?} both publish host port {}/{}",
+                    port.host,
+                    port.protocol.as_str()
+                ));
+            }
+        }
+        for volume in &unit.volumes {
+            if !volume.host.starts_with(CONTAINER_VOLUME_ROOT) || volume.host.contains("..") {
+                return Err(format!(
+                    "container {name:?} mounts {:?}; a container volume's host path is under {CONTAINER_VOLUME_ROOT} and may not climb out of it",
+                    volume.host
+                ));
+            }
+            if !volume.container.starts_with('/') {
+                return Err(format!(
+                    "container {name:?} mounts {:?} at {:?}, which is not an absolute path inside the container",
+                    volume.host, volume.container
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Bluetooth policy: whether the adapter runs, how it presents itself, and
+/// which devices it trusts.
+///
+/// Every field is declared. What BlueZ currently sees -- which devices are in
+/// range, which are connected -- is observed and lives nowhere in this tree:
+/// a paired phone that is switched off is still a declared device, and a phone
+/// in range that nobody paired is not one.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BluetoothSettings {
+    /// Whether `bluetooth.service` runs and the adapter is powered.
+    pub enabled: bool,
+    /// Whether the adapter answers a scan.
+    ///
+    /// Off by default: a device that is discoverable is one anybody in range
+    /// can see. Pairing turns it on for as long as the operator is pairing.
+    pub discoverable: bool,
+    /// The name the adapter advertises; absent advertises the hostname.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    /// The pairing code offered to a peer that asks for one.
+    ///
+    /// **Displayed, not hidden.** A legacy peer asks the device for a code and
+    /// somebody has to type it on the peer's keypad, so this value is shown in
+    /// the console by design and is not a secret. Absent derives one from the
+    /// device identity: fixed for this device, stable across boots, and not
+    /// the same code as every other device in the fleet -- the rule
+    /// [`WifiApSettings::psk`] states, applied to the one value here that has
+    /// to be readable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
+    /// The devices this device has paired with, by address.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub devices: BTreeMap<String, PairedDevice>,
+}
+
+/// One paired device, as the settings tree holds it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PairedDevice {
+    /// What it called itself when it paired; empty when it offered no name.
+    pub name: String,
+    /// Whether it may reconnect without being confirmed again.
+    pub trusted: bool,
+    /// Whether the adapter refuses it.
+    pub blocked: bool,
+}
+
+/// The digits a pairing code may carry, and how many.
+///
+/// Bluetooth's legacy PIN is 1 to 16 characters; every keypad that will be
+/// asked to enter one has digits and nothing else, so the code is digits.
+const MIN_PIN_LEN: usize = 4;
+const MAX_PIN_LEN: usize = 16;
+
+/// The pairing code this device offers when none is declared.
+///
+/// Derived from the device identifier: the first [`MIN_PIN_LEN`] digits of its
+/// hexadecimal, with each hex digit folded into a decimal one. Deterministic,
+/// so the console and the agent always show and answer the same code without
+/// storing it; per device, so a fleet does not share one PIN; and derived from
+/// the identity rather than from a credential, because it is displayed.
+#[must_use]
+pub fn derived_pairing_pin(device_id: &str) -> String {
+    let digits: String = device_id
+        .bytes()
+        .filter_map(|byte| (byte as char).to_digit(16))
+        .map(|value| char::from_digit(value % 10, 10).unwrap_or('0'))
+        .take(MIN_PIN_LEN)
+        .collect();
+    if digits.len() == MIN_PIN_LEN {
+        digits
+    } else {
+        // A device with no identifier yet: the reconciler has nothing to
+        // derive from, and a code that is shown has to be something.
+        "0".repeat(MIN_PIN_LEN)
+    }
+}
+
+/// Refuse a pairing code no keypad could enter.
+///
+/// # Errors
+///
+/// Returns the sentence the refusal carries.
+pub fn validate_pairing_pin(pin: &str) -> Result<(), String> {
+    if pin.len() < MIN_PIN_LEN || pin.len() > MAX_PIN_LEN {
+        return Err(format!(
+            "a pairing code is {MIN_PIN_LEN} to {MAX_PIN_LEN} digits"
+        ));
+    }
+    if !pin.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("a pairing code is digits: every keypad that will be asked to enter one has those and nothing else".to_string());
+    }
+    Ok(())
+}
+
+/// Refuse a device map no adapter could hold.
+///
+/// # Errors
+///
+/// Returns the sentence the refusal carries.
+pub fn validate_bluetooth(settings: &BluetoothSettings) -> Result<(), String> {
+    if let Some(pin) = &settings.pin {
+        validate_pairing_pin(pin)?;
+    }
+    if let Some(alias) = &settings.alias
+        && (alias.is_empty() || alias.len() > 64)
+    {
+        return Err("a Bluetooth alias is 1 to 64 characters".to_string());
+    }
+    for address in settings.devices.keys() {
+        if !is_bluetooth_address(address) {
+            return Err(format!(
+                "{address:?} is not a Bluetooth address: six hexadecimal octets separated by colons, such as `AA:BB:CC:DD:EE:FF`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `value` is the `AA:BB:CC:DD:EE:FF` an adapter names a device by.
+#[must_use]
+pub fn is_bluetooth_address(value: &str) -> bool {
+    let octets: Vec<&str> = value.split(':').collect();
+    octets.len() == 6
+        && octets
+            .iter()
+            .all(|octet| octet.len() == 2 && octet.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 /// MQTT policy: the master switch for the broker and the bridge, and the
@@ -742,6 +1076,67 @@ pub struct IfaceSettings {
     /// WireGuard parameters, for `kind = "wireguard"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wireguard: Option<WireguardConfig>,
+    /// Static routes this interface carries, beyond the default route a
+    /// `static.gateway` declares.
+    ///
+    /// Empty and skipped when empty, so an entry that declares none
+    /// serializes exactly as it did before routes existed: a document written
+    /// by a build that has this field is byte-identical to one written by a
+    /// build that does not, until someone uses it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<RouteConfig>,
+    /// The DHCP server this interface offers, if it offers one.
+    #[serde(
+        rename = "dhcpServer",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dhcp_server: Option<DhcpServerConfig>,
+}
+
+/// One static route, rendered as networkd's `[Route]`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteConfig {
+    /// Where the route leads, in CIDR notation. `0.0.0.0/0` is the default
+    /// route, which is what `static.gateway` already writes -- declaring both
+    /// is refused rather than rendered twice.
+    pub destination: String,
+    /// The next hop. Absent is a route out of this interface with no gateway,
+    /// which is what an on-link route is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<String>,
+    /// Route metric; absent leaves networkd's own default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<u32>,
+}
+
+/// The DHCP server offered on an interface, rendered as networkd's
+/// `[DHCPServer]`.
+///
+/// The pool is expressed the way networkd expresses it -- an offset into the
+/// interface's own subnet and a count -- rather than as a first and last
+/// address, because that is what the rendered file takes and a range converted
+/// twice is a range that can disagree with itself.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DhcpServerConfig {
+    /// First address handed out, as an offset from the subnet address.
+    #[serde(rename = "poolOffset")]
+    pub pool_offset: u32,
+    /// How many addresses the pool holds.
+    #[serde(rename = "poolSize")]
+    pub pool_size: u32,
+    /// DNS servers announced to clients; empty announces none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dns: Vec<String>,
+    /// Default lease time in seconds; absent leaves networkd's own default.
+    #[serde(
+        rename = "leaseSeconds",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub lease_seconds: Option<u32>,
 }
 
 /// The 802.1Q parameters of a VLAN interface.
@@ -886,6 +1281,28 @@ impl Settings {
             validate_network_key(iface).map_err(|message| SettingsError::Validation {
                 path: path.to_string(),
                 message,
+            })?;
+        }
+        // The same rule again, for the containers: a document that already
+        // loads keeps loading, and only a write that CHANGES the map has to
+        // satisfy its predicates.
+        // The same write-scoped rule again: a document that already loads
+        // keeps loading, and only a write that CHANGES the subtree has to
+        // satisfy its predicates.
+        if candidate.bluetooth != self.bluetooth {
+            validate_bluetooth(&candidate.bluetooth).map_err(|message| {
+                SettingsError::Validation {
+                    path: path.to_string(),
+                    message,
+                }
+            })?;
+        }
+        if candidate.container.units != self.container.units {
+            validate_container_units(&candidate.container.units).map_err(|message| {
+                SettingsError::Validation {
+                    path: path.to_string(),
+                    message,
+                }
             })?;
         }
         // Same rule as the network keys: a property of the write, not of the

@@ -1,6 +1,11 @@
 //! Reconciler contract shared by all micad reconcilers.
 
-mod container;
+/// Visible to the daemon for the reason `network` is: the bus surfaces the
+/// pairing actions, and they drive the unit this reconciler owns.
+pub mod bluetooth;
+/// Visible to the daemon for the reason `network` is: the container actions
+/// the bus surfaces drive the unit name this reconciler renders.
+pub mod container;
 mod hostname;
 mod mqtt;
 /// Visible to the daemon rather than to this module alone: the WireGuard key
@@ -8,7 +13,9 @@ mod mqtt;
 /// reconciler's mechanism reached from outside a reconcile.
 pub mod network;
 mod sshd;
-mod systemd;
+/// Visible to the daemon for the same reason: the container actions are
+/// systemd verbs, and the bus needs the trait they are spoken through.
+pub mod systemd;
 mod time;
 mod wifi_ap;
 mod wifi_client;
@@ -41,5 +48,11 @@ pub fn all() -> Vec<Box<dyn Reconciler>> {
         Box::new(container::ContainerReconciler::production()),
         Box::new(mqtt::MqttReconciler::production()),
         Box::new(time::TimeReconciler::production()),
+        // Last, and the only one whose subject is optional hardware: a board
+        // with no radio reports `unsupported` rather than failing.
+        Box::new(bluetooth::BluetoothReconciler::new(
+            systemd::Systemd::new(),
+            std::sync::Arc::new(crate::bluetooth::BlueZ),
+        )),
     ]
 }

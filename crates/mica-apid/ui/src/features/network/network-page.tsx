@@ -2,18 +2,19 @@ import { useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { Cable, ChevronRight, KeyRound, Plus, Trash2 } from 'lucide-react'
+import { Cable, ChevronRight, KeyRound, Plus, Radar, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
-import { configuredSummary, networkRows, type NetworkRow } from '@/lib/network'
-import type { NetworkOverview, TaskAccepted } from '@/lib/types'
+import { configuredSummary, networkRows, physicalInterfaces, visibleNetworkRows, type NetworkRow } from '@/lib/network'
+import type { NetworkOverview, ObservedNetworkState, TaskAccepted, WifiScan } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
+import { CopyField } from '@/shared/components/copy-field'
 import { CollectionPanel, Panel } from '@/shared/components/panel'
 import { DataTable } from '@/shared/components/data-table'
 import { FormDialog } from '@/shared/components/form-dialog'
 import { FormField, ToggleField } from '@/shared/components/form-field'
 import { MetricCard } from '@/shared/components/metric-card'
-import { Page, PageHeader, PageSection } from '@/shared/components/page'
+import { Page, PageHeader } from '@/shared/components/page'
 import { StatusBadge } from '@/shared/components/status-badge'
 import { TaskProgress } from '@/shared/components/task-progress'
 import { Button } from '@/shared/components/ui/button'
@@ -24,10 +25,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
 import { ObservedNetworkPanel } from '@/features/network/observed-network-panel'
+import { WifiApPanel } from '@/features/network/wifi-ap-panel'
+import { BluetoothPanel } from '@/features/network/bluetooth-panel'
 import { formatAge, formatKnownState } from '@/i18n/format'
 
 interface WifiNetwork { ssid: string; psk?: string; hidden: boolean; priority: number }
-interface WifiClient { enabled: boolean; interface: string; networks: WifiNetwork[] }
+interface WifiClientRole { enabled: boolean; interface: string }
 interface WireguardPeer { publicKey: string; allowedIps: string[]; endpoint?: string; persistentKeepalive?: number }
 interface WireguardRotation { publicKey: string }
 interface InterfaceConfig {
@@ -43,7 +46,9 @@ export function NetworkPage() {
   const { t } = useTranslation()
   const [adding, setAdding] = useState(false)
   const network = useQuery({ queryKey: ['network'], queryFn: () => api<NetworkOverview>('/api/v1/network'), refetchInterval: 10_000 })
-  const rows = networkRows(network.data?.configured, network.data?.observed.interfaces)
+  const allRows = networkRows(network.data?.configured, network.data?.observed.interfaces)
+  const rows = visibleNetworkRows(allRows)
+  const ports = physicalInterfaces(allRows)
   const age = formatAge(Date.now() - network.dataUpdatedAt, t)
   const summaryLabels = {
     notConfigured: t('network.summary.notConfigured'),
@@ -64,6 +69,8 @@ export function NetworkPage() {
           <TabsTrigger value="interfaces">{t('network.tabs.interfaces')}</TabsTrigger>
           <TabsTrigger value="wifi">{t('network.tabs.wifi')}</TabsTrigger>
           <TabsTrigger value="wireguard">{t('network.tabs.wireguard')}</TabsTrigger>
+          <TabsTrigger value="bluetooth">{t('network.tabs.bluetooth')}</TabsTrigger>
+          <TabsTrigger value="observed">{t('network.tabs.observed')}</TabsTrigger>
         </TabsList>
         <TabsContent value="interfaces" className="grid gap-6 pt-4">
           <CollectionPanel>
@@ -95,14 +102,16 @@ export function NetworkPage() {
               )}
             />
           </CollectionPanel>
-          <PageSection title={t('network.observed.title')} description={t('network.observed.addition')}>
-            <ObservedNetworkPanel />
-          </PageSection>
         </TabsContent>
         <TabsContent value="wifi" className="grid gap-6 pt-4"><WifiPanel /></TabsContent>
         <TabsContent value="wireguard" className="grid gap-6 pt-4"><WireguardPanel configured={(network.data?.configured ?? {}) as Record<string, InterfaceConfig>} /></TabsContent>
+        <TabsContent value="bluetooth" className="grid gap-6 pt-4"><BluetoothPanel /></TabsContent>
+        {/* What the device sees, device-wide: routes, DNS, radios. The
+            per-interface half of it is on each interface's own page, which is
+            where an operator who clicked a row is already looking. */}
+        <TabsContent value="observed" className="grid gap-6 pt-4"><ObservedNetworkPanel /></TabsContent>
       </Tabs>
-      <InterfaceDialog key={adding ? 'new' : 'closed'} open={adding} onClose={() => setAdding(false)} />
+      <InterfaceDialog key={adding ? 'new' : 'closed'} open={adding} onClose={() => setAdding(false)} ports={ports} />
     </Page>
   )
 }
@@ -115,7 +124,7 @@ function isOnline(row: NetworkRow) {
   return ['routable', 'carrier', 'degraded'].includes(row.observed?.operationalState ?? '')
 }
 
-function InterfaceDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; onClose: () => void; ports: string[] }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
@@ -124,17 +133,32 @@ function InterfaceDialog({ open, onClose }: { open: boolean; onClose: () => void
   const [address, setAddress] = useState('')
   const [gateway, setGateway] = useState('')
   const [dns, setDns] = useState('')
-  const [parent, setParent] = useState('eth0')
+  const [parent, setParent] = useState('')
   const [vlanId, setVlanId] = useState('100')
-  const [ports, setPorts] = useState('')
+  const [ports, setPorts] = useState<string[]>([])
   const [listenPort, setListenPort] = useState('51820')
+  // The first link the device actually has, rather than a name typed into the
+  // code: an appliance whose NIC is `enp1s0` had `eth0` pre-filled here, and a
+  // VLAN on an undeclared parent is refused by micad.
+  const parentValue = parent || candidates[0] || ''
+
+  // A tunnel has no DHCP client and no gateway of its own: its addressing is
+  // the address on the interface, and where its traffic goes is each peer's
+  // allowed IPs. Offering the switch would offer a configuration micad refuses.
+  const addressing = kind === 'wireguard' ? 'static' : dhcp ? 'dhcp' : 'static'
 
   const save = () => {
-    const value: InterfaceConfig = { dhcp }
+    const value: InterfaceConfig = { dhcp: addressing === 'dhcp' }
     if (kind !== 'physical') value.kind = kind
-    if (!dhcp) value.static = { address, ...(gateway ? { gateway } : {}), dns: splitList(dns) }
-    if (kind === 'vlan') value.vlan = { parent, id: Number(vlanId) }
-    if (kind === 'bridge') value.bridge = { ports: splitList(ports) }
+    if (addressing === 'static') {
+      value.static = {
+        address,
+        ...(gateway && kind !== 'wireguard' ? { gateway } : {}),
+        dns: kind === 'wireguard' ? [] : splitList(dns),
+      }
+    }
+    if (kind === 'vlan') value.vlan = { parent: parentValue, id: Number(vlanId) }
+    if (kind === 'bridge') value.bridge = { ports }
     if (kind === 'wireguard') value.wireguard = { listenPort: Number(listenPort), peers: [] }
     return api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(name)}`, json('PUT', value))
       .then(() => queryClient.invalidateQueries({ queryKey: ['network'] }))
@@ -162,28 +186,41 @@ function InterfaceDialog({ open, onClose }: { open: boolean; onClose: () => void
           </Select>
         )}
       </FormField>
-      <ToggleField
-        title={t('network.editor.dhcp')}
-        description={t('network.editor.dhcpCopy')}
-        control={<Switch checked={dhcp} onCheckedChange={setDhcp} aria-label={t('network.editor.dhcp')} />}
-      />
-      {!dhcp ? (
+      {kind === 'wireguard' ? (
+        <p className="text-sm text-muted-foreground">{t('network.editor.tunnelAddressing')}</p>
+      ) : (
+        <ToggleField
+          title={t('network.editor.dhcp')}
+          description={t('network.editor.dhcpCopy')}
+          control={<Switch checked={dhcp} onCheckedChange={setDhcp} aria-label={t('network.editor.dhcp')} />}
+        />
+      )}
+      {addressing === 'static' ? (
         <>
           <FormField label={t('network.editor.address')}>
             {(id) => <Input id={id} className="font-mono" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="192.168.1.20/24" required />}
           </FormField>
-          <FormField label={t('network.editor.gateway')}>
-            {(id) => <Input id={id} className="font-mono" value={gateway} onChange={(event) => setGateway(event.target.value)} />}
-          </FormField>
-          <FormField label={t('network.editor.dns')}>
-            {(id) => <Input id={id} className="font-mono" value={dns} onChange={(event) => setDns(event.target.value)} />}
-          </FormField>
+          {kind === 'wireguard' ? null : (
+            <>
+              <FormField label={t('network.editor.gateway')}>
+                {(id) => <Input id={id} className="font-mono" value={gateway} onChange={(event) => setGateway(event.target.value)} />}
+              </FormField>
+              <FormField label={t('network.editor.dns')}>
+                {(id) => <Input id={id} className="font-mono" value={dns} onChange={(event) => setDns(event.target.value)} />}
+              </FormField>
+            </>
+          )}
         </>
       ) : null}
       {kind === 'vlan' ? (
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label={t('network.editor.parent')}>
-            {(id) => <Input id={id} value={parent} onChange={(event) => setParent(event.target.value)} required />}
+          <FormField label={t('network.editor.parent')} hint={candidates.length === 0 ? t('network.editor.noPorts') : undefined}>
+            {(id) => (
+              <Select value={parentValue} onValueChange={(value) => setParent(String(value))}>
+                <SelectTrigger id={id} aria-label={t('network.editor.parent')}><SelectValue /></SelectTrigger>
+                <SelectContent>{candidates.map((name) => <SelectItem value={name} key={name}>{name}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
           </FormField>
           <FormField label={t('network.editor.vlanId')}>
             {(id) => <Input id={id} type="number" min={1} max={4094} value={vlanId} onChange={(event) => setVlanId(event.target.value)} required />}
@@ -191,8 +228,24 @@ function InterfaceDialog({ open, onClose }: { open: boolean; onClose: () => void
         </div>
       ) : null}
       {kind === 'bridge' ? (
-        <FormField label={t('network.editor.ports')}>
-          {(id) => <Input id={id} value={ports} onChange={(event) => setPorts(event.target.value)} placeholder="eth0, eth1" />}
+        <FormField label={t('network.editor.ports')} hint={candidates.length === 0 ? t('network.editor.noPorts') : t('network.editor.portsHint')}>
+          {/* A group and not a single control: the label names the set, and
+              each port carries its own checkbox label. */}
+          {(id) => (
+            <div id={id} role="group" aria-label={t('network.editor.ports')} className="grid gap-2 sm:grid-cols-2">
+              {candidates.map((name) => (
+                <label key={name} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-primary"
+                    checked={ports.includes(name)}
+                    onChange={(event) => setPorts(event.target.checked ? [...ports, name] : ports.filter((port) => port !== name))}
+                  />
+                  <span className="font-mono">{name}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </FormField>
       ) : null}
       {kind === 'wireguard' ? (
@@ -208,18 +261,29 @@ function WifiPanel() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<WifiNetwork>()
   const [ssid, setSsid] = useState('')
   const [psk, setPsk] = useState('')
   const [hidden, setHidden] = useState(false)
   const [priority, setPriority] = useState('0')
-  const client = useQuery({ queryKey: ['settings', 'wifi.client'], queryFn: () => api<WifiClient>('/api/v1/settings/wifi.client') })
+  const [radio, setRadio] = useState<string>()
+  // The station role, as its own resource: one radio, one switch. The list
+  // beside it is a separate collection because it carries keys.
+  const client = useQuery({ queryKey: ['wifi-client'], queryFn: () => api<WifiClientRole>('/api/v1/wifi/client') })
+  const status = useQuery({ queryKey: ['observed-network'], queryFn: () => api<ObservedNetworkState>('/api/v1/network/status'), retry: false })
   const networks = useQuery({ queryKey: ['wifi-networks'], queryFn: () => api<WifiNetwork[]>('/api/v1/wifi/client/networks') })
-  const toggle = useMutationFeedback<TaskAccepted, boolean>({
-    mutationFn: (enabled) => api<TaskAccepted>('/api/v1/settings/wifi.client.enabled', json('PUT', enabled)),
-    success: (_data, enabled) => t(enabled ? 'network.wifi.clientEnabled' : 'network.wifi.clientDisabled'),
+  const radios = status.data?.capabilities.wifi.interfaces ?? []
+  const currentRadio = radio ?? client.data?.interface ?? radios[0] ?? ''
+  const writeRole = useMutationFeedback<TaskAccepted, WifiClientRole>({
+    mutationFn: (role) => api<TaskAccepted>('/api/v1/wifi/client', json('PUT', role)),
+    success: (_data, role) => t(role.enabled ? 'network.wifi.clientEnabled' : 'network.wifi.clientDisabled'),
     failure: t('network.wifi.client'),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['settings', 'wifi.client'] }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['wifi-client'] }),
   })
+  const toggle = {
+    data: writeRole.data,
+    mutate: (enabled: boolean) => writeRole.mutate({ enabled, interface: currentRadio }),
+  }
   const remove = useMutationFeedback<void, string>({
     mutationFn: (name) => api<void>(`/api/v1/wifi/client/networks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     success: (_data, name) => t('network.wifi.removed', { name }),
@@ -233,6 +297,40 @@ function WifiPanel() {
       setSsid(''); setPsk(''); setHidden(false); setPriority('0')
       return queryClient.invalidateQueries({ queryKey: ['wifi-networks'] })
     })
+  // A scan is a POST: it sweeps every channel and briefly costs the station
+  // its link, so it happens when an operator asks and never on a render.
+  const scan = useMutationFeedback<WifiScan>({
+    mutationFn: () => api<WifiScan>('/api/v1/wifi/client/scan', { method: 'POST' }),
+    success: t('network.wifi.scanned'),
+    failure: t('network.wifi.scan'),
+  })
+
+  const connect = (network: NonNullable<WifiScan['networks']>[number]) => {
+    setSsid(network.ssid)
+    setPsk('')
+    setHidden(network.ssid === '')
+    setPriority('0')
+    setAdding(true)
+  }
+
+  const editNetwork = () => {
+    const entry = editing
+    if (!entry) return Promise.resolve()
+    return api<WifiNetwork>(`/api/v1/wifi/client/networks/${encodeURIComponent(entry.ssid)}`, json('PUT', {
+      ssid: entry.ssid,
+      // Absent keeps the stored key: the operator was never shown it, so an
+      // empty box is "leave it alone" and never "make this an open network".
+      ...(psk ? { psk } : {}),
+      hidden,
+      priority: Number(priority),
+    })).then(() => {
+      setEditing(undefined); setPsk('')
+      return queryClient.invalidateQueries({ queryKey: ['wifi-networks'] })
+    })
+  }
+  const startEditing = (entry: WifiNetwork) => {
+    setEditing(entry); setPsk(''); setHidden(entry.hidden); setPriority(entry.priority.toString())
+  }
   const clientState = client.isPending ? 'common.states.pending' : client.isError ? 'common.states.unknown' : client.data?.enabled ? 'common.states.enabled' : 'common.states.disabled'
   const panelError = client.error ?? networks.error
 
@@ -240,13 +338,44 @@ function WifiPanel() {
     <>
       <div className="flex flex-wrap items-center gap-3">
         <StatusBadge tone={client.isPending || client.isError ? 'warning' : client.data?.enabled ? 'success' : 'neutral'}>{t(clientState)}</StatusBadge>
-        <span className="font-mono text-sm text-muted-foreground">{client.data?.interface ?? 'wlan0'}</span>
+        {radios.length > 1 ? (
+          <Select value={currentRadio} onValueChange={(value) => { const next = String(value); setRadio(next); writeRole.mutate({ enabled: client.data?.enabled ?? false, interface: next }) }}>
+            <SelectTrigger className="w-40" aria-label={t('network.wifi.radio')}><SelectValue /></SelectTrigger>
+            <SelectContent>{radios.map((name) => <SelectItem value={name} key={name}>{name}</SelectItem>)}</SelectContent>
+          </Select>
+        ) : (
+          <span className="font-mono text-sm text-muted-foreground" aria-label={t('network.wifi.radio')}>{currentRadio || t('common.notAvailable')}</span>
+        )}
         <div className="ml-auto flex items-center gap-3">
           <Switch checked={client.data?.enabled ?? false} onCheckedChange={(value) => toggle.mutate(value)} aria-label={t('network.wifi.client')} />
           <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus />{t('network.wifi.add')}</Button>
         </div>
       </div>
       {panelError ? <Callout tone="danger" title={failureDetail(panelError, t('common.requestFailed'))} /> : null}
+      <CollectionPanel
+        title={t('network.wifi.scanTitle')}
+        action={(
+          <Button size="sm" variant="outline" onClick={() => scan.mutate()} disabled={scan.isPending}>
+            <Radar />{scan.isPending ? t('network.wifi.scanning') : t('network.wifi.scan')}
+          </Button>
+        )}
+      >
+        {scan.data && scan.data.available === false ? <Callout tone="warning" title={scan.data.detail ?? t('network.wifi.scanUnavailable')} /> : null}
+        <DataTable<NonNullable<WifiScan['networks']>[number]>
+          rows={scan.data?.networks}
+          rowKey={(entry) => entry.bssid}
+          isPending={scan.isPending}
+          empty={t('network.wifi.scanEmpty')}
+          columns={[
+            { id: 'ssid', header: 'SSID', cell: (entry) => <span className="font-mono">{entry.ssid || t('network.wifi.hiddenNetwork')}</span> },
+            { id: 'signal', header: t('network.wifi.signal'), cell: (entry) => entry.signalDbm === undefined ? '—' : `${entry.signalDbm} dBm` },
+            { id: 'security', header: t('network.wifi.security'), cell: (entry) => entry.flags.includes('PSK') ? t('network.wifi.wpa') : t('network.wifi.open') },
+            { id: 'actions', header: '', align: 'end', cell: (entry) => (
+              <Button type="button" size="sm" variant="outline" onClick={() => connect(entry)}>{t('network.wifi.connect')}</Button>
+            ) },
+          ]}
+        />
+      </CollectionPanel>
       <CollectionPanel>
         <DataTable<WifiNetwork>
           rows={networks.data}
@@ -259,6 +388,8 @@ function WifiPanel() {
             { id: 'credential', header: t('network.wifi.credential'), cell: (entry) => <StatusBadge>{t(entry.psk ? 'network.wifi.saved' : 'network.wifi.noCredential')}</StatusBadge> },
             { id: 'auto', header: t('network.wifi.auto'), cell: (entry) => t('network.wifi.priorityValue', { priority: entry.priority }) },
             { id: 'actions', header: '', align: 'end', cell: (entry) => (
+              <span className="flex justify-end gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => startEditing(entry)}>{t('common.actions.edit')}</Button>
               <ConfirmDialog
                 trigger={<Button type="button" size="sm" variant="destructive" aria-label={t('network.wifi.remove', { name: entry.ssid })}><Trash2 />{t('network.wifi.remove', { name: entry.ssid })}</Button>}
                 title={t('network.wifi.remove', { name: entry.ssid })}
@@ -268,10 +399,12 @@ function WifiPanel() {
                 failure={t('network.wifi.remove', { name: entry.ssid })}
                 onConfirm={() => remove.mutateAsync(entry.ssid)}
               />
+              </span>
             ) },
           ]}
         />
       </CollectionPanel>
+      <WifiApPanel />
       <TaskProgress taskId={toggle.data?.taskId} />
       <FormDialog
         open={adding}
@@ -294,6 +427,24 @@ function WifiPanel() {
         </FormField>
         <ToggleField title={t('network.wifi.hidden')} control={<Switch checked={hidden} onCheckedChange={setHidden} aria-label={t('network.wifi.hidden')} />} />
       </FormDialog>
+      <FormDialog
+        open={editing !== undefined}
+        onOpenChange={(next) => { if (!next) setEditing(undefined) }}
+        title={t('network.wifi.edit', { name: editing?.ssid ?? '' })}
+        description={t('network.wifi.editCopy')}
+        submitLabel={t('common.actions.save')}
+        success={t('network.wifi.added', { name: editing?.ssid ?? '' })}
+        failure={t('network.wifi.edit', { name: editing?.ssid ?? '' })}
+        onSubmit={editNetwork}
+      >
+        <FormField label={t('network.wifi.password')} hint={t('network.wifi.keepKey')}>
+          {(id) => <Input id={id} type="password" minLength={8} value={psk} onChange={(event) => setPsk(event.target.value)} placeholder={t('network.wifi.keepKeyPlaceholder')} />}
+        </FormField>
+        <FormField label={t('network.wifi.priority')}>
+          {(id) => <Input id={id} type="number" value={priority} onChange={(event) => setPriority(event.target.value)} />}
+        </FormField>
+        <ToggleField title={t('network.wifi.hidden')} control={<Switch checked={hidden} onCheckedChange={setHidden} aria-label={t('network.wifi.hidden')} />} />
+      </FormDialog>
     </>
   )
 }
@@ -310,6 +461,11 @@ function WireguardPanel({ configured }: { configured: Record<string, InterfaceCo
   const [allowedIps, setAllowedIps] = useState('')
   const [endpoint, setEndpoint] = useState('')
   const peers = useQuery({ queryKey: ['wireguard-peers', iface], queryFn: () => api<WireguardPeer[]>(`/api/v1/network/${encodeURIComponent(iface)}/peers`), enabled: Boolean(iface) })
+  // The public half of the key micad generated on the device. It is published
+  // into live state by the network reconciler and nowhere else: the private
+  // key never enters the settings tree, so this is the only place a remote
+  // peer's configuration can be read from.
+  const state = useQuery({ queryKey: ['state', 'network'], queryFn: () => api<Record<string, { publicKey?: string }>>('/api/v1/state/network'), retry: false })
   const remove = useMutationFeedback<void, string>({
     mutationFn: (key) => api<void>(`/api/v1/network/${encodeURIComponent(iface)}/peers/${encodeURIComponent(key)}`, { method: 'DELETE' }),
     success: t('network.wireguard.removed'),
@@ -327,6 +483,19 @@ function WireguardPanel({ configured }: { configured: Record<string, InterfaceCo
       return queryClient.invalidateQueries({ queryKey: ['wireguard-peers', iface] })
     })
 
+  // The rotation's answer first: it is newer than the live state the page last
+  // read, and an operator who just rotated is looking at this card.
+  const devicePublicKey = rotate.data?.publicKey ?? state.data?.[iface]?.publicKey
+  // The block a remote peer needs, in wg-quick's own spelling. `AllowedIPs` is
+  // this device's tunnel address: what the remote should route here, and the
+  // one value that cannot be guessed from the key.
+  const localPeerConfig = [
+    '[Peer]',
+    `PublicKey = ${devicePublicKey ?? ''}`,
+    `AllowedIPs = ${tunnel?.static?.address ?? ''}`,
+    ...(tunnel?.wireguard?.listenPort ? [`Endpoint = ${window.location.hostname}:${tunnel.wireguard.listenPort}`] : []),
+  ].join('\n')
+
   if (tunnels.length === 0) {
     return <Panel><p className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground"><KeyRound className="size-4" />{t('network.wireguard.empty')}</p></Panel>
   }
@@ -341,8 +510,13 @@ function WireguardPanel({ configured }: { configured: Record<string, InterfaceCo
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <MetricCard label={t('network.wireguard.tunnel')} mono value={`${iface} · ${tunnel?.static?.address ?? t('common.notAvailable')}`} caption={peers.data?.length ? t('network.wireguard.peerCount', { count: peers.data.length }) : t('network.wireguard.noPeers')} />
         <MetricCard label={t('network.wireguard.listen')} mono value={tunnel?.wireguard?.listenPort ? `${tunnel.wireguard.listenPort}/udp` : t('common.notAvailable')} caption={t('network.wireguard.listenCopy')} />
-        <MetricCard label={t('network.wireguard.publicKey')} mono value={<span className="text-sm break-all">{rotate.data?.publicKey ?? t('network.wireguard.keyHidden')}</span>} caption={t('network.wireguard.keyCopy')} />
+        <MetricCard label={t('network.wireguard.publicKey')} mono value={<span className="text-sm break-all">{devicePublicKey ?? t('network.wireguard.keyHidden')}</span>} caption={t('network.wireguard.keyCopy')} />
       </div>
+      {devicePublicKey ? (
+        <Panel title={t('network.wireguard.localTitle')} description={t('network.wireguard.localCopy')}>
+          <CopyField value={localPeerConfig} label={t('common.actions.copy')} />
+        </Panel>
+      ) : null}
       {peers.error ? <Callout tone="danger" title={failureDetail(peers.error, t('common.requestFailed'))} /> : null}
       <CollectionPanel
         title={t('network.wireguard.peers')}

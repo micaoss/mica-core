@@ -7,11 +7,12 @@ import { api, rememberSession } from '@/shared/lib/http'
 import { sessionKey } from '@/features/auth/auth'
 import { LanguageControl, ThemeControl } from '@/features/preferences/preferences'
 import { Button } from '@/shared/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/shared/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/shared/components/ui/dropdown-menu'
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/shared/components/ui/sheet'
 import type { Health, SystemInformation } from '@/lib/types'
 import { RotationNotice } from '@/features/onboarding/rotation-notice'
 import { connectionState, freshnessLabel } from './connection'
+import { BrandMark } from '@/shared/components/brand-mark'
 
 const nav = [
   { to: '/' as const, label: 'shell.nav.overview' as const, icon: LayoutGrid },
@@ -59,7 +60,7 @@ export function AppShell() {
       <header className="sticky top-0 z-40 border-b border-chrome-border bg-chrome text-chrome-foreground">
         <div className="mx-auto flex h-14 w-full max-w-[1280px] items-center gap-2 px-4 sm:px-6 lg:px-8">
           <Link to="/" className="flex min-w-0 flex-1 items-center gap-2.5 text-inherit no-underline" aria-label={t('shell.homeLabel')}>
-            <span className="logo-mark">m</span>
+            <BrandMark />
             <span className="flex min-w-0 flex-col leading-tight">
               <strong className="text-sm font-semibold">{t('shell.product')}</strong>
               <small className="truncate font-mono text-xs text-chrome-muted">{hostname.data ?? 'mica'}</small>
@@ -72,27 +73,17 @@ export function AppShell() {
             <Button variant="outline" size="icon" className={CHROME_CONTROL} onClick={refresh} aria-label={t('shell.refresh')} title={t('shell.refresh')}>
               <RefreshCw className={fetching ? 'animate-spin' : undefined} aria-hidden="true" />
             </Button>
-            {/* The language picker is its own control rather than a dialog
-                nested in the settings menu, which used to leave the menu open
-                on top of its own backdrop. */}
-            <LanguageControl className={`hidden w-40 lg:flex ${CHROME_CONTROL} [&_input]:text-chrome-foreground [&_input]:placeholder:text-chrome-muted`} />
+            {/* Both pickers are their own controls rather than dialogs nested
+                in the settings menu, which used to leave the menu open on top
+                of its own backdrop. They are icon-width now, so both fit at
+                every size and neither has a second spelling inside the menu. */}
+            <LanguageControl className="text-chrome-foreground hover:bg-chrome-hover hover:text-chrome-foreground" />
+            <ThemeControl className="text-chrome-foreground hover:bg-chrome-hover hover:text-chrome-foreground" />
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="outline" size="icon" className={CHROME_CONTROL} aria-label={t('shell.settings')} title={t('shell.settings')} />}>
                 <Settings2 aria-hidden="true" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64 p-2">
-                {/* A label is a group's label: base-ui refuses one outside a
-                    group, and the refusal takes the whole menu down. */}
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>{t('preferences.appearance')}</DropdownMenuLabel>
-                  <ThemeControl />
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup className="lg:hidden">
-                  <DropdownMenuLabel>{t('preferences.language')}</DropdownMenuLabel>
-                  <div className="px-1 pb-1"><LanguageControl className="w-full" /></div>
-                  <DropdownMenuSeparator />
-                </DropdownMenuGroup>
+              <DropdownMenuContent align="end" className="w-56 p-2">
                 <DropdownMenuItem disabled={logout.isPending} onClick={() => logout.mutate()}>
                   <LogOut aria-hidden="true" />{t('shell.signOut')}
                 </DropdownMenuItem>
@@ -106,7 +97,7 @@ export function AppShell() {
                 <SheetHeader className="flex-row items-center justify-between border-b p-3 pl-4">
                   <SheetTitle className="sr-only">{t('shell.navigationLabel')}</SheetTitle>
                   <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="logo-mark bg-primary text-primary-foreground">m</span>
+                    <BrandMark />
                     <span className="flex min-w-0 flex-col leading-tight">
                       <strong className="text-sm font-semibold">{t('shell.product')}</strong>
                       <small className="truncate font-mono text-xs text-muted-foreground">{hostname.data ?? 'mica'}</small>

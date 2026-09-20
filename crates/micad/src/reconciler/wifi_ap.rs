@@ -26,6 +26,16 @@ use super::network::{NetworkReload, Networkd};
 use super::systemd::{Systemd, UnitControl, is_active, is_enabled};
 use crate::identity;
 
+/// Directory hostapd opens its control socket in.
+///
+/// The socket is how the device can answer "who is connected": hostapd speaks
+/// the same request/reply protocol wpa_supplicant does, and without this line
+/// it opens no socket at all and the question has no answer.
+///
+/// Under `/run`, so it is a runtime path on a read-only root and disappears
+/// with the boot that made it.
+const CONTROL_DIR: &str = "/run/hostapd";
+
 /// Directory the `hostapd@.service` template reads its per-interface
 /// configuration from.
 const DEFAULT_CONFIG_DIR: &str = "/etc/hostapd";
@@ -361,6 +371,7 @@ fn render_config(ap: &WifiApSettings, ssid: &str, psk: &str) -> Result<String> {
     out.push_str("wpa_key_mgmt=WPA-PSK\n");
     out.push_str("rsn_pairwise=CCMP\n");
     out.push_str(&format!("{key}\n"));
+    out.push_str(&format!("ctrl_interface={CONTROL_DIR}\n"));
     Ok(out)
 }
 
@@ -662,7 +673,8 @@ mod tests {
         wpa=2\n\
         wpa_key_mgmt=WPA-PSK\n\
         rsn_pairwise=CCMP\n\
-        wpa_passphrase=labsecret1\n";
+        wpa_passphrase=labsecret1\n\
+        ctrl_interface=/run/hostapd\n";
     /// Golden networkd unit for `wlan0` at the default AP address.
     const GOLDEN_NETWORKD: &str = "[Match]\nName=wlan0\n\n\
         [Network]\nAddress=192.168.4.1/24\nDHCPServer=yes\n\n\

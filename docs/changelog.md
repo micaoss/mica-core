@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-20 10:40 [change]
+
+The console wears the brand mark (20260920-1035-console-brand-mark):
+
+- The header, the navigation sheet and the sign-in plate showed a lowercase
+  `m` in a tinted tile -- a stand-in from before the brand assets were in the
+  image. They show `favicon.svg` now, the icon micaos.dev serves, which
+  20260920-0811 already carried into the bundle.
+- One asset, not two spellings of it: `BrandMark` is an `<img>` against
+  `${import.meta.env.BASE_URL}favicon.svg` rather than a copy of the paths
+  inlined in a component, so the brand's colours stay in the file a component
+  may not name them in. The `logo-mark` rule and the `--logo` tokens are gone
+  with the glyph they styled.
+- The document's icon links are base-absolute (`/favicon.svg`, which Vite emits
+  as `/_ui/favicon.svg`). They were relative, so a reload on a deep route asked
+  for the icon under that route.
+
 ## 2026-09-20 10:30 [progress]
 
 The shared fixtures say more about themselves:
@@ -12,6 +29,295 @@ The shared fixtures say more about themselves:
   fires, measured and asserted, and the three whose mutation more than one rule
   would refuse are marked `alsoRefusedBy`. A refused-vector that could be
   refused by two rules tests neither.
+
+## 2026-09-20 10:20 [docs]
+
+The capability index, and the drift the inventory found
+(20260920-0542-feature-inventory):
+
+- `docs/features.md` answers the question neither `architecture.md` nor the
+  design pages do -- *what can this device do, and where is that implemented*
+  -- as one row per capability pointing at the owning crate and the section
+  that explains it. No design prose is duplicated into it: a row is a pointer,
+  so there is nothing in it to fall out of date except a path.
+- `docs/design/deployment.md` named the retired products `x64-dev` and
+  `x64-minimal`; it names the seven the assembly builds now. The same section
+  gains `catalog.json`, the `schemas` block and the canonical field order of an
+  envelope -- a wire-contract rule that 20260920-0100 recorded and no document
+  stated.
+- `docs/design/micad.md` had `4.4` and `4.5` sitting before `4.1`, from the
+  order they were appended in; they follow `4.3` now.
+- The system-log question from the device test is recorded as
+  20260920-1010-system-log-view rather than answered by guessing: a bounded
+  read over a unit allowlist and a live follow are different surfaces, and the
+  follow would be the first long-lived connection apid serves.
+
+## 2026-09-20 10:05 [feature]
+
+The automatic check can be a time of day (20260920-0629-daily-check-time):
+
+- `updates.json` gains `checkAt`, `HH:MM` **UTC** -- the rule
+  `maintenance.windows` already follows, because the device clock is UTC and
+  `time.timezone` is presentation only. Absent or `null` leaves the check on
+  `checkIntervalMinutes` measured from the daemon's start, which is what every
+  device does today.
+- The driver checks once per crossing of that clock face, and the interval is
+  not consulted while an anchor is set: an operator who named a time asked for
+  that time, not for that time or sooner. `checkIntervalMinutes = 0` still
+  means *no automatic checks* -- one switch turns them off, not two.
+- **An anchor crossed while the device was down does not fire at boot.** The
+  floor is seeded with the driver's start, so a device rebooting hourly under a
+  daily anchor checks daily; the cost is that a device that is off at its
+  anchor waits for the next one, and the interval remains the answer for a
+  device that is not on at a predictable hour.
+- **An unbelieved clock falls back to the interval**, rather than refusing: a
+  time of day is the one thing here that needs a wall clock, and a clockless
+  device must keep discovering updates. It is the same rule the install gate is
+  the other half of -- that one refuses, because an install is time-keyed
+  through the maintenance window.
+- `Cadence` answers a wall time beside its monotonic one, read only after
+  `ClockTrust::believed`, so an interval still cannot move when the clock is
+  set. `POST /api/v1/update/config` accepts `checkAt`, `GET /api/v1/update`
+  reports it beside the resolved cadence, and the console's policy pane has the
+  field with its UTC label.
+
+## 2026-09-20 09:24 [feature]
+
+Bluetooth is a declared trust list over BlueZ, and pairing is an action with an
+operator in it (20260920-0813-bluetooth-pairing, plan 20260920-0812):
+
+- `bluetooth.json` carries the subtree: the switch, `discoverable`, the
+  advertised `alias`, the legacy `pin` and the paired devices by address, each
+  with the name it gave, `trusted` and `blocked`. Declared and observed are
+  named apart -- a paired phone out of range and a phone in range nobody paired
+  are different facts, and the console shows which side each row came from.
+- The reconciler owns the unit, the adapter properties and the trust flags. It
+  is the first reconciler whose subject is **optional hardware**: a board with
+  no radio reports `unsupported` with the reason rather than failing, because a
+  reconciler that fails there fails on every pass forever. An absent alias
+  advertises the hostname. Only *paired* undeclared devices are removed --
+  sweeping merely-seen ones would delete the scan an operator is reading.
+- `GetBluetooth` reads the adapter and every device BlueZ knows over the system
+  bus, with the observer's usual unavailable default; `SetBluetoothDiscovery`,
+  `PairBluetoothDevice`, `ConfirmBluetoothPairing` and `RemoveBluetoothDevice`
+  are the actions. micad registers an `org.bluez.Agent1` of its own: one
+  pending request at a time, a bounded wait for the confirmation, and the
+  device list written under the same apply lock every settings write takes, so
+  a pair landing during a reconcile is not lost.
+- **The PIN is the device's own, shown rather than hidden.** A legacy peer with
+  no display is answered with `bluetooth.pin`, which is editable and defaults
+  to a value derived from this device's identity -- the access point key's
+  rule, applied to the one value here somebody has to read off the screen and
+  type on the other device. Not a fleet-wide constant: a constant would pair
+  every device in a fleet with one number.
+- `GET/PUT /api/v1/bluetooth`, `POST /api/v1/bluetooth/discovery`, and the
+  device routes (`pair`, `confirm`, `DELETE`) -- a resource group, because the
+  settings write route's allowlist does not carry this subtree. The console's
+  network page gains a Bluetooth tab: the adapter, the scan, the passkey
+  confirmation and the paired list.
+- `application-data` reset clears `bluetooth.devices`: a paired phone is
+  operator data, the conclusion the container work reached for its units.
+- No version bump: `micad` is already `0.1.0-2` and `mica-apid` `0.1.0-3` in
+  this unreleased set, and one bump covers every change since the release the
+  guard measures against. What the earlier `micad` bump missed is fixed here --
+  `mica-apid`, `mica-mqttd` and `mica-mqtt-broker` pin `micad (= 0.1.0-2)`
+  now, as `scripts/deb/producers.sh` requires, and `mica-mqttd` and
+  `mica-mqtt-broker` are `0.1.0-2` because that pin sits in their producer
+  directory and moves their inputs hash.
+
+## 2026-09-20 08:11 [change]
+
+The console chrome follows micaos.dev, and the Wi-Fi tab gains its missing
+halves (20260920-0811-console-chrome-and-wifi):
+
+- The language and appearance pickers are icon-triggered selects, the shape the
+  site uses for the same two controls. The language picker was a combobox with
+  a text input, which in a header slot read as an empty search box rather than
+  as the language the console is in; the theme control was a segmented control
+  inside the settings menu. Both are in the header now and the menu is down to
+  signing out.
+- The console has an icon: the site's `favicon.svg`, `favicon-32.png` and
+  `apple-touch-icon.png`, carried in the image because a device may have no
+  route off it. The SVG is the site's with its c2pa manifest stripped -- 8 KB
+  of provenance metadata about an icon, which is 95% of that file.
+- `lo0` and `dummy*` join the loopback and the container engine's `veth` ends
+  in what the interface list hides. A name an integrator chose, like
+  `lolink0`, still is not.
+- **Wi-Fi scanning**: `POST /api/v1/wifi/client/scan` and micad's `ScanWifi`
+  run `SCAN` then `SCAN_RESULTS` over wpa_supplicant's control socket, bounded
+  at 64 results. POST, because a scan sweeps every channel and briefly costs
+  the station its link. A hidden network is reported with an empty name rather
+  than dropped.
+- **The access point is configurable**: `GET/PUT /api/v1/wifi/ap`, with `psk`
+  read as `<redacted>` and kept when a write omits it -- the known-network
+  rule, so changing a channel cannot publish an open access point.
+- The console's Wi-Fi tab shows the access point, the networks on the air and
+  a Connect that opens the add dialog with the name filled in: joining a
+  network is declaring it.
+
+## 2026-09-20 07:46 [feature]
+
+An update archive can be uploaded from the console
+(20260920-0746-update-upload):
+
+- `ImportUpdate(path)` stages an offline `MICAUPD1` archive the way a fetch
+  stages a download -- same probe, same busy slot, same read bound, same
+  `mica-deploy` code path, so the signature, the product and every object
+  digest are checked exactly as they are for a download. **Not gated on the
+  network policy**: a metered link and a mode of `off` have nothing to say
+  about a file an operator carried here.
+- The path is bounded to `/mica/updates/uploads`, which is what keeps the bus
+  member from being a way to hand `mica-deploy` an arbitrary file, and the
+  upload is removed once the import settles either way.
+- `POST /api/v1/update/import` streams the body there under a name apid draws,
+  refuses a body that does not begin with `MICAUPD1` after eight bytes rather
+  than after a gigabyte, and answers 202.
+
+## 2026-09-20 07:37 [feature]
+
+The access point says who is connected to it (20260920-0737-ap-stations):
+
+- The AP reconciler renders `ctrl_interface=/run/hostapd`. Without it hostapd
+  opened no control socket, so the question had nowhere to be asked.
+- The observation gains `accessPoint`: per interface, each station's address,
+  signal, connected time and byte counters, walked over that socket with the
+  client wpa_supplicant is already asked through and bounded at 64 stations.
+  **No credential**: hostapd's reply carries key negotiation state and none of
+  it is read.
+- An interface with no hostapd on it is reported as one rather than as an
+  access point with no clients, and the console shows the stations beside the
+  associations -- one is this device joining a network, the other is a network
+  joining this device.
+
+## 2026-09-20 07:29 [feature]
+
+Containers are declared, rendered by Quadlet, observed through podman
+(20260920-0640-container-management, plan 20260920-0639):
+
+- `container.units` holds them: image, command, environment, published ports,
+  volumes, restart policy and `autoStart`, skipped when empty so a device that
+  declares none writes the document it wrote before. A volume's host path must
+  be under `/mica/`, checked in `micad-settings` and not only in apid, because
+  the document is writable without apid.
+- The reconciler renders `50-mica-<name>.container` per entry, compares before
+  writing, sweeps its own files and only its own, reloads so Quadlet
+  regenerates, and starts each unit its entry asks to start. Nothing is
+  rendered with the switch off: the directory is not mounted then.
+- `containers.rs` reads the engine and never writes it -- `podman ps --all` and
+  `podman images`, bounded in time and output, no `run`, no `rm`, no `pull`.
+  Starting a unit pulls the image if it has to, which keeps the one writer of
+  container state the unit file.
+- `GetContainers` names the declared map and the engine read apart rather than
+  merging them; `StartContainer`, `StopContainer` and `RestartContainer` are
+  systemd verbs on the generated unit, refused for a name the settings tree
+  does not hold.
+- apid serves `GET /api/v1/containers`, `PUT/DELETE /api/v1/containers/{name}`
+  and `POST /api/v1/containers/{name}/{action}` for exactly three actions, and
+  the console's containers page lists declared beside observed with start,
+  stop, restart, edit and a removal that says data under `/mica/` stays.
+- The `application-data` reset clears the declarations with the data
+  (20260920-0730-reset-clears-containers). A declared container is an operator
+  application: clearing the volumes and keeping the map would leave a reset
+  device running the same workload against an empty volume.
+
+## 2026-09-20 07:23 [feature]
+
+Static routes and a DHCP server on a declared interface
+(20260920-0723-routes-and-dhcp-server):
+
+- `IfaceSettings` gains `routes` and `dhcpServer`, both skipped when empty, so
+  an entry that declares neither serializes exactly as it did before they
+  existed. `network.json` keeps schema version 1 for that reason: bumping it
+  would make every older micad refuse every newer document, including the ones
+  that use nothing new.
+- Rendered as networkd `[Route]` sections and a `[DHCPServer]` block with
+  `DHCPServer=yes`. **A bridge port renders neither**: a port's addressing is
+  the bridge's, so a route or a server on one is a configuration networkd would
+  accept and nothing could use.
+- apid refuses, before anything is written: a destination that is not a
+  network, a next hop that is not an address, a second default route beside
+  `static.gateway`, a server on a link that is itself a DHCP client, an empty
+  pool, and an announced DNS server that is not an address.
+
+## 2026-09-20 07:00 [change]
+
+The network page shows what the device has and edits it
+(20260920-0700-network-page):
+
+- The interface list hides the loopback and the container engine's `veth`
+  ends, always keeping a declared entry. Observation moved: the device-wide
+  half (routes, DNS, radios) to its own tab, the per-interface half to that
+  interface's page, rendered by the same component.
+- An interface can be edited and removed: kind-level fields (VLAN parent and
+  id as selectors over the links the device actually has, bridge ports the
+  same, tunnel listen port) and a delete behind a confirmation. A tunnel is
+  offered neither DHCP nor a gateway, and the page says why.
+- The WireGuard tab prints the device's own `[Peer]` block with a copy
+  control, read from the public key the network reconciler publishes.
+- Two new routes, because the console could not do this without them:
+  `GET/PUT /api/v1/wifi/client` for the station's radio and switch -- the
+  interface was on no writable path at all -- and
+  `PUT /api/v1/wifi/client/networks/{ssid}`, where **`psk` absent keeps the
+  stored key**: a read substitutes the redaction sentinel, so an operator
+  changing a priority has not been shown the key.
+
+## 2026-09-20 06:58 [feature]
+
+`GET/PUT /api/v1/mqtt`, one resource for the broker and the bridge:
+
+- The listener is one decision -- an address and a port that take effect
+  together -- so it is one document and one write, not three entries on the
+  scalar settings allowlist. `GET` answers `{ configured, observed }` without
+  merging them: the declared listener and the one the broker is bound to differ
+  for as long as a reconcile takes, and after a failed one until someone looks.
+  `PUT` replaces the subtree, answers the apply task's id, and refuses a bind
+  address that is not an IP literal or a port of 0 -- failures the settings tree
+  would otherwise pass to a broker that then will not start.
+- `mqtt.enabled` stays a scalar write: the service switch owns it, and the
+  listener form carries it through unchanged so editing a listener cannot start
+  or stop the broker.
+- The console's MQTT service page gains the listener form and an observed panel
+  (both units, the bound listener, the rendered configuration path), and the
+  open-listener warning returns: bound off loopback, authentication off
+  (20260920-0733-mqtt-resource).
+- `mica-apid` is `0.1.0-3`: every change in this entry and the one below is in
+  that crate or its UI, so its inputs hash moves and the guard requires the
+  bump. `micad`, `mica-mqttd`, `mica-mqtt-broker`, `mica-sftp-server`,
+  `mica-deploy` and `mica-lifecycle` are untouched.
+
+## 2026-09-20 06:55 [change]
+
+Console work from a device test, and one credential that should never have
+existed:
+
+- **First-run setup mints no API token.** `POST /api/v1/setup` returned a
+  bearer secret on every call because it was once one of two setup clients; the
+  server-rendered wizard it was written for is gone, so the console was the only
+  caller and every operator got a long-lived credential they never asked for.
+  `SetupToken` is now `SetupResult`, carrying the session's CSRF token alone,
+  and `POST /api/v1/tokens` is the one way to get a bearer credential. The route
+  also documented "Answers 200" while returning 201
+  (20260920-0655-setup-mints-no-token).
+- **The overview names the uplink.** Its network card took the first observed
+  interface carrying any address, which is the loopback on every device, so it
+  read `lo · 127.0.0.1`. It now reads `/api/v1/network/status` and selects the
+  interface a default route leaves by, falling back to the first globally
+  addressed non-loopback link. The page also gained a device panel -- machine
+  id, board, software version, deployment, kernel -- from the
+  `/api/v1/system/info` document it already fetched
+  (20260920-0549-overview-uplink-and-identity).
+- **The web terminal is removed**, not deferred: card, detail pane, switch,
+  window, simulation flag, colour tokens and e2e block. It showed a fixed
+  transcript and took no input, and a root shell over HTTPS is not being built.
+  `ServiceDefinition` now requires a settings path and a state path, so every
+  card in the catalogue is one the device can answer for
+  (20260920-0611-remove-web-terminal).
+- **The update cadence reads in days and hours.** `checkIntervalMinutes` is
+  unchanged on the device; the field is a number and a unit, shown in the
+  largest unit that divides the stored value exactly, so a daily check reads as
+  `1 Days` and not `1440`. A check anchored to a time of day is
+  20260920-0629-daily-check-time and is not started: micad schedules from an
+  interval, not an anchor (20260920-0628-update-cadence-unit).
 
 ## 2026-09-20 01:00 [progress]
 

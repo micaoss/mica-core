@@ -32,7 +32,7 @@ export function ObservedNetworkPanel() {
         <>
           <Panel title={t('network.observed.interfaces.title')} description={t('network.observed.interfaces.description')} action={<Cable className="size-5 text-muted-foreground" />}>
             {!value.interfaces.available ? <Callout tone="warning"><Unavailable fact={value.interfaces} /></Callout> : null}
-            {value.interfaces.entries?.map((entry) => <InterfaceDetails key={entry.name} value={entry} />)}
+            {value.interfaces.entries?.map((entry) => <ObservedInterfaceFacts key={entry.name} value={entry} />)}
             {value.interfaces.available && value.interfaces.count === 0 ? <p className="py-4 text-center text-sm text-muted-foreground">{t('network.observed.interfaces.empty')}</p> : null}
           </Panel>
           <div className="grid gap-3 lg:grid-cols-2">
@@ -60,6 +60,7 @@ export function ObservedNetworkPanel() {
             </Panel>
           </div>
           <div className="grid gap-3 lg:grid-cols-2">
+            <AccessPointStations value={value.accessPoint} />
             <WifiAssociations value={value.wifi} />
             <Panel title={t('network.observed.capabilities.title')} description={t('network.observed.capabilities.description')} action={<Radio className="size-5 text-muted-foreground" />}>
               <FactList facts={[
@@ -72,6 +73,32 @@ export function ObservedNetworkPanel() {
         </>
       ) : null}
     </div>
+  )
+}
+
+/// Who is connected to this device's own access point.
+///
+/// The other direction from the associations beside it: those are this device
+/// joining someone else's network, these are someone else joining this one.
+function AccessPointStations({ value }: { value: ObservedNetworkState['accessPoint'] }) {
+  const { t } = useTranslation()
+  const entries = value.entries ?? []
+  const stations = entries.flatMap((entry) => entry.stations.map((station) => ({ ...station, interface: entry.interface })))
+  return (
+    <Panel title={t('network.observed.stations.title')} description={t('network.observed.stations.description')} action={<Radio className="size-5 text-muted-foreground" />}>
+      {!value.available ? <Callout tone="warning"><Unavailable fact={value} /></Callout> : (
+        <FactList facts={stations.map((station) => ({
+          id: `${station.interface}-${station.mac}`,
+          label: <span className="font-mono">{station.mac}</span>,
+          value: join([
+            station.interface,
+            station.signalDbm === undefined ? undefined : `${station.signalDbm} dBm`,
+            station.connectedSeconds === undefined ? undefined : t('network.observed.stations.connected', { minutes: Math.round(station.connectedSeconds / 60) }),
+          ]),
+        }))} />
+      )}
+      {value.available && stations.length === 0 ? <p className="py-4 text-center text-sm text-muted-foreground">{t('network.observed.stations.empty')}</p> : null}
+    </Panel>
   )
 }
 
@@ -97,7 +124,13 @@ function WifiAssociations({ value }: { value: ObservedNetworkState['wifi'] }) {
   )
 }
 
-function InterfaceDetails({ value }: { value: ObservedNetworkInterface }) {
+/// One interface's observation: the link, its addresses and their source, the
+/// lease, the link's DNS and its association if it is a radio.
+///
+/// Exported because the interface page shows the same reading for one
+/// interface that this panel shows for all of them, and two renderings of one
+/// observation drift.
+export function ObservedInterfaceFacts({ value }: { value: ObservedNetworkInterface }) {
   const { t } = useTranslation()
   const link = join([value.link.operationalState, value.link.carrierState ? t('network.observed.interfaces.carrier', { state: value.link.carrierState }) : undefined, value.link.onlineState])
   const lease = value.dhcp.lease

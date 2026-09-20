@@ -76,6 +76,17 @@ trait Micad {
     fn get_failure_evidence(&self) -> zbus::Result<String>;
     fn set_transient_root_password(&self, password: &str) -> zbus::Result<String>;
     fn rotate_wireguard_key(&self, iface: &str) -> zbus::Result<String>;
+    fn get_containers(&self) -> zbus::Result<String>;
+    fn scan_wifi(&self) -> zbus::Result<String>;
+    fn get_bluetooth(&self) -> zbus::Result<String>;
+    fn set_bluetooth_discovery(&self, on: bool) -> zbus::Result<()>;
+    fn pair_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
+    fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> zbus::Result<()>;
+    fn remove_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
+    fn import_update(&self, path: &str) -> zbus::Result<()>;
+    fn start_container(&self, name: &str) -> zbus::Result<()>;
+    fn stop_container(&self, name: &str) -> zbus::Result<()>;
+    fn restart_container(&self, name: &str) -> zbus::Result<()>;
     fn reboot(&self) -> zbus::Result<()>;
     fn power_off(&self) -> zbus::Result<()>;
     fn get_update_state(&self) -> zbus::Result<String>;
@@ -398,6 +409,86 @@ impl SettingsApi for BusSettings {
         let proxy = self.proxy().await?;
         self.call("RotateWireguardKey", proxy.rotate_wireguard_key(iface))
             .await
+    }
+
+    /// The Bluetooth trust list, the adapter, the devices and the code a
+    /// legacy peer is answered with.
+    async fn get_bluetooth(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetBluetooth", proxy.get_bluetooth()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    /// Start or stop a scan.
+    async fn set_bluetooth_discovery(&self, on: bool) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call("SetBluetoothDiscovery", proxy.set_bluetooth_discovery(on))
+            .await
+    }
+
+    /// Pair with a device and record it in the trust list.
+    async fn pair_bluetooth_device(&self, address: &str) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call("PairBluetoothDevice", proxy.pair_bluetooth_device(address))
+            .await
+    }
+
+    /// Answer the passkey the agent is holding.
+    async fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "ConfirmBluetoothPairing",
+            proxy.confirm_bluetooth_pairing(address, accept),
+        )
+        .await
+    }
+
+    /// Drop a device from the trust list and from the adapter.
+    async fn remove_bluetooth_device(&self, address: &str) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "RemoveBluetoothDevice",
+            proxy.remove_bluetooth_device(address),
+        )
+        .await
+    }
+
+    /// Scan for WiFi networks on the station's radio.
+    async fn scan_wifi(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("ScanWifi", proxy.scan_wifi()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    /// Ask micad to import the archive apid streamed to the device.
+    async fn import_update(&self, path: &str) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call("ImportUpdate", proxy.import_update(path)).await
+    }
+
+    /// The declared container map and what the engine reports, as micad joins
+    /// them -- each side named, never merged.
+    async fn get_containers(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetContainers", proxy.get_containers()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    /// One container lifecycle verb. micad drives the unit Quadlet generated
+    /// for the container, never podman.
+    async fn container_action(&self, name: &str, action: &str) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        match action {
+            "start" => {
+                self.call("StartContainer", proxy.start_container(name))
+                    .await
+            }
+            "stop" => self.call("StopContainer", proxy.stop_container(name)).await,
+            _ => {
+                self.call("RestartContainer", proxy.restart_container(name))
+                    .await
+            }
+        }
     }
 
     async fn get_update_state(&self) -> anyhow::Result<Value> {

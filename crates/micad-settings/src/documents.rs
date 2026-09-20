@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-    AccessSettings, ApiToken, ClaimSettings, ConsoleSettings, ContainerSettings,
+    AccessSettings, ApiToken, BluetoothSettings, ClaimSettings, ConsoleSettings, ContainerSettings,
     DeviceCredentialSettings, IfaceSettings, MqttSettings, ProvisioningSettings, ResetSettings,
     Settings, SshSettings, TimeSettings, WebAdminSettings, WifiSettings,
 };
@@ -32,7 +32,7 @@ pub const DOCUMENT_MODE: u32 = 0o600;
 
 /// The namespace's own index: the documents this schema writes, in the order
 /// the table names them.
-pub const CONFIG_DOCUMENTS: [&str; 7] = [
+pub const CONFIG_DOCUMENTS: [&str; 8] = [
     SYSTEM_DOCUMENT,
     NETWORK_DOCUMENT,
     WIFI_DOCUMENT,
@@ -40,6 +40,7 @@ pub const CONFIG_DOCUMENTS: [&str; 7] = [
     MQTT_DOCUMENT,
     TIME_DOCUMENT,
     CONTAINER_DOCUMENT,
+    BLUETOOTH_DOCUMENT,
 ];
 
 /// The addressed-tree subtrees each `/mica/config/` document carries.
@@ -47,7 +48,7 @@ pub const CONFIG_DOCUMENTS: [&str; 7] = [
 /// The document mapping in the form a caller can compute with, rather than as
 /// prose a reader has to re-derive. Two callers need it and both are the
 /// pour's:
-pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 7] = [
+pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 8] = [
     (SYSTEM_DOCUMENT, &["hostname", "access.console"]),
     (NETWORK_DOCUMENT, &["network"]),
     (WIFI_DOCUMENT, &["wifi"]),
@@ -55,6 +56,7 @@ pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 7] = [
     (MQTT_DOCUMENT, &["mqtt"]),
     (TIME_DOCUMENT, &["time"]),
     (CONTAINER_DOCUMENT, &["container"]),
+    (BLUETOOTH_DOCUMENT, &["bluetooth"]),
 ];
 
 /// The subtrees `document` carries, or `&[]` for a name that is not a
@@ -84,6 +86,8 @@ pub const MQTT_DOCUMENT: &str = "mqtt.json";
 pub const TIME_DOCUMENT: &str = "time.json";
 /// The `container` subtree; the container reconciler.
 pub const CONTAINER_DOCUMENT: &str = "container.json";
+/// The `bluetooth` subtree; the bluetooth reconciler.
+pub const BLUETOOTH_DOCUMENT: &str = "bluetooth.json";
 
 /// Schema version of `system.json`.
 pub const SYSTEM_SCHEMA_VERSION: u32 = 1;
@@ -99,6 +103,8 @@ pub const MQTT_SCHEMA_VERSION: u32 = 1;
 pub const TIME_SCHEMA_VERSION: u32 = 1;
 /// Schema version of `container.json`.
 pub const CONTAINER_SCHEMA_VERSION: u32 = 1;
+/// Schema version of `bluetooth.json`.
+pub const BLUETOOTH_SCHEMA_VERSION: u32 = 1;
 /// Schema version of the STATE document.
 ///
 /// The remainder is a document too and takes the same rule: it is not exempt
@@ -191,6 +197,17 @@ pub struct ContainerDocument {
     pub container: ContainerSettings,
 }
 
+/// `bluetooth.json`: the adapter policy and the devices this device trusts.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BluetoothDocument {
+    /// Version of this document alone.
+    pub schema_version: u32,
+    /// `bluetooth` in the addressed tree.
+    #[serde(default)]
+    pub bluetooth: BluetoothSettings,
+}
+
 /// The half of `access` that stays on STATE.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -249,6 +266,7 @@ pub(crate) struct DocumentSet {
     pub mqtt: MqttDocument,
     pub time: TimeDocument,
     pub container: ContainerDocument,
+    pub bluetooth: BluetoothDocument,
     pub state: StateDocument,
 }
 
@@ -285,6 +303,10 @@ impl DocumentSet {
                 schema_version: CONTAINER_SCHEMA_VERSION,
                 container: settings.container.clone(),
             },
+            bluetooth: BluetoothDocument {
+                schema_version: BLUETOOTH_SCHEMA_VERSION,
+                bluetooth: settings.bluetooth.clone(),
+            },
             state: StateDocument {
                 schema_version: STATE_SCHEMA_VERSION,
                 provisioning: settings.provisioning.clone(),
@@ -315,6 +337,7 @@ impl DocumentSet {
             provisioning: self.state.provisioning,
             wifi: self.wifi.wifi,
             container: self.container.container,
+            bluetooth: self.bluetooth.bluetooth,
             mqtt: self.mqtt.mqtt,
             time: self.time.time,
             reset: self.state.reset,
@@ -351,6 +374,7 @@ document_default!(SshDocument, ssh);
 document_default!(MqttDocument, mqtt);
 document_default!(TimeDocument, time);
 document_default!(ContainerDocument, container);
+document_default!(BluetoothDocument, bluetooth);
 document_default!(StateDocument, state);
 
 #[cfg(test)]

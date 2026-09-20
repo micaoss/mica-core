@@ -24,6 +24,11 @@ Both daemons ship disabled. The `mqtt` settings subtree decides:
 | `mqtt.listen.address`, `mqtt.listen.port` | `127.0.0.1`, `1883` | The broker's single listener; a wider bind is a deliberate operator change |
 | `mqtt.auth.enabled` | `false` | Whether a client must authenticate; the accounts are read from `/var/lib/mica/mqtt-broker-users.toml` on STATE, never from the settings tree |
 
+apid serves the subtree as one resource, `GET/PUT /api/v1/mqtt`, with the
+reconciler's live state beside it; `mqtt.enabled` is also writable on its own
+through `PUT /api/v1/settings/mqtt.enabled`, which is what the console's
+service switch uses.
+
 micad's `mqtt` reconciler renders `/run/mica/mqtt-broker.toml` and
 `/run/mica/mqttd-device.env` (the validated device identity only) before it
 brings `mica-mqtt-broker.service` and `mica-mqttd.service` to the requested

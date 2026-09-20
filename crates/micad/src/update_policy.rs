@@ -52,6 +52,18 @@ impl LoadedPolicy {
             }
         }
     }
+
+    /// The `HH:MM` UTC the checks are anchored to, or `None` when they run on
+    /// the interval alone.
+    ///
+    /// Gated on [`Self::auto_check_minutes`]: a device that initiates nothing
+    /// has no check to anchor, and `checkIntervalMinutes = 0` still means
+    /// *no automatic checks* even under an anchor -- one switch turns them
+    /// off, not two.
+    pub fn auto_check_at(&self) -> Option<&str> {
+        self.auto_check_minutes()?;
+        self.policy.check_at.as_deref()
+    }
 }
 
 /// Reads the operator document fresh per decision, resolved over the baked

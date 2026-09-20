@@ -6,6 +6,7 @@ import {
   RouterProvider,
   createMemoryHistory,
   createRootRoute,
+  createRoute,
   createRouter,
 } from '@tanstack/react-router'
 import { vi } from 'vitest'
@@ -46,6 +47,32 @@ export function renderRoute(node: ReactNode, path = '/') {
   })
   const router = createRouter({
     routeTree: rootRoute,
+    history: createMemoryHistory({ initialEntries: [path] }),
+  })
+  return render(<RouterProvider router={router as never} />)
+}
+
+/// The same again for a page that reads its own route parameters: the node is
+/// mounted under `routePath`, so a `useParams({ from: routePath })` inside it
+/// resolves the way it does in the generated tree.
+export function renderParamRoute(node: ReactNode, routePath: string, path: string) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  const rootRoute = createRootRoute()
+  const paramRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: routePath,
+    component: () => (
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={queryClient}>
+          <Toaster>{node}</Toaster>
+        </QueryClientProvider>
+      </I18nextProvider>
+    ),
+  })
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([paramRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   return render(<RouterProvider router={router as never} />)

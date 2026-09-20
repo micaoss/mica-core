@@ -119,15 +119,6 @@ test('labels every route that contains simulated behavior', async ({ page }, tes
     await page.goto(path)
     await expect(page.getByText('Simulation', { exact: true })).toBeVisible()
     await expect(page.getByText(/does not change this device/)).toBeVisible()
-    if (path === './services') {
-      await page.getByRole('link', { name: 'Web terminal' }).click()
-      await page.getByRole('switch', { name: 'Web terminal' }).click()
-      await page.getByRole('button', { name: 'Open terminal' }).click()
-      const terminal = page.getByRole('dialog', { name: 'Web terminal' })
-      await expect(terminal).toBeVisible()
-      await expect(terminal).toContainText('accepts no input')
-      await terminal.getByRole('button', { name: 'End session' }).click()
-    }
   }
 })
 

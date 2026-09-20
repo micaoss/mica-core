@@ -467,3 +467,110 @@ async fn explicit_native_deployment_actions_require_ids_and_reach_their_own_bus_
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert!(fake.update_calls().contains(&format!("install {id}")));
 }
+
+// --- The offline import ------------------------------------------------------
+
+const IMPORT_PATH: &str = "/api/v1/update/import";
+
+/// An upload with the archive's own magic is written to the device and named
+/// to micad, which is the only thing this route decides: everything the
+/// archive claims is checked inside `mica-deploy`.
+#[tokio::test]
+async fn an_uploaded_archive_is_written_and_handed_to_micad() {
+    let uploads = TempDir::new().unwrap();
+    let (tree, token) = with_token(configured_tree("hunter2secret"));
+    let fake = Arc::new(FakeSettings::new(tree));
+    let router = app(AppState::new(fake.clone(), SIGNING_KEY).with_update_uploads(uploads.path()));
+
+    let response = bearer_bytes(
+        &router,
+        IMPORT_PATH,
+        b"MICAUPD1the rest of an archive".to_vec(),
+        "application/octet-stream",
+        &token,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let call = fake
+        .update_calls()
+        .into_iter()
+        .find(|call| call.starts_with("import "))
+        .expect("micad was asked to import");
+    let path = std::path::PathBuf::from(call.trim_start_matches("import "));
+    assert_eq!(path.parent(), Some(uploads.path()));
+    assert_eq!(
+        std::fs::read(&path).expect("the upload"),
+        b"MICAUPD1the rest of an archive"
+    );
+}
+
+/// A body that is not an archive is refused after the magic, and nothing is
+/// left on the device: an update partition is not a place to leave a file
+/// nobody asked for.
+#[tokio::test]
+async fn a_body_that_is_not_an_archive_is_refused_and_leaves_nothing() {
+    for (body, content_type, status) in [
+        (
+            b"not an archive at all".to_vec(),
+            "application/octet-stream",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            b"MICA".to_vec(),
+            "application/octet-stream",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            b"MICAUPD1".to_vec(),
+            "application/json",
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        ),
+    ] {
+        let uploads = TempDir::new().unwrap();
+        let (tree, token) = with_token(configured_tree("hunter2secret"));
+        let fake = Arc::new(FakeSettings::new(tree));
+        let router =
+            app(AppState::new(fake.clone(), SIGNING_KEY).with_update_uploads(uploads.path()));
+
+        let response = bearer_bytes(&router, IMPORT_PATH, body, content_type, &token).await;
+
+        assert_eq!(response.status(), status);
+        assert!(
+            !fake
+                .update_calls()
+                .iter()
+                .any(|call| call.starts_with("import ")),
+            "micad was asked to import a refused body"
+        );
+        let left: Vec<_> = std::fs::read_dir(uploads.path())
+            .map(|entries| entries.flatten().collect())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "a refused upload was left on the device");
+    }
+}
+
+/// An import micad refuses takes its upload with it.
+#[tokio::test]
+async fn a_refused_import_removes_the_upload() {
+    let uploads = TempDir::new().unwrap();
+    let (tree, token) = with_token(configured_tree("hunter2secret"));
+    let fake = Arc::new(FakeSettings::new(tree));
+    fake.refuse_updates(ACCESS_DENIED, "an update operation is already running");
+    let router = app(AppState::new(fake.clone(), SIGNING_KEY).with_update_uploads(uploads.path()));
+
+    let response = bearer_bytes(
+        &router,
+        IMPORT_PATH,
+        b"MICAUPD1archive".to_vec(),
+        "application/octet-stream",
+        &token,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let left: Vec<_> = std::fs::read_dir(uploads.path())
+        .map(|entries| entries.flatten().collect())
+        .unwrap_or_default();
+    assert!(left.is_empty(), "a refused import left its upload behind");
+}

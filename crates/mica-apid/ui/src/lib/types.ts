@@ -50,6 +50,105 @@ export interface ObservedInterface {
   routes?: unknown[]
 }
 
+export interface BluetoothDevice {
+  address: string
+  name: string
+  paired: boolean
+  trusted: boolean
+  blocked: boolean
+  connected: boolean
+  rssi?: number | null
+}
+
+/// `GET /api/v1/bluetooth`: the declared trust list, the adapter, the devices
+/// BlueZ holds, the pairing code and whatever is waiting to be confirmed.
+/// Declared and observed are named apart because they answer different
+/// questions.
+export interface BluetoothOverview {
+  enabled: boolean
+  discoverable: boolean
+  /// The code a legacy peer is answered with. Displayed by design: somebody
+  /// has to type it on the other device.
+  pin: string
+  declared: Record<string, { name: string; trusted: boolean; blocked: boolean }>
+  adapter: AvailableFact & {
+    address?: string
+    alias?: string
+    powered?: boolean
+    discoverable?: boolean
+    discovering?: boolean
+  }
+  devices: AvailableFact & { entries?: BluetoothDevice[] }
+  /// The passkey waiting for a decision, or null.
+  pending: { address: string; passkey: number; since: number } | null
+}
+
+export interface WifiAccessPoint {
+  mode: 'off' | 'provisioning' | 'always'
+  interface: string
+  ssid?: string
+  /// Reads as `<redacted>`; omit it on a write to keep the stored key.
+  psk?: string
+  channel: number
+  countryCode: string
+  address: string
+  holdDownSeconds: number
+  graceSeconds: number
+}
+
+export interface WifiScan {
+  available: boolean
+  interface?: string
+  detail?: string
+  networks?: { ssid: string; bssid: string; signalDbm?: number; frequencyMhz?: number; flags: string }[]
+}
+
+export interface ContainerPort { host: number; container: number; protocol: 'tcp' | 'udp' }
+export interface ContainerVolume { host: string; container: string; readOnly: boolean }
+
+export interface ContainerUnit {
+  image: string
+  command?: string[]
+  environment?: Record<string, string>
+  publish?: ContainerPort[]
+  volumes?: ContainerVolume[]
+  restart?: 'no' | 'on-failure' | 'always'
+  autoStart?: boolean
+}
+
+/// `GET /api/v1/containers`: the declared map and the engine's own reads,
+/// named apart because they answer different questions. The engine half is
+/// podman's JSON verbatim, so only the fields this console reads are named.
+export interface ContainerOverview {
+  enabled: boolean
+  declared: Record<string, ContainerUnit>
+  engine: { available: boolean; detail?: string; entries?: { Names?: string[]; State?: string; Image?: string }[] }
+  images: { available: boolean; detail?: string; entries?: { Names?: string[] }[] }
+}
+
+export interface MqttConfiguration {
+  enabled: boolean
+  listen: { address: string; port: number }
+  auth: { enabled: boolean }
+}
+
+/// `GET /api/v1/mqtt`: the declared subtree, and the `mqtt` reconciler's own
+/// record of what it did with it. The observed half is micad's document
+/// verbatim, so only the fields this console reads are named here.
+export interface MqttOverview {
+  configured: MqttConfiguration
+  observed: {
+    available: boolean
+    state?: {
+      configPath?: string
+      listen?: { address?: string; port?: number }
+      auth?: { enabled?: boolean }
+      units?: { unit: string; activeState?: string; unitFileState?: string }[]
+    }
+    error?: string
+  }
+}
+
 export interface NetworkOverview {
   configured: Record<string, unknown>
   configuredCount: number
@@ -362,6 +461,15 @@ export interface ObservedNetworkState {
       keyManagement?: string
       rssiDbm?: number
       linkSpeedMbps?: number
+    }[]
+  }
+  /// What is associated with THIS device's access point, as hostapd reports
+  /// it. `wifi.associations` is the other direction: what this device joined.
+  accessPoint: AvailableFact & {
+    entries?: {
+      interface: string
+      stationCount: number
+      stations: { mac: string; connectedSeconds?: number; signalDbm?: number; rxBytes?: number; txBytes?: number }[]
     }[]
   }
   capabilities: {

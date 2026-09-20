@@ -220,7 +220,27 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
         ResetTier::Configuration | ResetTier::FullFactory => {
             reseeded_settings(settings, intent.tier)
         }
-        ResetTier::ApplicationData => settings.clone(),
+        // Tier 2 keeps the operator's configuration and takes their
+        // applications. A declared container IS an operator application --
+        // the entry is what renders the Quadlet unit and brings the workload
+        // back -- so clearing the data under `/mica/` without clearing the
+        // declarations would leave a reset device running the same workload
+        // against an empty volume.
+        ResetTier::ApplicationData => Settings {
+            container: micad_settings::ContainerSettings {
+                units: std::collections::BTreeMap::new(),
+                ..settings.container.clone()
+            },
+            // A paired device is operator data too: the phone in somebody's
+            // pocket is not this appliance's configuration, and a reset that
+            // kept the trust list would hand the next operator a device that
+            // still reconnects to the last one's.
+            bluetooth: micad_settings::BluetoothSettings {
+                devices: std::collections::BTreeMap::new(),
+                ..settings.bluetooth.clone()
+            },
+            ..settings.clone()
+        },
     };
     applied.reset = None;
     store
@@ -691,6 +711,70 @@ mod tests {
         // write is the record's removal.
         assert_eq!(settings, before_settings);
         assert_eq!(store.load().unwrap(), before_settings);
+    }
+
+    /// A declared container is an operator application: the tier that takes
+    /// their applications takes the declarations too, or the reconciler
+    /// renders them again and systemd starts a workload a reset was supposed
+    /// to remove. A paired device is the same argument.
+    #[test]
+    fn the_application_tier_clears_the_bluetooth_trust_list() {
+        let (dir, roots) = populated_roots();
+        let store = store_at(&dir, &roots);
+        let mut settings = fielded_settings();
+        settings.bluetooth.enabled = true;
+        settings.bluetooth.devices.insert(
+            "AA:BB:CC:DD:EE:01".to_string(),
+            micad_settings::PairedDevice {
+                name: "phone".to_string(),
+                trusted: true,
+                blocked: false,
+            },
+        );
+        stage(&mut settings, ResetTier::ApplicationData);
+
+        apply_pending(&store, &mut settings, &roots).unwrap();
+
+        assert!(settings.bluetooth.devices.is_empty());
+        // The adapter switch is configuration, and configuration is tier 1's.
+        assert!(settings.bluetooth.enabled);
+    }
+
+    /// A declared container is an operator application: the tier that takes
+    /// their applications takes the declarations too, or the reconciler
+    /// renders them again and systemd starts a workload a reset was supposed
+    /// to remove.
+    #[test]
+    fn the_application_tier_clears_declared_containers_with_their_data() {
+        let (dir, roots) = populated_roots();
+        let store = store_at(&dir, &roots);
+        let mut settings = fielded_settings();
+        settings.container.enabled = true;
+        settings.container.units.insert(
+            "node-red".to_string(),
+            micad_settings::ContainerUnit {
+                image: "docker.io/nodered/node-red:4.0.9".to_string(),
+                command: Vec::new(),
+                environment: std::collections::BTreeMap::new(),
+                publish: Vec::new(),
+                volumes: Vec::new(),
+                restart: micad_settings::RestartPolicy::default(),
+                auto_start: true,
+            },
+        );
+        let hostname = settings.hostname.clone();
+        stage(&mut settings, ResetTier::ApplicationData);
+
+        assert_eq!(
+            apply_pending(&store, &mut settings, &roots).unwrap(),
+            Outcome::Applied(ResetTier::ApplicationData)
+        );
+
+        assert!(settings.container.units.is_empty());
+        // The switch and the rest of the configuration are tier 1's business,
+        // not this tier's: they survive.
+        assert!(settings.container.enabled);
+        assert_eq!(settings.hostname, hostname);
     }
 
     #[test]

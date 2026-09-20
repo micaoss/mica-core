@@ -17,7 +17,19 @@ const routes = {
     wifi: { available: true, associations: [] },
     capabilities: { wifi: { supported: false, interfaces: [] }, bluetooth: { supported: false, adapters: [] }, cellular: { supported: false, interfaces: [] } },
   },
-  '/api/v1/settings/wifi.client': { enabled: true, interface: 'wlan0', networks: [] },
+  '/api/v1/wifi/client': { enabled: true, interface: 'wlan0' },
+  '/api/v1/wifi/ap': {
+    mode: 'provisioning',
+    interface: 'wlan0',
+    ssid: 'mica-lab',
+    psk: '<redacted>',
+    channel: 11,
+    countryCode: 'DE',
+    address: '192.168.4.1/24',
+    holdDownSeconds: 120,
+    graceSeconds: 60,
+  },
+  '/api/v1/state/network': {},
   '/api/v1/wifi/client/networks': [{ ssid: 'workshop', psk: 'x', hidden: false, priority: 10 }],
 }
 
@@ -52,8 +64,82 @@ describe('the network page', () => {
     expect((await screen.findAllByText('Network workshop removed.')).length).toBeGreaterThan(0)
   })
 
+  /// The operator was never shown the key, so an empty password box means
+  /// "keep it" and the request must carry no `psk` at all.
+  it('edits a stored network without sending a key it never showed', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/wifi/client/networks/workshop': () => jsonResponse({ ssid: 'workshop', psk: '<redacted>', hidden: true, priority: 3 }) })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    const dialog = await screen.findByRole('dialog')
+    const priority = within(dialog).getByLabelText('Priority')
+    await userEvent.clear(priority)
+    await userEvent.type(priority, '3')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ ssid: 'workshop', hidden: false, priority: 3 })
+  })
+
+  /// A scan is a POST: it sweeps every channel and briefly costs the station
+  /// its link, so it happens when an operator asks for it.
+  it('scans on request and offers to connect to what it found', async () => {
+    const fetch = stubFetch({
+      ...routes,
+      'POST /api/v1/wifi/client/scan': () => jsonResponse({
+        available: true,
+        interface: 'wlan0',
+        networks: [{ ssid: 'lab-5g', bssid: 'aa:bb:cc:dd:ee:01', signalDbm: -42, flags: '[WPA2-PSK-CCMP][ESS]' }],
+      }),
+    })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
+    expect(fetch.mock.calls.some(([path]) => String(path) === '/api/v1/wifi/client/scan')).toBe(false)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Scan' }))
+
+    expect(await screen.findByText('lab-5g')).toBeTruthy()
+    expect(screen.getByText('-42 dBm')).toBeTruthy()
+    // Connecting is adding the network: the device joins what it is told to
+    // join, and the dialog opens with the name already filled in.
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    // By name: a toast is a dialog too, and the success toast from the scan is
+    // still on screen.
+    const dialog = await screen.findByRole('dialog', { name: 'Add Wi-Fi network' })
+    expect((within(dialog).getByLabelText('SSID') as HTMLInputElement).value).toBe('lab-5g')
+  })
+
+  /// The access point is configured from the same tab, and its key is never
+  /// shown: the field is empty and an empty field keeps the stored one.
+  it('configures the access point without ever showing its key', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'task-2' }, 202) })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
+    const key = await screen.findByLabelText(/Pre-shared key/)
+    expect((key as HTMLInputElement).value).toBe('')
+    await userEvent.click(screen.getByRole('button', { name: 'Save access point' }))
+
+    const call = await waitFor(() => {
+      // The PUT, not the GET the panel read its values with.
+      const found = fetch.mock.calls.find(([path, init]) =>
+        String(path) === '/api/v1/wifi/ap' && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    const body = JSON.parse(String((call?.[1] as RequestInit).body))
+    expect(body.psk).toBeUndefined()
+    expect(body.mode).toBe('provisioning')
+  })
+
   it('reports the Wi-Fi client switch, which used to change nothing visible', async () => {
-    stubFetch({ ...routes, 'PUT /api/v1/settings/wifi.client.enabled': () => jsonResponse({ taskId: 'task-1' }, 202) })
+    stubFetch({ ...routes, 'PUT /api/v1/wifi/client': () => jsonResponse({ taskId: 'task-1' }, 202) })
     renderRoute(<NetworkPage />)
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))

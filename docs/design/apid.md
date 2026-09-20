@@ -47,11 +47,14 @@ document differs from `mica-apid --openapi`. Resource groups:
 | Tokens | `GET/POST /tokens`, `DELETE /tokens/{id}` | settings `access` |
 | Settings and state | `GET/PUT /settings/{path}`, `GET /state/{path}`, `GET /tasks`, `GET /tasks/{id}` | `GetSettings`, `SetSettings`, `GetState`, task records |
 | Network | `GET/PUT /network`, `PUT/DELETE /network/{iface}`, WireGuard peers, `GET /network/status` | settings `network`, `GetNetworkState` |
-| WiFi | `GET/POST /wifi/client/networks`, `DELETE /wifi/client/networks/{ssid}` | settings `wifi.client` |
+| WiFi | `GET/PUT /wifi/client`, `GET/POST /wifi/client/networks`, `PUT/DELETE /wifi/client/networks/{ssid}`, `POST /wifi/client/scan`, `GET/PUT /wifi/ap` | settings `wifi`; the scan is POST because it puts the radio to work, and `psk` reads redacted and is kept when a write omits it |
+| Containers | `GET /containers`, `PUT/DELETE /containers/{name}`, `POST /containers/{name}/start|stop|restart` | settings `container.units` and micad's engine read; the three verbs are POST-only |
+| Bluetooth | `GET/PUT /bluetooth`, `POST /bluetooth/discovery`, `POST /bluetooth/devices/{address}/{pair,confirm}`, `DELETE /bluetooth/devices/{address}` | settings `bluetooth` and micad's BlueZ read; the adapter write keeps the trust list, which only pairing changes |
+| MQTT | `GET/PUT /mqtt` | settings `mqtt` and the reconciler's live state; the listener is written as one document because an address and a port take effect together |
 | SSH | `GET/POST /ssh/authorized-keys`, `DELETE /ssh/authorized-keys/{fingerprint}` | settings `access.ssh` |
 | Observation | `GET /time/status`, `/storage/status`, `/system/info`, `/system/telemetry`, `/health`, `/meta` | micad observers |
 | Actions | `POST /actions/reboot`, `/actions/poweroff`, `/actions/transient-root-password`, `/actions/wireguard/{iface}/rotate-key` | micad actions |
-| Updates | `GET /update`, `POST /update/check`, `/fetch`, `/install`, `/confirm`, `/reject`, `/rollback`, `/reboot-override`, `/config` | micad update members |
+| Updates | `GET /update`, `POST /update/check`, `/fetch`, `/import`, `/install`, `/confirm`, `/reject`, `/rollback`, `/reboot-override`, `/config` | micad update members; `/import` streams an uploaded `.micaupd` to the device first |
 | Provisioning and claim | `GET /provisioning/status`, `GET /claim` | micad provisioning state |
 | Recovery and reset | `POST /recovery/credential`, `POST /reset` | apid authority checks, micad reset |
 | Diagnostics | `GET/POST /diagnostics/snapshots`, `GET/DELETE /diagnostics/snapshots/{id}` | `diagnostics.rs`, `/mica/diagnostics` |
@@ -65,7 +68,9 @@ A settings or transient-password write returns micad's task id; clients poll
 ## 4. Authentication and authorisation
 
 - **First run.** Until an admin password exists, `POST /setup` sets it (and
-  optionally a hostname, network entries and a first API token).
+  optionally a hostname and network entries). It mints no API token: the
+  password it creates is the device's one credential, and a client that wants
+  a bearer token asks for one at `POST /tokens`.
 - **Passwords** are hashed with argon2id and stored in the settings tree.
   Failed logins are throttled by a persistent backoff (`auth.rs`); the backoff
   applies to the password path only.

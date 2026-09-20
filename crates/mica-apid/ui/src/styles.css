@@ -45,12 +45,6 @@
   --color-chrome-hover: var(--chrome-hover);
   --color-chrome-active: var(--chrome-active);
   --color-chrome-active-foreground: var(--chrome-active-foreground);
-  --color-logo: var(--logo);
-  --color-logo-foreground: var(--logo-foreground);
-  --color-terminal: var(--terminal);
-  --color-terminal-foreground: var(--terminal-foreground);
-  --color-terminal-border: var(--terminal-border);
-  --color-terminal-accent: var(--terminal-accent);
   --font-sans: "Barlow", system-ui, sans-serif;
   --font-condensed: "Barlow Condensed", "Barlow", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, "Cascadia Code", "Liberation Mono", monospace;
@@ -97,15 +91,6 @@
   --chrome-hover: oklch(0.4514 0.1905 263.88);
   --chrome-active: oklch(1.0000 0 0);
   --chrome-active-foreground: oklch(0.3785 0.1954 263.23);
-  --logo: oklch(1.0000 0 0);
-  --logo-foreground: oklch(0.3785 0.1954 263.23);
-  /* The transcript pane is a terminal in both themes, so its surface does not
-     follow the light/dark switch; it is still a token rather than four literals
-     buried in a rule. */
-  --terminal: oklch(0.1723 0.0176 244.83);
-  --terminal-foreground: oklch(0.9268 0.0104 247.90);
-  --terminal-border: oklch(0.3072 0.0234 249.66);
-  --terminal-accent: oklch(0.8664 0.1734 145.02);
   --card-shadow: none;
   --shadow-sm: 0 1px 2px color-mix(in srgb, oklch(0.2899 0.0036 286.17) 14%, transparent);
   --shadow-lg: 0 12px 32px color-mix(in srgb, oklch(0.2899 0.0036 286.17) 22%, transparent);
@@ -156,15 +141,6 @@
   --chrome-hover: oklch(0.2593 0.0675 273.65);
   --chrome-active: oklch(0.5811 0.2018 268.46);
   --chrome-active-foreground: oklch(1.0000 0 0);
-  --logo: oklch(0.5811 0.2018 268.46);
-  --logo-foreground: oklch(1.0000 0 0);
-  /* The transcript pane is a terminal in both themes, so its surface does not
-     follow the light/dark switch; it is still a token rather than four literals
-     buried in a rule. */
-  --terminal: oklch(0.1723 0.0176 244.83);
-  --terminal-foreground: oklch(0.9268 0.0104 247.90);
-  --terminal-border: oklch(0.3072 0.0234 249.66);
-  --terminal-accent: oklch(0.8664 0.1734 145.02);
   --card-shadow: none;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / .5);
   --shadow-lg: 0 0 0 1px rgb(255 255 255 / .08), 0 20px 50px rgb(0 0 0 / .7);
@@ -192,20 +168,6 @@ button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 svg.lucide { stroke-width: 1.5; }
 code { border-radius: 3px; background: var(--muted); padding: 1px 4px; font: 500 .87em/1.4 var(--font-mono); }
-
-/* The product mark. A 28px rounded tile with one condensed glyph; not a
-   component, and never interactive. */
-.logo-mark {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: var(--logo);
-  color: var(--logo-foreground);
-  font: 600 15px/1 var(--font-condensed);
-}
 
 /* The sign-in plate: a square hairline box with registration marks drawn
    outside its corners, as the approved prototype frames it. */

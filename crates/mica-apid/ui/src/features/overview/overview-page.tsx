@@ -2,7 +2,8 @@ import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/shared/lib/http'
-import type { Health, NetworkOverview, SystemInformation, TaskRecord, TimeStatus } from '@/lib/types'
+import type { Health, ObservedNetworkState, SystemInformation, TaskRecord, TimeStatus } from '@/lib/types'
+import { selectUplink } from '@/lib/network'
 import { Callout } from '@/shared/components/callout'
 import { DataTable } from '@/shared/components/data-table'
 import { MetricCard } from '@/shared/components/metric-card'
@@ -22,7 +23,10 @@ export function OverviewPage() {
   const { t } = useTranslation()
   const health = useQuery({ queryKey: ['health'], queryFn: () => api<Health>('/api/v1/health'), refetchInterval: 15_000 })
   const information = useQuery({ queryKey: ['system-information'], queryFn: () => api<SystemInformation>('/api/v1/system/info'), retry: false })
-  const network = useQuery({ queryKey: ['network'], queryFn: () => api<NetworkOverview>('/api/v1/network'), refetchInterval: 10_000 })
+  // The observed view and not `/api/v1/network`: the declared map says what an
+  // integrator asked for, and the card is here to say what the device actually
+  // reached the world through.
+  const network = useQuery({ queryKey: ['network-status'], queryFn: () => api<ObservedNetworkState>('/api/v1/network/status'), refetchInterval: 10_000 })
   const hostname = useQuery({ queryKey: ['settings', 'hostname'], queryFn: () => api<string>('/api/v1/settings/hostname') })
   const tasks = useQuery({ queryKey: ['tasks'], queryFn: () => api<TaskRecord[]>('/api/v1/tasks'), refetchInterval: 5_000 })
   const update = useQuery({ queryKey: ['update-state'], queryFn: () => api<UpdateLifecycle>('/api/v1/update'), retry: false })
@@ -55,9 +59,20 @@ export function OverviewPage() {
     } : undefined,
   ].filter((item) => item !== undefined)
 
-  const observed = network.data?.observed.interfaces?.find((iface) => (iface.addresses ?? []).length > 0)
+  const uplink = selectUplink(network.data)
   const machineId = information.data?.machineId
   const uptime = information.data?.uptime
+  const release = information.data?.release
+  const deployment = information.data?.deployment
+  const board = information.data?.board
+  const kernel = information.data?.kernel
+  const device = [
+    { id: 'machineId', label: t('overview.device.machineId'), value: machineId?.available ? machineId.id : undefined },
+    { id: 'board', label: t('overview.device.board'), value: board?.available ? board.model : undefined },
+    { id: 'software', label: t('overview.device.software'), value: release?.available ? release.version ?? release.prettyName : undefined },
+    { id: 'deployment', label: t('overview.device.deployment'), value: deployment?.available ? deployment.version : undefined },
+    { id: 'kernel', label: t('overview.device.kernel'), value: kernel?.available ? kernel.release : undefined },
+  ]
 
   return (
     <Page>
@@ -106,8 +121,8 @@ export function OverviewPage() {
         <MetricCard
           label={t('overview.network')}
           mono
-          value={observed ? `${observed.name} · ${observed.addresses?.[0] ?? ''}` : t('common.notAvailable')}
-          caption={observed?.operationalState ? formatKnownState(observed.operationalState, t) : t('overview.liveUnavailable')}
+          value={uplink ? (uplink.address ? `${uplink.name} · ${uplink.address}` : uplink.name) : t('common.notAvailable')}
+          caption={uplink?.operationalState ? formatKnownState(uplink.operationalState, t) : t('overview.liveUnavailable')}
           render={(card) => <Link to="/network" className="contents">{card}</Link>}
         />
         <MetricCard
@@ -118,6 +133,24 @@ export function OverviewPage() {
           render={(card) => <Link to="/system" hash="information" className="contents">{card}</Link>}
         />
       </div>
+      <CollectionPanel
+        title={t('overview.device.title')}
+        action={
+          <Link to="/system" hash="information" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            {t('overview.device.open')}
+          </Link>
+        }
+      >
+        <RowList>
+          {device.map((fact) => (
+            <RowItem
+              key={fact.id}
+              title={fact.label}
+              description={<span className="font-mono text-[0.8125rem]">{fact.value ?? t('common.notAvailable')}</span>}
+            />
+          ))}
+        </RowList>
+      </CollectionPanel>
       <CollectionPanel
         title={t('overview.recentTasks')}
         action={<span className="text-sm whitespace-nowrap text-muted-foreground">{freshnessLabel(tasks.dataUpdatedAt, t)}</span>}

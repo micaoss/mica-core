@@ -19,12 +19,16 @@ use zbus::message::Header;
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 
 use crate::apply_queue::{ApplyJob, ApplyQueue, TaskRecord};
+use crate::bluetooth::{Agent as BluetoothAgent, BluetoothControl};
+use crate::containers::ContainerEngine;
 use crate::deployment::{self, DeploymentClient, NativeClient};
 use crate::diagnostics::{FailureEvidenceSource, UnavailableFailureEvidence};
 use crate::network_state::{NetworkState, UnavailableNetworkState};
 use crate::power::PowerControl;
 use crate::reconciler::Reconciler;
+use crate::reconciler::container::unit_name;
 use crate::reconciler::network::WireguardRotate;
+use crate::reconciler::systemd::UnitControl;
 use crate::scan::Registry;
 use crate::storage_status::{self, PressureTracker, StorageStatusSource, UnavailableStorageStatus};
 use crate::system_info::{self, SystemInfoSource, UnavailableSystemInfo};
@@ -74,6 +78,14 @@ struct Inner {
 /// The `com.mica.micad1` service: settings tree, live-state tree, store,
 /// reconcilers, the power control, the update installer client and the shadow
 /// file a transient root password is written into.
+/// The three verbs a declared container takes.
+#[derive(Debug, Clone, Copy)]
+enum ContainerAction {
+    Start,
+    Stop,
+    Restart,
+}
+
 pub struct MicadService {
     store: Store,
     reconcilers: Arc<Vec<Box<dyn Reconciler>>>,
@@ -119,6 +131,34 @@ pub struct MicadService {
     system_info: Arc<dyn SystemInfoSource>,
     /// Read-only board telemetry, on the same default.
     telemetry: Arc<dyn TelemetrySource>,
+    /// Read-only container observation: what the engine says is there.
+    ///
+    /// Read-only in the strong sense -- the adapter runs `podman ps` and
+    /// `podman images` and nothing else. Containers are declared as settings
+    /// and their lifecycle belongs to systemd, so there is no writing engine
+    /// call for this field to hold. Same unavailable default as every other
+    /// observer.
+    engine: Arc<dyn ContainerEngine>,
+    /// The Bluetooth adapter, its devices and its pairing verbs.
+    ///
+    /// The default has no adapter, so a board with no radio, a dry run and a
+    /// test all answer "this device has no Bluetooth adapter" rather than a
+    /// list of devices nobody has.
+    bluetooth: Arc<dyn BluetoothControl>,
+    /// The pairing agent's shared state: what is waiting for a confirmation,
+    /// and the code a legacy peer is answered with.
+    ///
+    /// Shared with the `org.bluez.Agent1` object BlueZ calls, which is the
+    /// whole reason it is here: the agent blocks on a decision that arrives
+    /// through the bus members below.
+    agent: Arc<BluetoothAgent>,
+    /// The unit control the three container actions drive.
+    ///
+    /// `StartContainer` and its two siblings are systemd verbs on the unit
+    /// Quadlet generated, never podman verbs on the container: a container
+    /// podman started is one no unit name can stop and nothing brings back
+    /// after a reboot.
+    units: Arc<dyn UnitControl>,
     /// Read-only failure evidence for the diagnostic snapshot:
     /// failed units and a bounded journal excerpt. Same default.
     failure_evidence: Arc<dyn FailureEvidenceSource>,
@@ -219,10 +259,78 @@ impl MicadService {
             system_info: Arc::new(UnavailableSystemInfo),
             telemetry: Arc::new(UnavailableTelemetry),
             failure_evidence: Arc::new(UnavailableFailureEvidence),
+            engine: Arc::new(crate::containers::NoEngine),
+            bluetooth: Arc::new(crate::bluetooth::NoAdapter),
+            agent: Arc::new(BluetoothAgent::default()),
+            units: Arc::new(crate::reconciler::systemd::NoUnits),
             storage_pressure: Arc::new(PressureTracker::default()),
             update,
             refusals: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    /// The pairing code this device answers a legacy peer with.
+    ///
+    /// The declared one, or the value derived from the device identity. Read
+    /// here rather than stored, so the console and the agent cannot disagree
+    /// about what a peer will be told.
+    async fn pairing_pin(&self, settings: &micad_settings::Settings) -> String {
+        match &settings.bluetooth.pin {
+            Some(pin) => pin.clone(),
+            None => micad_settings::derived_pairing_pin(
+                settings
+                    .provisioning
+                    .device_id
+                    .as_deref()
+                    .unwrap_or_default(),
+            ),
+        }
+    }
+
+    /// Refuse a Bluetooth action on a device that has no adapter or has it
+    /// switched off, rather than letting it fail as a bus error about an
+    /// object that does not exist.
+    async fn require_bluetooth(&self) -> fdo::Result<()> {
+        if !self.inner.read().await.settings.bluetooth.enabled {
+            return Err(fdo::Error::Failed(
+                "Bluetooth is switched off on this device; enable `bluetooth.enabled` first"
+                    .to_string(),
+            ));
+        }
+        self.bluetooth
+            .adapter()
+            .await
+            .map(|_| ())
+            .map_err(|err| fdo::Error::Failed(format!("{err:#}")))
+    }
+
+    /// One container lifecycle verb, on the unit Quadlet generated for it.
+    ///
+    /// The name is checked against the DECLARED map first, so this is not a
+    /// way to drive an arbitrary systemd unit through a container-shaped
+    /// argument: a name nobody declared is refused before any bus call.
+    async fn container_action(&self, name: &str, action: ContainerAction) -> fdo::Result<()> {
+        let settings = self.inner.read().await.settings.clone();
+        if !settings.container.units.contains_key(name) {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "no container named {name:?} is declared on this device"
+            )));
+        }
+        if !settings.container.enabled {
+            return Err(fdo::Error::Failed(
+                "containers are switched off on this device; enable `container.enabled` first"
+                    .to_string(),
+            ));
+        }
+        let unit = unit_name(name);
+        let result = match action {
+            ContainerAction::Start => self.units.start(&unit).await,
+            ContainerAction::Stop => self.units.stop(&unit).await,
+            ContainerAction::Restart => self.units.restart(&unit).await,
+        };
+        result.map_err(|err| fdo::Error::Failed(format!("{action:?} {unit}: {err:#}")))?;
+        tracing::info!(container = name, unit = %unit, ?action, "container action");
+        Ok(())
     }
 
     /// Record the `/mica/config/` documents this boot refused, and publish them
@@ -333,6 +441,32 @@ impl MicadService {
     #[must_use]
     pub fn with_system_info(mut self, system_info: Arc<dyn SystemInfoSource>) -> Self {
         self.system_info = system_info;
+        self
+    }
+
+    /// Attach the container engine and the unit control the container
+    /// actions drive (`GetContainers`, `StartContainer` and its siblings).
+    #[must_use]
+    pub fn with_containers(
+        mut self,
+        engine: Arc<dyn ContainerEngine>,
+        units: Arc<dyn UnitControl>,
+    ) -> Self {
+        self.engine = engine;
+        self.units = units;
+        self
+    }
+
+    /// Attach the Bluetooth adapter and the pairing agent's state
+    /// (`GetBluetooth` and the pairing actions).
+    #[must_use]
+    pub fn with_bluetooth(
+        mut self,
+        bluetooth: Arc<dyn BluetoothControl>,
+        agent: Arc<BluetoothAgent>,
+    ) -> Self {
+        self.bluetooth = bluetooth;
+        self.agent = agent;
         self
     }
 
@@ -669,6 +803,13 @@ impl MicadService {
     /// lock and each live-state result is recorded under a short write lock;
     /// no data lock is held while a reconciler waits on another process.
     async fn apply_subtree(&self, path: &str) -> Vec<String> {
+        // The agent learns the pairing code here, which is where the settings
+        // that carry it have just changed. Anywhere else and the console would
+        // be able to show one code while a peer is told another.
+        if path.is_empty() || path.starts_with("bluetooth") {
+            let settings = self.inner.read().await.settings.clone();
+            self.agent.set_pin(self.pairing_pin(&settings).await).await;
+        }
         reconcile_subtree(&self.reconcilers, &self.inner, &self.refusals, path).await
     }
 
@@ -1113,6 +1254,202 @@ impl MicadService {
     /// JSON board telemetry: temperature, watchdog and the reset
     /// reason the kernel's generic sources support, observed at call time.
     /// Absence is explicit; nothing here reads a vendor register.
+    /// The containers this device declares, joined with what the engine says
+    /// is actually there -- each side named, never merged.
+    ///
+    /// A declared container the engine has never heard of and a running
+    /// container nobody declared are both real states, and a merged answer
+    /// could not tell them apart.
+    async fn get_containers(&self) -> Result<String, SettingsFault> {
+        let settings = self.inner.read().await.settings.clone();
+        let declared = serde_json::to_value(&settings.container.units)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        Ok(serde_json::json!({
+            "enabled": settings.container.enabled,
+            "declared": declared,
+            "engine": self.engine.containers().await,
+            "images": self.engine.images().await,
+        })
+        .to_string())
+    }
+
+    /// Scan for WiFi networks on the station's radio and answer what it found.
+    ///
+    /// The interface is the one `wifi.client` declares -- a scan is a thing
+    /// the station role does, not an arbitrary radio operation, so there is no
+    /// interface argument to point somewhere else.
+    async fn scan_wifi(&self) -> Result<String, SettingsFault> {
+        let settings = self.inner.read().await.settings.clone();
+        let interface = settings.wifi.client.interface.clone();
+        let root = std::path::PathBuf::from("/");
+        let scanned = tokio::task::spawn_blocking(move || {
+            crate::network_state::scan_networks(&root, &interface)
+        })
+        .await
+        .map_err(|err| SettingsFault::Fdo(fdo::Error::Failed(format!("wifi scan task: {err}"))))?;
+        let value = match scanned {
+            Ok(networks) => serde_json::json!({
+                "available": true,
+                "interface": settings.wifi.client.interface,
+                "networks": networks
+                    .iter()
+                    .map(|network| serde_json::json!({
+                        "ssid": network.ssid,
+                        "bssid": network.bssid,
+                        "frequencyMhz": network.frequency_mhz,
+                        "signalDbm": network.signal_dbm,
+                        "flags": network.flags,
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+            Err(detail) => serde_json::json!({
+                "available": false,
+                "interface": settings.wifi.client.interface,
+                "detail": detail,
+            }),
+        };
+        Ok(value.to_string())
+    }
+
+    /// The declared Bluetooth trust list, what BlueZ reports, the pairing code
+    /// and whatever is waiting to be confirmed.
+    async fn get_bluetooth(&self) -> Result<String, SettingsFault> {
+        let settings = self.inner.read().await.settings.clone();
+        let pin = self.pairing_pin(&settings).await;
+        let mut value = crate::bluetooth::observed_json(
+            &settings.bluetooth.devices,
+            self.bluetooth
+                .adapter()
+                .await
+                .map_err(|err| format!("{err:#}")),
+            self.bluetooth
+                .devices()
+                .await
+                .map_err(|err| format!("{err:#}")),
+            &pin,
+        );
+        value["enabled"] = serde_json::json!(settings.bluetooth.enabled);
+        value["discoverable"] = serde_json::json!(settings.bluetooth.discoverable);
+        // What the console renders its pairing dialog from. Absent when
+        // nothing is waiting, which is most of the time.
+        value["pending"] = match self.agent.pending().await {
+            Some(pending) => serde_json::to_value(pending).unwrap_or(Value::Null),
+            None => Value::Null,
+        };
+        Ok(value.to_string())
+    }
+
+    /// Start or stop a scan.
+    ///
+    /// A scan is bounded by BlueZ's own discovery and by the console stopping
+    /// it; what this refuses is starting one on a device whose adapter is
+    /// switched off, where it would fail with a bus error about an object that
+    /// does not exist.
+    async fn set_bluetooth_discovery(&self, on: bool) -> fdo::Result<()> {
+        self.require_bluetooth().await?;
+        self.bluetooth
+            .set_discovery(on)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("bluetooth discovery: {err:#}")))
+    }
+
+    /// Pair with a device, then record it in the trust list.
+    ///
+    /// The record is the point: BlueZ remembers the keys, and the settings
+    /// tree remembers that this device is one this appliance trusts. A reset
+    /// clears the second, and the reconciler then clears the first.
+    async fn pair_bluetooth_device(&self, address: &str) -> fdo::Result<()> {
+        self.require_bluetooth().await?;
+        if !micad_settings::is_bluetooth_address(address) {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "{address:?} is not a Bluetooth address"
+            )));
+        }
+        self.bluetooth
+            .pair(address)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("pair {address}: {err:#}")))?;
+
+        // Under the apply lock, like every settings write: a pair landing
+        // during a reconcile must not be lost to the tree that reconcile wrote.
+        let _apply = self.apply_lock.lock().await;
+        let name = self
+            .bluetooth
+            .devices()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .find(|device| device.address == address)
+            .map(|device| device.name)
+            .unwrap_or_default();
+        let mut devices = self.inner.read().await.settings.bluetooth.devices.clone();
+        devices.insert(
+            address.to_string(),
+            micad_settings::PairedDevice {
+                name,
+                // Trusted on pairing: an operator who just confirmed a passkey
+                // has said yes to this device, and a paired-but-untrusted
+                // device asks again on every reconnect.
+                trusted: true,
+                blocked: false,
+            },
+        );
+        let value = serde_json::to_value(&devices).unwrap_or(Value::Null);
+        self.persist_setting("bluetooth.devices", value)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("persist the trust list: {err}")))?;
+        drop(_apply);
+        self.apply_subtree("bluetooth").await;
+        Ok(())
+    }
+
+    /// Answer the passkey the agent is holding.
+    async fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> fdo::Result<()> {
+        if self.agent.answer(address, accept).await {
+            Ok(())
+        } else {
+            Err(fdo::Error::Failed(format!(
+                "no pairing confirmation is waiting for {address}"
+            )))
+        }
+    }
+
+    /// Drop a device: out of the trust list, and out of the adapter.
+    async fn remove_bluetooth_device(&self, address: &str) -> fdo::Result<()> {
+        let _apply = self.apply_lock.lock().await;
+        let mut devices = self.inner.read().await.settings.bluetooth.devices.clone();
+        if devices.remove(address).is_none() {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "no device named {address:?} is declared on this device"
+            )));
+        }
+        let value = serde_json::to_value(&devices).unwrap_or(Value::Null);
+        self.persist_setting("bluetooth.devices", value)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("persist the trust list: {err}")))?;
+        drop(_apply);
+        // The adapter is told directly as well as through the reconcile: the
+        // keys should go now, not at the next pass.
+        let _ = self.bluetooth.remove(address).await;
+        self.apply_subtree("bluetooth").await;
+        Ok(())
+    }
+
+    /// Start the unit Quadlet generated for a declared container.
+    async fn start_container(&self, name: &str) -> fdo::Result<()> {
+        self.container_action(name, ContainerAction::Start).await
+    }
+
+    /// Stop it.
+    async fn stop_container(&self, name: &str) -> fdo::Result<()> {
+        self.container_action(name, ContainerAction::Stop).await
+    }
+
+    /// Restart it, which is what a changed image tag needs.
+    async fn restart_container(&self, name: &str) -> fdo::Result<()> {
+        self.container_action(name, ContainerAction::Restart).await
+    }
+
     async fn get_telemetry(&self) -> Result<String, SettingsFault> {
         let evidence = self.telemetry.observe().await.map_err(|err| {
             SettingsFault::Fdo(fdo::Error::Failed(format!("observe telemetry: {err:#}")))
@@ -1288,6 +1625,32 @@ impl MicadService {
     async fn fetch_update(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
         self.update
             .request_fetch(sender_of(&header))
+            .await
+            .map_err(refusal_to_fdo)
+    }
+
+    /// Import an offline `MICAUPD1` archive somebody uploaded.
+    ///
+    /// The path is bounded to the acquisition workspace's own upload
+    /// directory. The method takes a path because the archive is measured in
+    /// hundreds of megabytes and the bus is not how those travel; apid streams
+    /// it to disk and names it here. Bounding the path is what keeps the
+    /// method from being a way to hand `mica-deploy` an arbitrary file.
+    async fn import_update(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        path: &str,
+    ) -> fdo::Result<()> {
+        let archive = std::path::Path::new(path);
+        let uploads = self.update.uploads_dir();
+        if archive.parent() != Some(uploads.as_path()) || archive.file_name().is_none() {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "an imported archive is a file directly under {}",
+                uploads.display()
+            )));
+        }
+        self.update
+            .request_import(sender_of(&header), archive)
             .await
             .map_err(refusal_to_fdo)
     }
@@ -1829,6 +2192,400 @@ mod tests {
             crate::reconciler::network::NoDelete,
         )));
         (service, calls, dir)
+    }
+
+    /// A unit control that records the verbs it was asked for and refuses
+    /// nothing, so a test can assert which unit a container action drove.
+    struct RecordingUnits {
+        calls: CallLog,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::reconciler::systemd::UnitControl for RecordingUnits {
+        async fn active_state(&self, _unit: &str) -> anyhow::Result<String> {
+            Ok("inactive".to_string())
+        }
+        async fn unit_file_state(&self, _unit: &str) -> anyhow::Result<String> {
+            Ok("disabled".to_string())
+        }
+        async fn start(&self, unit: &str) -> anyhow::Result<()> {
+            self.calls
+                .lock()
+                .expect("call log")
+                .push(format!("start {unit}"));
+            Ok(())
+        }
+        async fn stop(&self, unit: &str) -> anyhow::Result<()> {
+            self.calls
+                .lock()
+                .expect("call log")
+                .push(format!("stop {unit}"));
+            Ok(())
+        }
+        async fn restart(&self, unit: &str) -> anyhow::Result<()> {
+            self.calls
+                .lock()
+                .expect("call log")
+                .push(format!("restart {unit}"));
+            Ok(())
+        }
+        async fn reset_failed(&self, _unit: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn enable(&self, _unit: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn disable(&self, _unit: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn daemon_reload(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A service holding one declared container, with `enabled` as given.
+    fn service_with_container(enabled: bool) -> (MicadService, CallLog, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let shadow_path = dir.path().join("shadow");
+        std::fs::write(&shadow_path, SHADOW).expect("seed shadow");
+        let mut settings = micad_settings::Settings::default();
+        settings.container.enabled = enabled;
+        settings.container.units.insert(
+            "node-red".to_string(),
+            micad_settings::ContainerUnit {
+                image: "docker.io/nodered/node-red:4.0.9".to_string(),
+                command: Vec::new(),
+                environment: std::collections::BTreeMap::new(),
+                publish: Vec::new(),
+                volumes: Vec::new(),
+                restart: micad_settings::RestartPolicy::default(),
+                auto_start: true,
+            },
+        );
+        let calls: CallLog = Arc::new(Mutex::new(Vec::new()));
+        let service = MicadService::new(
+            store_in(&dir),
+            settings,
+            Vec::new(),
+            Box::new(MockPower {
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }),
+            shadow_path,
+            serde_json::json!({}),
+        )
+        .with_containers(
+            Arc::new(crate::containers::NoEngine),
+            Arc::new(RecordingUnits {
+                calls: Arc::clone(&calls),
+            }),
+        );
+        (service, calls, dir)
+    }
+
+    /// An adapter that records what the bus asked it to do.
+    #[derive(Default)]
+    struct MockBluetooth {
+        calls: std::sync::Mutex<Vec<String>>,
+        devices: Vec<crate::bluetooth::Device>,
+        present: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::bluetooth::BluetoothControl for MockBluetooth {
+        async fn adapter(&self) -> anyhow::Result<crate::bluetooth::Adapter> {
+            if self.present {
+                Ok(crate::bluetooth::Adapter {
+                    address: "11:22:33:44:55:66".to_string(),
+                    powered: true,
+                    ..crate::bluetooth::Adapter::default()
+                })
+            } else {
+                anyhow::bail!("bluetoothd reports no adapter on this device")
+            }
+        }
+
+        async fn devices(&self) -> anyhow::Result<Vec<crate::bluetooth::Device>> {
+            Ok(self.devices.clone())
+        }
+
+        async fn set_discovery(&self, on: bool) -> anyhow::Result<()> {
+            self.calls
+                .lock()
+                .expect("calls")
+                .push(format!("discovery {on}"));
+            Ok(())
+        }
+
+        async fn pair(&self, address: &str) -> anyhow::Result<()> {
+            self.calls
+                .lock()
+                .expect("calls")
+                .push(format!("pair {address}"));
+            Ok(())
+        }
+
+        async fn remove(&self, address: &str) -> anyhow::Result<()> {
+            self.calls
+                .lock()
+                .expect("calls")
+                .push(format!("remove {address}"));
+            Ok(())
+        }
+    }
+
+    /// A service with Bluetooth attached, switched on or off.
+    fn service_with_bluetooth(
+        enabled: bool,
+        present: bool,
+    ) -> (MicadService, Arc<MockBluetooth>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let shadow_path = dir.path().join("shadow");
+        std::fs::write(&shadow_path, SHADOW).expect("seed shadow");
+        let mut settings = micad_settings::Settings::default();
+        settings.bluetooth.enabled = enabled;
+        settings.provisioning.device_id = Some("0123456789abcdef0123456789abcdef".to_string());
+        let adapter = Arc::new(MockBluetooth {
+            present,
+            devices: vec![crate::bluetooth::Device {
+                address: "AA:BB:CC:DD:EE:01".to_string(),
+                name: "phone".to_string(),
+                paired: true,
+                ..crate::bluetooth::Device::default()
+            }],
+            ..MockBluetooth::default()
+        });
+        let service = MicadService::new(
+            store_in(&dir),
+            settings,
+            Vec::new(),
+            Box::new(MockPower {
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }),
+            shadow_path,
+            serde_json::json!({}),
+        )
+        .with_bluetooth(
+            Arc::clone(&adapter) as Arc<dyn crate::bluetooth::BluetoothControl>,
+            Arc::new(crate::bluetooth::Agent::default()),
+        );
+        (service, adapter, dir)
+    }
+
+    /// The read names the declared list, the adapter, the devices and the code
+    /// a legacy peer will be told -- apart, never merged.
+    #[tokio::test]
+    async fn the_bluetooth_read_names_each_side_and_the_pairing_code() {
+        let (service, _adapter, _dir) = service_with_bluetooth(true, true);
+
+        let value: serde_json::Value =
+            serde_json::from_str(&service.get_bluetooth().await.expect("read"))
+                .expect("bluetooth JSON");
+
+        assert_eq!(value["enabled"], serde_json::json!(true));
+        assert_eq!(value["adapter"]["available"], serde_json::json!(true));
+        assert_eq!(
+            value["devices"]["entries"][0]["address"],
+            serde_json::json!("AA:BB:CC:DD:EE:01")
+        );
+        assert_eq!(value["declared"], serde_json::json!({}));
+        // Derived from this device's identifier, because the tree declares
+        // none: fixed for this device and not shared with the fleet.
+        assert_eq!(
+            value["pin"],
+            serde_json::json!(micad_settings::derived_pairing_pin(
+                "0123456789abcdef0123456789abcdef"
+            ))
+        );
+        assert!(value["pending"].is_null());
+    }
+
+    /// Pairing records the device in the trust list, trusted: an operator who
+    /// confirmed a passkey has said yes to this device.
+    #[tokio::test]
+    async fn pairing_records_the_device_as_trusted() {
+        let (service, adapter, _dir) = service_with_bluetooth(true, true);
+
+        service
+            .pair_bluetooth_device("AA:BB:CC:DD:EE:01")
+            .await
+            .expect("pair");
+
+        assert!(
+            adapter
+                .calls
+                .lock()
+                .expect("calls")
+                .contains(&"pair AA:BB:CC:DD:EE:01".to_string())
+        );
+        let declared = &service.inner.read().await.settings.bluetooth.devices;
+        assert!(declared["AA:BB:CC:DD:EE:01"].trusted);
+        assert_eq!(declared["AA:BB:CC:DD:EE:01"].name, "phone");
+    }
+
+    /// Every action is refused on a device whose Bluetooth is off, and on one
+    /// with no adapter -- with the reason, not a bus error about an object
+    /// that does not exist.
+    #[tokio::test]
+    async fn bluetooth_actions_are_refused_without_an_adapter_or_with_the_switch_off() {
+        let (off, adapter, _dir) = service_with_bluetooth(false, true);
+        let error = off
+            .set_bluetooth_discovery(true)
+            .await
+            .expect_err("switched off");
+        assert!(format!("{error}").contains("bluetooth.enabled"), "{error}");
+        assert!(adapter.calls.lock().expect("calls").is_empty());
+
+        let (absent, adapter, _dir) = service_with_bluetooth(true, false);
+        let error = absent
+            .pair_bluetooth_device("AA:BB:CC:DD:EE:01")
+            .await
+            .expect_err("no adapter");
+        assert!(format!("{error}").contains("no adapter"), "{error}");
+        assert!(adapter.calls.lock().expect("calls").is_empty());
+    }
+
+    /// An address no adapter could name is refused before any call.
+    #[tokio::test]
+    async fn a_pair_of_something_that_is_not_an_address_is_refused() {
+        let (service, adapter, _dir) = service_with_bluetooth(true, true);
+
+        let error = service
+            .pair_bluetooth_device("not-an-address")
+            .await
+            .expect_err("not an address");
+
+        assert!(
+            format!("{error}").contains("not a Bluetooth address"),
+            "{error}"
+        );
+        assert!(adapter.calls.lock().expect("calls").is_empty());
+    }
+
+    /// Removing takes the declaration and tells the adapter now, rather than
+    /// leaving the keys until the next reconcile.
+    #[tokio::test]
+    async fn removing_a_device_drops_the_declaration_and_the_keys() {
+        let (service, adapter, _dir) = service_with_bluetooth(true, true);
+        service
+            .pair_bluetooth_device("AA:BB:CC:DD:EE:01")
+            .await
+            .expect("pair");
+
+        service
+            .remove_bluetooth_device("AA:BB:CC:DD:EE:01")
+            .await
+            .expect("remove");
+
+        assert!(
+            service
+                .inner
+                .read()
+                .await
+                .settings
+                .bluetooth
+                .devices
+                .is_empty()
+        );
+        assert!(
+            adapter
+                .calls
+                .lock()
+                .expect("calls")
+                .contains(&"remove AA:BB:CC:DD:EE:01".to_string())
+        );
+        // And a device nobody declared cannot be removed.
+        let error = service
+            .remove_bluetooth_device("AA:BB:CC:DD:EE:02")
+            .await
+            .expect_err("not declared");
+        assert!(format!("{error}").contains("no device named"), "{error}");
+    }
+
+    /// A confirmation with nothing waiting is refused rather than silently
+    /// accepted: the console would otherwise report a pairing that never
+    /// happened.
+    #[tokio::test]
+    async fn a_confirmation_with_nothing_waiting_is_refused() {
+        let (service, _adapter, _dir) = service_with_bluetooth(true, true);
+
+        let error = service
+            .confirm_bluetooth_pairing("AA:BB:CC:DD:EE:01", true)
+            .await
+            .expect_err("nothing waiting");
+
+        assert!(
+            format!("{error}").contains("no pairing confirmation"),
+            "{error}"
+        );
+    }
+
+    /// The three verbs drive the unit Quadlet generated, never podman.
+    #[tokio::test]
+    async fn a_container_action_is_a_systemd_verb_on_the_generated_unit() {
+        let (service, calls, _dir) = service_with_container(true);
+
+        service.start_container("node-red").await.expect("start");
+        service
+            .restart_container("node-red")
+            .await
+            .expect("restart");
+        service.stop_container("node-red").await.expect("stop");
+
+        assert_eq!(
+            *calls.lock().expect("call log"),
+            vec![
+                "start 50-mica-node-red.service".to_string(),
+                "restart 50-mica-node-red.service".to_string(),
+                "stop 50-mica-node-red.service".to_string(),
+            ]
+        );
+    }
+
+    /// The name is checked against the declared map first, so this is not a
+    /// way to drive an arbitrary unit through a container-shaped argument.
+    #[tokio::test]
+    async fn an_undeclared_container_is_refused_before_any_unit_call() {
+        let (service, calls, _dir) = service_with_container(true);
+
+        let error = service
+            .start_container("dbus.service")
+            .await
+            .expect_err("an undeclared name must be refused");
+
+        assert!(format!("{error}").contains("dbus.service"), "{error}");
+        assert!(calls.lock().expect("call log").is_empty());
+    }
+
+    /// With the switch off there is no mount, no generated unit and nothing to
+    /// start; saying so beats a systemd error about a unit that does not exist.
+    #[tokio::test]
+    async fn a_container_action_is_refused_while_containers_are_switched_off() {
+        let (service, calls, _dir) = service_with_container(false);
+
+        let error = service
+            .start_container("node-red")
+            .await
+            .expect_err("a switched-off device must refuse");
+
+        assert!(format!("{error}").contains("container.enabled"), "{error}");
+        assert!(calls.lock().expect("call log").is_empty());
+    }
+
+    /// The read names both sides and merges neither.
+    #[tokio::test]
+    async fn the_container_read_names_the_declared_map_and_the_engine_apart() {
+        let (service, _calls, _dir) = service_with_container(true);
+
+        let value: serde_json::Value =
+            serde_json::from_str(&service.get_containers().await.expect("read"))
+                .expect("container JSON");
+
+        assert_eq!(value["enabled"], serde_json::json!(true));
+        assert_eq!(
+            value["declared"]["node-red"]["image"],
+            serde_json::json!("docker.io/nodered/node-red:4.0.9")
+        );
+        assert_eq!(value["engine"]["available"], serde_json::json!(false));
     }
 
     #[tokio::test]

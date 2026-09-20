@@ -60,7 +60,8 @@ reader sees:
 | `network.<iface>` | Per-interface configuration; `kind` is `physical`, `vlan`, `bridge` or `wireguard`, with the one block that belongs to it (static/DHCP addressing, VLAN parent and ID, bridge ports, WireGuard peers) |
 | `access` | `ssh` (enabled, listen addresses, authorized keys), `console`, `webAdmin` (password hash), API tokens, claim and device-credential state |
 | `wifi` | `client` (known networks) and `ap` (access point) |
-| `container` | The container engine switch |
+| `container` | The container engine switch, and `units`: the containers this device declares |
+| `bluetooth` | The adapter switch, whether it is discoverable, its advertised name, the pairing code and `devices`: the trust list |
 | `mqtt` | The switch for broker and bridge, the broker listen address and port (default `127.0.0.1:1883`), whether clients must authenticate |
 | `time` | NTP servers and the presentation timezone |
 | `provisioning` | First-boot and provisioning-document status |
@@ -81,6 +82,7 @@ interface name is a convention; the `kind` block is authoritative.
 | `mqtt.json` | `/mica/config/` | `mqtt` |
 | `time.json` | `/mica/config/` | `time` |
 | `container.json` | `/mica/config/` | `container` |
+| `bluetooth.json` | `/mica/config/` | `bluetooth` |
 | `settings.toml` | `/var/lib/mica/` (STATE) | identity, credentials, provisioning state, staged reset |
 
 The split follows the reset tiers: tier 1 (configuration) clears exactly what
@@ -107,13 +109,10 @@ converges the system to the settings and returns the applied state as JSON.
 | `sshd` | `/run/mica/dropbear.env` (`DROPBEAR_ARGS`), `~/.ssh/authorized_keys` of `root` and `mica` | `dropbear.service` restart when changed |
 | `wifi_client` | wpa_supplicant configuration, the link's networkd unit | `wpa_supplicant@<iface>.service` |
 | `wifi_ap` | hostapd configuration, the AP's networkd unit with its DHCP server | `hostapd@<iface>.service` |
-| `container` | the mount unit binding `/etc/containers/systemd` from STATE | systemd daemon-reload, so Quadlet units exist only while enabled |
+| `container` | the mount unit binding `/etc/containers/systemd` from STATE, and a `50-mica-<name>.container` per declared container | systemd daemon-reload, so Quadlet units exist only while enabled; each declared unit to the state its `autoStart` asks for |
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env` | `mica-mqtt-broker.service`, `mica-mqttd.service` |
 | `time` | `/run/systemd/timesyncd.conf.d/60-mica-servers.conf`, `/run/mica/timezone` | systemd-timesyncd |
-
-Shared helpers: `reconciler/systemd.rs` (unit start/stop/restart/reload,
-`reset-failed`) and `fswrite.rs` (writing into STATE-backed bind mounts
-correctly).
+| `bluetooth` | nothing: BlueZ owns the adapter, and this reconciler sets its properties | `bluetooth.service`, the adapter's `Powered`/`Discoverable`/`Alias`, and each declared device's trust |
 
 ### 4.1 Apply tasks
 
@@ -276,6 +275,60 @@ rewrote the file would change what the public key says without changing what the
 tunnel uses. No `SettingsChanged` is emitted: nothing in the settings tree
 changed.
 
+### 4.4 Bluetooth, and the agent that pairs
+
+BlueZ owns the adapter; micad owns what is declared about it. `bluetooth`
+carries the switch, whether the adapter answers scans, the advertised name, the
+pairing code and `devices` -- the trust list, by address.
+
+The reconciler brings `bluetooth.service` to the switch, sets the adapter's
+properties, reconciles each declared device's trust, and **removes a paired
+device the settings tree does not name**. Only a paired one: BlueZ publishes an
+object for every device it has merely seen, and sweeping those would delete the
+results of the scan an operator is looking at.
+
+**A board with no radio reports `unsupported`**, not a failure. It is the only
+reconciler here whose subject is optional hardware, and one that failed would
+fail on every pass forever.
+
+Pairing is not a reconcile. micad registers an `org.bluez.Agent1` at
+`/com/mica/bluetooth/agent` with capability `DisplayYesNo`; when BlueZ asks for
+a confirmation the agent records the passkey and **blocks its reply** until
+`ConfirmBluetoothPairing` answers or 45 seconds pass. One request at a time: two
+passkeys on one screen is two decisions an operator cannot tell apart.
+
+A legacy peer that asks for a code is answered with `bluetooth.pin`. That value
+is **displayed** in the console by design -- somebody has to type it on the
+other device -- and an absent one is derived from the device identity rather
+than defaulting to a constant, so a fleet does not share one code. What bounds
+legacy pairing is not the code but discovery: it is an operator action with a
+timeout.
+
+### 4.5 Declared containers
+
+`container.units` is a map of container names to the fields a Quadlet
+`.container` unit needs: image, command, environment, published ports, volumes,
+restart policy and whether it starts at boot. The reconciler renders each entry
+to `50-mica-<name>.container` in the bound Quadlet directory, compares before
+writing, sweeps the `50-mica-` files it no longer declares -- and only those, so
+a `.container` an integrator dropped in by hand is left alone -- and reloads so
+Quadlet regenerates. A **bridge-port-like** rule applies to volumes: a host path
+must be under `/mica/`, checked by `micad-settings` itself because the document
+is writable without apid.
+
+Lifecycle is systemd's. `StartContainer` and its siblings drive
+`50-mica-<name>.service`, never podman: a container podman started is one no
+unit name can stop and nothing brings back after a reboot.
+
+What the engine reports is read separately (`containers.rs`): `podman ps --all`
+and `podman images`, bounded in time and output, **read-only** -- no `run`, no
+`rm`, no `pull`. Starting a unit pulls the image if it has to, which keeps the
+one writer of container state the unit file.
+
+Shared helpers: `reconciler/systemd.rs` (unit start/stop/restart/reload,
+`reset-failed`) and `fswrite.rs` (writing into STATE-backed bind mounts
+correctly).
+
 ## 5. D-Bus interface
 
 Bus name `com.mica.micad`, object `/com/mica/micad`, interface
@@ -305,6 +358,9 @@ Bus name `com.mica.micad`, object `/com/mica/micad`, interface
 | `GetSystemInfo` | What the device is, assembled from where each fact already lives |
 | `GetTelemetry` | Board temperature, watchdog and reset reason |
 | `GetFailureEvidence` | Failed units and a bounded journal excerpt |
+| `GetContainers` | The declared container map joined with what the engine reports, each side named |
+| `ScanWifi` | What the station's radio finds on the air: one entry per network with its SSID, BSSID, signal and flags |
+| `GetBluetooth` | The declared trust list, the adapter, the devices BlueZ holds, the pairing code and whatever is waiting to be confirmed |
 
 ### 5.3 Actions
 
@@ -315,10 +371,16 @@ Bus name `com.mica.micad`, object `/com/mica/micad`, interface
 | `RotateWireguardKey` | `iface` → the new public key | Draw a new WireGuard private key; the reconcilers re-render the tunnel |
 | `GetUpdateState` | → JSON | The complete update state |
 | `CheckUpdate`, `FetchUpdate` | — | Check the signed catalog; download the selected deployment |
+| `ImportUpdate` | `path` | Import an offline `MICAUPD1` archive apid streamed into the workspace's `uploads/`; a path outside it is refused |
 | `InstallUpdate` | `deployment_id` | Install an acquired deployment |
 | `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment` | `deployment_id` | Boot lifecycle actions |
 | `SetRebootOverride` | `seconds` → JSON | Bounded administrative override of the safe-to-reboot gate |
 | `SetUpdateConfig` | `patch_json` → JSON | Write the operator update policy |
+| `StartContainer`, `StopContainer`, `RestartContainer` | `name` | systemd verbs on the unit Quadlet generated for a declared container; a name the settings tree does not hold is refused |
+| `SetBluetoothDiscovery` | `on` | Start or stop a scan; refused with the switch off or with no adapter |
+| `PairBluetoothDevice` | `address` | Pair, then record the device in the trust list as trusted |
+| `ConfirmBluetoothPairing` | `address`, `accept` | Answer the passkey the agent is holding |
+| `RemoveBluetoothDevice` | `address` | Drop the declaration and tell the adapter to forget its keys |
 
 Errors are D-Bus errors; a value the tree rejects is
 `org.freedesktop.DBus.Error.InvalidArgs`.
@@ -348,7 +410,13 @@ hashes. `mica-mqttd` has no exception.
 - `deployment.rs` runs `/usr/bin/mica-deploy` with bounded time and output and
   parses its JSON status.
 - `update_policy.rs`: refusals, the maintenance window, the automatic check
-  cadence and the safe-to-reboot gate.
+  cadence and the safe-to-reboot gate. The cadence is `checkIntervalMinutes`
+  measured from the daemon's start, unless the document names `checkAt`
+  (`HH:MM` UTC): then the check is that time of day, answered once per
+  crossing, seeded at the driver's start so an anchor crossed while the device
+  was down does not fire at boot. An unbelieved clock falls back to the
+  interval rather than stopping -- a clockless device must keep discovering
+  updates.
 - `update_lifecycle.rs`: records acquisition and install progress and applies
   the maintenance and reboot gates to actions.
 - `update_auto.rs`: automatic check, download and install within the operator
@@ -366,7 +434,9 @@ hashes. `mica-mqttd` has no exception.
   record is live state under `power` (`{ last_action, requested_by }`), and the
   settings documents, `SCHEMA_VERSION` included, are left as they were.
 - `reset.rs`: applies a staged reset tier — `configuration` (settings back to
-  schema defaults), `application-data` (operator applications and their data),
+  schema defaults), `application-data` (operator applications and their data,
+  `container.units` among them: a declared container is an operator
+  application),
   `full-factory` (first-boot state, keeping identity, calibration, META and both
   system slots). apid stages the intent; micad applies it.
 - `recovery.rs`: reads a board-declared physical recovery action at boot

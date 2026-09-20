@@ -25,6 +25,18 @@ pub(crate) const V1_UPDATE_REJECT_PATH: &str = "/v1/update/reject";
 pub(crate) const V1_UPDATE_ROLLBACK_PATH: &str = "/v1/update/rollback";
 pub(crate) const V1_UPDATE_REBOOT_OVERRIDE_PATH: &str = "/v1/update/reboot-override";
 pub(crate) const V1_UPDATE_CONFIG_PATH: &str = "/v1/update/config";
+pub(crate) const V1_UPDATE_IMPORT_PATH: &str = "/v1/update/import";
+
+/// The most an uploaded archive may be.
+///
+/// A deployment is kernel plus root plus support images; two gigabytes is
+/// well above any product this repository builds and well below what a DATA
+/// partition holds. The real bound is the device's free space, which the
+/// write hits on its own.
+const MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// The first eight bytes of every component archive.
+const ARCHIVE_MAGIC: &[u8; 8] = b"MICAUPD1";
 
 /// The D-Bus error name micad's update surface refuses policy-forbidden
 /// actions with. Not in `routes.rs`'s table: only this cluster produces it.
@@ -173,6 +185,188 @@ pub(crate) async fn api_v1_update_fetch(
             accepted()
         }
         Err(err) => update_bus_error(&err),
+    }
+}
+
+/// Upload a signed offline archive and import it.
+///
+/// The body is the `MICAUPD1` archive itself, streamed to the device's upload
+/// directory and then imported by micad through `mica-deploy import` -- the
+/// same code path an online fetch stages through, so every signature, product
+/// and object check an online acquisition runs, runs here.
+///
+/// **The network policy does not gate it.** A metered link, an absent source
+/// and an update mode of `off` all refuse a fetch and none of them has
+/// anything to say about a file an operator carried here themselves.
+///
+/// Answers **202**: the import verifies each object and that is not a
+/// request's worth of time. Poll `GET /api/v1/update` for the outcome.
+#[utoipa::path(
+    post,
+    path = V1_UPDATE_IMPORT_PATH,
+    context_path = API,
+    tag = "actions",
+    request_body(content = String, description = "The `MICAUPD1` archive", content_type = "application/octet-stream"),
+    responses(
+        (status = 202, description = "The archive was written and the import started; poll the update state"),
+        (status = 400, description = "The upload was interrupted, or does not begin with the archive magic (`archive_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 409, description = "Another update operation is already running (`update_refused`)", body = ApiError),
+        (status = 413, description = "The archive is larger than this device accepts (`archive_too_large`)", body = ApiError),
+        (status = 415, description = "The body is not `application/octet-stream` (`archive_type`)", body = ApiError),
+        (status = 507, description = "The upload could not be written (`update_storage_unavailable`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_update_import(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Source(source): Source,
+    request: axum::extract::Request<axum::body::Body>,
+) -> Response {
+    use futures_util::StreamExt as _;
+    use tokio::io::AsyncWriteExt as _;
+
+    let refuse = |status: StatusCode, code: &'static str, message: &str| {
+        api_response(status, ApiError::apid(code, message.to_string()))
+    };
+    let content_type = request
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim);
+    if content_type != Some("application/octet-stream") {
+        return refuse(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "archive_type",
+            "upload the .micaupd archive as application/octet-stream",
+        );
+    }
+    if request
+        .headers()
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|length| length > MAX_ARCHIVE_BYTES)
+    {
+        return refuse(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "archive_too_large",
+            "this device accepts an update archive of at most 2 GiB",
+        );
+    }
+
+    let uploads = state.update_uploads.as_path();
+    if let Err(err) = tokio::fs::create_dir_all(uploads).await {
+        tracing::error!(error = %err, "creating the update upload directory failed");
+        return refuse(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "update_storage_unavailable",
+            "the update upload directory could not be created",
+        );
+    }
+    // A name drawn here and not taken from the client: an upload is addressed
+    // by the path apid hands micad, and a client-chosen name is a client
+    // choosing where on the device its bytes land.
+    let upload = uploads.join(format!("{:032x}.micaupd", rand::random::<u128>()));
+    let mut file = match tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&upload)
+        .await
+    {
+        Ok(file) => file,
+        Err(err) => {
+            tracing::error!(error = %err, "creating the update upload file failed");
+            return refuse(
+                StatusCode::INSUFFICIENT_STORAGE,
+                "update_storage_unavailable",
+                "the upload file could not be created",
+            );
+        }
+    };
+    let mut stream = request.into_body().into_data_stream();
+    let mut written = 0_u64;
+    let mut magic = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                let _ = tokio::fs::remove_file(&upload).await;
+                tracing::warn!(error = %err, "the update upload was interrupted");
+                return refuse(
+                    StatusCode::BAD_REQUEST,
+                    "archive_invalid",
+                    "the upload was interrupted",
+                );
+            }
+        };
+        written += chunk.len() as u64;
+        if written > MAX_ARCHIVE_BYTES {
+            let _ = tokio::fs::remove_file(&upload).await;
+            return refuse(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "archive_too_large",
+                "this device accepts an update archive of at most 2 GiB",
+            );
+        }
+        // The magic is checked as soon as there is enough of it, so a body
+        // that is not an archive at all is refused after eight bytes rather
+        // than after a gigabyte.
+        if magic.len() < ARCHIVE_MAGIC.len() {
+            magic.extend_from_slice(&chunk[..chunk.len().min(ARCHIVE_MAGIC.len() - magic.len())]);
+            if magic.len() == ARCHIVE_MAGIC.len() && magic != ARCHIVE_MAGIC {
+                let _ = tokio::fs::remove_file(&upload).await;
+                return refuse(
+                    StatusCode::BAD_REQUEST,
+                    "archive_invalid",
+                    "this is not a component archive: it does not begin with MICAUPD1",
+                );
+            }
+        }
+        if let Err(err) = file.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&upload).await;
+            tracing::error!(error = %err, "writing the update upload failed");
+            return refuse(
+                StatusCode::INSUFFICIENT_STORAGE,
+                "update_storage_unavailable",
+                "the upload could not be written",
+            );
+        }
+    }
+    if magic.len() < ARCHIVE_MAGIC.len() {
+        let _ = tokio::fs::remove_file(&upload).await;
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "archive_invalid",
+            "this is not a component archive: it does not begin with MICAUPD1",
+        );
+    }
+    if let Err(err) = file.sync_all().await {
+        let _ = tokio::fs::remove_file(&upload).await;
+        tracing::error!(error = %err, "syncing the update upload failed");
+        return refuse(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "update_storage_unavailable",
+            "the upload could not be written",
+        );
+    }
+    drop(file);
+
+    match state.api.import_update(&upload.to_string_lossy()).await {
+        Ok(()) => {
+            state.audit.record(UPDATE_FETCH_EVENT, REQUESTED, &source);
+            accepted()
+        }
+        Err(err) => {
+            // micad never took it, so the copy on disk is apid's to remove.
+            let _ = tokio::fs::remove_file(&upload).await;
+            update_bus_error(&err)
+        }
     }
 }
 
@@ -496,6 +690,7 @@ pub(crate) struct UpdateConfig(Value);
 /// following its image, which nobody asked for.
 ///
 /// Accepted keys: `policy` (`off`/`check`/`auto`), `checkIntervalMinutes`,
+/// `checkAt` (`HH:MM` UTC, the time of day the check is anchored to),
 /// `rebootPolicy` (`manual`/`window`), `source.url`, `source.channel`,
 /// `network`, `maintenance` and `rebootGate`. Anything else — including a
 /// trust anchor under any name, at any depth — is **422** naming the key: the

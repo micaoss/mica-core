@@ -12,7 +12,9 @@
 #![forbid(unsafe_code)]
 
 mod apply_queue;
+mod bluetooth;
 mod bus;
+mod containers;
 mod deployment;
 mod diagnostics;
 mod fswrite;
@@ -282,6 +284,13 @@ async fn serve() -> anyhow::Result<()> {
     }
     state.insert("meta".to_string(), meta.to_json());
 
+    // Read before the tree is handed to the service: the agent answers a
+    // legacy peer with the declared code, or with the one derived from this
+    // device's own identity.
+    let settings_pin = settings.bluetooth.pin.clone();
+    let device_id_for_pin = settings.provisioning.device_id.clone().unwrap_or_default();
+    let mut pairing_agent: Option<Arc<bluetooth::Agent>> = None;
+
     let mut service = bus::MicadService::new(
         store,
         settings,
@@ -301,6 +310,19 @@ async fn serve() -> anyhow::Result<()> {
         service = service.with_telemetry(Arc::new(telemetry::SysfsTelemetry::production()));
         service =
             service.with_failure_evidence(Arc::new(diagnostics::HostFailureEvidence::production()));
+        // The engine is read-only and the unit control is systemd: a declared
+        // container's lifecycle is a unit's, and a dry-run daemon gets
+        // neither, so it neither runs podman nor starts anything.
+        // The adapter and the pairing agent. The agent's state is shared with
+        // the `org.bluez.Agent1` object registered below: it blocks on a
+        // decision the console makes through the bus.
+        let agent = Arc::new(bluetooth::Agent::default());
+        pairing_agent = Some(Arc::clone(&agent));
+        service = service.with_bluetooth(Arc::new(bluetooth::BlueZ), Arc::clone(&agent));
+        service = service.with_containers(
+            Arc::new(containers::Podman::default()),
+            Arc::new(reconciler::systemd::Systemd::new()),
+        );
         // Same reasoning again: the rotation writes a private key onto STATE
         // and deletes a kernel device, so a dry-run daemon is never given one.
         service = service.with_wireguard(Arc::new(reconciler::network::KeyRotation::production()));
@@ -337,6 +359,37 @@ async fn serve() -> anyhow::Result<()> {
         .build()
         .await
         .with_context(|| format!("connect to {bus_kind} bus"))?;
+    // The pairing agent, on the same connection. Served before it is
+    // registered, so BlueZ never calls an object that is not there yet, and
+    // registered on a best-effort basis: a board with no radio has no
+    // `org.bluez` to register with, and that is not a reason for micad not to
+    // start.
+    if !dry_run && let Some(agent) = pairing_agent.take() {
+        let state = Arc::clone(&agent);
+        if let Err(err) = connection
+            .object_server()
+            .at(bluetooth::AGENT_PATH, bluetooth::PairingAgent { state })
+            .await
+        {
+            tracing::warn!(error = %err, "serving the Bluetooth pairing agent failed");
+        } else if let Err(err) = bluetooth::register_agent(&connection).await {
+            tracing::info!(error = %err, "no Bluetooth agent registered: bluetoothd did not answer");
+        } else {
+            tracing::info!(
+                path = bluetooth::AGENT_PATH,
+                "Bluetooth pairing agent registered"
+            );
+        }
+        // The agent answers with whatever the settings say; the reconciler
+        // keeps it in step from here on.
+        agent
+            .set_pin(
+                settings_pin
+                    .clone()
+                    .unwrap_or_else(|| micad_settings::derived_pairing_pin(&device_id_for_pin)),
+            )
+            .await;
+    }
     // The service scan, started before the well-known name is claimed so that
     // its NameOwnerChanged subscription is in place before anything can react
     // to micad appearing — a service that claims its name in that window is

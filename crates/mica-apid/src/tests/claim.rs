@@ -66,15 +66,15 @@ async fn access_of(fake: &FakeSettings) -> serde_json::Value {
 
 // --- The one-write commit --------------------------------------------------
 
-/// The credential, the record of how the device was claimed and the minted
-/// token reach the bus as ONE write of ONE subtree.
+/// The credential and the record of how the device was claimed reach the bus
+/// as ONE write of ONE subtree.
 ///
 /// The assertion is the write LIST and not the resulting tree, because the
-/// resulting tree looks identical whether it took one write or three. micad
+/// resulting tree looks identical whether it took one write or two. micad
 /// turns one `SetSettings` into one `Store::save`, so "one write here" is
 /// exactly "one commit point on the device".
 #[tokio::test]
-async fn a_route_claim_commits_the_credential_the_record_and_the_token_in_one_write() {
+async fn a_route_claim_commits_the_credential_and_the_record_in_one_write() {
     let (router, fake) = test_app(seeded_tree());
 
     let response = post_json(&router, "/api/v1/setup", &claim_body(), None).await;
@@ -89,7 +89,9 @@ async fn a_route_claim_commits_the_credential_the_record_and_the_token_in_one_wr
     assert!(access["webAdmin"]["password_hash"].as_str().is_some());
     assert_eq!(access["claim"]["via"], json!("setup"));
     assert_eq!(access["claim"]["rotationRequired"], json!(false));
-    assert_eq!(access["apiTokens"].as_array().unwrap().len(), 1);
+    // Setup mints nothing: an operator who wants API access asks for a token
+    // with the credential this write just created.
+    assert!(access.get("apiTokens").is_none(), "{access}");
 }
 
 /// Everything the route has no opinion about survives the whole-subtree write.
@@ -267,9 +269,8 @@ impl SettingsApi for InterruptOnce {
 /// The identity assertion is `provisioning.deviceId`, which is what
 /// "without cloning identity" is about: it is drawn once by
 /// `micad/src/identity.rs` and the claim never touches it, so a claim driven
-/// twice must leave the same one. The credential assertion is the token list,
-/// because a claim that retried by appending would leave TWO tokens that both
-/// authenticate and only one of which the caller was ever told about.
+/// twice must leave the same one. The credential assertion is the session the
+/// second attempt hands back: it works, and it is the only thing that does.
 #[tokio::test]
 async fn an_interrupted_claim_writes_nothing_and_the_retry_mints_one_identity() {
     let api = InterruptOnce::new(seeded_tree(), "access");
@@ -294,16 +295,12 @@ async fn an_interrupted_claim_writes_nothing_and_the_retry_mints_one_identity() 
     // The retry, on a device the interruption left exactly as it found it.
     let response = post_json(&router, "/api/v1/setup", &claim_body(), None).await;
     assert_eq!(response.status(), StatusCode::CREATED);
-    let token = body_json(response).await["token"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let cookie = session_cookie_value(&response);
 
     let access = access_of(&api.inner).await;
-    assert_eq!(
-        access["apiTokens"].as_array().unwrap().len(),
-        1,
-        "the retry minted a second working credential: {access}"
+    assert!(
+        access.get("apiTokens").is_none(),
+        "the retry left a bearer credential behind: {access}"
     );
     assert_eq!(access["claim"]["via"], json!("setup"));
     assert_eq!(
@@ -316,7 +313,7 @@ async fn an_interrupted_claim_writes_nothing_and_the_retry_mints_one_identity() 
     );
 
     // And the one credential the caller was handed is the one that works.
-    let probe = bearer(&router, "GET", "/api/v1/meta", &token).await;
+    let probe = get(&router, "/api/v1/meta", Some(&cookie)).await;
     assert_eq!(probe.status(), StatusCode::OK);
 }
 
@@ -324,7 +321,7 @@ async fn an_interrupted_claim_writes_nothing_and_the_retry_mints_one_identity() 
 /// reached the caller, so the caller retries a claim that already happened.
 ///
 /// It is refused, and the refusal is what keeps the device single-credentialled
-/// — the first token still authenticates, the claim record still says what it
+/// — the first session still authenticates, the claim record still says what it
 /// said, and the identity has not moved.
 #[tokio::test]
 async fn a_claim_that_committed_but_was_never_answered_is_refused_on_retry() {
@@ -332,10 +329,7 @@ async fn a_claim_that_committed_but_was_never_answered_is_refused_on_retry() {
 
     let first = post_json(&router, "/api/v1/setup", &claim_body(), None).await;
     assert_eq!(first.status(), StatusCode::CREATED);
-    let token = body_json(first).await["token"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let cookie = session_cookie_value(&first);
     let committed = access_of(&fake).await;
 
     let retry = post_json(&router, "/api/v1/setup", &claim_body(), None).await;
@@ -352,7 +346,7 @@ async fn a_claim_that_committed_but_was_never_answered_is_refused_on_retry() {
         vec!["access".to_string()],
         "the refused retry wrote something"
     );
-    let probe = bearer(&router, "GET", "/api/v1/meta", &token).await;
+    let probe = get(&router, "/api/v1/meta", Some(&cookie)).await;
     assert_eq!(probe.status(), StatusCode::OK);
 }
 
@@ -415,9 +409,9 @@ async fn a_refused_claim_is_audited_and_discloses_only_what_the_session_route_do
 ///
 /// The sentinel is driven through every surface a secret could leak into: the
 /// audit trail, the claim status, the settings tree's own readable fields, and
-/// the bodies and headers of both failures. The minted token is deliberately
-/// NOT checked out of the success body — that body is the one place it may
-/// appear, and it appears there once.
+/// the bodies and headers of both failures. The success body carries no secret
+/// at all: setup mints no token, so the only credential it creates is the
+/// password the caller already holds.
 #[tokio::test]
 async fn no_claim_surface_emits_the_password() {
     let dir = TempDir::new().unwrap();
@@ -437,12 +431,10 @@ async fn no_claim_surface_emits_the_password() {
 
     let created = post_json(&router, "/api/v1/setup", &claim_body(), None).await;
     assert_eq!(created.status(), StatusCode::CREATED);
-    let token = body_json(created).await["token"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let cookie = session_cookie_value(&created);
+    assert!(!body_string(created).await.contains(PW_SENTINEL));
 
-    let status = bearer(&router, "GET", CLAIM_PATH, &token).await;
+    let status = get(&router, CLAIM_PATH, Some(&cookie)).await;
     assert_eq!(status.status(), StatusCode::OK);
     let status = body_string(status).await;
     assert!(!status.contains(PW_SENTINEL), "{status}");
@@ -452,7 +444,7 @@ async fn no_claim_surface_emits_the_password() {
 
     let trail = std::fs::read_to_string(dir.path().join("audit.log")).unwrap();
     assert!(!trail.contains(PW_SENTINEL), "{trail}");
-    assert!(!trail.contains(&token), "{trail}");
+    assert!(!trail.contains(&cookie), "{trail}");
 
     // The stored claim record itself holds nothing the caller typed.
     let record = access_of(&fake).await["claim"].clone();
@@ -476,11 +468,8 @@ async fn a_document_claim_and_a_route_claim_answer_one_projection() {
     let (router, fake) = test_app(seeded_tree());
     let created = post_json(&router, "/api/v1/setup", &claim_body(), None).await;
     assert_eq!(created.status(), StatusCode::CREATED);
-    let token = body_json(created).await["token"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let by_route = body_json(bearer(&router, "GET", CLAIM_PATH, &token).await).await;
+    let cookie = session_cookie_value(&created);
+    let by_route = body_json(get(&router, CLAIM_PATH, Some(&cookie)).await).await;
 
     assert_eq!(by_route["state"], json!("claimed"));
     assert_eq!(by_route["via"], json!("setup"));
@@ -685,22 +674,28 @@ async fn a_mutation_refused_for_want_of_a_rotation_is_audited() {
 
 /// A claim by route needs no rotation, so the bound never fires on the
 /// channel whose credential the caller chose.
+///
+/// The mint is also where the first API token of a route-claimed device comes
+/// from now that setup makes none: the session setup handed back is what asks
+/// for it.
 #[tokio::test]
 async fn a_route_claim_is_not_bound_by_the_rotation() {
     let (router, _fake) = test_app(seeded_tree());
     let created = post_json(&router, "/api/v1/setup", &claim_body(), None).await;
     assert_eq!(created.status(), StatusCode::CREATED);
-    let token = body_json(created).await["token"]
+    let cookie = session_cookie_value(&created);
+    let csrf = body_json(created).await["csrfToken"]
         .as_str()
-        .unwrap()
+        .expect("setup hands back the session's CSRF token")
         .to_string();
 
-    let mint = bearer_json(
+    let mint = json_request(
         &router,
         "POST",
         "/api/v1/tokens",
-        &token,
-        &json!({ "name": "ci" }).to_string(),
+        json!({ "name": "ci" }),
+        Some(&cookie),
+        Some(&csrf),
     )
     .await;
     assert_eq!(mint.status(), StatusCode::CREATED);
@@ -801,10 +796,9 @@ async fn a_factory_fresh_device_issues_one_administrator_session_to_concurrent_c
         "a second claim reached the device"
     );
     let access = access_of(&fake).await;
-    assert_eq!(
-        access["apiTokens"].as_array().unwrap().len(),
-        1,
-        "one claim minted more than one first-run token: {access}"
+    assert!(
+        access.get("apiTokens").is_none(),
+        "a claim left a bearer credential behind: {access}"
     );
     assert_eq!(access["claim"]["via"], json!("setup"));
 

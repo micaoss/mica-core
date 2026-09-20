@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { findService, serviceCatalog, serviceEndpoint } from './service-catalog'
 
 describe('the service catalog', () => {
-  it('lists the three services of the prototype in its order', () => {
-    expect(serviceCatalog.map((service) => service.id)).toEqual(['containers', 'mqtt', 'terminal'])
+  it('lists the services in its order', () => {
+    expect(serviceCatalog.map((service) => service.id)).toEqual(['containers', 'mqtt'])
   })
 
-  /// A service without a settings path is one the device cannot be asked
-  /// about, which is exactly what makes the terminal simulated.
-  it('marks the terminal as having no device setting', () => {
+  /// Every service in the catalogue is one the device can be asked about:
+  /// a card with no settings path could only ever report an invented state.
+  it('gives every service a device setting and a state path', () => {
     expect(findService('containers')?.settingsPath).toBe('container.enabled')
-    expect(findService('terminal')?.settingsPath).toBeUndefined()
+    expect(serviceCatalog.every((service) => service.settingsPath && service.statePath)).toBe(true)
     expect(findService('nothing')).toBeUndefined()
   })
 })

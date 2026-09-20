@@ -36,17 +36,16 @@ function renderPreferences() {
 }
 
 async function openPicker() {
-  const input = screen.getByRole('combobox', { name: 'Language' })
-  await userEvent.click(input)
-  return input
+  const trigger = screen.getByRole('combobox', { name: 'Language' })
+  await userEvent.click(trigger)
+  return trigger
 }
 
 describe('display preferences', () => {
-  it('searches the picker, applies a language and persists the choice', async () => {
+  it('applies a language and persists the choice', async () => {
     renderPreferences()
 
-    const input = await openPicker()
-    await userEvent.type(input, 'chinese')
+    await openPicker()
     await userEvent.click(await screen.findByRole('option', { name: /简体中文/ }))
 
     await waitFor(() => expect(document.documentElement.lang).toBe('zh-CN'))
@@ -68,23 +67,32 @@ describe('display preferences', () => {
     expect(document.documentElement.lang).toBe('en')
   })
 
-  it('says when no language matches the search', async () => {
-    renderPreferences()
-
-    const input = await openPicker()
-    await userEvent.type(input, 'klingon')
-
-    expect(await screen.findByText('No languages match')).toBeTruthy()
-  })
-
+  /// Both controls are the same shape, which is the point: one icon trigger
+  /// each, the current value checked in the popup.
   it('changes and persists an explicit theme', async () => {
     renderPreferences()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Dark' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Appearance' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Dark' }))
 
     await waitFor(() => expect(document.documentElement.classList.contains('dark')).toBe(true))
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
-    expect(screen.getByRole('button', { name: 'Dark' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  /// Neither control is a text box. The language picker used to be a combobox
+  /// with a search input, which in a header slot read as an empty search field
+  /// rather than as the language the console is in.
+  it('is a pair of triggers rather than a text input', async () => {
+    renderPreferences()
+
+    const language = screen.getByRole('combobox', { name: 'Language' })
+    const appearance = screen.getByRole('combobox', { name: 'Appearance' })
+
+    expect(language.tagName).not.toBe('INPUT')
+    expect(appearance.tagName).not.toBe('INPUT')
+    // The value is there for a screen reader and hidden from the layout, so
+    // the trigger stays icon-width.
+    expect(language.querySelector('.sr-only')).toBeTruthy()
   })
 
   /// The picker used to be a dialog rendered inside the header's dropdown menu,

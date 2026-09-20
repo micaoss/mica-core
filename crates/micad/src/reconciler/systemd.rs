@@ -97,6 +97,52 @@ pub trait UnitControl: Send + Sync {
     async fn daemon_reload(&self) -> Result<()>;
 }
 
+/// A unit control that drives nothing.
+///
+/// The default a daemon holds when it was handed no systemd: a dry run, or a
+/// test that did not ask for one. Every verb refuses rather than pretending to
+/// have run, so "nothing happened" is never reported as success.
+pub struct NoUnits;
+
+#[async_trait::async_trait]
+impl UnitControl for NoUnits {
+    async fn active_state(&self, _unit: &str) -> Result<String> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+
+    async fn unit_file_state(&self, _unit: &str) -> Result<String> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+
+    async fn start(&self, _unit: &str) -> Result<()> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+
+    async fn stop(&self, _unit: &str) -> Result<()> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+
+    async fn restart(&self, _unit: &str) -> Result<()> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+
+    async fn reset_failed(&self, _unit: &str) -> Result<()> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+
+    async fn enable(&self, _unit: &str) -> Result<()> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+
+    async fn disable(&self, _unit: &str) -> Result<()> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+
+    async fn daemon_reload(&self) -> Result<()> {
+        anyhow::bail!("this daemon drives no systemd")
+    }
+}
+
 /// True when `state` is an [`UnitControl::active_state`] value that means the
 /// unit is running or on its way up, i.e. starting it again would be
 /// redundant.

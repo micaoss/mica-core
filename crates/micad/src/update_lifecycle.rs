@@ -524,6 +524,17 @@ impl UpdateLifecycle {
         self.workspace_root.join("verified")
     }
 
+    /// Where an uploaded archive is streamed to before it is imported.
+    ///
+    /// Inside the acquisition workspace and beside `verified/`, so an upload
+    /// lands on the same medium the objects it carries will be staged onto:
+    /// a device with no room for the deployment runs out of it while writing
+    /// the upload, which is the earlier and cheaper failure.
+    #[must_use]
+    pub fn uploads_dir(&self) -> PathBuf {
+        self.workspace_root.join("uploads")
+    }
+
     /// Why `path` must not be handed to the native backend, or `Ok` when it is a regular
     /// file (not a symbolic link) directly inside `verified/` and not a
     /// `.part`. The bus layer's `InstallUpdate` asks this for every path,
@@ -660,6 +671,96 @@ impl UpdateLifecycle {
             this.settle_fetch(result).await;
         });
         Ok(())
+    }
+
+    /// Start an import, spawned like a fetch: the archive's objects are
+    /// verified one by one and that is not a bus call's worth of time. The
+    /// outcome lands in the update state the caller polls.
+    pub async fn request_import(
+        self: &Arc<Self>,
+        sender: &str,
+        archive: &Path,
+    ) -> Result<(), Refusal> {
+        let workspace = self.admit_import(sender).await?;
+        let this = Arc::clone(self);
+        let archive = archive.to_path_buf();
+        tokio::spawn(async move {
+            let result = this.run_import(&workspace, &archive).await;
+            this.settle_fetch(result).await;
+            // The upload is consumed: it has either been staged into the
+            // workspace or refused, and either way the copy under `uploads/`
+            // is a second megabyte-scale file on DATA that nothing reads.
+            let _ = tokio::fs::remove_file(&archive).await;
+        });
+        Ok(())
+    }
+
+    /// The same import, awaited to its outcome instead of spawned; see
+    /// [`Self::check_now`] for why the awaited form exists.
+    ///
+    /// Import an offline archive: the staging a fetch performs, from a file
+    /// somebody carried here instead of from a server.
+    ///
+    /// **Not gated on the network policy.** A metered link, an absent source
+    /// and an update mode of `off` all refuse a fetch and none of them has
+    /// anything to say about a file already on the device: an operator who
+    /// uploaded an archive has made the decision the policy exists to make.
+    /// What still applies is the workspace probe, the client, the busy slot
+    /// and -- inside `mica-deploy` -- every signature and product check an
+    /// online acquisition runs, because it is the same code path.
+    #[cfg(test)]
+    pub async fn import_now(
+        self: &Arc<Self>,
+        sender: &str,
+        archive: &Path,
+    ) -> Result<Settled<String>, Refusal> {
+        let workspace = self.admit_import(sender).await?;
+        let result = self.run_import(&workspace, archive).await;
+        Ok(self.settle_fetch(result).await)
+    }
+
+    /// Admit an import: the client and the busy slot, and nothing about the
+    /// network.
+    async fn admit_import(&self, sender: &str) -> Result<Workspace, Refusal> {
+        if let Some(reason) = self.client.unavailable() {
+            self.record_refusal(
+                "import",
+                &CodedReason::new(update_codes::REFUSED_CLIENT_UNAVAILABLE, reason.clone()),
+            )
+            .await;
+            return Err(Refusal::Unavailable(reason));
+        }
+        self.begin("importing").await?;
+        tracing::info!(sender, "update import requested");
+        Ok(self.policy.load().policy.workspace.clone())
+    }
+
+    async fn run_import(
+        &self,
+        workspace: &Workspace,
+        archive: &Path,
+    ) -> Result<FetchOutcome, Failure> {
+        self.probe(workspace).await?;
+        // The same read bound every acquisition carries. An import is the one
+        // acquisition whose input a person chose, which is the reason to bound
+        // it rather than a reason not to.
+        let args = vec![
+            "--max-bytes".to_string(),
+            workspace.max_bytes.to_string(),
+            "import".to_string(),
+            archive.to_string_lossy().into_owned(),
+        ];
+        let output = self
+            .client
+            .run(&args, FETCH_TIMEOUT)
+            .await
+            .map_err(|error| {
+                Failure::Error(CodedReason::new(
+                    update_codes::CLIENT_SPAWN_FAILED,
+                    format!("import: {error:#}"),
+                ))
+            })?;
+        parse_fetch(&output, &self.verified_dir()).map_err(Failure::Error)
     }
 
     /// The same fetch, awaited to its outcome instead of spawned; see
@@ -1270,6 +1371,9 @@ fn render_entry(
             // `GET /api/v1/provisioning/status`.
             "policy": selection.map(|selection| selection.mode.as_str()),
             "checkIntervalMinutes": selection.map(|selection| selection.check_interval_minutes),
+            // Layer 2's own, like `rebootPolicy`: it answers even when the
+            // selection does not, and `null` is "no anchor", not "unknown".
+            "checkAt": policy.check_at.clone(),
             "sourceUrl": selection.and_then(|selection| selection.url.clone()),
             "channel": selection.map(|selection| selection.channel.clone()),
             // Layer 2 owns this one outright, so it answers even when the
@@ -1649,6 +1753,47 @@ mod tests {
                 "https://updates.example",
                 "--channel",
                 "stable"
+            ]
+        );
+    }
+
+    /// An imported archive stages exactly what a fetch stages, and the client
+    /// is asked for `import` with the file and nothing else -- no source, no
+    /// channel: there is no server in this path.
+    #[tokio::test]
+    async fn an_import_stages_the_archive_the_way_a_fetch_stages_a_download() {
+        let dir = tempfile::tempdir().unwrap();
+        // No source configured at all, which would refuse a fetch outright.
+        let policy = policy_file(&dir, r#"{"policy":"off"}"#);
+        let client = MockClient::new(vec![
+            ready_probe(),
+            ("import", Ok(fetch_output(&staged_path()))),
+        ]);
+        let calls = Arc::clone(&client.calls);
+        let host = TestHost::new();
+        let (lifecycle, _) = lifecycle(client, policy, Arc::clone(&host));
+        let archive = dir.path().join("release.micaupd");
+        std::fs::write(&archive, b"MICAUPD1").unwrap();
+
+        let settled_outcome = lifecycle
+            .import_now("test", &archive)
+            .await
+            .expect("an upload is not refused by the network policy");
+
+        assert!(
+            matches!(settled_outcome, Settled::Done(_)),
+            "{settled_outcome:?}"
+        );
+        let recorded = settled(&host).await;
+        assert_eq!(recorded["state"], "ready");
+        assert_eq!(recorded["deploymentId"], "a".repeat(64));
+        assert_eq!(
+            calls.lock().unwrap()[1],
+            [
+                "--max-bytes",
+                "500000000",
+                "import",
+                archive.to_string_lossy().as_ref(),
             ]
         );
     }

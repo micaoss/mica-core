@@ -2,7 +2,7 @@ import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderPanel, stubFetch } from '@/shared/testing/panel'
-import { UpdateActions, UpdatePanel } from './system-page'
+import { ManualUpdate, UpdateActions, UpdatePanel } from './system-page'
 
 afterEach(() => {
   cleanup()
@@ -50,4 +50,35 @@ it('displays the running, candidate and fallback identities with the running com
   } })
   renderPanel(<UpdatePanel />)
   for (const id of ['a', 'b', 'c', 'd', 'e']) expect(await screen.findByText(id.repeat(64))).toBeTruthy()
+})
+
+describe('the offline import', () => {
+  /// The archive is the request body, not a form field: it is measured in
+  /// hundreds of megabytes and the device writes it as it arrives.
+  it('uploads the chosen archive as the body of one request', async () => {
+    const fetch = stubFetch({
+      '/api/v1/update': { lifecycle: { state: 'idle' } },
+      'POST /api/v1/update/import': () => jsonResponse({}, 202),
+    })
+    renderPanel(<ManualUpdate />)
+
+    const archive = new File([new Uint8Array([0x4d, 0x49, 0x43, 0x41])], 'release.micaupd')
+    // The picker's input is hidden behind its own button, so the file is
+    // handed to the element rather than to a label that points at nothing.
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, archive)
+    await userEvent.click(screen.getByRole('button', { name: 'Upload and import' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([path]) => String(path) === '/api/v1/update/import')
+      expect(found).toBeTruthy()
+      return found
+    })
+    const init = call?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    // `api` builds a Headers from what it was given, so the content type is
+    // read back the same way the request carries it.
+    expect(new Headers(init.headers).get('content-type')).toBe('application/octet-stream')
+    expect(init.body).toBe(archive)
+  })
 })

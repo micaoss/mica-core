@@ -410,6 +410,16 @@ pub struct UpdatesDocument {
         skip_serializing_if = "Option::is_none"
     )]
     pub check_interval_minutes: Override<u64>,
+    /// The time of day the automatic check is anchored to, `HH:MM` UTC.
+    /// Absent leaves the check on `checkIntervalMinutes` measured from the
+    /// daemon's start. UTC for the reason [`MaintenanceWindow`] is UTC: the
+    /// device clock is UTC and `time.timezone` is presentation only.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub check_at: Override<String>,
     /// What the automatic path does after an install. Read only under
     /// [`UpdateMode::Auto`], which is the only mode that installs. Not an
     /// override: layer 1 carries no default for it.
@@ -612,6 +622,26 @@ fn minutes_of_day(clock: &str) -> Option<u32> {
     (hours < 24 && minutes < 60).then_some(hours * 60 + minutes)
 }
 
+/// The most recent occurrence of the clock face `clock` at or before `now`,
+/// or `None` when the string is not `HH:MM`.
+///
+/// The one implementation of "when did today's check time last come round":
+/// the driver anchors on it, and a caller that computed it itself would
+/// eventually disagree with the document's own validation.
+#[must_use]
+pub fn last_crossing(clock: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let minutes = minutes_of_day(clock)?;
+    let face = now
+        .date_naive()
+        .and_hms_opt(minutes / 60, minutes % 60, 0)?
+        .and_utc();
+    Some(if face <= now {
+        face
+    } else {
+        face - chrono::Duration::days(1)
+    })
+}
+
 /// `mon`..`sun` → 0..6, Monday first (chrono's `num_days_from_monday`).
 fn day_index(day: &str) -> Option<u32> {
     Some(match day {
@@ -719,6 +749,9 @@ pub fn validate(document: &UpdatesDocument) -> Result<(), String> {
             })?;
         }
     }
+    if let Some(check_at) = document.check_at.as_ref().and_then(Option::as_ref) {
+        minutes_of_day(check_at).ok_or_else(|| format!("checkAt `{check_at}` is not HH:MM"))?;
+    }
     // The document-local half of the rule. The half precedence creates -- a
     // baked `auto` under a document that names no policy -- cannot be seen
     // from here, and is [`EffectivePolicy::auto_window_refusal`].
@@ -745,6 +778,9 @@ pub struct UpdatesPatch {
     /// Minutes between automatic checks; `0` disables them.
     #[serde(default, deserialize_with = "present")]
     pub check_interval_minutes: Override<u64>,
+    /// `HH:MM` UTC to anchor the check to; `null` returns it to the interval.
+    #[serde(default, deserialize_with = "present")]
+    pub check_at: Override<String>,
     /// What the automatic path does after an install. Not an override —
     /// layer 1 bakes no default for it — so it has two states, not three.
     #[serde(default)]
@@ -780,6 +816,9 @@ pub fn apply_patch(mut document: UpdatesDocument, patch: UpdatesPatch) -> Update
     }
     if let Some(minutes) = patch.check_interval_minutes {
         document.check_interval_minutes = Some(minutes);
+    }
+    if let Some(check_at) = patch.check_at {
+        document.check_at = Some(check_at);
     }
     if let Some(reboot_policy) = patch.reboot_policy {
         document.reboot_policy = reboot_policy;
@@ -927,6 +966,10 @@ pub struct EffectivePolicy {
     pub maintenance: MaintenancePolicy,
     pub reboot_gate: RebootGatePolicy,
     pub reboot_policy: RebootPolicy,
+    /// `HH:MM` UTC the automatic check is anchored to, when the operator
+    /// named one. Layer 2 owns it outright: layer 1 bakes no anchor, so it is
+    /// not part of [`Selection`].
+    pub check_at: Option<String>,
 }
 
 impl EffectivePolicy {
@@ -975,6 +1018,7 @@ pub fn resolve(baked: &BakedUpdate, document: UpdatesDocument) -> EffectivePolic
         maintenance: document.maintenance,
         reboot_gate: document.reboot_gate,
         reboot_policy: document.reboot_policy,
+        check_at: document.check_at.flatten(),
     }
 }
 
@@ -1280,6 +1324,70 @@ mod tests {
                 "removed option accepted: {key}"
             );
         }
+    }
+
+    /// The anchor is a clock face, and the document says so before a device
+    /// schedules on it.
+    #[test]
+    fn the_check_anchor_must_be_a_clock_face() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("updates.json");
+        for accepted in ["00:00", "03:30", "23:59"] {
+            std::fs::write(&path, json!({ "checkAt": accepted }).to_string()).unwrap();
+            assert_eq!(
+                load_updates(&path).unwrap().check_at,
+                Some(Some(accepted.to_string()))
+            );
+        }
+        for refused in ["3:00", "24:00", "03:60", "0300", "03:00:00"] {
+            std::fs::write(&path, json!({ "checkAt": refused }).to_string()).unwrap();
+            let error = load_updates(&path).unwrap_err().to_string();
+            assert!(error.contains("is not HH:MM"), "{refused}: {error}");
+        }
+        // `null` is a value here as everywhere: the anchor is cleared, and
+        // the device is back on its interval.
+        std::fs::write(&path, json!({ "checkAt": null }).to_string()).unwrap();
+        assert_eq!(load_updates(&path).unwrap().check_at, Some(None));
+    }
+
+    /// The anchor is layer 2's outright, like `rebootPolicy`: the baked layer
+    /// has no opinion to override.
+    #[test]
+    fn the_check_anchor_resolves_from_the_operator_document_alone() {
+        let baked = BakedUpdate::code_defaults();
+        let document = UpdatesDocument {
+            check_at: Some(Some("03:00".to_string())),
+            ..UpdatesDocument::default()
+        };
+        assert_eq!(
+            resolve(&baked, document).check_at,
+            Some("03:00".to_string())
+        );
+        assert_eq!(resolve(&baked, UpdatesDocument::default()).check_at, None);
+    }
+
+    /// The crossing is the most recent one at or before now, which is
+    /// yesterday's when today's has not come round yet.
+    #[test]
+    fn the_last_crossing_is_todays_or_yesterdays() {
+        let now = DateTime::parse_from_rfc3339("2026-09-20T04:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            last_crossing("03:00", now).unwrap().to_rfc3339(),
+            "2026-09-20T03:00:00+00:00"
+        );
+        assert_eq!(
+            last_crossing("05:00", now).unwrap().to_rfc3339(),
+            "2026-09-19T05:00:00+00:00"
+        );
+        // The minute itself counts as crossed, so a driver ticking at 03:00:00
+        // does not wait a day.
+        assert_eq!(
+            last_crossing("04:30", now).unwrap().to_rfc3339(),
+            "2026-09-20T04:30:00+00:00"
+        );
+        assert!(last_crossing("4:30", now).is_none());
     }
 
     /// A document with something in every shape the write has to preserve:

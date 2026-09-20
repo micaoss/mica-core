@@ -91,6 +91,80 @@ describe('the automatic update policy', () => {
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
       policy: 'check',
       checkIntervalMinutes: 1440,
+      // No anchor on this device, and an untouched form says so rather than
+      // leaving the key out: `null` is what clears one.
+      checkAt: null,
+      rebootPolicy: 'manual',
+    })
+  })
+
+  /// 1440 is a day. An operator reading "check every 1440" has to do the
+  /// division themselves, and typing a daily cadence means getting it right.
+  it('reads a daily cadence back as one day rather than 1440 minutes', async () => {
+    const fetch = stubFetch({
+      '/api/v1/update': policy,
+      '/api/v1/provisioning/status': bakedOnly,
+      'POST /api/v1/update/config': () => jsonResponse({ policy: 'check' }),
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    expect((await screen.findByLabelText(/Check every/) as HTMLInputElement).value).toBe('1')
+    expect(screen.getByRole('combobox', { name: 'Cadence unit' })).toBeTruthy()
+
+    // The unit it is shown in is display only: an untouched form writes back
+    // the minute count the device already holds.
+    await userEvent.click(screen.getByRole('button', { name: 'Save policy' }))
+    const call = fetch.mock.calls.find(([input]) => String(input) === '/api/v1/update/config')
+    expect(JSON.parse(String(call?.[1]?.body)).checkIntervalMinutes).toBe(1440)
+  })
+
+  /// "Check once a day at 03:00" is a time of day, not an interval from
+  /// whenever the device last booted.
+  it('writes a check time and clears it back to the interval', async () => {
+    const anchored = {
+      lifecycle: { policy: { ...policy.lifecycle.policy, checkAt: '03:00' } },
+    }
+    const fetch = stubFetch({
+      '/api/v1/update': anchored,
+      '/api/v1/provisioning/status': bakedOnly,
+      'POST /api/v1/update/config': () => jsonResponse({ policy: 'check' }),
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    // The device's anchor is what the field holds, once the read lands.
+    const at = await screen.findByLabelText(/Check at/)
+    await waitFor(() => expect((at as HTMLInputElement).value).toBe('03:00'))
+    await userEvent.click(screen.getByRole('button', { name: 'Save policy' }))
+    expect(JSON.parse(String(fetch.mock.calls.find(([input]) => String(input) === '/api/v1/update/config')?.[1]?.body)).checkAt).toBe('03:00')
+
+    // Clearing the box is the device back on its interval, which is `null`
+    // and not an empty string.
+    await userEvent.clear(screen.getByLabelText(/Check at/))
+    await userEvent.click(screen.getByRole('button', { name: 'Save policy' }))
+    const calls = fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/update/config')
+    expect(JSON.parse(String(calls[calls.length - 1]?.[1]?.body)).checkAt).toBe(null)
+  })
+
+  it('writes the cadence in minutes whatever unit it was entered in', async () => {
+    const fetch = stubFetch({
+      '/api/v1/update': policy,
+      '/api/v1/provisioning/status': bakedOnly,
+      'POST /api/v1/update/config': () => jsonResponse({ policy: 'check' }),
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Cadence unit' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Hours' }))
+    const every = screen.getByLabelText(/Check every/)
+    await userEvent.clear(every)
+    await userEvent.type(every, '6')
+    await userEvent.click(screen.getByRole('button', { name: 'Save policy' }))
+
+    const call = fetch.mock.calls.find(([input]) => String(input) === '/api/v1/update/config')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      policy: 'check',
+      checkIntervalMinutes: 360,
+      checkAt: null,
       rebootPolicy: 'manual',
     })
   })

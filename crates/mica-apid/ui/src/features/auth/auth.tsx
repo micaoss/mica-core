@@ -1,16 +1,16 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { KeyRound, ShieldCheck } from 'lucide-react'
+import { KeyRound } from 'lucide-react'
 import { api, json, rememberSession, type SessionStatus } from '@/shared/lib/http'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent } from '@/shared/components/ui/card'
 import { Input } from '@/shared/components/ui/input'
 import { Callout } from '@/shared/components/callout'
-import { CopyField } from '@/shared/components/copy-field'
 import { FormField } from '@/shared/components/form-field'
 import { failureDetail } from '@/shared/feedback/toast'
 import { Preferences } from '@/features/preferences/preferences'
+import { BrandMark } from '@/shared/components/brand-mark'
 
 export const sessionKey = ['session'] as const
 
@@ -26,7 +26,7 @@ function AuthFrame({ title, copy, children }: { title: string; copy: string; chi
         <i className="corner bl" aria-hidden="true" /><i className="corner br" aria-hidden="true" />
         <CardContent className="flex flex-col gap-5 p-6 sm:p-8">
           <div className="flex items-center gap-2.5">
-            <span className="logo-mark size-8 text-base">m</span>
+            <BrandMark className="size-8" />
             <strong className="font-condensed text-xl leading-none font-semibold">mica</strong>
           </div>
           <div className="flex flex-col gap-1">
@@ -73,7 +73,6 @@ export function LoginView() {
 }
 
 interface SetupResult {
-  token: string
   csrfToken: string
 }
 
@@ -83,33 +82,24 @@ export function SetupView() {
   const [confirm, setConfirm] = useState('')
   const [hostname, setHostname] = useState('')
   const queryClient = useQueryClient()
+  // Setup answers with the session it created and nothing else: the device
+  // mints no API token here, so there is no secret to stop and save. The
+  // console enters as soon as the device answers.
   const setup = useMutation({
     mutationFn: () => api<SetupResult>('/api/v1/setup', json('POST', {
       password,
       ...(hostname ? { hostname } : {}),
     })),
+    onSuccess: (result) => {
+      const session: SessionStatus = { state: 'authenticated', csrfToken: result.csrfToken }
+      rememberSession(session)
+      queryClient.setQueryData(sessionKey, session)
+    },
   })
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (password !== confirm) return
     setup.mutate()
-  }
-  if (setup.data) {
-    const finish = () => {
-      const session: SessionStatus = { state: 'authenticated', csrfToken: setup.data.csrfToken }
-      rememberSession(session)
-      queryClient.setQueryData(sessionKey, session)
-    }
-    return (
-      <AuthFrame title={t('auth.complete.title')} copy={t('auth.complete.copy')}>
-        <div className="grid gap-5">
-          {/* Shown once and never again, so it is offered with a copy control
-              rather than left to be selected by hand. */}
-          <CopyField value={setup.data.token} label={t('common.actions.copy')} />
-          <Button size="lg" onClick={finish}><ShieldCheck /> {t('auth.complete.submit')}</Button>
-        </div>
-      </AuthFrame>
-    )
   }
   return (
     <AuthFrame title={t('auth.setup.title')} copy={t('auth.setup.copy')}>

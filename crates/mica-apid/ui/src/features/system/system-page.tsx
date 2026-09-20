@@ -9,6 +9,7 @@ import { Button, buttonVariants } from '@/shared/components/ui/button'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { FactList } from '@/shared/components/fact-list'
+import { FilePicker } from '@/shared/components/file-picker'
 import { FormField, ToggleField } from '@/shared/components/form-field'
 import { Page, PageHeader, PageSection } from '@/shared/components/page'
 import { Panel } from '@/shared/components/panel'
@@ -206,10 +207,23 @@ export function UpdateChecks() {
   )
 }
 
-function ManualUpdate() {
+export function ManualUpdate() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [deploymentId, setDeploymentId] = useState('')
+  // The archive is streamed as its own bytes, not as a form field: it is
+  // measured in hundreds of megabytes, and the device writes it to disk as it
+  // arrives rather than holding it anywhere.
+  const upload = useMutationFeedback<unknown, File>({
+    mutationFn: (file) => api<unknown>('/api/v1/update/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: file,
+    }),
+    success: t('system.update.importAccepted'),
+    failure: t('system.update.import'),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['update-state'] }),
+  })
   const install = useMutationFeedback({
     mutationFn: () => api<unknown>('/api/v1/update/install', json('POST', { deploymentId })),
     success: t('system.update.installAccepted'),
@@ -225,6 +239,20 @@ function ManualUpdate() {
         </FormField>
         <Button className="justify-self-end" type="submit" disabled={install.isPending || !/^[0-9a-f]{64}$/.test(deploymentId)}>{t('system.update.install')}</Button>
       </form>
+      <div className="grid gap-4 border-t pt-4">
+        <p className="text-sm text-muted-foreground">{t('system.update.importCopy')}</p>
+        <FilePicker
+          label={t('system.update.archive')}
+          hint={t('system.update.archiveHint')}
+          accept=".micaupd"
+          chooseLabel={t('system.update.chooseArchive')}
+          emptyLabel={t('system.update.noArchive')}
+          submitLabel={t('system.update.import')}
+          pendingLabel={t('system.update.importing')}
+          pending={upload.isPending}
+          onSubmit={(file) => upload.mutate(file)}
+        />
+      </div>
     </Panel>
   )
 }

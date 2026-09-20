@@ -11,11 +11,11 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::documents::{
-    CONTAINER_DOCUMENT, CONTAINER_SCHEMA_VERSION, DEFAULT_CONFIG_DIR, DOCUMENT_MODE, DocumentSet,
-    MQTT_DOCUMENT, MQTT_SCHEMA_VERSION, NETWORK_DOCUMENT, NETWORK_SCHEMA_VERSION, SSH_DOCUMENT,
-    SSH_SCHEMA_VERSION, STATE_SCHEMA_VERSION, SYSTEM_DOCUMENT, SYSTEM_SCHEMA_VERSION,
-    StateDocument, TIME_DOCUMENT, TIME_SCHEMA_VERSION, WIFI_DOCUMENT, WIFI_SCHEMA_VERSION,
-    document_subtrees,
+    BLUETOOTH_DOCUMENT, BLUETOOTH_SCHEMA_VERSION, CONTAINER_DOCUMENT, CONTAINER_SCHEMA_VERSION,
+    DEFAULT_CONFIG_DIR, DOCUMENT_MODE, DocumentSet, MQTT_DOCUMENT, MQTT_SCHEMA_VERSION,
+    NETWORK_DOCUMENT, NETWORK_SCHEMA_VERSION, SSH_DOCUMENT, SSH_SCHEMA_VERSION,
+    STATE_SCHEMA_VERSION, SYSTEM_DOCUMENT, SYSTEM_SCHEMA_VERSION, StateDocument, TIME_DOCUMENT,
+    TIME_SCHEMA_VERSION, WIFI_DOCUMENT, WIFI_SCHEMA_VERSION, document_subtrees,
 };
 use crate::error::SettingsError;
 use crate::model::Settings;
@@ -284,6 +284,11 @@ impl Store {
                 CONTAINER_SCHEMA_VERSION,
                 refusals.as_deref_mut(),
             )?,
+            bluetooth: self.read_config(
+                BLUETOOTH_DOCUMENT,
+                BLUETOOTH_SCHEMA_VERSION,
+                refusals.as_deref_mut(),
+            )?,
             // The STATE remainder, and NOT through the refusal path: see
             // [`Store::load_with_refusals`] for why it keeps the hard failure.
             state: read_document::<StateDocument>(
@@ -349,6 +354,10 @@ impl Store {
             (
                 CONTAINER_DOCUMENT,
                 Format::Json.render(&documents.container),
+            ),
+            (
+                BLUETOOTH_DOCUMENT,
+                Format::Json.render(&documents.bluetooth),
             ),
             (STATE_DOCUMENT, Format::Toml.render(&documents.state)),
         ] {

@@ -47,20 +47,18 @@ describe('first-run setup', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  /// Shown once and never again, so it is offered with a copy control rather
-  /// than left to be selected by hand.
-  it('offers the one-time recovery token with a way to copy it', async () => {
-    const writeText = vi.fn(() => Promise.resolve())
-    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
-    stubFetch({ 'POST /api/v1/setup': { token: 'mica_recovery_abcdef', csrfToken: 'csrf' } })
+  /// Setup creates one credential: the password the operator just chose. It
+  /// mints no API token, so there is no secret to stop and copy, and the
+  /// console enters on the session the device answered with.
+  it('enters the console on the session setup answered with', async () => {
+    const fetch = stubFetch({ 'POST /api/v1/setup': { csrfToken: 'csrf-token' } })
     renderPanel(withTheme(<SetupView />))
 
     await userEvent.type(screen.getByLabelText('Admin password'), 'correct-horse')
     await userEvent.type(screen.getByLabelText('Confirm password'), 'correct-horse')
     await userEvent.click(screen.getByRole('button', { name: 'Configure device' }))
 
-    expect(await screen.findByText('mica_recovery_abcdef')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Copy' }))
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('mica_recovery_abcdef'))
+    await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/setup')).toBe(true))
+    expect(screen.queryByText(/token/i)).toBeNull()
   })
 })

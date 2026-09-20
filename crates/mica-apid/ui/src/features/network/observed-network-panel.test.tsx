@@ -33,6 +33,14 @@ function observed(overrides: Partial<ObservedNetworkState> = {}): ObservedNetwor
       probe: { name: 'deb.debian.org', reachable: true, result: 'resolved' },
     },
     wifi: { available: true, associations: [] },
+    accessPoint: {
+      available: true,
+      entries: [{
+        interface: 'wlan0',
+        stationCount: 1,
+        stations: [{ mac: '02:00:00:00:01:00', connectedSeconds: 934, signalDbm: -51 }],
+      }],
+    },
     capabilities: {
       wifi: { supported: false, interfaces: [] },
       bluetooth: { supported: false, adapters: [] },
@@ -67,6 +75,27 @@ describe('observed network state', () => {
     expect(screen.getByText('bound · server 192.168.1.1 · router 192.168.1.1 · lease 3600s')).toBeTruthy()
     expect(screen.getByText('192.168.1.1 · inet · metric 100 · DHCPv4')).toBeTruthy()
     expect(screen.getByText('resolved')).toBeTruthy()
+  })
+
+  /// The other direction from an association: someone joining this device's
+  /// own access point, which is a fact the console had no place for.
+  it('names the clients connected to this device access point', async () => {
+    stubFetch({ '/api/v1/network/status': observed() })
+    renderPanel(<ObservedNetworkPanel />)
+
+    expect(await screen.findByText('02:00:00:00:01:00')).toBeTruthy()
+    expect(screen.getByText('wlan0 · -51 dBm · connected 16 min')).toBeTruthy()
+  })
+
+  it('says no access point is running rather than showing no clients', async () => {
+    stubFetch({
+      '/api/v1/network/status': observed({
+        accessPoint: { available: false, detail: 'hostapd is not running on any interface of this device' },
+      }),
+    })
+    renderPanel(<ObservedNetworkPanel />)
+
+    expect(await screen.findByText(/hostapd is not running/)).toBeTruthy()
   })
 
   it('reports cellular as explicitly unsupported rather than hiding it', async () => {

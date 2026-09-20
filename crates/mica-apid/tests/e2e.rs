@@ -277,7 +277,7 @@ async fn web_flow_end_to_end() -> anyhow::Result<()> {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await?["state"], "setup");
 
-    // First-run setup creates both the one-time bearer and the browser session.
+    // First-run setup creates the administrator credential and the browser session.
     let response = admin
         .post(format!("{https_base}/api/v1/setup"))
         .header(CONTENT_TYPE, "application/json")
@@ -303,7 +303,9 @@ async fn web_flow_end_to_end() -> anyhow::Result<()> {
         );
     }
     let setup = response_json(response).await?;
-    let bearer = setup["token"].as_str().context("setup token")?.to_string();
+    // Setup mints no API token; the bearer credential this flow exercises
+    // below is one the session asks for through `POST /api/v1/tokens`.
+    assert!(setup.get("token").is_none(), "{setup}");
     let csrf = setup["csrfToken"]
         .as_str()
         .context("setup CSRF token")?
@@ -376,7 +378,21 @@ async fn web_flow_end_to_end() -> anyhow::Result<()> {
     assert_eq!(network["observed"]["available"], false);
     assert!(network["observed"]["interfaces"].is_array());
 
-    // The setup bearer is the same API credential without a CSRF requirement.
+    // A token the session minted is the same API credential without a CSRF
+    // requirement. It is the only way a device gets one: setup makes none.
+    let response = admin
+        .post(format!("{https_base}/api/v1/tokens"))
+        .header("x-csrf-token", &csrf)
+        .header(CONTENT_TYPE, "application/json")
+        .body(r#"{"name":"e2e"}"#)
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let bearer = response_json(response).await?["token"]
+        .as_str()
+        .context("minted token")?
+        .to_string();
+
     let response = anonymous
         .get(format!("{https_base}/api/v1/settings/hostname"))
         .bearer_auth(&bearer)

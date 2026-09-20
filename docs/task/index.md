@@ -5,6 +5,23 @@
 - [x] [**20260916-0912-cross-built-arm64-bytes What differs between a cross-built and a native arm64 archive**](20260916-0912-cross-built-arm64-bytes.md) `P2`
 - [x] [**20260919-1030-board-rename The device side follows the board rename**](20260919-1030-board-rename.md) `P0`
 - [-] [**20260920-0100-protocol-as-data The catalog vector and the schema vocabulary**](20260920-0100-protocol-as-data.md) `P2`
+- [x] [**20260920-0542-feature-inventory The capability inventory and the deployment doc drift**](20260920-0542-feature-inventory.md) `P3`
+- [x] [**20260920-0549-overview-uplink-and-identity The overview names the uplink, and says what the device is**](20260920-0549-overview-uplink-and-identity.md) `P1`
+- [x] [**20260920-0611-remove-web-terminal The web terminal leaves the console**](20260920-0611-remove-web-terminal.md) `P2`
 - [-] [**20260920-0620-ssh-without-pam SSH authenticates without PAM, and nothing says it must**](20260920-0620-ssh-without-pam.md) `P1`
+- [x] [**20260920-0628-update-cadence-unit The update cadence is read in the unit an operator thinks in**](20260920-0628-update-cadence-unit.md) `P1`
+- [x] [**20260920-0629-daily-check-time A check at a chosen time of day**](20260920-0629-daily-check-time.md) `P2`
+- [x] [**20260920-0640-container-management Container management on the device**](20260920-0640-container-management.md) `P2`
+- [x] [**20260920-0655-setup-mints-no-token Setup stops minting an API token**](20260920-0655-setup-mints-no-token.md) `P2`
 - [x] [**20260920-0700-dbus-activation Nothing mica-core ships is D-Bus activated**](20260920-0700-dbus-activation.md) `P1`
+- [x] [**20260920-0700-network-page The network page shows what the device has and edits it**](20260920-0700-network-page.md) `P1`
+- [x] [**20260920-0723-routes-and-dhcp-server Static routes and a DHCP server on a declared interface**](20260920-0723-routes-and-dhcp-server.md) `P2`
+- [x] [**20260920-0730-reset-clears-containers The application-data reset clears declared containers**](20260920-0730-reset-clears-containers.md) `P1`
+- [x] [**20260920-0733-mqtt-resource The MQTT listener is one document**](20260920-0733-mqtt-resource.md) `P1`
+- [x] [**20260920-0737-ap-stations The access point says who is connected to it**](20260920-0737-ap-stations.md) `P2`
+- [x] [**20260920-0746-update-upload An update archive can be uploaded from the console**](20260920-0746-update-upload.md) `P2`
+- [x] [**20260920-0811-console-chrome-and-wifi The chrome follows micaos.dev, and Wi-Fi gains its missing halves**](20260920-0811-console-chrome-and-wifi.md) `P1`
+- [x] [**20260920-0813-bluetooth-pairing Bluetooth pairing on the device**](20260920-0813-bluetooth-pairing.md) `P2`
 - [-] [**20260920-0900-pinned-vectors Read the release-lock vectors out of mica at a pinned commit**](20260920-0900-pinned-vectors.md) `P1`
+- [ ] [**20260920-1010-system-log-view A read-only system log in the console**](20260920-1010-system-log-view.md) `P3`
+- [x] [**20260920-1035-console-brand-mark The console wears the brand mark**](20260920-1035-console-brand-mark.md) `P3`

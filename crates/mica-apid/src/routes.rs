@@ -101,6 +101,13 @@ pub struct AppState {
     /// The desired fleet document: `/mica/config/fleet.json` on a device, an
     /// isolated path in route tests.
     pub(crate) fleet_path: Arc<std::path::PathBuf>,
+    /// Where an uploaded update archive is streamed before micad imports it:
+    /// `/mica/updates/uploads` on a device, a temporary directory in tests.
+    ///
+    /// apid writes the file and names it on the bus; micad refuses a path
+    /// outside this directory, so the two agree on one location and neither
+    /// takes the other's word for it.
+    pub(crate) update_uploads: Arc<std::path::PathBuf>,
     /// The diagnostic snapshot store: `/mica/diagnostics` on a
     /// device, a temporary directory in tests. A path and no syscall until
     /// the first publish.
@@ -150,6 +157,7 @@ impl AppState {
             fleet_path: Arc::new(std::path::PathBuf::from(
                 micad_settings::configuration::DEFAULT_FLEET_PATH,
             )),
+            update_uploads: Arc::new(std::path::PathBuf::from(UPDATE_UPLOADS_DIR)),
             diagnostics: Arc::new(SnapshotStore::at_default()),
             collecting: Arc::new(tokio::sync::Mutex::new(())),
             rotation: Arc::new(tokio::sync::Mutex::new(())),
@@ -278,6 +286,13 @@ impl AppState {
     #[cfg(test)]
     pub fn with_updates_path(mut self, updates: impl Into<std::path::PathBuf>) -> Self {
         self.updates_path = Arc::new(updates.into());
+        self
+    }
+
+    /// Point the update upload directory at an isolated test fixture.
+    #[cfg(test)]
+    pub fn with_update_uploads(mut self, uploads: impl Into<std::path::PathBuf>) -> Self {
+        self.update_uploads = Arc::new(uploads.into());
         self
     }
 
@@ -482,6 +497,14 @@ const V1_DIAGNOSTICS_SNAPSHOT_ROUTE: &str = "/v1/diagnostics/snapshots/{id}";
 /// the first-run operation, so it is named for that and nothing else.
 const V1_SETUP_PATH: &str = "/v1/setup";
 
+/// Where an uploaded update archive lands, on a device.
+///
+/// `uploads/` inside the acquisition workspace, which is the directory micad's
+/// `ImportUpdate` bounds its argument to. On the same medium as the objects
+/// the archive carries, so a device with no room for the deployment runs out
+/// of it while writing the upload -- the earlier and cheaper failure.
+const UPDATE_UPLOADS_DIR: &str = "/mica/updates/uploads";
+
 /// The read-only provisioning-document status.
 ///
 /// A fixed path on the time status's reasoning, and the whole of this
@@ -550,6 +573,37 @@ const V1_WIFI_NETWORK_ROUTE: &str = "/v1/wifi/client/networks/{ssid}";
 /// writes it: one dot-path for one list, whichever surface is writing it.
 const WIFI_NETWORKS_PATH: &str = "wifi.client.networks";
 
+/// The station role itself: which radio it runs on, and whether it runs.
+///
+/// A resource route rather than two scalar writes, for the reason the MQTT
+/// listener is one: a station moved to another radio is one decision, and
+/// `wifi.client.interface` is not on the scalar allowlist at all -- before
+/// this route the only way to bind the station to a different radio was to
+/// edit the document on the device.
+const V1_WIFI_CLIENT_PATH: &str = "/v1/wifi/client";
+const WIFI_CLIENT_PATH: &str = "wifi.client";
+
+/// The scan: POST, because it puts the radio to work.
+const V1_WIFI_SCAN_PATH: &str = "/v1/wifi/client/scan";
+
+/// The Bluetooth resource: the adapter, its trust list and the pairing verbs.
+///
+/// The verbs are POST-only for the reason the power actions are: nothing that
+/// merely follows a link should start a radio scan or pair with a device.
+const V1_BLUETOOTH_PATH: &str = "/v1/bluetooth";
+const V1_BLUETOOTH_DISCOVERY_PATH: &str = "/v1/bluetooth/discovery";
+const V1_BLUETOOTH_DEVICE_ROUTE: &str = "/v1/bluetooth/devices/{address}";
+const V1_BLUETOOTH_DEVICE_ACTION_ROUTE: &str = "/v1/bluetooth/devices/{address}/{action}";
+
+/// The settings dot-path the Bluetooth subtree lives at.
+const BLUETOOTH_SETTINGS_PATH: &str = "bluetooth";
+
+/// The access point: its own resource, for the reason the station role is one.
+/// `wifi.ap` carries a key, so the read redacts and the write keeps the stored
+/// one unless a new one is sent.
+const V1_WIFI_AP_PATH: &str = "/v1/wifi/ap";
+const WIFI_AP_PATH: &str = "wifi.ap";
+
 /// The network cluster: the interface map, one interface, and a tunnel's peer collection.
 ///
 /// The prefix is needed separately for the reason the token collection's is:
@@ -563,6 +617,31 @@ const V1_NETWORK_PEER_ROUTE: &str = "/v1/network/{iface}/peers/{publicKey}";
 /// The settings dot-path the interface map lives at, which every envelope
 /// raised about the whole map names.
 const NETWORK_SETTINGS_PATH: &str = "network";
+
+/// The MQTT resource: the whole `mqtt` subtree, read with the reconciler's
+/// live state beside it and written in one call.
+///
+/// A resource route rather than three scalar writes through
+/// `PUT /api/v1/settings/...`, because the listener is one decision: an
+/// address and a port that must take effect together. Two writes would restart
+/// the broker twice and leave it bound to an address the operator never asked
+/// for in between.
+const V1_MQTT_PATH: &str = "/v1/mqtt";
+
+/// The settings dot-path the MQTT subtree lives at.
+const MQTT_SETTINGS_PATH: &str = "mqtt";
+
+/// The container resource: the declared map, one entry, and the three
+/// lifecycle verbs.
+///
+/// The verbs are POST-only for the reason the power actions are: no `GET`
+/// handler exists, so nothing that merely follows a link can stop a container.
+const V1_CONTAINERS_PATH: &str = "/v1/containers";
+const V1_CONTAINER_ROUTE: &str = "/v1/containers/{name}";
+const V1_CONTAINER_ACTION_ROUTE: &str = "/v1/containers/{name}/{action}";
+
+/// The settings dot-path the declared containers live at.
+const CONTAINERS_SETTINGS_PATH: &str = "container.units";
 
 /// Each root's three spellings as one tuple, for the test that holds them
 /// together.
@@ -665,12 +744,53 @@ fn api_router() -> Router<AppState> {
             V1_WIFI_NETWORKS_PATH,
             get(api_v1_wifi_networks_list).post(api_v1_wifi_networks_add),
         )
-        .route(V1_WIFI_NETWORK_ROUTE, delete(api_v1_wifi_networks_remove))
+        .route(
+            V1_WIFI_NETWORK_ROUTE,
+            put(api_v1_wifi_networks_replace).delete(api_v1_wifi_networks_remove),
+        )
+        .route(
+            V1_WIFI_CLIENT_PATH,
+            get(api_v1_wifi_client_read).put(api_v1_wifi_client_write),
+        )
+        .route(V1_WIFI_SCAN_PATH, post(api_v1_wifi_scan))
+        // Bluetooth: one document, one write for the adapter, and the verbs
+        // that pair.
+        .route(
+            V1_BLUETOOTH_PATH,
+            get(api_v1_bluetooth_read).put(api_v1_bluetooth_write),
+        )
+        .route(
+            V1_BLUETOOTH_DISCOVERY_PATH,
+            post(api_v1_bluetooth_discovery),
+        )
+        .route(
+            V1_BLUETOOTH_DEVICE_ROUTE,
+            delete(api_v1_bluetooth_device_remove),
+        )
+        .route(
+            V1_BLUETOOTH_DEVICE_ACTION_ROUTE,
+            post(api_v1_bluetooth_device_action),
+        )
+        .route(
+            V1_WIFI_AP_PATH,
+            get(api_v1_wifi_ap_read).put(api_v1_wifi_ap_write),
+        )
         // The network cluster. Typed rather than a dot-path passthrough
         // because the rules under `network` are relational: a bridge port has to
         // name a declared entry, which no check confined to the entry being
         // written could see. `PUT /api/v1/settings/network...` is refused at
         // 409 by [`settings_write_refusal`] and names these routes.
+        // The containers: declared as settings, observed through the engine,
+        // driven as units.
+        .route(V1_CONTAINERS_PATH, get(api_v1_containers_read))
+        .route(
+            V1_CONTAINER_ROUTE,
+            put(api_v1_container_write).delete(api_v1_container_remove),
+        )
+        .route(V1_CONTAINER_ACTION_ROUTE, post(api_v1_container_action))
+        // One document for the broker and the bridge: the declared subtree and
+        // the reconciler's own report of what it did with it.
+        .route(V1_MQTT_PATH, get(api_v1_mqtt_read).put(api_v1_mqtt_write))
         .route(
             V1_NETWORK_PATH,
             get(api_v1_network_read).put(api_v1_network_write),
@@ -725,6 +845,10 @@ fn api_router() -> Router<AppState> {
         .route(
             crate::update_api::V1_UPDATE_CONFIG_PATH,
             post(crate::update_api::api_v1_update_config),
+        )
+        .route(
+            crate::update_api::V1_UPDATE_IMPORT_PATH,
+            post(crate::update_api::api_v1_update_import),
         )
         // Actions are POST-only so navigation and prefetch cannot trigger
         // state changes.
@@ -3881,6 +4005,709 @@ pub(crate) async fn api_v1_wifi_networks_add(
 /// Forget one known WiFi network by its SSID.
 ///
 /// Answers **404** when no stored network carries that SSID. There is no
+/// The station role: the radio it runs on and whether it runs.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WifiClientRole {
+    /// Whether the station role is started.
+    enabled: bool,
+    /// The wireless interface it runs on.
+    interface: String,
+}
+
+/// Read which radio the WiFi station runs on, and whether it runs.
+///
+/// The known networks are not here: they are their own collection, because
+/// they carry secrets this document would then have to redact.
+#[utoipa::path(
+    get,
+    path = V1_WIFI_CLIENT_PATH,
+    context_path = API,
+    tag = "resources",
+    responses(
+        (status = 200, description = "The station role", body = WifiClientRole),
+        (status = 401, description = "No API credential was supplied", body = ApiError),
+        (status = 500, description = "The stored subtree is not a station document this build can read (`settings_invalid`)", body = ApiError),
+        (status = 503, description = "micad is unavailable", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_wifi_client_read(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    let stored = match state.api.get_settings(WIFI_CLIENT_PATH).await {
+        Ok(value) => value,
+        Err(err) => return bus_api_error(&err, Some(WIFI_CLIENT_PATH)),
+    };
+    // Read field by field rather than deserialized whole: the subtree carries
+    // the network list too, and this document is deliberately not that.
+    let enabled = stored.get("enabled").and_then(Value::as_bool);
+    let interface = stored
+        .get("interface")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let (Some(enabled), Some(interface)) = (enabled, interface) else {
+        return api_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::apid(
+                "settings_invalid",
+                "the stored WiFi station settings carry no `enabled` and `interface` pair"
+                    .to_string(),
+            )
+            .at(WIFI_CLIENT_PATH),
+        );
+    };
+    api_response(StatusCode::OK, WifiClientRole { enabled, interface })
+}
+
+/// Bind the WiFi station to a radio, and switch it on or off.
+///
+/// **The known networks are untouched**: they are written through their own
+/// collection, and a route that replaced them here would drop every stored
+/// pre-shared key the moment someone moved the station to another radio.
+#[utoipa::path(
+    put,
+    path = V1_WIFI_CLIENT_PATH,
+    context_path = API,
+    tag = "resources",
+    request_body = WifiClientRole,
+    responses(
+        (status = 202, description = "The station role was written and the reconcile queued; the body carries the task id", body = TaskAccepted),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, or the interface is not an interface name (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_wifi_client_write(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let role: WifiClientRole = match json_body(body, Some(WIFI_CLIENT_PATH)) {
+        Ok(role) => role,
+        Err(response) => return *response,
+    };
+    if let Err(response) = check_iface_name(&role.interface, WIFI_CLIENT_PATH) {
+        return *response;
+    }
+    // Two scalar writes and not one subtree write, deliberately: the subtree
+    // holds the network list, and a whole-subtree write built from this body
+    // would have to carry it -- which means reading it, redacting nothing, and
+    // writing every pre-shared key back through the API on every switch flip.
+    match state
+        .api
+        .set_settings(
+            "wifi.client.interface",
+            &Value::String(role.interface.clone()),
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(err) => return bus_api_error(&err, Some("wifi.client.interface")),
+    }
+    match state
+        .api
+        .set_settings("wifi.client.enabled", &Value::Bool(role.enabled))
+        .await
+    {
+        // The second task is the one returned: it is the write that starts or
+        // stops the station, so it is the one whose outcome the caller is
+        // waiting on.
+        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
+        Err(err) => bus_api_error(&err, Some("wifi.client.enabled")),
+    }
+}
+
+/// Scan for WiFi networks on the station's radio.
+///
+/// **POST**, because it puts the radio to work: a scan sweeps every channel
+/// and briefly costs the station its link. Nothing that merely follows a link
+/// should do that.
+///
+/// The answer is micad's: `available` with the networks it found, or
+/// `available: false` with the reason -- an interface with no station running
+/// on it has no answer, and an empty list would claim there is nothing on the
+/// air.
+#[utoipa::path(
+    post,
+    path = V1_WIFI_SCAN_PATH,
+    context_path = API,
+    tag = "actions",
+    responses(
+        (status = 200, description = "What the radio found, or why it could not look", body = Object),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_wifi_scan(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    match state.api.scan_wifi().await {
+        Ok(value) => api_response(StatusCode::OK, value),
+        Err(err) => bus_api_error(&err, Some(WIFI_CLIENT_PATH)),
+    }
+}
+
+/// The adapter's own settings: whether it runs, whether it answers scans, the
+/// name it advertises and the code a legacy peer is told.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct BluetoothAdapterSettings {
+    /// Whether `bluetooth.service` runs and the adapter is powered.
+    enabled: bool,
+    /// Whether the adapter answers a scan.
+    discoverable: bool,
+    /// The name it advertises; absent advertises the hostname.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    alias: Option<String>,
+    /// The pairing code offered to a peer that asks for one. Absent derives
+    /// one from the device identity. **Not a secret**: it is displayed,
+    /// because somebody has to type it on the other device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pin: Option<String>,
+}
+
+/// The device's answer to a pending pairing confirmation.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PairingAnswer {
+    /// Whether the passkey matched what the peer is showing.
+    accept: bool,
+}
+
+/// Whether a scan should be running.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DiscoveryRequest {
+    /// `true` starts a scan, `false` stops it.
+    on: bool,
+}
+
+/// Read the Bluetooth surface: the trust list, the adapter, the devices, the
+/// pairing code and whatever is waiting to be confirmed.
+#[utoipa::path(
+    get,
+    path = V1_BLUETOOTH_PATH,
+    context_path = API,
+    tag = "resources",
+    responses(
+        (status = 200, description = "`declared`, `adapter`, `devices`, `pin` and `pending`, each named apart", body = Object),
+        (status = 401, description = "No API credential was supplied", body = ApiError),
+        (status = 503, description = "micad is unavailable", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_bluetooth_read(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    match state.api.get_bluetooth().await {
+        Ok(value) => api_response(StatusCode::OK, value),
+        Err(err) => bus_api_error(&err, Some(BLUETOOTH_SETTINGS_PATH)),
+    }
+}
+
+/// Configure the adapter.
+///
+/// **The trust list is not here.** Devices arrive by pairing and leave by
+/// being removed; a route that replaced the whole list would let a client
+/// declare a device it never paired with, which the adapter would then have
+/// no keys for.
+#[utoipa::path(
+    put,
+    path = V1_BLUETOOTH_PATH,
+    context_path = API,
+    tag = "resources",
+    request_body = BluetoothAdapterSettings,
+    responses(
+        (status = 202, description = "The adapter settings were written and the reconcile queued; the body carries the task id", body = TaskAccepted),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, the alias is empty or longer than 64 characters, or the pairing code is not 4 to 16 digits (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 500, description = "The stored subtree could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_bluetooth_write(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let requested: BluetoothAdapterSettings = match json_body(body, Some(BLUETOOTH_SETTINGS_PATH)) {
+        Ok(requested) => requested,
+        Err(response) => return *response,
+    };
+    if let Some(pin) = &requested.pin
+        && let Err(message) = micad_settings::validate_pairing_pin(pin)
+    {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid("validation_failed", message).at(BLUETOOTH_SETTINGS_PATH),
+        );
+    }
+    if let Some(alias) = &requested.alias
+        && (alias.is_empty() || alias.len() > 64)
+    {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "a Bluetooth alias is 1 to 64 characters".to_string(),
+            )
+            .at(BLUETOOTH_SETTINGS_PATH),
+        );
+    }
+    // The trust list is read from the tree and written back untouched: this
+    // route configures the adapter, and the devices are the pairing verbs'.
+    let stored = match state.api.get_settings(BLUETOOTH_SETTINGS_PATH).await {
+        Ok(value) => value,
+        Err(err) => return bus_api_error(&err, Some(BLUETOOTH_SETTINGS_PATH)),
+    };
+    let mut subtree = match stored {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    subtree.insert("enabled".to_string(), Value::Bool(requested.enabled));
+    subtree.insert(
+        "discoverable".to_string(),
+        Value::Bool(requested.discoverable),
+    );
+    set_or_remove(&mut subtree, "alias", requested.alias);
+    set_or_remove(&mut subtree, "pin", requested.pin);
+    match state
+        .api
+        .set_settings(BLUETOOTH_SETTINGS_PATH, &Value::Object(subtree))
+        .await
+    {
+        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
+        Err(err) => bus_api_error(&err, Some(BLUETOOTH_SETTINGS_PATH)),
+    }
+}
+
+/// Write an optional string, or take the key out when it is absent.
+///
+/// Absent means "derive it", which is a different thing from an empty string,
+/// so the key goes rather than being written as one.
+fn set_or_remove(map: &mut serde_json::Map<String, Value>, key: &str, value: Option<String>) {
+    match value {
+        Some(value) => {
+            map.insert(key.to_string(), Value::String(value));
+        }
+        None => {
+            map.remove(key);
+        }
+    }
+}
+
+/// Start or stop a Bluetooth scan.
+#[utoipa::path(
+    post,
+    path = V1_BLUETOOTH_DISCOVERY_PATH,
+    context_path = API,
+    tag = "actions",
+    request_body = DiscoveryRequest,
+    responses(
+        (status = 204, description = "The adapter was told to start or stop scanning"),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 422, description = "The body is not this shape (`validation_failed`)", body = ApiError),
+        (status = 500, description = "Bluetooth is switched off, this device has no adapter, or BlueZ refused (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_bluetooth_discovery(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let request: DiscoveryRequest = match json_body(body, Some(BLUETOOTH_SETTINGS_PATH)) {
+        Ok(request) => request,
+        Err(response) => return *response,
+    };
+    match state.api.set_bluetooth_discovery(request.on).await {
+        Ok(()) => no_content(),
+        Err(err) => bus_api_error(&err, Some(BLUETOOTH_SETTINGS_PATH)),
+    }
+}
+
+/// Pair with a device, or answer the confirmation a pairing is waiting on.
+///
+/// Two verbs on one path because they are two halves of one exchange: `pair`
+/// starts it, and `confirm` answers the passkey BlueZ asked about in the
+/// middle of it.
+#[utoipa::path(
+    post,
+    path = V1_BLUETOOTH_DEVICE_ACTION_ROUTE,
+    context_path = API,
+    tag = "actions",
+    params(
+        ("address" = String, Path, description = "The device's address, `AA:BB:CC:DD:EE:FF`"),
+        ("action" = String, Path, description = "`pair` or `confirm`"),
+    ),
+    request_body(content = PairingAnswer, description = "`confirm` only: whether the passkey matched"),
+    responses(
+        (status = 204, description = "The pairing was started, or the confirmation was answered"),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 404, description = "The path names no action this route serves (`not_found`)", body = ApiError),
+        (status = 422, description = "The address is not a Bluetooth address, or no confirmation is waiting for it (`settings_rejected`)", body = ApiError),
+        (status = 500, description = "Bluetooth is switched off, this device has no adapter, or the pairing failed (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_bluetooth_device_action(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path((address, action)): Path<(String, String)>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let result = match action.as_str() {
+        "pair" => state.api.pair_bluetooth_device(&address).await,
+        "confirm" => {
+            let answer: PairingAnswer = match json_body(body, Some(BLUETOOTH_SETTINGS_PATH)) {
+                Ok(answer) => answer,
+                Err(response) => return *response,
+            };
+            state
+                .api
+                .confirm_bluetooth_pairing(&address, answer.accept)
+                .await
+        }
+        // An allowlist and not a passthrough: a path segment that is not one
+        // of these names nothing.
+        _ => return item_not_found(BLUETOOTH_SETTINGS_PATH, &action),
+    };
+    match result {
+        Ok(()) => no_content(),
+        Err(err) => bus_api_error(&err, Some(BLUETOOTH_SETTINGS_PATH)),
+    }
+}
+
+/// Drop a device: out of the trust list, and out of the adapter's keys.
+#[utoipa::path(
+    delete,
+    path = V1_BLUETOOTH_DEVICE_ROUTE,
+    context_path = API,
+    tag = "resources",
+    params(("address" = String, Path, description = "The declared device's address")),
+    responses(
+        (status = 204, description = "The device was removed"),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 422, description = "No device of this address is declared (`settings_rejected`)", body = ApiError),
+        (status = 500, description = "micad failed (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_bluetooth_device_remove(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+) -> Response {
+    match state.api.remove_bluetooth_device(&address).await {
+        Ok(()) => no_content(),
+        Err(err) => bus_api_error(&err, Some(BLUETOOTH_SETTINGS_PATH)),
+    }
+}
+
+/// The access point, as the device holds it.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WifiAccessPoint {
+    /// `off`, `provisioning` (only while no uplink works) or `always`.
+    mode: String,
+    /// The wireless interface it runs on.
+    interface: String,
+    /// The advertised name; absent derives one from the device identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ssid: Option<String>,
+    /// The pre-shared key. **Read as `<redacted>`**; absent on a write keeps
+    /// the stored one, and absent on a device that never had one derives it
+    /// from the device credential.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    psk: Option<String>,
+    /// The 2.4 GHz channel.
+    channel: u8,
+    /// The regulatory domain the radio is configured for.
+    country_code: String,
+    /// The AP-side address in CIDR notation.
+    address: String,
+    /// Seconds without a usable uplink before the access point starts.
+    hold_down_seconds: u32,
+    /// Seconds it stays up after an uplink returns.
+    grace_seconds: u32,
+}
+
+/// Read the access-point configuration, with its key redacted.
+#[utoipa::path(
+    get,
+    path = V1_WIFI_AP_PATH,
+    context_path = API,
+    tag = "resources",
+    responses(
+        (status = 200, description = "The `wifi.ap` subtree; `psk` reads as `<redacted>`", body = WifiAccessPoint),
+        (status = 401, description = "No API credential was supplied", body = ApiError),
+        (status = 500, description = "The stored subtree is not an access-point document this build can read (`settings_invalid`)", body = ApiError),
+        (status = 503, description = "micad is unavailable", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_wifi_ap_read(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    let stored = match state.api.get_settings(WIFI_AP_PATH).await {
+        Ok(value) => value,
+        Err(err) => return bus_api_error(&err, Some(WIFI_AP_PATH)),
+    };
+    // Through the same redactor every other read uses: the key is `psk`, the
+    // one name `SECRET_FIELDS` carries for exactly this pair of fields.
+    api_response(StatusCode::OK, redact::redact(stored, WIFI_AP_PATH))
+}
+
+/// Configure the access point: switch it on, name it, key it, place it.
+///
+/// **`psk` absent keeps the stored key**, for the reason the known-network
+/// route gives: a read substitutes the redaction sentinel, so an operator
+/// changing the channel has not been shown the key, and treating absence as
+/// "no key" would publish an open access point.
+#[utoipa::path(
+    put,
+    path = V1_WIFI_AP_PATH,
+    context_path = API,
+    tag = "resources",
+    request_body = WifiAccessPoint,
+    responses(
+        (status = 202, description = "The configuration was written and the reconcile queued; the body carries the task id", body = TaskAccepted),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, the mode is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, or the body carries the redaction sentinel (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 500, description = "The stored subtree could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_wifi_ap_write(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let Json(value) = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return api_response(
+                StatusCode::BAD_REQUEST,
+                ApiError::apid("request_invalid", rejection.body_text()).at(WIFI_AP_PATH),
+            );
+        }
+    };
+    if redact::carries_sentinel(&value) {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                format!(
+                    "the body carries `{}`, which is what a read substitutes for a secret and never a value to write. Omit `psk` to keep the stored key",
+                    redact::REDACTED
+                ),
+            )
+            .at(WIFI_AP_PATH),
+        );
+    }
+    let requested: WifiAccessPoint = match serde_json::from_value(value) {
+        Ok(requested) => requested,
+        Err(err) => {
+            return api_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiError::apid("validation_failed", err.to_string()).at(WIFI_AP_PATH),
+            );
+        }
+    };
+    if !matches!(requested.mode.as_str(), "off" | "provisioning" | "always") {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "the access point runs `off`, `provisioning` (only while no uplink works) or `always`".to_string(),
+            )
+            .at(WIFI_AP_PATH),
+        );
+    }
+    if let Err(response) = check_iface_name(&requested.interface, WIFI_AP_PATH) {
+        return *response;
+    }
+    if let Some(psk) = &requested.psk
+        && let Err(message) = micad_settings::validate_wifi_psk(psk)
+    {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid("validation_failed", message).at(WIFI_AP_PATH),
+        );
+    }
+    if !valid_cidr(&requested.address) {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "the access-point address is IPv4 CIDR notation, e.g. 192.168.4.1/24".to_string(),
+            )
+            .at(WIFI_AP_PATH),
+        );
+    }
+    // The stored key is kept when the body sends none. Read from the tree and
+    // not from the caller, so a client that never saw the key cannot drop it.
+    let stored = match state.api.get_settings(WIFI_AP_PATH).await {
+        Ok(value) => value,
+        Err(err) => return bus_api_error(&err, Some(WIFI_AP_PATH)),
+    };
+    let mut requested = requested;
+    if requested.psk.is_none() {
+        requested.psk = stored
+            .get("psk")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+    }
+    // Infallible: a struct of scalars.
+    let value = serde_json::to_value(&requested).expect("the access point serializes");
+    match state.api.set_settings(WIFI_AP_PATH, &value).await {
+        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
+        Err(err) => bus_api_error(&err, Some(WIFI_AP_PATH)),
+    }
+}
+
+/// Replace one known network, keeping its stored key unless a new one is sent.
+///
+/// **`psk` absent keeps the stored key.** An operator changing a network's
+/// priority has not been shown the key -- a read substitutes the redaction
+/// sentinel for it -- so a `PUT` that treated absence as "open network" would
+/// silently drop the credential of a network that still works.
+#[utoipa::path(
+    put,
+    path = V1_WIFI_NETWORK_ROUTE,
+    context_path = API,
+    tag = "resources",
+    params(("ssid" = String, Path, description = "The stored network to replace")),
+    request_body = WifiNetworkEntry,
+    responses(
+        (status = 200, description = "The stored entry, with its key redacted", body = WifiNetworkEntry),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 404, description = "No stored network carries this SSID (`not_found`)", body = ApiError),
+        (status = 422, description = "The body is not a network, carries the redaction sentinel as its `psk`, names another SSID, or the key is outside IEEE 802.11i's length bounds (`validation_failed`)", body = ApiError),
+        (status = 500, description = "The stored list could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_wifi_networks_replace(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path(ssid): Path<String>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let Json(value) = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return api_response(
+                StatusCode::BAD_REQUEST,
+                ApiError::apid("request_invalid", rejection.body_text()).at(WIFI_NETWORKS_PATH),
+            );
+        }
+    };
+    // The sentinel first, as the add route takes it: a client that read the
+    // entry and posted it back is answered about the thing it got wrong.
+    if redact::carries_sentinel(&value) {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                format!(
+                    "the body carries `{}`, which is what a read substitutes for a secret and never a value to write. Omit `psk` to keep the stored key, or send the key itself",
+                    redact::REDACTED
+                ),
+            )
+            .at(WIFI_NETWORKS_PATH),
+        );
+    }
+    let network: WifiNetwork = match serde_json::from_value(value) {
+        Ok(network) => network,
+        Err(err) => {
+            return api_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiError::apid("validation_failed", err.to_string()).at(WIFI_NETWORKS_PATH),
+            );
+        }
+    };
+    // The path segment identifies the entry; a body that renames it is refused
+    // rather than guessed at, because renaming a network and replacing it are
+    // different operations and only one of them was asked for.
+    if network.ssid != ssid {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                format!(
+                    "this route replaces `{ssid}`; the body names `{}`. Remove the entry and add the new one to rename it",
+                    network.ssid
+                ),
+            )
+            .at(WIFI_NETWORKS_PATH),
+        );
+    }
+    if let Some(psk) = &network.psk
+        && let Err(message) = micad_settings::validate_wifi_psk(psk)
+    {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid("validation_failed", message).at(WIFI_NETWORKS_PATH),
+        );
+    }
+    let mut networks = match stored_networks(&state).await {
+        Ok(networks) => networks,
+        Err(response) => return *response,
+    };
+    let Some(index) = networks.iter().position(|stored| stored.ssid == ssid) else {
+        return item_not_found(WIFI_NETWORKS_PATH, &ssid);
+    };
+    let mut network = network;
+    if network.psk.is_none() {
+        network.psk = networks[index].psk.clone();
+    }
+    let echoed = redact::redact(
+        serde_json::to_value(&network).expect("a wifi network serializes"),
+        WIFI_NETWORKS_PATH,
+    );
+    networks[index] = network;
+    if let Err(response) = write_networks(&state, &networks).await {
+        return *response;
+    }
+    api_response(StatusCode::OK, echoed)
+}
+
 /// malformed-SSID case: any non-empty path segment is a possible name.
 #[utoipa::path(
     delete,
@@ -4023,6 +4850,44 @@ pub(crate) struct NetworkInterface {
     /// WireGuard parameters, for `kind = "wireguard"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     wireguard: Option<WireguardParameters>,
+    /// Static routes this interface carries, beyond the default route
+    /// `static.gateway` declares. Empty and absent are the same thing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    routes: Vec<StaticRoute>,
+    /// The DHCP server this interface offers. Absent offers none, and a link
+    /// with no static address of its own may not offer one.
+    #[serde(rename = "dhcpServer", skip_serializing_if = "Option::is_none")]
+    dhcp_server: Option<DhcpServer>,
+}
+
+/// One static route.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct StaticRoute {
+    /// Where the route leads, in CIDR notation.
+    destination: String,
+    /// The next hop; absent is an on-link route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gateway: Option<String>,
+    /// Route metric; absent leaves networkd's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metric: Option<u32>,
+}
+
+/// The DHCP server offered on one interface.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DhcpServer {
+    /// First address handed out, as an offset into the interface's subnet.
+    pool_offset: u32,
+    /// How many addresses the pool holds; at least one.
+    pool_size: u32,
+    /// DNS servers announced to clients; empty announces none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dns: Vec<String>,
+    /// Default lease time in seconds; absent leaves networkd's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lease_seconds: Option<u32>,
 }
 
 /// The `network` subtree as typed entries, or the error envelope for whatever
@@ -4109,6 +4974,81 @@ fn relational_refusal(entries: &NetworkEntries, path: &str) -> Result<(), Box<Re
 /// [`api_v1_network_iface_remove`] re-validates the stored map without the
 /// removed entry, and putting this rule in that shared re-validation would make
 /// removing an unrelated interface start failing on bad data already on disk.
+/// The routing and DHCP-server rules of one entry.
+///
+/// Three refusals, all of them about configurations networkd would accept and
+/// nothing could use:
+///
+/// - a route whose destination is not a network, or whose next hop is not an
+///   address;
+/// - a second default route, declared as a `0.0.0.0/0` route beside a
+///   `static.gateway` that already is one;
+/// - a DHCP server on a link with no address of its own, which has no subnet
+///   to hand addresses out of.
+fn routing_refusal(iface: &str, cfg: &IfaceSettings) -> Result<(), Box<Response>> {
+    let refuse = |message: String| {
+        Box::new(api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid("validation_failed", message).at(&iface_settings_path(iface)),
+        ))
+    };
+    let has_gateway = cfg
+        .static_
+        .as_ref()
+        .is_some_and(|static_| static_.gateway.is_some());
+    for route in &cfg.routes {
+        if !is_ip_or_cidr(&route.destination) {
+            return Err(refuse(format!(
+                "the route destination {:?} is not a network in CIDR notation, such as `10.20.0.0/16`",
+                route.destination
+            )));
+        }
+        if let Some(gateway) = &route.gateway
+            && gateway.parse::<IpAddr>().is_err()
+        {
+            return Err(refuse(format!(
+                "the route via {gateway:?} does not name an address; omit the gateway for an on-link route"
+            )));
+        }
+        if is_default_destination(&route.destination) && has_gateway {
+            return Err(refuse(format!(
+                "this entry declares a default route twice: once as `static.gateway` and once as the route to {:?}. Keep one",
+                route.destination
+            )));
+        }
+    }
+    if cfg.dhcp_server.is_some() {
+        let addressed = !cfg.dhcp && cfg.static_.is_some();
+        if !addressed {
+            return Err(refuse(
+                "a DHCP server needs a static address on this interface: the pool is an offset into the interface's own subnet, and a link with no address has no subnet"
+                    .to_string(),
+            ));
+        }
+        if let Some(server) = &cfg.dhcp_server {
+            if server.pool_size == 0 {
+                return Err(refuse(
+                    "the DHCP pool holds no addresses; give `poolSize` a count of at least 1"
+                        .to_string(),
+                ));
+            }
+            for dns in &server.dns {
+                if dns.parse::<IpAddr>().is_err() {
+                    return Err(refuse(format!(
+                        "the DNS server {dns:?} announced to clients is not an address"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether a destination is the default route, in either family.
+fn is_default_destination(destination: &str) -> bool {
+    matches!(destination, "0.0.0.0/0" | "::/0")
+}
+
 fn address_refusal(iface: &str, cfg: &IfaceSettings) -> Result<(), Box<Response>> {
     let address = cfg
         .static_
@@ -4235,6 +5175,460 @@ pub(crate) struct ObservedInterface {
     routes: Vec<Value>,
 }
 
+/// One declared container, documented.
+///
+/// A mirror of `micad_settings::ContainerUnit`, held field-for-field against
+/// it by a test, for the reason `NetworkInterface` is a mirror: the model is
+/// what the body deserializes into, and this is what says so in the document.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContainerDeclaration {
+    /// The image reference, tag included.
+    image: String,
+    /// The command to run instead of the image's own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    command: Vec<String>,
+    /// Environment variables passed into the container.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    environment: std::collections::BTreeMap<String, String>,
+    /// Ports published from the host.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    publish: Vec<ContainerPort>,
+    /// Host paths mounted into the container. A host path is under `/mica/`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    volumes: Vec<ContainerVolume>,
+    /// `no`, `on-failure` or `always`.
+    restart: String,
+    /// Whether the unit starts at boot.
+    auto_start: bool,
+}
+
+/// One published port.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContainerPort {
+    /// The port on the host.
+    host: u16,
+    /// The port inside the container.
+    container: u16,
+    /// `tcp` or `udp`.
+    protocol: String,
+}
+
+/// One bind mount.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContainerVolume {
+    /// The path on the device, under `/mica/`.
+    host: String,
+    /// Where it appears inside the container.
+    container: String,
+    /// Whether the container sees it read-only.
+    read_only: bool,
+}
+
+/// The declared containers and what the engine reports, as micad joins them.
+#[utoipa::path(
+    get,
+    path = V1_CONTAINERS_PATH,
+    context_path = API,
+    tag = "resources",
+    responses(
+        (status = 200, description = "`enabled`, the declared map, and the engine's own `containers` and `images` reads, each with its availability", body = Object),
+        (status = 401, description = "No API credential was supplied", body = ApiError),
+        (status = 503, description = "micad is unavailable", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_containers_read(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    match state.api.get_containers().await {
+        Ok(value) => api_response(StatusCode::OK, value),
+        Err(err) => bus_api_error(&err, Some(CONTAINERS_SETTINGS_PATH)),
+    }
+}
+
+/// The declared containers, by name, as the settings tree holds them.
+type ContainerMap = std::collections::BTreeMap<String, micad_settings::ContainerUnit>;
+
+/// Read the declared map, or the envelope saying why it could not be read.
+async fn stored_containers(state: &AppState) -> Result<ContainerMap, Box<Response>> {
+    let value = match state.api.get_settings(CONTAINERS_SETTINGS_PATH).await {
+        Ok(value) => value,
+        Err(err) => {
+            return Err(Box::new(bus_api_error(
+                &err,
+                Some(CONTAINERS_SETTINGS_PATH),
+            )));
+        }
+    };
+    // An absent map is an empty one: `container.units` is skipped when empty,
+    // so a device that declares none has no key here at all.
+    if value.is_null() {
+        return Ok(ContainerMap::new());
+    }
+    serde_json::from_value(value).map_err(|err| {
+        Box::new(api_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::apid(
+                "settings_invalid",
+                format!("the stored container map could not be read: {err}"),
+            )
+            .at(CONTAINERS_SETTINGS_PATH),
+        ))
+    })
+}
+
+/// Write the map, refusing what the device would refuse.
+async fn write_containers(state: &AppState, map: &ContainerMap) -> Result<String, Box<Response>> {
+    // The same validator the settings tree runs, called here so the operator
+    // gets the sentence rather than a bus error carrying it.
+    if let Err(message) = micad_settings::validate_container_units(map) {
+        return Err(Box::new(api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid("validation_failed", message).at(CONTAINERS_SETTINGS_PATH),
+        )));
+    }
+    let value = serde_json::to_value(map).expect("the container map serializes");
+    state
+        .api
+        .set_settings(CONTAINERS_SETTINGS_PATH, &value)
+        .await
+        .map_err(|err| Box::new(bus_api_error(&err, Some(CONTAINERS_SETTINGS_PATH))))
+}
+
+/// Declare or replace one container, validated against the whole map.
+///
+/// **A `PUT` replaces the entry entirely.** Creating and replacing are one
+/// operation, so there is no 404 here: a name that is not declared becomes
+/// one that is.
+#[utoipa::path(
+    put,
+    path = V1_CONTAINER_ROUTE,
+    context_path = API,
+    tag = "resources",
+    params(("name" = String, Path, description = "The container to declare or replace")),
+    request_body = ContainerDeclaration,
+    responses(
+        (status = 202, description = "The container was declared and the reconcile queued; the body carries the task id", body = TaskAccepted),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 422, description = "The body is not a container, or the resulting map breaks a rule -- a name a unit cannot carry, no image, one host port published twice, or a volume outside `/mica/` (`validation_failed`)", body = ApiError),
+        (status = 500, description = "The stored map could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_container_write(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let unit: micad_settings::ContainerUnit = match json_body(body, Some(CONTAINERS_SETTINGS_PATH))
+    {
+        Ok(unit) => unit,
+        Err(response) => return *response,
+    };
+    let mut map = match stored_containers(&state).await {
+        Ok(map) => map,
+        Err(response) => return *response,
+    };
+    map.insert(name, unit);
+    match write_containers(&state, &map).await {
+        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
+        Err(response) => *response,
+    }
+}
+
+/// Remove one container, re-validating the rest of the map without it.
+///
+/// **The volumes are not deleted with it.** A container's data under `/mica/`
+/// outlives the declaration, which is what makes removing and re-declaring a
+/// container a safe way to change its image.
+#[utoipa::path(
+    delete,
+    path = V1_CONTAINER_ROUTE,
+    context_path = API,
+    tag = "resources",
+    params(("name" = String, Path, description = "The declared container to remove")),
+    responses(
+        (status = 202, description = "The container was removed and the reconcile queued; the body carries the task id", body = TaskAccepted),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 404, description = "No container of this name is declared (`not_found`)", body = ApiError),
+        (status = 500, description = "The stored map could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_container_remove(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let mut map = match stored_containers(&state).await {
+        Ok(map) => map,
+        Err(response) => return *response,
+    };
+    if map.remove(&name).is_none() {
+        return item_not_found(CONTAINERS_SETTINGS_PATH, &name);
+    }
+    match write_containers(&state, &map).await {
+        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
+        Err(response) => *response,
+    }
+}
+
+/// Start, stop or restart one declared container.
+///
+/// The verb drives the unit Quadlet generated for the container. micad refuses
+/// a name it does not hold, so this is not a way to drive an arbitrary systemd
+/// unit through a container-shaped path.
+#[utoipa::path(
+    post,
+    path = V1_CONTAINER_ACTION_ROUTE,
+    context_path = API,
+    tag = "actions",
+    params(
+        ("name" = String, Path, description = "The declared container"),
+        ("action" = String, Path, description = "`start`, `stop` or `restart`"),
+    ),
+    responses(
+        (status = 204, description = "systemd accepted the job"),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 404, description = "The path names no action this route serves (`not_found`)", body = ApiError),
+        (status = 422, description = "micad holds no container of this name (`settings_rejected`)", body = ApiError),
+        (status = 500, description = "systemd refused the job (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_container_action(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path((name, action)): Path<(String, String)>,
+) -> Response {
+    // An allowlist and not a passthrough: the action reaches micad as a verb,
+    // and a path segment that is not one of these names nothing.
+    if !matches!(action.as_str(), "start" | "stop" | "restart") {
+        return item_not_found(CONTAINERS_SETTINGS_PATH, &action);
+    }
+    match state.api.container_action(&name, &action).await {
+        Ok(()) => no_content(),
+        Err(err) => bus_api_error(&err, Some(CONTAINERS_SETTINGS_PATH)),
+    }
+}
+
+/// The `mqtt` subtree as the device holds it.
+///
+/// Every field is required on a write: a `PUT` replaces the subtree, so a body
+/// that omitted the listener would have to be merged with something, and the
+/// only honest something is the value the client last read.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MqttConfiguration {
+    /// Whether the broker and the bridge run at all.
+    enabled: bool,
+    /// Where the broker listens.
+    listen: MqttListen,
+    /// Whether the broker demands credentials.
+    auth: MqttAuth,
+}
+
+/// The broker's single listener.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MqttListen {
+    /// The address the broker binds, as an IPv4 or IPv6 literal.
+    address: String,
+    /// The TCP port it listens on.
+    port: u16,
+}
+
+/// Whether a client must authenticate.
+///
+/// The accounts themselves are not here and never will be: they live in
+/// `/var/lib/mica/mqtt-broker-users.toml` on STATE, outside the settings tree
+/// and therefore outside everything this API serves.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MqttAuth {
+    /// Whether a connecting client must authenticate.
+    enabled: bool,
+}
+
+/// What the `mqtt` reconciler last published about what it did.
+///
+/// micad's document verbatim when it answers, and `available: false` with a
+/// sentence when it does not -- the same posture the network observation
+/// takes, for the same reason: an absent observer is not an empty one.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MqttObserved {
+    /// Whether micad answered with a live-state document.
+    available: bool,
+    /// The reconciler's own record: the rendered configuration path, the
+    /// listener it wrote and the state of the two units.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    state: Option<Value>,
+    /// Why there is no document, when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'static str>,
+}
+
+/// The declared MQTT configuration together with what the reconciler did.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MqttOverview {
+    /// The stored subtree.
+    configured: MqttConfiguration,
+    /// The reconciler's live state.
+    observed: MqttObserved,
+}
+
+/// Read the MQTT configuration together with the reconciler's live state.
+#[utoipa::path(
+    get,
+    path = V1_MQTT_PATH,
+    context_path = API,
+    tag = "resources",
+    responses(
+        (status = 200, description = "The declared `mqtt` subtree and the reconciler's last published state", body = MqttOverview),
+        (status = 401, description = "No API credential was supplied", body = ApiError),
+        (status = 500, description = "The stored subtree is not an `mqtt` document this build can read (`settings_invalid`)", body = ApiError),
+        (status = 503, description = "micad is unavailable", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_mqtt_read(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    let stored = match state.api.get_settings(MQTT_SETTINGS_PATH).await {
+        Ok(value) => value,
+        Err(err) => return bus_api_error(&err, Some(MQTT_SETTINGS_PATH)),
+    };
+    // A subtree this build cannot read is an error and never a default: a
+    // console shown `127.0.0.1:1883` for a device bound to `0.0.0.0` would be
+    // reporting the wrong device.
+    let configured: MqttConfiguration = match serde_json::from_value(stored) {
+        Ok(configured) => configured,
+        Err(err) => {
+            return api_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiError::apid(
+                    "settings_invalid",
+                    format!("the stored MQTT settings could not be read: {err}"),
+                )
+                .at(MQTT_SETTINGS_PATH),
+            );
+        }
+    };
+    let observed = match state.api.get_state(MQTT_SETTINGS_PATH).await {
+        Ok(value) => MqttObserved {
+            available: true,
+            state: Some(value),
+            error: None,
+        },
+        Err(err) => {
+            tracing::warn!(error = %err, "live MQTT state unavailable");
+            MqttObserved {
+                available: false,
+                state: None,
+                error: Some("the MQTT reconciler has published no state"),
+            }
+        }
+    };
+    api_response(
+        StatusCode::OK,
+        MqttOverview {
+            configured,
+            observed,
+        },
+    )
+}
+
+/// Replace the MQTT configuration, applied as one reconcile.
+///
+/// **A `PUT` replaces the whole subtree**: send the document that was read,
+/// with the fields that changed. Answers the apply task's id, which is what
+/// `GET /api/v1/tasks/{id}` follows -- the broker and the bridge are brought
+/// to the new configuration by the `mqtt` reconciler, not by this call.
+#[utoipa::path(
+    put,
+    path = V1_MQTT_PATH,
+    context_path = API,
+    tag = "resources",
+    request_body = MqttConfiguration,
+    responses(
+        (status = 202, description = "The configuration was written and the reconcile queued; the body carries the task id", body = TaskAccepted),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 422, description = "The body is not an MQTT document, the listen address is not an IP literal, or the port is 0 (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_mqtt_write(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let configured: MqttConfiguration = match json_body(body, Some(MQTT_SETTINGS_PATH)) {
+        Ok(configured) => configured,
+        Err(response) => return *response,
+    };
+    // The settings tree takes the address as text and the broker is what finds
+    // out it is not one, which on a read-only root means a unit that will not
+    // start and a console that reported success. The check is here for the
+    // reason the network routes' address check is: the file stays writable
+    // without apid, and this is the surface that can still say why.
+    if configured
+        .listen
+        .address
+        .parse::<std::net::IpAddr>()
+        .is_err()
+    {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "the listen address is an IPv4 or IPv6 literal, such as `127.0.0.1` for the loopback or `0.0.0.0` for every address".to_string(),
+            )
+            .at(MQTT_SETTINGS_PATH),
+        );
+    }
+    if configured.listen.port == 0 {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "the listen port is a TCP port between 1 and 65535; the MQTT default is 1883"
+                    .to_string(),
+            )
+            .at(MQTT_SETTINGS_PATH),
+        );
+    }
+    // Infallible: a struct of scalars.
+    let value = serde_json::to_value(&configured).expect("mqtt settings serialize");
+    match state.api.set_settings(MQTT_SETTINGS_PATH, &value).await {
+        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
+        Err(err) => bus_api_error(&err, Some(MQTT_SETTINGS_PATH)),
+    }
+}
+
 /// Read declared network configuration together with current link state.
 #[utoipa::path(
     get,
@@ -4356,6 +5750,9 @@ pub(crate) async fn api_v1_network_write(
         if let Err(response) = address_refusal(iface, cfg) {
             return *response;
         }
+        if let Err(response) = routing_refusal(iface, cfg) {
+            return *response;
+        }
     }
     // No read first, deliberately: this route's whole contract is that the map
     // it sends is the map that ends up stored, so a read-modify-write would be
@@ -4424,6 +5821,9 @@ pub(crate) async fn api_v1_network_iface_write(
     // entry that already holds an unparseable address is not this request's
     // fault and must not make an edit to a different interface fail.
     if let Err(response) = address_refusal(&iface, &cfg) {
+        return *response;
+    }
+    if let Err(response) = routing_refusal(&iface, &cfg) {
         return *response;
     }
     // The entry's own dot-path and not the whole map, so a concurrent edit of
@@ -5324,46 +6724,37 @@ pub(crate) struct SetupRequest {
 }
 
 /// `POST /api/v1/setup` response body.
+///
+/// **No API token.** Setup used to mint one unconditionally, from a time when
+/// a server-rendered wizard and this route were two different clients. There
+/// is one client now -- the console -- and it authenticates with the password
+/// it just set, so the mint handed every operator a long-lived bearer
+/// credential they never asked for and could not decline. A caller that wants
+/// one asks for it: `POST /api/v1/tokens`, authenticated by the credential
+/// this route created.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SetupToken {
-    /// The whole token, `mica_<id>_<secret>`.
-    ///
-    /// **It appears here and nowhere else, ever**, exactly as the mint route's
-    /// does: only the SHA-256 digest is stored. The id is not a separate
-    /// member because it is the token's own second segment, so a caller that
-    /// holds this string can address it for a later `DELETE` without being
-    /// told it twice.
-    token: String,
+pub(crate) struct SetupResult {
     /// CSRF token for the browser session created by setup.
     csrf_token: String,
 }
-
-/// The label the setup-minted token is listed under.
-///
-/// A fixed string and not a request field: the body has no name member, and
-/// inventing one would make the first credential's label the one thing about
-/// first-run setup a client must get right. It says where the token came from,
-/// which is the only thing a listing can usefully say about it.
-const SETUP_TOKEN_NAME: &str = "first-run setup";
 
 // The write order fails safe: nothing before `access.webAdmin` takes the
 // device out of setup mode, so a failure at any point leaves the wizard
 // reachable. The browser wizard writes in a different order and is not changed
 // here; closing that gap needs a transactional multi-path write on the bus.
-/// First-run setup: set the admin password, optionally a hostname and network
-/// entries, and mint an API token.
+/// First-run setup: set the admin password and, optionally, a hostname and
+/// network entries.
 ///
 /// **Unauthenticated**, because it creates the device's first credential.
 /// Answers **409** once a password exists, which closes it permanently.
 ///
 /// Everything is validated before anything is written; a rejected request
 /// leaves the device untouched and still in setup mode. On success the writes
-/// run in the order hostname, network, `access.webAdmin`, token.
+/// run in the order hostname, network, `access.webAdmin`.
 ///
-/// Answers **200** with the minted token secret, returned once. Unlike the
-/// browser wizard, this route always mints one: a caller driving setup over
-/// the API wants API access.
+/// Answers **201** with the browser session's CSRF token and nothing else. It
+/// mints no API token: see [`SetupResult`].
 #[utoipa::path(
     post,
     path = V1_SETUP_PATH,
@@ -5371,11 +6762,11 @@ const SETUP_TOKEN_NAME: &str = "first-run setup";
     tag = "actions",
     request_body = SetupRequest,
     responses(
-        (status = 201, description = "The device is configured; the body carries a newly minted API token, which is not recoverable afterwards", body = SetupToken),
+        (status = 201, description = "The device is configured and a browser session was created; the body carries that session's CSRF token", body = SetupResult),
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 409, description = "The device already has an admin password, so it is not in setup mode (`already_configured`). Change the password with `POST /api/v1/actions/change-password`", body = ApiError),
         (status = 422, description = "The body is not this shape, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them", body = ApiError),
-        (status = 500, description = "Hashing the password failed (`hash_failed`), the stored token list could not be read (`settings_invalid`), no free token id was drawn (`mint_failed`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 500, description = "Hashing the password failed (`hash_failed`), the stored `access` subtree could not be read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
         (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
@@ -5401,13 +6792,13 @@ pub(crate) async fn api_v1_setup(
     // argon2id hash below plus two bus round trips, and it was measured on the
     // shipped path with no test seam in it: two concurrent requests against a
     // real micad over a real bus produced two 201s and two working
-    // administrator sessions in 200 of 200 runs, on a device that kept one
-    // token and the last password written.
+    // administrator sessions in 200 of 200 runs, on a device that kept the
+    // last password written.
     let _claim_guard = state.claim.lock().await;
-    // One read of `access`, answering two questions: whether the device is
-    // still in setup mode, and what the token list holds. The form path's
-    // condition is `password_hash(&access).is_some` and this is that
-    // condition and not a rendering of it.
+    // One read of `access`: whether the device is still in setup mode. The
+    // condition is `password_hash(&access).is_some` and this is that condition
+    // and not a rendering of it. The subtree is kept because the write below
+    // replaces it whole and must not drop what it did not write.
     let access = match state.api.get_settings("access").await {
         Ok(value) => value,
         Err(err) => return bus_api_error(&err, Some("access")),
@@ -5504,33 +6895,6 @@ pub(crate) async fn api_v1_setup(
             Some(candidate)
         }
     };
-    // Read from the subtree already in hand rather than through
-    // `stored_tokens`, which would call the bus a second time for the same
-    // value. The posture is that helper's: a list that is present and
-    // unreadable is an error and never an empty list.
-    let tokens = match parse_tokens(&access) {
-        Ok(tokens) => tokens,
-        Err(err) => {
-            return api_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ApiError::apid(
-                    "settings_invalid",
-                    format!("the stored token list could not be read: {err}"),
-                )
-                .at(API_TOKENS_PATH),
-            );
-        }
-    };
-    let Some(minted) = token::mint(&tokens) else {
-        return api_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ApiError::apid(
-                "mint_failed",
-                "no free token id was drawn; nothing was written".to_string(),
-            )
-            .at(API_TOKENS_PATH),
-        );
-    };
     // Off the async workers for the same reason login verification and the
     // wizard's own hash are: argon2id costs real CPU per call, by design. It
     // is done here, before the first write, because it is the last step that
@@ -5576,23 +6940,9 @@ pub(crate) async fn api_v1_setup(
         return *response;
     }
 
-    // The claim itself, as ONE write of the whole `access` subtree.
-    let mut tokens = tokens;
-    tokens.push(ApiToken {
-        id: minted.id,
-        name: SETUP_TOKEN_NAME.to_string(),
-        hash: minted.hash,
-        created: device_clock_seconds(),
-    });
-    // The same validator micad runs, so a list this route accepts is one the
-    // store will accept too -- [`write_tokens`]'s check, which the whole-subtree
-    // write does not go through.
-    if let Err(err) = validate_api_tokens(&tokens) {
-        return api_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            ApiError::apid("validation_failed", key_error_message(&err)).at(API_TOKENS_PATH),
-        );
-    }
+    // The claim itself, as ONE write of the whole `access` subtree. Any token
+    // list already in that subtree is carried through untouched: this route
+    // writes the password and the claim record, and nothing about tokens.
     let claim = ClaimSettings {
         via: ClaimChannel::Setup,
         at: device_clock_seconds(),
@@ -5616,10 +6966,6 @@ pub(crate) async fn api_v1_setup(
     subtree.insert(
         "claim".to_string(),
         serde_json::to_value(claim).expect("the claim record serializes"),
-    );
-    subtree.insert(
-        "apiTokens".to_string(),
-        serde_json::to_value(&tokens).expect("api tokens serialize"),
     );
     if let Err(err) = state
         .api
@@ -5645,8 +6991,7 @@ pub(crate) async fn api_v1_setup(
             ),
             (SET_COOKIE, session::session_cookie(&session.cookie)),
         ],
-        Json(SetupToken {
-            token: minted.wire,
+        Json(SetupResult {
             csrf_token: session.csrf_token,
         }),
     )

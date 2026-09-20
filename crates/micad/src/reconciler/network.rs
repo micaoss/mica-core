@@ -519,6 +519,37 @@ fn render_unit(iface: &str, cfg: &IfaceSettings, master: Option<&str>, vlans: &[
     for child in vlans {
         out.push_str(&format!("VLAN={child}\n"));
     }
+    // A port carries neither: its addressing is the bridge's, and a DHCP
+    // server or a route on a link that has no address of its own is a
+    // configuration networkd would accept and nothing could use. apid refuses
+    // the entry; the renderer refuses to render it, so a file hand-edited past
+    // apid still produces a unit that means what the bridge means.
+    if master.is_none() {
+        if cfg.dhcp_server.is_some() {
+            out.push_str("DHCPServer=yes\n");
+        }
+        for route in &cfg.routes {
+            out.push_str(&format!("\n[Route]\nDestination={}\n", route.destination));
+            if let Some(gateway) = &route.gateway {
+                out.push_str(&format!("Gateway={gateway}\n"));
+            }
+            if let Some(metric) = route.metric {
+                out.push_str(&format!("Metric={metric}\n"));
+            }
+        }
+        if let Some(server) = &cfg.dhcp_server {
+            out.push_str(&format!(
+                "\n[DHCPServer]\nPoolOffset={}\nPoolSize={}\n",
+                server.pool_offset, server.pool_size
+            ));
+            for dns in &server.dns {
+                out.push_str(&format!("DNS={dns}\n"));
+            }
+            if let Some(seconds) = server.lease_seconds {
+                out.push_str(&format!("DefaultLeaseTimeSec={seconds}\n"));
+            }
+        }
+    }
     out
 }
 
@@ -749,6 +780,67 @@ mod tests {
             keystore_in(dir),
         );
         (reconciler, calls)
+    }
+
+    /// A statically addressed link that hands out addresses and carries one
+    /// static route: the two fields together, because the rendering order of
+    /// the sections they produce is part of the file.
+    #[test]
+    fn a_server_and_a_route_render_as_their_own_sections() {
+        let iface = IfaceSettings {
+            dhcp: false,
+            static_: Some(StaticConfig {
+                address: "192.168.50.1/24".to_string(),
+                gateway: None,
+                dns: Vec::new(),
+            }),
+            routes: vec![micad_settings::RouteConfig {
+                destination: "10.20.0.0/16".to_string(),
+                gateway: Some("192.168.50.254".to_string()),
+                metric: Some(200),
+            }],
+            dhcp_server: Some(micad_settings::DhcpServerConfig {
+                pool_offset: 100,
+                pool_size: 50,
+                dns: vec!["192.168.50.1".to_string()],
+                lease_seconds: Some(3600),
+            }),
+            ..IfaceSettings::default()
+        };
+
+        assert_eq!(
+            render_unit("eth1", &iface, None, &[]),
+            "[Match]\nName=eth1\n\n[Network]\nAddress=192.168.50.1/24\nDHCPServer=yes\n\n\
+             [Route]\nDestination=10.20.0.0/16\nGateway=192.168.50.254\nMetric=200\n\n\
+             [DHCPServer]\nPoolOffset=100\nPoolSize=50\nDNS=192.168.50.1\nDefaultLeaseTimeSec=3600\n"
+        );
+    }
+
+    /// A port's addressing is the bridge's, and so is everything that depends
+    /// on having an address. A hand-edited document that puts a server on a
+    /// port renders a port, not a server.
+    #[test]
+    fn a_bridge_port_renders_neither_a_route_nor_a_server() {
+        let iface = IfaceSettings {
+            dhcp: false,
+            routes: vec![micad_settings::RouteConfig {
+                destination: "10.20.0.0/16".to_string(),
+                gateway: None,
+                metric: None,
+            }],
+            dhcp_server: Some(micad_settings::DhcpServerConfig {
+                pool_offset: 2,
+                pool_size: 10,
+                dns: Vec::new(),
+                lease_seconds: None,
+            }),
+            ..IfaceSettings::default()
+        };
+
+        assert_eq!(
+            render_unit("eth2", &iface, Some("br0"), &[]),
+            "[Match]\nName=eth2\n\n[Network]\nBridge=br0\n"
+        );
     }
 
     /// A tunnel entry with `peers`, addressed statically the way a WireGuard

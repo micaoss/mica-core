@@ -21,6 +21,7 @@ import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 interface ResolvedPolicy {
   policy?: string | null
   checkIntervalMinutes?: number | null
+  checkAt?: string | null
   sourceUrl?: string | null
   channel?: string | null
   rebootPolicy?: string
@@ -60,6 +61,8 @@ interface ProvisioningLayers {
 interface UpdateConfigPatch {
   policy?: string
   checkIntervalMinutes?: number
+  /// `HH:MM` UTC, or `null` to go back to the interval.
+  checkAt?: string | null
   rebootPolicy?: string
   source?: { url?: string | null; channel?: string | null }
   maintenance?: { windows: { days: string[]; start: string; end: string }[] }
@@ -67,6 +70,20 @@ interface UpdateConfigPatch {
 
 const POLICIES = ['off', 'check', 'auto'] as const
 const REBOOT_POLICIES = ['manual', 'window'] as const
+
+/// The cadence the document holds is a minute count. An operator thinks in
+/// days or hours, so the field is a number and a unit, and the largest unit
+/// that divides the stored value exactly is the one it is shown in: 1440
+/// reads as one day, 90 stays ninety minutes.
+const CADENCE_UNITS = { minutes: 1, hours: 60, days: 1440 } as const
+
+type CadenceUnit = keyof typeof CADENCE_UNITS
+
+function cadenceOf(minutes: number): { value: number; unit: CadenceUnit } {
+  if (minutes > 0 && minutes % CADENCE_UNITS.days === 0) return { value: minutes / CADENCE_UNITS.days, unit: 'days' }
+  if (minutes > 0 && minutes % CADENCE_UNITS.hours === 0) return { value: minutes / CADENCE_UNITS.hours, unit: 'hours' }
+  return { value: minutes, unit: 'minutes' }
+}
 
 /// One write, three panes, three sentences.
 ///
@@ -191,10 +208,15 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
   const write = useWriteConfig(t('system.update.automatic.policySaved'), t('system.update.automatic.save'))
   const [mode, setMode] = useState<string>()
   const [interval, setInterval] = useState<string>()
+  const [unit, setUnit] = useState<CadenceUnit>()
   const [rebootPolicy, setRebootPolicy] = useState<string>()
+  const [checkAt, setCheckAt] = useState<string>()
+  const stored = cadenceOf(policy?.checkIntervalMinutes ?? 1440)
   const currentMode = mode ?? policy?.policy ?? 'check'
-  const currentInterval = interval ?? (policy?.checkIntervalMinutes ?? 1440).toString()
+  const currentInterval = interval ?? stored.value.toString()
+  const currentUnit = unit ?? stored.unit
   const currentReboot = rebootPolicy ?? policy?.rebootPolicy ?? 'manual'
+  const currentCheckAt = checkAt ?? policy?.checkAt ?? ''
   const knownMode = POLICIES.find((known) => known === currentMode)
   const knownReboot = REBOOT_POLICIES.find((known) => known === currentReboot)
   return (
@@ -205,7 +227,10 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
           event.preventDefault()
           write.mutate({
             policy: currentMode,
-            checkIntervalMinutes: Number(currentInterval),
+            checkIntervalMinutes: Number(currentInterval) * CADENCE_UNITS[currentUnit],
+            // An empty box is `null`, which is the device back on its
+            // interval -- sending an empty string would store one.
+            checkAt: currentCheckAt.trim() ? currentCheckAt.trim() : null,
             rebootPolicy: currentReboot,
           })
         }}
@@ -220,7 +245,22 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
             )}
           </FormField>
           <FormField label={t('system.update.automatic.interval')} hint={t('system.update.automatic.intervalHint')}>
-            {(id) => <Input id={id} type="number" min={0} value={currentInterval} onChange={(event) => setInterval(event.target.value)} required />}
+            {(id) => (
+              <div className="flex gap-2">
+                <Input id={id} type="number" min={0} value={currentInterval} onChange={(event) => setInterval(event.target.value)} required />
+                <Select value={currentUnit} onValueChange={(value) => setUnit(String(value) as CadenceUnit)}>
+                  <SelectTrigger className="w-32" aria-label={t('system.update.automatic.intervalUnit')}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(CADENCE_UNITS) as CadenceUnit[]).map((option) => (
+                      <SelectItem value={option} key={option}>{t(`system.update.automatic.intervalUnits.${option}`)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </FormField>
+          <FormField label={t('system.update.automatic.checkAt')} hint={t('system.update.automatic.checkAtHint')}>
+            {(id) => <Input id={id} type="time" value={currentCheckAt} onChange={(event) => setCheckAt(event.target.value)} />}
           </FormField>
           <FormField label={t('system.update.automatic.rebootPolicy')} hint={knownReboot ? t(`system.update.automatic.rebootPolicies.${knownReboot}`) : undefined}>
             {(id) => (

@@ -9,7 +9,6 @@ import { Panel } from '@/shared/components/panel'
 import { StatusBadge } from '@/shared/components/status-badge'
 import { Switch } from '@/shared/components/ui/switch'
 import { SimulationNotice } from '@/shared/simulation/simulation-notice'
-import { useSimulation } from '@/shared/simulation/simulation-provider'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
 import { serviceCatalog, serviceEndpoint, type ServiceDefinition } from './service-catalog'
@@ -22,7 +21,7 @@ export function ServicesPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {serviceCatalog.map((service) => <ServiceCard key={service.id} service={service} />)}
       </div>
-      <SimulationNotice scope={t('services.terminal.title')} />
+      <SimulationNotice scope={t('services.title')} />
     </Page>
   )
 }
@@ -30,18 +29,15 @@ export function ServicesPage() {
 function ServiceCard({ service }: { service: ServiceDefinition }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const simulation = useSimulation()
   const Icon = service.icon
   const title = t(`services.${service.id}.title`)
   const enabled = useQuery({
     queryKey: ['settings', service.settingsPath],
     queryFn: () => api<boolean>(`/api/v1/settings/${service.settingsPath}`),
-    enabled: Boolean(service.settingsPath),
   })
   const state = useQuery({
     queryKey: ['state', service.statePath],
     queryFn: () => api<Record<string, unknown>>(`/api/v1/state/${service.statePath}`),
-    enabled: Boolean(service.statePath),
     retry: false,
   })
   const update = useMutationFeedback<TaskAccepted, boolean>({
@@ -51,8 +47,7 @@ function ServiceCard({ service }: { service: ServiceDefinition }) {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['settings', service.settingsPath] }),
   })
 
-  const simulated = service.settingsPath === undefined
-  const on = simulated ? simulation.terminalEnabled : enabled.data === true
+  const on = enabled.data === true
   const observed = typeof state.data?.state === 'string' ? state.data.state : undefined
   const endpoint = serviceEndpoint(state.data)
 
@@ -63,21 +58,21 @@ function ServiceCard({ service }: { service: ServiceDefinition }) {
           <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted"><Icon className="size-5" /></span>
           <div className="flex min-w-0 flex-col">
             <Link to="/services/$service" params={{ service: service.id }} className="font-medium text-primary hover:underline">{title}</Link>
-            <small className="font-mono text-sm break-all text-muted-foreground">{endpoint ?? (simulated ? t('services.terminal.endpoint') : t('common.notAvailable'))}</small>
+            <small className="font-mono text-sm break-all text-muted-foreground">{endpoint ?? t('common.notAvailable')}</small>
           </div>
         </div>
         <Switch
           checked={on}
-          onCheckedChange={(value) => simulated ? simulation.setTerminalEnabled(value) : update.mutate(value)}
-          disabled={!simulated && (enabled.isPending || enabled.isError || update.isPending)}
+          onCheckedChange={(value) => update.mutate(value)}
+          disabled={enabled.isPending || enabled.isError || update.isPending}
           aria-label={title}
         />
       </div>
       <p className="text-sm text-muted-foreground">{t(`services.${service.id}.warning`)}</p>
       {enabled.error ? <Callout tone="danger" title={failureDetail(enabled.error, t('common.requestFailed'))} /> : null}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
-        <StatusBadge tone={simulated ? 'neutral' : observed === 'running' ? 'success' : state.isError ? 'warning' : 'neutral'}>
-          {simulated ? t(on ? 'common.states.enabled' : 'common.states.disabled') : observed ?? t('common.states.unknown')}
+        <StatusBadge tone={observed === 'running' ? 'success' : state.isError ? 'warning' : 'neutral'}>
+          {observed ?? t('common.states.unknown')}
         </StatusBadge>
         <span className="text-sm text-muted-foreground">{update.isPending ? t('services.saving') : t(on ? 'services.desiredEnabled' : 'services.desiredDisabled')}</span>
       </div>

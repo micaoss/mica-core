@@ -222,3 +222,166 @@ async fn an_already_running_container_is_not_restarted() {
         "a running container was started again, which for a Restart=always unit is a needless outage: {calls:?}"
     );
 }
+
+// --- Declared containers -----------------------------------------------------
+
+/// Settings declaring one container.
+fn with_container(enabled: bool, name: &str, unit: micad_settings::ContainerUnit) -> Settings {
+    let mut s = settings(enabled);
+    s.container.units.insert(name.to_string(), unit);
+    s
+}
+
+fn node_red() -> micad_settings::ContainerUnit {
+    micad_settings::ContainerUnit {
+        image: "docker.io/nodered/node-red:4.0.9".to_string(),
+        command: Vec::new(),
+        environment: std::collections::BTreeMap::from([("TZ".to_string(), "UTC".to_string())]),
+        publish: vec![micad_settings::PublishedPort {
+            host: 1880,
+            container: 1880,
+            protocol: micad_settings::PortProtocol::Tcp,
+        }],
+        volumes: vec![micad_settings::VolumeMount {
+            host: "/mica/apps/node-red".to_string(),
+            container: "/data".to_string(),
+            read_only: false,
+        }],
+        restart: micad_settings::RestartPolicy::Always,
+        auto_start: true,
+    }
+}
+
+/// The rendered file, in full: a golden, because the file IS the contract
+/// between this reconciler and Quadlet.
+#[test]
+fn a_declared_container_renders_its_quadlet_file() {
+    assert_eq!(
+        render_container("node-red", &node_red()),
+        "[Unit]\nDescription=mica container node-red\n\n\
+         [Container]\nImage=docker.io/nodered/node-red:4.0.9\nContainerName=node-red\n\
+         Environment=TZ=UTC\nPublishPort=1880:1880/tcp\nVolume=/mica/apps/node-red:/data\n\n\
+         [Service]\nRestart=always\n\n\
+         [Install]\nWantedBy=multi-user.target\n"
+    );
+}
+
+/// A container that does not start at boot renders no `[Install]` section, so
+/// Quadlet writes no `.wants` symlink and the unit exists without running.
+#[test]
+fn a_container_that_does_not_autostart_renders_no_install_section() {
+    let mut unit = node_red();
+    unit.auto_start = false;
+    unit.restart = micad_settings::RestartPolicy::No;
+    let rendered = render_container("node-red", &unit);
+
+    assert!(!rendered.contains("[Install]"), "{rendered}");
+    assert!(rendered.contains("Restart=no"), "{rendered}");
+}
+
+#[tokio::test]
+async fn applying_writes_the_declared_file_and_reports_it() {
+    let (_tmp, quadlet, generator) = dirs();
+    let control = MockUnitControl::new("inactive", "disabled");
+    let r = ContainerReconciler::new(quadlet.clone(), generator, control);
+
+    let state = r
+        .apply(&with_container(true, "node-red", node_red()))
+        .await
+        .expect("apply");
+
+    let path = quadlet.join("50-mica-node-red.container");
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the declared file"),
+        render_container("node-red", &node_red())
+    );
+    assert_eq!(state["declaredCount"], serde_json::json!(1));
+    assert_eq!(
+        state["renderedUnits"],
+        serde_json::json!(["50-mica-node-red.container"])
+    );
+}
+
+/// The second pass writes nothing: these files live on STATE, and an
+/// unconditional rewrite is a flash write on every reconcile.
+#[tokio::test]
+async fn a_converged_device_rewrites_nothing() {
+    let (_tmp, quadlet, generator) = dirs();
+    let control = MockUnitControl::new("inactive", "disabled");
+    let r = ContainerReconciler::new(quadlet, generator, control);
+    let settings = with_container(true, "node-red", node_red());
+
+    r.apply(&settings).await.expect("first apply");
+    let state = r.apply(&settings).await.expect("second apply");
+
+    assert_eq!(state["renderedUnits"], serde_json::json!([]));
+    assert_eq!(state["sweptUnits"], serde_json::json!([]));
+}
+
+/// An entry that is no longer declared has its file swept; a `.container` an
+/// integrator wrote by hand is left exactly where it is.
+#[tokio::test]
+async fn the_sweep_takes_its_own_files_and_leaves_an_integrators() {
+    let (_tmp, quadlet, generator) = dirs();
+    let control = MockUnitControl::new("inactive", "disabled");
+    let r = ContainerReconciler::new(quadlet.clone(), generator, control);
+
+    r.apply(&with_container(true, "node-red", node_red()))
+        .await
+        .expect("first apply");
+    std::fs::write(
+        quadlet.join("their-own.container"),
+        "[Container]\nImage=alpine:3\n",
+    )
+    .expect("an integrator's file");
+
+    let state = r.apply(&settings(true)).await.expect("second apply");
+
+    assert_eq!(
+        state["sweptUnits"],
+        serde_json::json!(["50-mica-node-red.container"])
+    );
+    assert!(!quadlet.join("50-mica-node-red.container").exists());
+    assert!(quadlet.join("their-own.container").exists());
+}
+
+/// With the switch off nothing is rendered: the directory is not mounted, so a
+/// write would land in the image's own read-only copy of it.
+#[tokio::test]
+async fn nothing_is_rendered_while_the_switch_is_off() {
+    let (_tmp, quadlet, generator) = dirs();
+    let control = MockUnitControl::new("inactive", "disabled");
+    let r = ContainerReconciler::new(quadlet.clone(), generator, control);
+
+    let state = r
+        .apply(&with_container(false, "node-red", node_red()))
+        .await
+        .expect("apply");
+
+    assert_eq!(state["renderedUnits"], serde_json::json!([]));
+    assert!(!quadlet.join("50-mica-node-red.container").exists());
+}
+
+/// A declared container that does not start at boot is not started by the
+/// reconciler either, while a unit from a file micad did not write keeps the
+/// behaviour it had before containers could be declared.
+#[tokio::test]
+async fn a_unit_starts_when_its_container_says_it_starts() {
+    let (_tmp, quadlet, generator) = dirs();
+    write_generated(&generator, "50-mica-node-red.service");
+    write_generated(&generator, "their-own.service");
+    let control = MockUnitControl::new("inactive", "disabled");
+    let r = ContainerReconciler::new(quadlet, generator, control);
+    let mut unit = node_red();
+    unit.auto_start = false;
+
+    let state = r
+        .apply(&with_container(true, "node-red", unit))
+        .await
+        .expect("apply");
+
+    assert_eq!(
+        state["startedUnits"],
+        serde_json::json!(["their-own.service"])
+    );
+}

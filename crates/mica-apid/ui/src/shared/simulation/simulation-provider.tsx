@@ -31,14 +31,12 @@ export type UpdatePhase = 'idle' | 'checking' | 'ready' | 'installing' | 'reboot
 interface SimulationValue {
   apps: SimulatedApp[]
   activity: SimulatedActivity[]
-  terminalEnabled: boolean
   updatePhase: UpdatePhase
   supportAccess: boolean
   installApp: (id: string) => void
   toggleApp: (id: string) => void
   removeApp: (id: string) => void
   updateApp: (id: string) => void
-  setTerminalEnabled: (enabled: boolean) => void
   advanceUpdate: () => void
   setSupportAccess: (enabled: boolean) => void
 }
@@ -64,7 +62,6 @@ const SimulationContext = createContext<SimulationValue | null>(null)
 export function SimulationProvider({ children }: { children: ReactNode }) {
   const [apps, setApps] = useState(initialApps)
   const [activity, setActivity] = useState(initialActivity)
-  const [terminalEnabled, setTerminalEnabled] = useState(false)
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('ready')
   const [supportAccess, setSupportAccess] = useState(false)
 
@@ -99,17 +96,15 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SimulationValue>(() => ({
     apps,
     activity,
-    terminalEnabled,
     updatePhase,
     supportAccess,
     installApp,
     toggleApp,
     removeApp,
     updateApp,
-    setTerminalEnabled,
     advanceUpdate,
     setSupportAccess,
-  }), [apps, activity, terminalEnabled, updatePhase, supportAccess])
+  }), [apps, activity, updatePhase, supportAccess])
 
   return <SimulationContext value={value}>{children}</SimulationContext>
 }

@@ -123,9 +123,10 @@ trait Reconciler {
 | `sshd` | `access.ssh` | dropbear arguments in `/run/mica/dropbear.env`, `authorized_keys` for `root` and `mica`, `dropbear.service` |
 | `wifi_client` | `wifi.client` | wpa_supplicant configuration and unit, the link's networkd unit |
 | `wifi_ap` | `wifi.ap` | hostapd configuration and unit, the AP's address and DHCP server |
-| `container` | `container` | binds `/etc/containers/systemd` from STATE and reloads systemd so Quadlet units exist only while enabled |
+| `container` | `container` | binds `/etc/containers/systemd` from STATE, renders a Quadlet unit per declared container, and reloads systemd so they exist only while enabled |
 | `mqtt` | `mqtt` | `/run/mica/mqtt-broker.toml`, the bridge identity, the broker and bridge units |
 | `time` | `time` | timesyncd server drop-in and the presentation timezone |
+| `bluetooth` | `bluetooth` | `bluetooth.service`, the adapter's properties and the declared devices' trust; a board with no radio reports `unsupported` |
 
 A settings write is validated against the whole tree, persisted, and then
 queued as an apply task (`apply_queue.rs`). The task's progress is visible as a

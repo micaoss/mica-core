@@ -506,6 +506,492 @@
         }
       }
     },
+    "/api/v1/bluetooth": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read the Bluetooth surface: the trust list, the adapter, the devices, the\npairing code and whatever is waiting to be confirmed.",
+        "operationId": "api_v1_bluetooth_read",
+        "responses": {
+          "200": {
+            "description": "`declared`, `adapter`, `devices`, `pin` and `pending`, each named apart",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "micad is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Configure the adapter.",
+        "description": "**The trust list is not here.** Devices arrive by pairing and leave by\nbeing removed; a route that replaced the whole list would let a client\ndeclare a device it never paired with, which the adapter would then have\nno keys for.",
+        "operationId": "api_v1_bluetooth_write",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BluetoothAdapterSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The adapter settings were written and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, the alias is empty or longer than 64 characters, or the pairing code is not 4 to 16 digits (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored subtree could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bluetooth/devices/{address}": {
+      "delete": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Drop a device: out of the trust list, and out of the adapter's keys.",
+        "operationId": "api_v1_bluetooth_device_remove",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "description": "The declared device's address",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The device was removed"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No device of this address is declared (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bluetooth/devices/{address}/{action}": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Pair with a device, or answer the confirmation a pairing is waiting on.",
+        "description": "Two verbs on one path because they are two halves of one exchange: `pair`\nstarts it, and `confirm` answers the passkey BlueZ asked about in the\nmiddle of it.",
+        "operationId": "api_v1_bluetooth_device_action",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "description": "The device's address, `AA:BB:CC:DD:EE:FF`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "`pair` or `confirm`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "`confirm` only: whether the passkey matched",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairingAnswer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The pairing was started, or the confirmation was answered"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The path names no action this route serves (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The address is not a Bluetooth address, or no confirmation is waiting for it (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Bluetooth is switched off, this device has no adapter, or the pairing failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bluetooth/discovery": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Start or stop a Bluetooth scan.",
+        "operationId": "api_v1_bluetooth_discovery",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The adapter was told to start or stop scanning"
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Bluetooth is switched off, this device has no adapter, or BlueZ refused (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/claim": {
       "get": {
         "tags": [
@@ -557,6 +1043,396 @@
           },
           "503": {
             "description": "micad is unavailable (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/containers": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "The declared containers and what the engine reports, as micad joins them.",
+        "operationId": "api_v1_containers_read",
+        "responses": {
+          "200": {
+            "description": "`enabled`, the declared map, and the engine's own `containers` and `images` reads, each with its availability",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "micad is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/containers/{name}": {
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Declare or replace one container, validated against the whole map.",
+        "description": "**A `PUT` replaces the entry entirely.** Creating and replacing are one\noperation, so there is no 404 here: a name that is not declared becomes\none that is.",
+        "operationId": "api_v1_container_write",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The container to declare or replace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContainerDeclaration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The container was declared and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not a container, or the resulting map breaks a rule -- a name a unit cannot carry, no image, one host port published twice, or a volume outside `/mica/` (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored map could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Remove one container, re-validating the rest of the map without it.",
+        "description": "**The volumes are not deleted with it.** A container's data under `/mica/`\noutlives the declaration, which is what makes removing and re-declaring a\ncontainer a safe way to change its image.",
+        "operationId": "api_v1_container_remove",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The declared container to remove",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The container was removed and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No container of this name is declared (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored map could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/containers/{name}/{action}": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Start, stop or restart one declared container.",
+        "description": "The verb drives the unit Quadlet generated for the container. micad refuses\na name it does not hold, so this is not a way to drive an arbitrary systemd\nunit through a container-shaped path.",
+        "operationId": "api_v1_container_action",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The declared container",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "`start`, `stop` or `restart`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "systemd accepted the job"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The path names no action this route serves (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "micad holds no container of this name (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "systemd refused the job (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
             "content": {
               "application/json": {
                 "schema": {
@@ -910,6 +1786,177 @@
           },
           "405": {
             "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mqtt": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read the MQTT configuration together with the reconciler's live state.",
+        "operationId": "api_v1_mqtt_read",
+        "responses": {
+          "200": {
+            "description": "The declared `mqtt` subtree and the reconciler's last published state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MqttOverview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored subtree is not an `mqtt` document this build can read (`settings_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "micad is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Replace the MQTT configuration, applied as one reconcile.",
+        "description": "**A `PUT` replaces the whole subtree**: send the document that was read,\nwith the fields that changed. Answers the apply task's id, which is what\n`GET /api/v1/tasks/{id}` follows -- the broker and the bridge are brought\nto the new configuration by the `mqtt` reconciler, not by this call.",
+        "operationId": "api_v1_mqtt_write",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MqttConfiguration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The configuration was written and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not an MQTT document, the listen address is not an IP literal, or the port is 0 (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed to write (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
             "content": {
               "application/json": {
                 "schema": {
@@ -2422,8 +3469,8 @@
         "tags": [
           "actions"
         ],
-        "summary": "First-run setup: set the admin password, optionally a hostname and network\nentries, and mint an API token.",
-        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, `access.webAdmin`, token.\n\nAnswers **200** with the minted token secret, returned once. Unlike the\nbrowser wizard, this route always mints one: a caller driving setup over\nthe API wants API access.",
+        "summary": "First-run setup: set the admin password and, optionally, a hostname and\nnetwork entries.",
+        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, `access.webAdmin`.\n\nAnswers **201** with the browser session's CSRF token and nothing else. It\nmints no API token: see [`SetupResult`].",
         "operationId": "api_v1_setup",
         "requestBody": {
           "content": {
@@ -2437,11 +3484,11 @@
         },
         "responses": {
           "201": {
-            "description": "The device is configured; the body carries a newly minted API token, which is not recoverable afterwards",
+            "description": "The device is configured and a browser session was created; the body carries that session's CSRF token",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SetupToken"
+                  "$ref": "#/components/schemas/SetupResult"
                 }
               }
             }
@@ -2487,7 +3534,7 @@
             }
           },
           "500": {
-            "description": "Hashing the password failed (`hash_failed`), the stored token list could not be read (`settings_invalid`), no free token id was drawn (`mint_failed`), or micad failed to write (`settings_io`, `micad_failed`)",
+            "description": "Hashing the password failed (`hash_failed`), the stored `access` subtree could not be read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4521,6 +5568,132 @@
         }
       }
     },
+    "/api/v1/update/import": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Upload a signed offline archive and import it.",
+        "description": "The body is the `MICAUPD1` archive itself, streamed to the device's upload\ndirectory and then imported by micad through `mica-deploy import` -- the\nsame code path an online fetch stages through, so every signature, product\nand object check an online acquisition runs, runs here.\n\n**The network policy does not gate it.** A metered link, an absent source\nand an update mode of `off` all refuse a fetch and none of them has\nanything to say about a file an operator carried here themselves.\n\nAnswers **202**: the import verifies each object and that is not a\nrequest's worth of time. Poll `GET /api/v1/update` for the outcome.",
+        "operationId": "api_v1_update_import",
+        "requestBody": {
+          "description": "The `MICAUPD1` archive",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The archive was written and the import started; poll the update state"
+          },
+          "400": {
+            "description": "The upload was interrupted, or does not begin with the archive magic (`archive_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another update operation is already running (`update_refused`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The archive is larger than this device accepts (`archive_too_large`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/octet-stream` (`archive_type`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "The upload could not be written (`update_storage_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/update/install": {
       "post": {
         "tags": [
@@ -4952,6 +6125,349 @@
         }
       }
     },
+    "/api/v1/wifi/ap": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read the access-point configuration, with its key redacted.",
+        "operationId": "api_v1_wifi_ap_read",
+        "responses": {
+          "200": {
+            "description": "The `wifi.ap` subtree; `psk` reads as `<redacted>`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiAccessPoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored subtree is not an access-point document this build can read (`settings_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "micad is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Configure the access point: switch it on, name it, key it, place it.",
+        "description": "**`psk` absent keeps the stored key**, for the reason the known-network\nroute gives: a read substitutes the redaction sentinel, so an operator\nchanging the channel has not been shown the key, and treating absence as\n\"no key\" would publish an open access point.",
+        "operationId": "api_v1_wifi_ap_write",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiAccessPoint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The configuration was written and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, the mode is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, or the body carries the redaction sentinel (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored subtree could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wifi/client": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read which radio the WiFi station runs on, and whether it runs.",
+        "description": "The known networks are not here: they are their own collection, because\nthey carry secrets this document would then have to redact.",
+        "operationId": "api_v1_wifi_client_read",
+        "responses": {
+          "200": {
+            "description": "The station role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiClientRole"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored subtree is not a station document this build can read (`settings_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "micad is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Bind the WiFi station to a radio, and switch it on or off.",
+        "description": "**The known networks are untouched**: they are written through their own\ncollection, and a route that replaced them here would drop every stored\npre-shared key the moment someone moved the station to another radio.",
+        "operationId": "api_v1_wifi_client_write",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiClientRole"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The station role was written and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, or the interface is not an interface name (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed to write (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/wifi/client/networks": {
       "get": {
         "tags": [
@@ -5148,12 +6664,142 @@
       }
     },
     "/api/v1/wifi/client/networks/{ssid}": {
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Replace one known network, keeping its stored key unless a new one is sent.",
+        "description": "**`psk` absent keeps the stored key.** An operator changing a network's\npriority has not been shown the key -- a read substitutes the redaction\nsentinel for it -- so a `PUT` that treated absence as \"open network\" would\nsilently drop the credential of a network that still works.",
+        "operationId": "api_v1_wifi_networks_replace",
+        "parameters": [
+          {
+            "name": "ssid",
+            "in": "path",
+            "description": "The stored network to replace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiNetworkEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The stored entry, with its key redacted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiNetworkEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No stored network carries this SSID (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not a network, carries the redaction sentinel as its `psk`, names another SSID, or the key is outside IEEE 802.11i's length bounds (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored list could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "resources"
         ],
-        "summary": "Forget one known WiFi network by its SSID.",
-        "description": "Answers **404** when no stored network carries that SSID. There is no\nmalformed-SSID case: any non-empty path segment is a possible name.",
+        "summary": "malformed-SSID case: any non-empty path segment is a possible name.",
         "operationId": "api_v1_wifi_networks_remove",
         "parameters": [
           {
@@ -5232,6 +6878,78 @@
           },
           "504": {
             "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wifi/client/scan": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Scan for WiFi networks on the station's radio.",
+        "description": "**POST**, because it puts the radio to work: a scan sweeps every channel\nand briefly costs the station its link. Nothing that merely follows a link\nshould do that.\n\nThe answer is micad's: `available` with the networks it found, or\n`available: false` with the reason -- an interface with no station running\non it has no answer, and an empty list would claim there is nothing on the\nair.",
+        "operationId": "api_v1_wifi_scan",
+        "responses": {
+          "200": {
+            "description": "What the radio found, or why it could not look",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -5569,6 +7287,39 @@
           }
         }
       },
+      "BluetoothAdapterSettings": {
+        "type": "object",
+        "description": "The adapter's own settings: whether it runs, whether it answers scans, the\nname it advertises and the code a legacy peer is told.",
+        "required": [
+          "enabled",
+          "discoverable"
+        ],
+        "properties": {
+          "alias": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name it advertises; absent advertises the hostname."
+          },
+          "discoverable": {
+            "type": "boolean",
+            "description": "Whether the adapter answers a scan."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether `bluetooth.service` runs and the adapter is powered."
+          },
+          "pin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The pairing code offered to a peer that asks for one. Absent derives\none from the device identity. **Not a secret**: it is displayed,\nbecause somebody has to type it on the other device."
+          }
+        },
+        "additionalProperties": false
+      },
       "BridgeParameters": {
         "type": "object",
         "description": "The parameters of a software bridge.",
@@ -5636,6 +7387,113 @@
             "description": "Which channel minted the administrator credential: `setup` or\n`provisioning-document`. Absent while the device is unclaimed."
           }
         }
+      },
+      "ContainerDeclaration": {
+        "type": "object",
+        "description": "One declared container, documented.\n\nA mirror of `micad_settings::ContainerUnit`, held field-for-field against\nit by a test, for the reason `NetworkInterface` is a mirror: the model is\nwhat the body deserializes into, and this is what says so in the document.",
+        "required": [
+          "image",
+          "restart",
+          "autoStart"
+        ],
+        "properties": {
+          "autoStart": {
+            "type": "boolean",
+            "description": "Whether the unit starts at boot."
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The command to run instead of the image's own."
+          },
+          "environment": {
+            "type": "object",
+            "description": "Environment variables passed into the container.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "image": {
+            "type": "string",
+            "description": "The image reference, tag included."
+          },
+          "publish": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContainerPort"
+            },
+            "description": "Ports published from the host."
+          },
+          "restart": {
+            "type": "string",
+            "description": "`no`, `on-failure` or `always`."
+          },
+          "volumes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContainerVolume"
+            },
+            "description": "Host paths mounted into the container. A host path is under `/mica/`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ContainerPort": {
+        "type": "object",
+        "description": "One published port.",
+        "required": [
+          "host",
+          "container",
+          "protocol"
+        ],
+        "properties": {
+          "container": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port inside the container.",
+            "minimum": 0
+          },
+          "host": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port on the host.",
+            "minimum": 0
+          },
+          "protocol": {
+            "type": "string",
+            "description": "`tcp` or `udp`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ContainerVolume": {
+        "type": "object",
+        "description": "One bind mount.",
+        "required": [
+          "host",
+          "container",
+          "readOnly"
+        ],
+        "properties": {
+          "container": {
+            "type": "string",
+            "description": "Where it appears inside the container."
+          },
+          "host": {
+            "type": "string",
+            "description": "The path on the device, under `/mica/`."
+          },
+          "readOnly": {
+            "type": "boolean",
+            "description": "Whether the container sees it read-only."
+          }
+        },
+        "additionalProperties": false
       },
       "CredentialRecovered": {
         "type": "object",
@@ -5725,6 +7583,59 @@
         },
         "additionalProperties": false
       },
+      "DhcpServer": {
+        "type": "object",
+        "description": "The DHCP server offered on one interface.",
+        "required": [
+          "poolOffset",
+          "poolSize"
+        ],
+        "properties": {
+          "dns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "DNS servers announced to clients; empty announces none."
+          },
+          "leaseSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Default lease time in seconds; absent leaves networkd's default.",
+            "minimum": 0
+          },
+          "poolOffset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "First address handed out, as an offset into the interface's subnet.",
+            "minimum": 0
+          },
+          "poolSize": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many addresses the pool holds; at least one.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "DiscoveryRequest": {
+        "type": "object",
+        "description": "Whether a scan should be running.",
+        "required": [
+          "on"
+        ],
+        "properties": {
+          "on": {
+            "type": "boolean",
+            "description": "`true` starts a scan, `false` stops it."
+          }
+        },
+        "additionalProperties": false
+      },
       "MintTokenRequest": {
         "type": "object",
         "description": "`POST /api/v1/tokens` request body.",
@@ -5761,6 +7672,110 @@
           }
         }
       },
+      "MqttAuth": {
+        "type": "object",
+        "description": "Whether a client must authenticate.\n\nThe accounts themselves are not here and never will be: they live in\n`/var/lib/mica/mqtt-broker-users.toml` on STATE, outside the settings tree\nand therefore outside everything this API serves.",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether a connecting client must authenticate."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MqttConfiguration": {
+        "type": "object",
+        "description": "The `mqtt` subtree as the device holds it.\n\nEvery field is required on a write: a `PUT` replaces the subtree, so a body\nthat omitted the listener would have to be merged with something, and the\nonly honest something is the value the client last read.",
+        "required": [
+          "enabled",
+          "listen",
+          "auth"
+        ],
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/MqttAuth",
+            "description": "Whether the broker demands credentials."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the broker and the bridge run at all."
+          },
+          "listen": {
+            "$ref": "#/components/schemas/MqttListen",
+            "description": "Where the broker listens."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MqttListen": {
+        "type": "object",
+        "description": "The broker's single listener.",
+        "required": [
+          "address",
+          "port"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "The address the broker binds, as an IPv4 or IPv6 literal."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The TCP port it listens on.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "MqttObserved": {
+        "type": "object",
+        "description": "What the `mqtt` reconciler last published about what it did.\n\nmicad's document verbatim when it answers, and `available: false` with a\nsentence when it does not -- the same posture the network observation\ntakes, for the same reason: an absent observer is not an empty one.",
+        "required": [
+          "available"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether micad answered with a live-state document."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why there is no document, when there is none."
+          },
+          "state": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The reconciler's own record: the rendered configuration path, the\nlistener it wrote and the state of the two units."
+          }
+        }
+      },
+      "MqttOverview": {
+        "type": "object",
+        "description": "The declared MQTT configuration together with what the reconciler did.",
+        "required": [
+          "configured",
+          "observed"
+        ],
+        "properties": {
+          "configured": {
+            "$ref": "#/components/schemas/MqttConfiguration",
+            "description": "The stored subtree."
+          },
+          "observed": {
+            "$ref": "#/components/schemas/MqttObserved",
+            "description": "The reconciler's live state."
+          }
+        }
+      },
       "NetworkInterface": {
         "type": "object",
         "description": "One `network` entry, as the document describes it.",
@@ -5784,9 +7799,27 @@
             "type": "boolean",
             "description": "Whether the interface acquires its address via DHCP."
           },
+          "dhcpServer": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DhcpServer",
+                "description": "The DHCP server this interface offers. Absent offers none, and a link\nwith no static address of its own may not offer one."
+              }
+            ]
+          },
           "kind": {
             "type": "string",
             "description": "`physical`, `vlan`, `bridge` or `wireguard`. Absent means `physical`.\n\nThe block below is authoritative and the interface name is not:\n`eth0.100` is a convention, not a declaration."
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaticRoute"
+            },
+            "description": "Static routes this interface carries, beyond the default route\n`static.gateway` declares. Empty and absent are the same thing."
           },
           "static": {
             "oneOf": [
@@ -5972,6 +8005,20 @@
             }
           }
         }
+      },
+      "PairingAnswer": {
+        "type": "object",
+        "description": "The device's answer to a pending pairing confirmation.",
+        "required": [
+          "accept"
+        ],
+        "properties": {
+          "accept": {
+            "type": "boolean",
+            "description": "Whether the passkey matched what the peer is showing."
+          }
+        },
+        "additionalProperties": false
       },
       "ProvisioningStatus": {
         "type": "object",
@@ -6169,21 +8216,16 @@
           }
         }
       },
-      "SetupToken": {
+      "SetupResult": {
         "type": "object",
-        "description": "`POST /api/v1/setup` response body.",
+        "description": "`POST /api/v1/setup` response body.\n\n**No API token.** Setup used to mint one unconditionally, from a time when\na server-rendered wizard and this route were two different clients. There\nis one client now -- the console -- and it authenticates with the password\nit just set, so the mint handed every operator a long-lived bearer\ncredential they never asked for and could not decline. A caller that wants\none asks for it: `POST /api/v1/tokens`, authenticated by the credential\nthis route created.",
         "required": [
-          "token",
           "csrfToken"
         ],
         "properties": {
           "csrfToken": {
             "type": "string",
             "description": "CSRF token for the browser session created by setup."
-          },
-          "token": {
-            "type": "string",
-            "description": "The whole token, `mica_<id>_<secret>`.\n\n**It appears here and nowhere else, ever**, exactly as the mint route's\ndoes: only the SHA-256 digest is stored. The id is not a separate\nmember because it is the token's own second segment, so a caller that\nholds this string can address it for a later `DELETE` without being\ntold it twice."
           }
         }
       },
@@ -6364,6 +8406,36 @@
             "description": "Default gateway address; absent for a link with no route of its own."
           }
         }
+      },
+      "StaticRoute": {
+        "type": "object",
+        "description": "One static route.",
+        "required": [
+          "destination"
+        ],
+        "properties": {
+          "destination": {
+            "type": "string",
+            "description": "Where the route leads, in CIDR notation."
+          },
+          "gateway": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The next hop; absent is an on-link route."
+          },
+          "metric": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Route metric; absent leaves networkd's default.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "TaskAccepted": {
         "type": "object",
@@ -6594,7 +8666,7 @@
         "description": "The operator's update document as micad saved it: the layer-2 keys and\nnothing resolved.\n\nA key the operator never set is **absent** and one they set to `null` is\n**`null`**; both mean \"take the baked default\" and they are still two\ndifferent statements about the document. The resolved values — what this\ndevice will actually dial and follow — are `GET /api/v1/update`'s\n`lifecycle.policy` and `GET /api/v1/provisioning/status`'s `effective`."
       },
       "UpdateConfigWrite": {
-        "description": "The body of the update-configuration write: a **patch**, not a document.\n\nA key this body omits is left exactly as it is on the device; a key set to\n`null` clears an operator override so the baked default applies again; a\nkey with a value overrides it. That is what makes the write safe from a\nconsole: a client that sent the whole resolved document back would pin the\nimage's defaults into the operator's layer and the device would stop\nfollowing its image, which nobody asked for.\n\nAccepted keys: `policy` (`off`/`check`/`auto`), `checkIntervalMinutes`,\n`rebootPolicy` (`manual`/`window`), `source.url`, `source.channel`,\n`network`, `maintenance` and `rebootGate`. Anything else — including a\ntrust anchor under any name, at any depth — is **422** naming the key: the\naddress this device dials is the operator's, what it will accept is baked\ninto the image, and no body may move that line."
+        "description": "The body of the update-configuration write: a **patch**, not a document.\n\nA key this body omits is left exactly as it is on the device; a key set to\n`null` clears an operator override so the baked default applies again; a\nkey with a value overrides it. That is what makes the write safe from a\nconsole: a client that sent the whole resolved document back would pin the\nimage's defaults into the operator's layer and the device would stop\nfollowing its image, which nobody asked for.\n\nAccepted keys: `policy` (`off`/`check`/`auto`), `checkIntervalMinutes`,\n`checkAt` (`HH:MM` UTC, the time of day the check is anchored to),\n`rebootPolicy` (`manual`/`window`), `source.url`, `source.channel`,\n`network`, `maintenance` and `rebootGate`. Anything else — including a\ntrust anchor under any name, at any depth — is **422** naming the key: the\naddress this device dials is the operator's, what it will accept is baked\ninto the image, and no body may move that line."
       },
       "UpdateState": {
         "description": "The update state document, verbatim from micad: `lifecycle` (state machine,\npolicy, reboot gate), per-slot status, `booted_slot`, `primary`,\n`pending_not_confirmed`, `rollback`, `install` and `last_mark`.\n\n`rollback` is the one place slot state is offered as a decision: micad's\n`rollback_eligibility` resolves the alternate slot, says whether a manual\nrollback is permitted, and names the refusal otherwise. There is no second\nread route for it — this document is the single writer of that fact."
@@ -6618,6 +8690,89 @@
             "description": "Name of the `network` entry this VLAN sits on. **It must be a declared\nentry**; a body naming one that is not is refused at 422."
           }
         }
+      },
+      "WifiAccessPoint": {
+        "type": "object",
+        "description": "The access point, as the device holds it.",
+        "required": [
+          "mode",
+          "interface",
+          "channel",
+          "countryCode",
+          "address",
+          "holdDownSeconds",
+          "graceSeconds"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "The AP-side address in CIDR notation."
+          },
+          "channel": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The 2.4 GHz channel.",
+            "minimum": 0
+          },
+          "countryCode": {
+            "type": "string",
+            "description": "The regulatory domain the radio is configured for."
+          },
+          "graceSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds it stays up after an uplink returns.",
+            "minimum": 0
+          },
+          "holdDownSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds without a usable uplink before the access point starts.",
+            "minimum": 0
+          },
+          "interface": {
+            "type": "string",
+            "description": "The wireless interface it runs on."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`off`, `provisioning` (only while no uplink works) or `always`."
+          },
+          "psk": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The pre-shared key. **Read as `<redacted>`**; absent on a write keeps\nthe stored one, and absent on a device that never had one derives it\nfrom the device credential."
+          },
+          "ssid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The advertised name; absent derives one from the device identity."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WifiClientRole": {
+        "type": "object",
+        "description": "Forget one known WiFi network by its SSID.\n\nAnswers **404** when no stored network carries that SSID. There is no\nThe station role: the radio it runs on and whether it runs.",
+        "required": [
+          "enabled",
+          "interface"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the station role is started."
+          },
+          "interface": {
+            "type": "string",
+            "description": "The wireless interface it runs on."
+          }
+        },
+        "additionalProperties": false
       },
       "WifiNetworkEntry": {
         "type": "object",

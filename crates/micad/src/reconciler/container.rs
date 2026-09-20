@@ -6,10 +6,11 @@
 //! contains no podman unit at all -- no `podman.socket` to leave masked and no
 //! service to leave stopped.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use anyhow::Result;
-use micad_settings::Settings;
+use anyhow::{Context, Result};
+use micad_settings::{ContainerUnit, Settings};
 
 use super::Reconciler;
 use super::systemd::{Systemd, UnitControl, is_active, is_enabled};
@@ -32,6 +33,60 @@ pub const GENERATOR_DIR_ENV: &str = "MICA_SYSTEMD_GENERATOR_DIR";
 
 /// Marker identifying a unit as one Quadlet generated for this image.
 const GENERATED_UNIT_MARKER: &str = "/usr/bin/podman";
+
+/// The prefix every file this reconciler writes carries.
+///
+/// The same shape the network reconciler's units take, and for the same
+/// reason: the sweep has to be able to tell a file micad wrote from one an
+/// integrator dropped into the directory by hand, and delete only the first.
+pub const RENDERED_PREFIX: &str = "50-mica-";
+
+/// The unit name Quadlet generates for a declared container.
+#[must_use]
+pub fn unit_name(container: &str) -> String {
+    format!("{RENDERED_PREFIX}{container}.service")
+}
+
+/// The `.container` file a declared unit renders to.
+///
+/// A pure function of the entry: the reconciler re-renders on every pass,
+/// compares against what is on disk and writes only on a difference, so a
+/// converged device performs no flash write.
+#[must_use]
+pub fn render_container(name: &str, unit: &ContainerUnit) -> String {
+    let mut out = format!(
+        "[Unit]\nDescription=mica container {name}\n\n[Container]\nImage={}\n",
+        unit.image
+    );
+    out.push_str(&format!("ContainerName={name}\n"));
+    for (key, value) in &unit.environment {
+        out.push_str(&format!("Environment={key}={value}\n"));
+    }
+    for port in &unit.publish {
+        out.push_str(&format!(
+            "PublishPort={}:{}/{}\n",
+            port.host,
+            port.container,
+            port.protocol.as_str()
+        ));
+    }
+    for volume in &unit.volumes {
+        out.push_str(&format!(
+            "Volume={}:{}{}\n",
+            volume.host,
+            volume.container,
+            if volume.read_only { ":ro" } else { "" }
+        ));
+    }
+    if !unit.command.is_empty() {
+        out.push_str(&format!("Exec={}\n", unit.command.join(" ")));
+    }
+    out.push_str(&format!("\n[Service]\nRestart={}\n", unit.restart.as_str()));
+    if unit.auto_start {
+        out.push_str("\n[Install]\nWantedBy=multi-user.target\n");
+    }
+    out
+}
 
 /// Reconciler for the `container` subtree.
 pub struct ContainerReconciler<C: UnitControl> {
@@ -110,12 +165,65 @@ impl<C: UnitControl> ContainerReconciler<C> {
         files
     }
 
+    /// Write the declared units and sweep the ones this reconciler wrote and
+    /// no longer declares.
+    ///
+    /// Returns the files written and the files swept, both sorted. Called
+    /// after the bind is up -- the directory is the mount -- and before the
+    /// daemon-reload, so Quadlet reads the files this pass produced.
+    fn render_declared(
+        &self,
+        units: &BTreeMap<String, ContainerUnit>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        let mut written = Vec::new();
+        let mut wanted = Vec::new();
+        for (name, unit) in units {
+            let file = format!("{RENDERED_PREFIX}{name}.container");
+            let path = self.quadlet_dir.join(&file);
+            let body = render_container(name, unit);
+            wanted.push(file.clone());
+            // Compare before writing: these files live on STATE, and an
+            // unconditional rewrite costs a flash write on every reconcile.
+            if std::fs::read_to_string(&path).is_ok_and(|current| current == body) {
+                continue;
+            }
+            std::fs::write(&path, &body)
+                .with_context(|| format!("write the container unit {}", path.display()))?;
+            written.push(file);
+        }
+        let mut swept = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&self.quadlet_dir) {
+            for entry in entries.flatten() {
+                let Some(file) = entry.file_name().to_str().map(str::to_string) else {
+                    continue;
+                };
+                // Only this reconciler's own files: a `.container` an
+                // integrator dropped in by hand is theirs and is left alone.
+                if !file.starts_with(RENDERED_PREFIX) || !file.ends_with(".container") {
+                    continue;
+                }
+                if wanted.contains(&file) {
+                    continue;
+                }
+                std::fs::remove_file(entry.path())
+                    .with_context(|| format!("remove the container unit {file}"))?;
+                swept.push(file);
+            }
+        }
+        written.sort();
+        swept.sort();
+        Ok((written, swept))
+    }
+
     /// Bring the bind up and re-run generators so Quadlet sees STATE.
     // Each step logs before it runs, not after. A reconciler that blocks leaves
     // no evidence otherwise: micad is Type=dbus and runs apply_all BEFORE it
     // acquires its bus name, so a hang here shows up as a unit stuck in
     // "activating" with nothing in the journal naming the step it stopped at.
-    async fn turn_on(&self) -> Result<Vec<String>> {
+    async fn turn_on(
+        &self,
+        units: &BTreeMap<String, ContainerUnit>,
+    ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         tracing::info!("container: turn_on begin");
         tracing::info!("container: reading unit_file_state");
         if !is_enabled(&self.control.unit_file_state(QUADLET_MOUNT_UNIT).await?) {
@@ -126,6 +234,11 @@ impl<C: UnitControl> ContainerReconciler<C> {
             tracing::info!("container: starting the bind");
             self.control.start(QUADLET_MOUNT_UNIT).await?;
         }
+        // After the mount and before the reload, for the same reason the reload
+        // is after the mount: a file written into the image's empty directory
+        // is a file Quadlet never reads.
+        let (written, swept) = self.render_declared(units)?;
+        tracing::info!(written = ?written, swept = ?swept, "container: declared units rendered");
         // After the mount, never before: a generator run with the directory
         // still unmounted parses the image's empty one and produces nothing,
         // and every step would have succeeded.
@@ -146,12 +259,24 @@ impl<C: UnitControl> ContainerReconciler<C> {
         let generated = self.generated_units();
         tracing::info!(count = generated.len(), units = ?generated, "container: units Quadlet generated");
         for unit in generated {
+            // A declared container starts when it says it starts. A unit from
+            // a file this reconciler did not write is an integrator's, and
+            // keeps the behaviour it had before containers could be declared:
+            // it is started.
+            if let Some(declared) = units
+                .iter()
+                .find(|(name, _)| unit_name(name) == unit)
+                .map(|(_, declared)| declared)
+                && !declared.auto_start
+            {
+                continue;
+            }
             if !is_active(&self.control.active_state(&unit).await?) {
                 self.control.start(&unit).await?;
                 started.push(unit);
             }
         }
-        Ok(started)
+        Ok((started, written, swept))
     }
 
     /// Stop what is running, then take the bind down.
@@ -207,10 +332,17 @@ impl<C: UnitControl> Reconciler for ContainerReconciler<C> {
 
     async fn apply(&self, settings: &Settings) -> Result<serde_json::Value> {
         let enabled = settings.container.enabled;
-        let (started, stopped) = if enabled {
-            (self.turn_on().await?, Vec::new())
+        // Named `declared` and not `units`: the local below is the list of
+        // units Quadlet generated, which is a different set.
+        let declared = &settings.container.units;
+        let (started, written, swept, stopped) = if enabled {
+            let (started, written, swept) = self.turn_on(declared).await?;
+            (started, written, swept, Vec::new())
         } else {
-            (Vec::new(), self.turn_off().await?)
+            // Nothing is rendered with the switch off: the directory is not
+            // mounted, so a write would land in the image's own read-only
+            // copy of it -- and on a device that is a failure, not a file.
+            (Vec::new(), Vec::new(), Vec::new(), self.turn_off().await?)
         };
 
         // Read AFTER the transition, so what is published is what the system
@@ -237,6 +369,13 @@ impl<C: UnitControl> Reconciler for ContainerReconciler<C> {
             // value while nothing was ever started.
             "startedUnits": started,
             "stoppedUnits": stopped,
+            // What this pass did with the declared map, named separately from
+            // what was already there: a device with a `.container` an
+            // integrator wrote and one micad declares has both, and only one
+            // of them is this reconciler's to sweep.
+            "declaredCount": declared.len(),
+            "renderedUnits": written,
+            "sweptUnits": swept,
         }))
     }
 }

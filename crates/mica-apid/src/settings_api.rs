@@ -102,6 +102,49 @@ pub trait SettingsApi: Send + Sync {
     /// private half never leaves micad and there is no accessor that returns
     /// one, so the only thing this call can hand back is the public half.
     async fn rotate_wireguard_key(&self, iface: &str) -> anyhow::Result<String>;
+    /// The Bluetooth surface micad joins: the declared trust list, the
+    /// adapter, the devices BlueZ holds, the pairing code and whatever is
+    /// waiting to be confirmed (`GetBluetooth`).
+    ///
+    /// Unavailable by default, like every other observation.
+    async fn get_bluetooth(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no Bluetooth adapter")
+    }
+    /// Start or stop a Bluetooth scan (`SetBluetoothDiscovery`).
+    async fn set_bluetooth_discovery(&self, _on: bool) -> anyhow::Result<()> {
+        anyhow::bail!("this build drives no Bluetooth adapter")
+    }
+    /// Pair with a device (`PairBluetoothDevice`).
+    async fn pair_bluetooth_device(&self, _address: &str) -> anyhow::Result<()> {
+        anyhow::bail!("this build drives no Bluetooth adapter")
+    }
+    /// Answer the agent's pending confirmation (`ConfirmBluetoothPairing`).
+    async fn confirm_bluetooth_pairing(&self, _address: &str, _accept: bool) -> anyhow::Result<()> {
+        anyhow::bail!("this build drives no Bluetooth adapter")
+    }
+    /// Drop a device (`RemoveBluetoothDevice`).
+    async fn remove_bluetooth_device(&self, _address: &str) -> anyhow::Result<()> {
+        anyhow::bail!("this build drives no Bluetooth adapter")
+    }
+    /// Scan for WiFi networks on the station's radio (`ScanWifi`).
+    ///
+    /// Unavailable by default, like every other observation: a build with no
+    /// bus behind it reports the scan as unavailable rather than inventing an
+    /// empty list of networks on the air.
+    async fn scan_wifi(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build drives no radio")
+    }
+    /// The declared containers joined with what the engine reports
+    /// (`GetContainers`). Unavailable by default: a build with no bus behind
+    /// it reports the engine as absent rather than inventing an empty list.
+    async fn get_containers(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no container engine")
+    }
+    /// One container lifecycle verb: `start`, `stop` or `restart`
+    /// (`StartContainer` and its siblings).
+    async fn container_action(&self, _name: &str, _action: &str) -> anyhow::Result<()> {
+        anyhow::bail!("this build drives no containers")
+    }
     /// The complete update state (`GetUpdateState`): micad reads native deployment records and
     /// re-derives the lifecycle before answering, so this is never stale.
     async fn get_update_state(&self) -> anyhow::Result<Value>;
@@ -109,6 +152,12 @@ pub trait SettingsApi: Send + Sync {
     async fn check_update(&self) -> anyhow::Result<()>;
     /// Ask micad to download the selected deployment objects on a background task.
     async fn fetch_update(&self) -> anyhow::Result<()>;
+    /// Ask micad to import an offline archive already written to the device
+    /// (`ImportUpdate`). The path is the file apid streamed the upload into;
+    /// micad refuses one outside its own upload directory.
+    async fn import_update(&self, _path: &str) -> anyhow::Result<()> {
+        anyhow::bail!("this build imports no update archives")
+    }
     /// Ask micad to install a verified deployment by its authenticated ID.
     /// Background progress lands in the update state.
     async fn install_update(&self, deployment_id: &str) -> anyhow::Result<()>;
@@ -605,6 +654,56 @@ impl SettingsApi for FakeSettings {
 
     async fn fetch_update(&self) -> anyhow::Result<()> {
         self.update_call("fetch")
+    }
+
+    async fn get_bluetooth(&self) -> anyhow::Result<Value> {
+        // The shape micad answers, so a route test drives the document the
+        // console actually reads.
+        Ok(serde_json::json!({
+            "enabled": true,
+            "discoverable": false,
+            "pin": "4211",
+            "declared": { "AA:BB:CC:DD:EE:01": { "name": "phone", "trusted": true, "blocked": false } },
+            "adapter": { "available": true, "address": "11:22:33:44:55:66", "alias": "edge-42", "powered": true, "discoverable": false, "discovering": false },
+            "devices": { "available": true, "entries": [
+                { "address": "AA:BB:CC:DD:EE:01", "name": "phone", "paired": true, "trusted": true, "blocked": false, "connected": false, "rssi": -55 },
+            ] },
+            "pending": null,
+        }))
+    }
+
+    async fn set_bluetooth_discovery(&self, on: bool) -> anyhow::Result<()> {
+        self.update_call(&format!("bluetooth discovery {on}"))
+    }
+
+    async fn pair_bluetooth_device(&self, address: &str) -> anyhow::Result<()> {
+        self.update_call(&format!("bluetooth pair {address}"))
+    }
+
+    async fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> anyhow::Result<()> {
+        self.update_call(&format!("bluetooth confirm {address} {accept}"))
+    }
+
+    async fn remove_bluetooth_device(&self, address: &str) -> anyhow::Result<()> {
+        self.update_call(&format!("bluetooth remove {address}"))
+    }
+
+    async fn scan_wifi(&self) -> anyhow::Result<Value> {
+        self.update_log
+            .lock()
+            .unwrap()
+            .push("scan_wifi".to_string());
+        Ok(serde_json::json!({
+            "available": true,
+            "interface": "wlan0",
+            "networks": [
+                { "ssid": "workshop", "bssid": "aa:bb:cc:dd:ee:01", "signalDbm": -42, "flags": "[WPA2-PSK-CCMP][ESS]" },
+            ],
+        }))
+    }
+
+    async fn import_update(&self, path: &str) -> anyhow::Result<()> {
+        self.update_call(&format!("import {path}"))
     }
 
     async fn install_update(&self, deployment_id: &str) -> anyhow::Result<()> {

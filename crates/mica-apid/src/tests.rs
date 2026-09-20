@@ -188,6 +188,25 @@ async fn zip_request(
     send(router, builder.body(Body::from(bytes)).unwrap()).await
 }
 
+/// A bearer-authenticated POST of raw bytes under a chosen content type: the
+/// shape an archive upload has.
+async fn bearer_bytes(
+    router: &Router,
+    path: &str,
+    bytes: Vec<u8>,
+    content_type: &str,
+    token: &str,
+) -> Response<axum::body::Body> {
+    let request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header(CONTENT_TYPE, content_type)
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::from(bytes))
+        .unwrap();
+    send(router, request).await
+}
+
 fn location(response: &Response<axum::body::Body>) -> &str {
     response.headers().get(LOCATION).unwrap().to_str().unwrap()
 }
@@ -1294,11 +1313,12 @@ async fn the_api_reservation_answers_every_shape_with_the_envelope() {
         // routes beside them.
         ("GET", "/api/v1/actions"),
         ("GET", "/api/v1/actions/"),
-        // `/api/v1/wifi/client/networks` was here until it was declared. Its prefix and its trailing-slash spelling took its place, and
-        // they are the more useful cases: neither is a route this router
+        // `/api/v1/wifi/client/networks` was here until it was declared, and
+        // `/api/v1/wifi/client` until the station role was. The spellings that
+        // remain are the trailing-slash ones: neither is a route this router
         // serves, so both must still reach the reservation rather than the
-        // collection beside them.
-        ("GET", "/api/v1/wifi/client"),
+        // resources beside them.
+        ("GET", "/api/v1/wifi/"),
         ("GET", "/api/v1/wifi/client/networks/"),
         ("POST", "/api/v1/settings"),
     ] {
@@ -1521,7 +1541,11 @@ fn the_openapi_document_covers_browser_ui_and_live_network_routes() {
     assert!(
         document["components"]["schemas"]["NetworkOverview"]["properties"]["observed"].is_object()
     );
-    assert!(document["components"]["schemas"]["SetupToken"]["properties"]["csrfToken"].is_object());
+    assert!(
+        document["components"]["schemas"]["SetupResult"]["properties"]["csrfToken"].is_object()
+    );
+    // Setup mints no API token, so its response carries no secret at all.
+    assert!(document["components"]["schemas"]["SetupResult"]["properties"]["token"].is_null());
 }
 
 // The document describes the served surface, the outcome included: a
@@ -1912,6 +1936,914 @@ fn set_unit_state(state: &mut serde_json::Value, unit: &str, active_state: &str)
         .find(|entry| entry["unit"] == json!(unit))
         .unwrap_or_else(|| panic!("the golden state publishes no unit named {unit}"));
     entry["activeState"] = json!(active_state);
+}
+
+// --- Bluetooth ---------------------------------------------------------------
+
+const BLUETOOTH_API: &str = "/api/v1/bluetooth";
+
+// A device with a Bluetooth subtree to write over.
+fn bluetooth_tree() -> serde_json::Value {
+    let mut tree = configured_tree("hunter2secret");
+    tree["bluetooth"] = json!({
+        "enabled": true,
+        "discoverable": false,
+        "devices": { "AA:BB:CC:DD:EE:01": { "name": "phone", "trusted": true, "blocked": false } },
+    });
+    tree
+}
+
+// The read is micad's document: the two sides named apart, and the pairing
+// code the console has to display.
+#[tokio::test]
+async fn the_bluetooth_read_answers_micads_document() {
+    let (router, _fake) = test_app(bluetooth_tree());
+    let cookie = login(&router, "hunter2secret").await;
+
+    let body = body_json(get(&router, BLUETOOTH_API, Some(&cookie)).await).await;
+
+    assert_eq!(body["adapter"]["available"], json!(true));
+    assert_eq!(
+        body["declared"]["AA:BB:CC:DD:EE:01"]["trusted"],
+        json!(true)
+    );
+    assert_eq!(body["devices"]["entries"][0]["rssi"], json!(-55));
+    assert_eq!(body["pin"], json!("4211"));
+}
+
+// The adapter write keeps the trust list: devices arrive by pairing, and a
+// route that replaced the list would declare devices the adapter has no keys
+// for.
+#[tokio::test]
+async fn the_adapter_write_keeps_the_trust_list() {
+    let (router, fake) = test_app(bluetooth_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        BLUETOOTH_API,
+        json!({ "enabled": true, "discoverable": true, "alias": "edge-42", "pin": "4211" }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let stored = fake.get_settings("bluetooth").await.unwrap();
+    assert_eq!(stored["discoverable"], json!(true));
+    assert_eq!(stored["alias"], json!("edge-42"));
+    assert_eq!(stored["pin"], json!("4211"));
+    assert_eq!(
+        stored["devices"]["AA:BB:CC:DD:EE:01"]["name"],
+        json!("phone"),
+        "the trust list was dropped by an adapter write"
+    );
+}
+
+// An absent alias or PIN takes the key out rather than writing an empty
+// string: absent means "derive it", which is a different thing.
+#[tokio::test]
+async fn an_absent_alias_or_code_is_removed_rather_than_emptied() {
+    let (router, fake) = test_app(bluetooth_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    json_request(
+        &router,
+        "PUT",
+        BLUETOOTH_API,
+        json!({ "enabled": true, "discoverable": false, "alias": "edge-42", "pin": "4211" }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    json_request(
+        &router,
+        "PUT",
+        BLUETOOTH_API,
+        json!({ "enabled": true, "discoverable": false }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    let stored = fake.get_settings("bluetooth").await.unwrap();
+    assert!(stored.get("alias").is_none(), "{stored}");
+    assert!(stored.get("pin").is_none(), "{stored}");
+}
+
+// A pairing code no keypad could enter, and an alias no adapter could carry.
+#[tokio::test]
+async fn an_adapter_setting_the_device_would_refuse_is_refused_here() {
+    for body in [
+        json!({ "enabled": true, "discoverable": false, "pin": "12" }),
+        json!({ "enabled": true, "discoverable": false, "pin": "abcd" }),
+        json!({ "enabled": true, "discoverable": false, "alias": "" }),
+    ] {
+        let (router, fake) = test_app(bluetooth_tree());
+        let (cookie, csrf) = mqtt_session(&router).await;
+
+        let response = json_request(
+            &router,
+            "PUT",
+            BLUETOOTH_API,
+            body.clone(),
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{body}"
+        );
+        assert!(fake.set_paths().is_empty());
+    }
+}
+
+// The two halves of one exchange, and nothing else on that path.
+#[tokio::test]
+async fn the_device_path_pairs_confirms_and_serves_no_other_verb() {
+    let (router, fake) = test_app(bluetooth_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let paired = json_request(
+        &router,
+        "POST",
+        &format!("{BLUETOOTH_API}/devices/AA:BB:CC:DD:EE:01/pair"),
+        json!({}),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(paired.status(), StatusCode::NO_CONTENT);
+
+    let confirmed = json_request(
+        &router,
+        "POST",
+        &format!("{BLUETOOTH_API}/devices/AA:BB:CC:DD:EE:01/confirm"),
+        json!({ "accept": true }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(confirmed.status(), StatusCode::NO_CONTENT);
+
+    let unknown = json_request(
+        &router,
+        "POST",
+        &format!("{BLUETOOTH_API}/devices/AA:BB:CC:DD:EE:01/forget"),
+        json!({}),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let calls = fake.update_calls();
+    assert!(
+        calls.contains(&"bluetooth pair AA:BB:CC:DD:EE:01".to_string()),
+        "{calls:?}"
+    );
+    assert!(
+        calls.contains(&"bluetooth confirm AA:BB:CC:DD:EE:01 true".to_string()),
+        "{calls:?}"
+    );
+}
+
+// Discovery is a POST with a body, and a GET on it is not served: nothing that
+// follows a link should start a radio scan.
+#[tokio::test]
+async fn discovery_is_a_post_and_never_a_navigation() {
+    let (router, fake) = test_app(bluetooth_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let refused = get(
+        &router,
+        &format!("{BLUETOOTH_API}/discovery"),
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(refused.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    let response = json_request(
+        &router,
+        "POST",
+        &format!("{BLUETOOTH_API}/discovery"),
+        json!({ "on": true }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(
+        fake.update_calls()
+            .contains(&"bluetooth discovery true".to_string()),
+        "{:?}",
+        fake.update_calls()
+    );
+}
+
+// --- The access point and the scan ------------------------------------------
+
+const WIFI_AP_API: &str = "/api/v1/wifi/ap";
+
+// A device with an access point configured and keyed.
+fn ap_tree() -> serde_json::Value {
+    let mut tree = wifi_tree(json!([]));
+    tree["wifi"]["ap"] = json!({
+        "mode": "provisioning",
+        "interface": "wlan0",
+        "ssid": "mica-lab",
+        "psk": "labsecret1",
+        "channel": 11,
+        "countryCode": "DE",
+        "address": "192.168.4.1/24",
+        "holdDownSeconds": 120,
+        "graceSeconds": 60,
+    });
+    tree
+}
+
+// The read never carries the key, and the write keeps it when the body sends
+// none -- which is every write by an operator who was shown the redaction.
+#[tokio::test]
+async fn the_access_point_reads_redacted_and_keeps_its_key_through_a_write() {
+    let (router, fake) = test_app(ap_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let read = body_json(get(&router, WIFI_AP_API, Some(&cookie)).await).await;
+    assert_eq!(read["psk"], json!("<redacted>"));
+    assert_eq!(read["mode"], json!("provisioning"));
+
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_AP_API,
+        json!({
+            "mode": "always",
+            "interface": "wlan0",
+            "ssid": "mica-lab",
+            "channel": 6,
+            "countryCode": "DE",
+            "address": "192.168.4.1/24",
+            "holdDownSeconds": 120,
+            "graceSeconds": 60,
+        }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let stored = fake.get_settings("wifi.ap").await.unwrap();
+    assert_eq!(stored["mode"], json!("always"));
+    assert_eq!(stored["channel"], json!(6));
+    assert_eq!(
+        stored["psk"],
+        json!("labsecret1"),
+        "the stored key was dropped"
+    );
+}
+
+// The refusals: a mode that is not one of the three, an interface that is not
+// one, an address that is not a network, and the sentinel written back.
+#[tokio::test]
+async fn an_access_point_the_device_would_refuse_is_refused_here() {
+    let base = json!({
+        "mode": "always",
+        "interface": "wlan0",
+        "channel": 6,
+        "countryCode": "DE",
+        "address": "192.168.4.1/24",
+        "holdDownSeconds": 120,
+        "graceSeconds": 60,
+    });
+    for change in [
+        json!({ "mode": "sometimes" }),
+        json!({ "interface": "not an interface" }),
+        json!({ "address": "192.168.4.1" }),
+        json!({ "psk": "<redacted>" }),
+        json!({ "psk": "short" }),
+    ] {
+        let (router, fake) = test_app(ap_tree());
+        let (cookie, csrf) = mqtt_session(&router).await;
+        let mut body = base.clone();
+        for (key, value) in change.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+
+        let response = json_request(
+            &router,
+            "PUT",
+            WIFI_AP_API,
+            body.clone(),
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{body}"
+        );
+        assert!(
+            fake.set_paths().is_empty(),
+            "a refused access point was written"
+        );
+    }
+}
+
+// The scan is POST-only -- it puts the radio to work -- and answers micad's
+// own document.
+#[tokio::test]
+async fn the_scan_is_a_post_that_answers_what_the_radio_found() {
+    let (router, _fake) = test_app(station_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let refused = get(&router, "/api/v1/wifi/client/scan", Some(&cookie)).await;
+    assert_eq!(refused.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    let response = json_request(
+        &router,
+        "POST",
+        "/api/v1/wifi/client/scan",
+        json!({}),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["available"], json!(true));
+    assert_eq!(body["networks"][0]["ssid"], json!("workshop"));
+}
+
+// --- Declared containers -----------------------------------------------------
+
+const CONTAINERS_API: &str = "/api/v1/containers";
+
+// A device with containers switched on and one declared.
+fn container_tree() -> serde_json::Value {
+    let hash = auth::hash_password("hunter2secret").unwrap();
+    json!({
+        "hostname": "mica",
+        "network": {},
+        "access": { "webAdmin": { "password_hash": hash } },
+        "container": {
+            "enabled": true,
+            "units": {
+                "node-red": {
+                    "image": "docker.io/nodered/node-red:4.0.9",
+                    "autoStart": true,
+                },
+            },
+        },
+    })
+}
+
+// A declaration replaces the entry whole and answers the apply task.
+#[tokio::test]
+async fn declaring_a_container_writes_the_map_and_answers_a_task() {
+    let (router, fake) = test_app(container_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        &format!("{CONTAINERS_API}/metrics"),
+        json!({
+            "image": "docker.io/library/busybox:1",
+            "publish": [{ "host": 9100, "container": 9100 }],
+            "volumes": [{ "host": "/mica/apps/metrics", "container": "/data" }],
+            "restart": "always",
+            "autoStart": true,
+        }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert!(body_json(response).await["taskId"].is_string());
+    assert_eq!(fake.set_paths(), vec!["container.units".to_string()]);
+    let stored = fake.get_settings("container.units").await.unwrap();
+    // The entry that was already there is untouched: this route replaces one
+    // container, not the map.
+    assert!(stored["node-red"].is_object(), "{stored}");
+    assert_eq!(stored["metrics"]["publish"][0]["host"], json!(9100));
+}
+
+// The device's own rules, answered here rather than as a bus error.
+#[tokio::test]
+async fn a_container_the_device_would_refuse_is_refused_here() {
+    for (name, body) in [
+        // A volume outside the operator's half of the device.
+        (
+            "app",
+            json!({ "image": "alpine:3", "volumes": [{ "host": "/etc", "container": "/host" }] }),
+        ),
+        // A host port a declared container already publishes.
+        (
+            "app",
+            json!({ "image": "alpine:3", "publish": [{ "host": 1880, "container": 1880 }] }),
+        ),
+        // A name no unit could carry, percent-encoded as a client would
+        // have to send it.
+        ("node%20red", json!({ "image": "alpine:3" })),
+        // No image.
+        ("app", json!({ "image": "" })),
+    ] {
+        let mut tree = container_tree();
+        tree["container"]["units"]["node-red"]["publish"] =
+            json!([{ "host": 1880, "container": 1880 }]);
+        let (router, fake) = test_app(tree);
+        let (cookie, csrf) = mqtt_session(&router).await;
+
+        let response = json_request(
+            &router,
+            "PUT",
+            &format!("{CONTAINERS_API}/{name}"),
+            body.clone(),
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{name}: {body}"
+        );
+        assert!(
+            fake.set_paths().is_empty(),
+            "a refused container was written"
+        );
+    }
+}
+
+// Removing one re-validates the rest without it, and a name nobody declared is
+// a 404 rather than a silent success.
+#[tokio::test]
+async fn removing_a_container_takes_only_that_entry() {
+    let (router, fake) = test_app(container_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let absent = json_request(
+        &router,
+        "DELETE",
+        &format!("{CONTAINERS_API}/nothing"),
+        json!({}),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(absent.status(), StatusCode::NOT_FOUND);
+    assert!(fake.set_paths().is_empty());
+
+    let response = json_request(
+        &router,
+        "DELETE",
+        &format!("{CONTAINERS_API}/node-red"),
+        json!({}),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let stored = fake.get_settings("container.units").await.unwrap();
+    assert_eq!(stored, json!({}));
+}
+
+// The action path takes three verbs and nothing else.
+#[tokio::test]
+async fn a_container_action_path_serves_three_verbs_and_no_others() {
+    let (router, _fake) = test_app(container_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "POST",
+        &format!("{CONTAINERS_API}/node-red/destroy"),
+        json!({}),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    // The settings collection's own not-found code: the path names a place in
+    // the tree, and `destroy` is not one.
+    assert_eq!(envelope(response).await["code"], "settings_not_found");
+}
+
+// --- Routes and a DHCP server on a declared interface ------------------------
+
+// A tree with one statically addressed link to hang routes off.
+fn routed_tree() -> serde_json::Value {
+    let hash = auth::hash_password("hunter2secret").unwrap();
+    json!({
+        "hostname": "mica",
+        "network": {
+            "eth1": { "dhcp": false, "static": { "address": "192.168.50.1/24", "dns": [] } },
+        },
+        "access": { "webAdmin": { "password_hash": hash } },
+    })
+}
+
+// The accepted shape, written through the per-interface route and stored as
+// sent: routes are a list and the server is one block.
+#[tokio::test]
+async fn an_interface_takes_static_routes_and_a_dhcp_server() {
+    let (router, fake) = test_app(routed_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        "/api/v1/network/eth1",
+        json!({
+            "dhcp": false,
+            "static": { "address": "192.168.50.1/24", "dns": [] },
+            "routes": [{ "destination": "10.20.0.0/16", "gateway": "192.168.50.254", "metric": 200 }],
+            "dhcpServer": { "poolOffset": 100, "poolSize": 50, "dns": ["192.168.50.1"], "leaseSeconds": 3600 },
+        }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let stored = fake.get_settings("network").await.unwrap();
+    assert_eq!(
+        stored["eth1"]["routes"][0]["destination"],
+        json!("10.20.0.0/16")
+    );
+    assert_eq!(stored["eth1"]["dhcpServer"]["poolSize"], json!(50));
+}
+
+// The four refusals, each naming a configuration networkd would accept and
+// nothing could use.
+#[tokio::test]
+async fn routing_configurations_that_cannot_work_are_refused() {
+    for entry in [
+        // A destination that is not a network.
+        json!({
+            "dhcp": false,
+            "static": { "address": "192.168.50.1/24", "dns": [] },
+            "routes": [{ "destination": "not-a-network" }],
+        }),
+        // A next hop that is not an address.
+        json!({
+            "dhcp": false,
+            "static": { "address": "192.168.50.1/24", "dns": [] },
+            "routes": [{ "destination": "10.20.0.0/16", "gateway": "over-there" }],
+        }),
+        // Two default routes on one entry.
+        json!({
+            "dhcp": false,
+            "static": { "address": "192.168.50.1/24", "gateway": "192.168.50.254", "dns": [] },
+            "routes": [{ "destination": "0.0.0.0/0", "gateway": "192.168.50.1" }],
+        }),
+        // A server on a link that gets its own address from one.
+        json!({
+            "dhcp": true,
+            "dhcpServer": { "poolOffset": 100, "poolSize": 50 },
+        }),
+        // A pool with no addresses in it.
+        json!({
+            "dhcp": false,
+            "static": { "address": "192.168.50.1/24", "dns": [] },
+            "dhcpServer": { "poolOffset": 100, "poolSize": 0 },
+        }),
+    ] {
+        let (router, fake) = test_app(routed_tree());
+        let (cookie, csrf) = mqtt_session(&router).await;
+
+        let response = json_request(
+            &router,
+            "PUT",
+            "/api/v1/network/eth1",
+            entry.clone(),
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{entry}"
+        );
+        assert_eq!(envelope(response).await["code"], "validation_failed");
+        assert!(fake.set_paths().is_empty(), "a refused entry was written");
+    }
+}
+
+// --- The WiFi station role and one known network -----------------------------
+
+const WIFI_CLIENT_API: &str = "/api/v1/wifi/client";
+const WIFI_NETWORKS_API: &str = "/api/v1/wifi/client/networks";
+
+// A device with a station on `wlan0` and one network stored with a key. The
+// list is the existing [`wifi_tree`] helper's, so both suites read one shape.
+fn station_tree() -> serde_json::Value {
+    wifi_tree(json!([
+        { "ssid": "lab", "psk": "correct-horse", "hidden": false, "priority": 10 },
+    ]))
+}
+
+// The station's radio is writable, and the known networks are not touched by
+// the write that moves it.
+#[tokio::test]
+async fn the_station_role_binds_a_radio_without_disturbing_the_known_networks() {
+    let (router, fake) = test_app(station_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let read = body_json(get(&router, WIFI_CLIENT_API, Some(&cookie)).await).await;
+    assert_eq!(read, json!({ "enabled": false, "interface": "wlan0" }));
+
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_CLIENT_API,
+        json!({ "enabled": true, "interface": "wlan1" }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert!(body_json(response).await["taskId"].is_string());
+    assert_eq!(
+        fake.set_paths(),
+        vec![
+            "wifi.client.interface".to_string(),
+            "wifi.client.enabled".to_string()
+        ],
+        "the station role is two scalar writes and never a subtree write"
+    );
+    let networks = fake.get_settings("wifi.client.networks").await.unwrap();
+    assert_eq!(networks[0]["psk"], json!("correct-horse"));
+}
+
+#[tokio::test]
+async fn a_station_bound_to_something_that_is_not_an_interface_is_refused() {
+    let (router, fake) = test_app(station_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_CLIENT_API,
+        json!({ "enabled": true, "interface": "not an interface" }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(fake.set_paths().is_empty());
+}
+
+// The whole reason this route exists: an operator changing a priority has not
+// been shown the key, so absence has to mean "keep it".
+#[tokio::test]
+async fn replacing_a_network_without_a_key_keeps_the_stored_one() {
+    let (router, fake) = test_app(station_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        &format!("{WIFI_NETWORKS_API}/lab"),
+        json!({ "ssid": "lab", "hidden": true, "priority": 42 }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    // The echo redacts, exactly as the listing does.
+    assert_eq!(body_json(response).await["psk"], json!("<redacted>"));
+    let stored = fake.get_settings("wifi.client.networks").await.unwrap();
+    assert_eq!(stored[0]["psk"], json!("correct-horse"));
+    assert_eq!(stored[0]["priority"], json!(42));
+    assert_eq!(stored[0]["hidden"], json!(true));
+}
+
+#[tokio::test]
+async fn replacing_a_network_with_a_key_takes_the_new_one() {
+    let (router, fake) = test_app(station_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        &format!("{WIFI_NETWORKS_API}/lab"),
+        json!({ "ssid": "lab", "psk": "another-secret", "hidden": false, "priority": 10 }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = fake.get_settings("wifi.client.networks").await.unwrap();
+    assert_eq!(stored[0]["psk"], json!("another-secret"));
+}
+
+// The three refusals: the sentinel written back, a rename through the wrong
+// door, and an SSID that is not stored.
+#[tokio::test]
+async fn a_replacement_is_refused_rather_than_guessed_at() {
+    for (ssid, body, status) in [
+        (
+            "lab",
+            json!({ "ssid": "lab", "psk": "<redacted>", "hidden": false, "priority": 1 }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "lab",
+            json!({ "ssid": "renamed", "hidden": false, "priority": 1 }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "absent",
+            json!({ "ssid": "absent", "hidden": false, "priority": 1 }),
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        let (router, fake) = test_app(station_tree());
+        let (cookie, csrf) = mqtt_session(&router).await;
+
+        let response = json_request(
+            &router,
+            "PUT",
+            &format!("{WIFI_NETWORKS_API}/{ssid}"),
+            body,
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+
+        assert_eq!(response.status(), status, "{ssid}");
+        assert!(fake.set_paths().is_empty(), "a refused replacement wrote");
+    }
+}
+
+// --- The MQTT resource ------------------------------------------------------
+
+const MQTT_PATH: &str = "/api/v1/mqtt";
+
+// A browser session and its CSRF proof, which every write below needs.
+async fn mqtt_session(router: &Router) -> (String, String) {
+    let response = json_request(
+        router,
+        "POST",
+        "/api/v1/session",
+        json!({ "password": "hunter2secret" }),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let cookie = session_cookie_value(&response);
+    let csrf = body_json(response).await["csrfToken"]
+        .as_str()
+        .expect("an authenticated session carries a CSRF token")
+        .to_string();
+    (cookie, csrf)
+}
+
+// The read answers the stored subtree and the reconciler's own document, and
+// it does not merge them: the console has to be able to show a listener that
+// was configured but is not the one the broker is bound to.
+#[tokio::test]
+async fn the_mqtt_read_answers_the_declared_subtree_and_the_published_state() {
+    let (router, fake) = test_app(mqtt_tree(true));
+    fake.set_state_entry("mqtt", mqtt_state(true, "0.0.0.0", 8883, true));
+    let cookie = login(&router, "hunter2secret").await;
+
+    let body = body_json(get(&router, MQTT_PATH, Some(&cookie)).await).await;
+
+    assert_eq!(body["configured"]["enabled"], json!(true));
+    assert_eq!(body["configured"]["listen"]["address"], json!("127.0.0.1"));
+    assert_eq!(body["configured"]["listen"]["port"], json!(1883));
+    assert_eq!(body["configured"]["auth"]["enabled"], json!(false));
+    assert_eq!(body["observed"]["available"], json!(true));
+    assert_eq!(
+        body["observed"]["state"]["listen"]["address"],
+        json!("0.0.0.0")
+    );
+    assert_eq!(
+        body["observed"]["state"]["units"][0]["unit"],
+        json!("mica-mqtt-broker.service")
+    );
+}
+
+// A reconciler that has published nothing is reported as absent, not as a
+// broker at its defaults.
+#[tokio::test]
+async fn the_mqtt_read_reports_an_absent_observer_rather_than_a_default_one() {
+    let (router, _fake) = test_app(mqtt_tree(false));
+    let cookie = login(&router, "hunter2secret").await;
+
+    let body = body_json(get(&router, MQTT_PATH, Some(&cookie)).await).await;
+
+    assert_eq!(body["observed"]["available"], json!(false));
+    assert!(body["observed"].get("state").is_none(), "{body}");
+    assert!(body["observed"]["error"].is_string(), "{body}");
+}
+
+// The listener is one decision, so the write is one write: address, port, the
+// switch and the auth flag reach micad as a single `mqtt` subtree.
+#[tokio::test]
+async fn the_mqtt_write_commits_the_whole_subtree_in_one_write() {
+    let (router, fake) = test_app(mqtt_tree(false));
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        MQTT_PATH,
+        json!({
+            "enabled": true,
+            "listen": { "address": "0.0.0.0", "port": 8883 },
+            "auth": { "enabled": true },
+        }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert!(body_json(response).await["taskId"].is_string());
+    assert_eq!(fake.set_paths(), vec!["mqtt".to_string()]);
+    let stored = fake.get_settings("mqtt").await.unwrap();
+    assert_eq!(
+        stored,
+        json!({
+            "enabled": true,
+            "listen": { "address": "0.0.0.0", "port": 8883 },
+            "auth": { "enabled": true },
+        })
+    );
+}
+
+// An address the broker cannot bind is refused here rather than on the device,
+// where it is a unit that will not start and a console that reported success.
+#[tokio::test]
+async fn the_mqtt_write_refuses_a_listener_the_broker_could_not_bind() {
+    for listen in [
+        json!({ "address": "not-an-address", "port": 1883 }),
+        json!({ "address": "127.0.0.1", "port": 0 }),
+    ] {
+        let (router, fake) = test_app(mqtt_tree(false));
+        let (cookie, csrf) = mqtt_session(&router).await;
+
+        let response = json_request(
+            &router,
+            "PUT",
+            MQTT_PATH,
+            json!({ "enabled": true, "listen": listen, "auth": { "enabled": false } }),
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let error = envelope(response).await;
+        assert_eq!(error["code"], "validation_failed");
+        assert_eq!(error["path"], "mqtt");
+        assert!(fake.set_paths().is_empty(), "a refused write reached micad");
+    }
+}
+
+// A body missing a field is refused rather than merged: a `PUT` replaces the
+// subtree, and the only value a missing field could take is one the client
+// never sent.
+#[tokio::test]
+async fn the_mqtt_write_refuses_a_partial_document() {
+    let (router, fake) = test_app(mqtt_tree(false));
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        MQTT_PATH,
+        json!({ "enabled": true }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(fake.set_paths().is_empty());
 }
 
 #[tokio::test]
@@ -4320,9 +5252,9 @@ async fn an_absent_root_is_404_and_a_malformed_path_is_422() {
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
 }
 
-// The eight top-level keys the write route's not-found rule is derived from.
+// The nine top-level keys the write route's not-found rule is derived from.
 #[test]
-fn the_settings_schema_has_the_eight_roots_the_write_route_knows() {
+fn the_settings_schema_has_the_nine_roots_the_write_route_knows() {
     let tree = serde_json::to_value(micad_settings::Settings::default()).unwrap();
     let mut keys: Vec<&str> = tree
         .as_object()
@@ -4335,6 +5267,7 @@ fn the_settings_schema_has_the_eight_roots_the_write_route_knows() {
         keys,
         [
             "access",
+            "bluetooth",
             "container",
             "hostname",
             "mqtt",
@@ -6081,6 +7014,65 @@ async fn the_network_paths_the_router_does_not_serve_reach_the_reservation() {
 // The document describes every network operation, with every
 // outcome each has: a client reading only `openapi.json` has to learn them.
 
+// The documented container schema against `micad_settings::ContainerUnit`,
+// field for field, on the same rule the interface mirror takes: the model is
+// what the body deserializes into, so a field added to it cannot go
+// undocumented here.
+#[test]
+fn the_container_schema_matches_the_settings_model() {
+    let document: serde_json::Value =
+        serde_json::from_str(&crate::openapi::document_json()).expect("the document is JSON");
+
+    let unit = micad_settings::ContainerUnit {
+        image: "docker.io/library/busybox:1".to_string(),
+        command: vec!["sleep".to_string(), "infinity".to_string()],
+        environment: std::collections::BTreeMap::from([("TZ".to_string(), "UTC".to_string())]),
+        publish: vec![micad_settings::PublishedPort {
+            host: 8080,
+            container: 80,
+            protocol: micad_settings::PortProtocol::Tcp,
+        }],
+        volumes: vec![micad_settings::VolumeMount {
+            host: "/mica/apps/app".to_string(),
+            container: "/data".to_string(),
+            read_only: true,
+        }],
+        restart: micad_settings::RestartPolicy::Always,
+        auto_start: true,
+    };
+
+    for (schema, model) in [
+        ("ContainerDeclaration", serde_json::to_value(&unit).unwrap()),
+        (
+            "ContainerPort",
+            serde_json::to_value(&unit.publish[0]).unwrap(),
+        ),
+        (
+            "ContainerVolume",
+            serde_json::to_value(&unit.volumes[0]).unwrap(),
+        ),
+    ] {
+        let mut documented: Vec<String> = document["components"]["schemas"][schema]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{schema} is an object schema"))
+            .keys()
+            .cloned()
+            .collect();
+        let mut fields: Vec<String> = model
+            .as_object()
+            .unwrap_or_else(|| panic!("{schema}'s model is an object"))
+            .keys()
+            .cloned()
+            .collect();
+        documented.sort();
+        fields.sort();
+        assert_eq!(
+            documented, fields,
+            "the documented {schema} has drifted from the settings model"
+        );
+    }
+}
+
 // The documented interface schema against `micad_settings::IfaceSettings`
 // itself, field for field, so a field added to the model cannot go
 // undocumented here.
@@ -6114,6 +7106,17 @@ fn the_network_schema_matches_the_settings_model() {
             listen_port: Some(51820),
             peers: vec![peer.clone()],
         }),
+        routes: vec![micad_settings::RouteConfig {
+            destination: "10.20.0.0/16".to_string(),
+            gateway: Some("10.8.0.1".to_string()),
+            metric: Some(200),
+        }],
+        dhcp_server: Some(micad_settings::DhcpServerConfig {
+            pool_offset: 100,
+            pool_size: 50,
+            dns: vec!["10.8.0.1".to_string()],
+            lease_seconds: Some(3600),
+        }),
     };
 
     for (schema, model) in [
@@ -6135,6 +7138,14 @@ fn the_network_schema_matches_the_settings_model() {
             serde_json::to_value(iface.wireguard.clone().unwrap()).unwrap(),
         ),
         ("WireguardPeerEntry", serde_json::to_value(&peer).unwrap()),
+        (
+            "StaticRoute",
+            serde_json::to_value(&iface.routes[0]).unwrap(),
+        ),
+        (
+            "DhcpServer",
+            serde_json::to_value(iface.dhcp_server.clone().unwrap()).unwrap(),
+        ),
     ] {
         let mut documented: Vec<String> = document["components"]["schemas"][schema]["properties"]
             .as_object()
@@ -6674,6 +7685,7 @@ async fn the_setup_route_is_the_one_api_route_that_takes_no_credential() {
         ("POST", "/api/v1/actions/reboot", ""),
         ("POST", "/api/v1/tokens", "{\"name\":\"x\"}"),
         ("PUT", "/api/v1/network", "{}"),
+        ("PUT", "/api/v1/mqtt", "{}"),
         ("POST", "/api/v1/ssh/authorized-keys", "{}"),
     ] {
         let request = Request::builder()
@@ -6714,18 +7726,20 @@ async fn the_api_setup_route_records_the_claim_and_no_credential() {
 
     let response = post_json(&router, SETUP_PATH, &full_setup_body(), None).await;
     assert_eq!(response.status(), StatusCode::CREATED);
-    let token =
-        serde_json::from_str::<serde_json::Value>(&body_string(response).await).unwrap()["token"]
-            .as_str()
-            .unwrap()
-            .to_string();
+    let cookie = session_cookie_value(&response);
+    // The body carries the session's CSRF token and no credential of any
+    // other kind: setup mints no API token.
+    let body: serde_json::Value =
+        serde_json::from_str(&body_string(response).await).expect("setup JSON");
+    assert!(body["csrfToken"].as_str().is_some(), "{body}");
+    assert!(body.get("token").is_none(), "{body}");
 
     assert_eq!(
         audit_events(&audit_lines(dir.path())),
         [("claim".to_string(), "completed".to_string())]
     );
     let raw = std::fs::read_to_string(dir.path().join("audit.log")).unwrap();
-    for secret in ["first-boot-pw", token.as_str()] {
+    for secret in ["first-boot-pw", cookie.as_str()] {
         assert!(!raw.contains(secret), "the trail must not carry {secret}");
     }
 }

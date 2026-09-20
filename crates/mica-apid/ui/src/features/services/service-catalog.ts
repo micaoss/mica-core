@@ -1,18 +1,15 @@
-import { Boxes, RadioTower, TerminalSquare } from 'lucide-react'
+import { Boxes, RadioTower } from 'lucide-react'
 
 export interface ServiceDefinition {
-  id: 'containers' | 'mqtt' | 'terminal'
+  id: 'containers' | 'mqtt'
   icon: typeof Boxes
-  /// Absent when the device has no setting for this service, which is also
-  /// what makes the service simulated.
-  settingsPath?: string
-  statePath?: string
+  settingsPath: string
+  statePath: string
 }
 
 export const serviceCatalog: readonly ServiceDefinition[] = [
   { id: 'containers', icon: Boxes, settingsPath: 'container.enabled', statePath: 'container' },
   { id: 'mqtt', icon: RadioTower, settingsPath: 'mqtt.enabled', statePath: 'mqtt' },
-  { id: 'terminal', icon: TerminalSquare },
 ]
 
 export function findService(id: string) {

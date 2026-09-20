@@ -100,10 +100,20 @@ enum Stage {
     RebootPending,
 }
 
-/// The driver's cadence clock, and the ONE thing it is allowed to answer.
+/// The driver's cadence clock, and the two things it is allowed to answer.
 pub trait Cadence: Send + Sync {
-    /// The monotonic now.
+    /// The monotonic now, which every interval is measured on.
     fn now(&self) -> Instant;
+
+    /// The wall now, which only the check anchor reads.
+    ///
+    /// Separate from [`Self::now`] on purpose: an interval must not move when
+    /// the clock is set, and a time of day cannot be answered without it.
+    /// Read only after [`ClockTrust::believed`], so a device that does not
+    /// believe its clock never schedules on one.
+    fn wall(&self) -> chrono::DateTime<Utc> {
+        Utc::now()
+    }
 }
 
 /// The production cadence: the machine's own monotonic clock.
@@ -123,6 +133,14 @@ pub struct AutoDriver {
     /// success-based: a check refused by policy must not retry every tick,
     /// and the cadence an operator set is a cadence of attempts.
     last_check: Instant,
+    /// The last time the anchor came round that this driver counts as
+    /// answered: its start, then each anchored check it makes.
+    ///
+    /// Seeded with the start so an anchor that passed while the device was
+    /// down does not fire at boot -- a device rebooting hourly under a daily
+    /// anchor would otherwise check hourly, which is what the interval
+    /// already guards against.
+    anchor_floor: chrono::DateTime<Utc>,
     stage: Stage,
 }
 
@@ -144,6 +162,7 @@ impl AutoDriver {
             // the cadence this replaces did by sleeping before its first
             // check: a device that reboots hourly must not check hourly.
             last_check: cadence.now(),
+            anchor_floor: cadence.wall(),
             cadence,
             stage: Stage::Idle,
         }
@@ -191,6 +210,23 @@ impl AutoDriver {
         }
     }
 
+    /// The anchor's last crossing, or `None` when this device checks on the
+    /// interval instead.
+    ///
+    /// `None` for all three ways an anchor can fail to be one: the document
+    /// names none, the clock is not one this device believes, or the string
+    /// is not a clock face. **The interval is the fallback, never a refusal**:
+    /// a device whose clock never synchronises must keep discovering updates,
+    /// which is the same reason checks and fetches are unaffected by the
+    /// clock gate that stops installs.
+    async fn anchored_crossing(&self, loaded: &LoadedPolicy) -> Option<chrono::DateTime<Utc>> {
+        let anchor = loaded.auto_check_at()?;
+        if !self.routes.clock().await.believed() {
+            return None;
+        }
+        micad_settings::configuration::last_crossing(anchor, self.cadence.wall())
+    }
+
     /// Step 1: the check cadence, shared by `check` and `auto`.
     async fn check_if_due(&mut self, loaded: &LoadedPolicy) {
         // `auto_check_minutes` is the one reading of "does this device check
@@ -200,8 +236,24 @@ impl AutoDriver {
             return;
         };
         let now = self.cadence.now();
-        if now.duration_since(self.last_check) < Duration::from_secs(interval.saturating_mul(60)) {
-            return;
+        match self.anchored_crossing(loaded).await {
+            // Anchored: the check is due when the named time of day has come
+            // round since the last one this driver answered, and at no other
+            // moment. The interval is not consulted -- an operator who named
+            // a time asked for that time, not for that time or sooner.
+            Some(crossing) => {
+                if crossing <= self.anchor_floor {
+                    return;
+                }
+                self.anchor_floor = crossing;
+            }
+            None => {
+                if now.duration_since(self.last_check)
+                    < Duration::from_secs(interval.saturating_mul(60))
+                {
+                    return;
+                }
+            }
         }
         self.last_check = now;
         self.routes.audit(UPDATE_CHECK_EVENT).await;
@@ -461,6 +513,10 @@ fn descriptor_id(descriptor: &str) -> Option<&str> {
 pub struct TestCadence {
     base: Instant,
     offset: std::sync::Mutex<Duration>,
+    /// The wall clock the anchor reads, moved on its own: an interval and a
+    /// time of day are different questions, and a test says so by answering
+    /// them separately.
+    wall: std::sync::Mutex<chrono::DateTime<Utc>>,
 }
 
 #[cfg(test)]
@@ -469,7 +525,14 @@ impl TestCadence {
         Arc::new(Self {
             base: Instant::now(),
             offset: std::sync::Mutex::new(Duration::ZERO),
+            wall: std::sync::Mutex::new(Utc::now()),
         })
+    }
+
+    /// Move the driver's notion of the time of day forward by `by`.
+    pub fn advance_wall(&self, by: chrono::Duration) {
+        let mut wall = self.wall.lock().expect("cadence wall");
+        *wall += by;
     }
 
     /// Move the driver's notion of now forward by `by`.
@@ -487,6 +550,10 @@ impl TestCadence {
 impl Cadence for TestCadence {
     fn now(&self) -> Instant {
         self.base + *self.offset.lock().expect("cadence offset")
+    }
+
+    fn wall(&self) -> chrono::DateTime<Utc> {
+        *self.wall.lock().expect("cadence wall")
     }
 }
 
@@ -736,6 +803,16 @@ mod tests {
         )
     }
 
+    /// The document of a device that names a time of day to check at.
+    fn anchored_document(at: &str, window: &str) -> String {
+        format!(
+            r#"{{"policy": "auto", "checkIntervalMinutes": 60, "checkAt": "{at}",
+                 "rebootPolicy": "manual",
+                 "source": {{"url": "http://mirror/tuf", "channel": "stable"}},
+                 "maintenance": {{"windows": [{window}]}}}}"#
+        )
+    }
+
     const BUNDLE: &str = "/mica/updates/verified/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json";
 
     fn candidate(name: &str, version: &str) -> Available {
@@ -805,6 +882,99 @@ mod tests {
         async fn tick(&mut self) {
             self.driver.tick().await;
         }
+    }
+
+    /// A named time of day is the cadence, not a floor on one: the interval
+    /// elapses and nothing checks until the clock face comes round.
+    #[tokio::test]
+    async fn an_anchored_check_waits_for_the_named_time_of_day() {
+        let mut scene = Scene::auto(&open_window(), "manual");
+        scene.write_document(&anchored_document(
+            &clock_face(Wall::hours(2)),
+            &open_window(),
+        ));
+        scene.daemon.will_check(Ok(Settled::NoneCompatible));
+        scene.daemon.will_check(Ok(Settled::NoneCompatible));
+
+        scene.cadence.advance_past_the_check_interval();
+        scene.tick().await;
+        assert!(
+            !scene.daemon.calls().contains(&Call::Check),
+            "the anchor has not come round: {:?}",
+            scene.daemon.calls()
+        );
+
+        scene
+            .cadence
+            .advance_wall(Wall::hours(2) + Wall::minutes(1));
+        scene.tick().await;
+        assert_eq!(checks(&scene), 1, "the anchor came round and it checked");
+
+        // Once per crossing: an hour later is the same day's anchor, which
+        // this driver has answered.
+        scene.cadence.advance_wall(Wall::hours(1));
+        scene.cadence.advance_past_the_check_interval();
+        scene.tick().await;
+        assert_eq!(checks(&scene), 1, "the same crossing checked twice");
+
+        // The next day's crossing is a new one.
+        scene.cadence.advance_wall(Wall::hours(24));
+        scene.tick().await;
+        assert_eq!(checks(&scene), 2, "tomorrow's anchor did not check");
+    }
+
+    /// An anchor that passed while the device was down does not fire at boot:
+    /// a device rebooting hourly under a daily anchor would otherwise check
+    /// hourly, which is what the interval already guards against.
+    #[tokio::test]
+    async fn an_anchor_that_passed_before_the_driver_started_does_not_fire() {
+        let mut scene = Scene::auto(&open_window(), "manual");
+        scene.write_document(&anchored_document(
+            &clock_face(-Wall::hours(2)),
+            &open_window(),
+        ));
+        scene.daemon.will_check(Ok(Settled::NoneCompatible));
+
+        scene.cadence.advance_past_the_check_interval();
+        scene.tick().await;
+        assert_eq!(
+            checks(&scene),
+            0,
+            "an anchor crossed before the start fired anyway"
+        );
+    }
+
+    /// The anchor is the one thing here that needs a wall clock, so a device
+    /// that does not believe its own goes back to the interval rather than
+    /// stopping: a clockless device must keep discovering updates, which is
+    /// the rule the install gate is the other half of.
+    #[tokio::test]
+    async fn an_untrusted_clock_checks_on_the_interval_instead_of_the_anchor() {
+        let mut scene = Scene::auto(&open_window(), "manual");
+        scene.write_document(&anchored_document(
+            &clock_face(Wall::hours(2)),
+            &open_window(),
+        ));
+        FakeDaemon::set(&scene.daemon.clock, untrusted_clock());
+        scene.daemon.will_check(Ok(Settled::NoneCompatible));
+
+        scene.cadence.advance_past_the_check_interval();
+        scene.tick().await;
+        assert_eq!(
+            checks(&scene),
+            1,
+            "an untrusted clock stopped the checks instead of falling back"
+        );
+    }
+
+    /// How many checks the driver has asked for.
+    fn checks(scene: &Scene) -> usize {
+        scene
+            .daemon
+            .calls()
+            .iter()
+            .filter(|call| **call == Call::Check)
+            .count()
     }
 
     /// The seam itself, and the property every test below rests on: a driver

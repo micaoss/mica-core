@@ -1344,6 +1344,7 @@ fn configured() -> Settings {
     settings.mqtt.enabled = true;
     settings.time.timezone = "Europe/Berlin".to_string();
     settings.container.enabled = !settings.container.enabled;
+    settings.bluetooth.enabled = !settings.bluetooth.enabled;
     settings
 }
 
@@ -2074,4 +2075,192 @@ fn rejects_future_settings_without_stripping_or_defaulting_them() {
         fs::read_to_string(store.config_dir().join(WIFI_DOCUMENT)).unwrap(),
         original
     );
+}
+
+// --- Declared containers -----------------------------------------------------
+
+/// A minimal unit: everything else defaults, and the defaults are the safe
+/// ones -- no command, no ports, no volumes, no restart, no autostart.
+fn container_unit(image: &str) -> micad_settings::ContainerUnit {
+    micad_settings::ContainerUnit {
+        image: image.to_string(),
+        command: Vec::new(),
+        environment: std::collections::BTreeMap::new(),
+        publish: Vec::new(),
+        volumes: Vec::new(),
+        restart: micad_settings::RestartPolicy::default(),
+        auto_start: false,
+    }
+}
+
+/// A device that declares no container writes the document it wrote before a
+/// container could be declared: the field is skipped when empty, which is what
+/// makes an A/B rollback survive this addition.
+#[test]
+fn a_device_with_no_containers_serializes_as_it_did_before() {
+    let settings = micad_settings::Settings::default();
+    let json = serde_json::to_value(&settings.container).unwrap();
+
+    assert_eq!(json, serde_json::json!({ "enabled": false }));
+}
+
+#[test]
+fn a_declared_container_round_trips_through_the_tree() {
+    let mut settings = micad_settings::Settings::default();
+    settings
+        .set(
+            "container.units",
+            serde_json::json!({
+                "node-red": {
+                    "image": "docker.io/nodered/node-red:4.0.9",
+                    "publish": [{ "host": 1880, "container": 1880 }],
+                    "volumes": [{ "host": "/mica/apps/node-red", "container": "/data" }],
+                    "restart": "always",
+                    "autoStart": true,
+                },
+            }),
+        )
+        .expect("a declared container is accepted");
+
+    let unit = &settings.container.units["node-red"];
+    assert_eq!(unit.image, "docker.io/nodered/node-red:4.0.9");
+    assert_eq!(unit.publish[0].host, 1880);
+    assert_eq!(unit.publish[0].protocol, micad_settings::PortProtocol::Tcp);
+    assert_eq!(unit.restart, micad_settings::RestartPolicy::Always);
+    assert!(unit.auto_start);
+}
+
+/// The four refusals, each of them a container the device could not run.
+#[test]
+fn a_container_map_the_device_could_not_run_is_refused() {
+    let mut units = std::collections::BTreeMap::new();
+
+    // A name that cannot be a unit.
+    units.insert("node red".to_string(), container_unit("alpine:3"));
+    assert!(micad_settings::validate_container_units(&units).is_err());
+    units.clear();
+
+    // No image.
+    units.insert("app".to_string(), container_unit("   "));
+    assert!(micad_settings::validate_container_units(&units).is_err());
+    units.clear();
+
+    // Two containers claiming one host port.
+    let mut first = container_unit("alpine:3");
+    first.publish = vec![micad_settings::PublishedPort {
+        host: 8080,
+        container: 80,
+        protocol: micad_settings::PortProtocol::Tcp,
+    }];
+    let mut second = container_unit("alpine:3");
+    second.publish = first.publish.clone();
+    units.insert("a".to_string(), first);
+    units.insert("b".to_string(), second);
+    let message = micad_settings::validate_container_units(&units).unwrap_err();
+    assert!(message.contains("8080/tcp"), "{message}");
+    units.clear();
+
+    // A volume outside the operator's half of the device, and one that climbs
+    // out of it.
+    for host in ["/etc", "/mica/../etc"] {
+        let mut unit = container_unit("alpine:3");
+        unit.volumes = vec![micad_settings::VolumeMount {
+            host: host.to_string(),
+            container: "/data".to_string(),
+            read_only: false,
+        }];
+        units.insert("app".to_string(), unit);
+        let message = micad_settings::validate_container_units(&units).unwrap_err();
+        assert!(
+            message.contains(micad_settings::CONTAINER_VOLUME_ROOT),
+            "{message}"
+        );
+        units.clear();
+    }
+}
+
+/// The bound is on the write and not only on apid, because the document is
+/// writable without apid.
+#[test]
+fn a_volume_outside_mica_is_refused_by_the_tree_itself() {
+    let mut settings = micad_settings::Settings::default();
+    let error = settings
+        .set(
+            "container.units",
+            serde_json::json!({
+                "app": {
+                    "image": "alpine:3",
+                    "volumes": [{ "host": "/etc", "container": "/host-etc" }],
+                },
+            }),
+        )
+        .expect_err("a root bind must be refused");
+
+    assert!(format!("{error}").contains("/mica/"), "{error}");
+    assert!(settings.container.units.is_empty());
+}
+
+// --- Bluetooth ---------------------------------------------------------------
+
+/// A device that declares nothing Bluetooth writes the document its schema
+/// default produces: the switch off, nothing discoverable, no devices.
+#[test]
+fn bluetooth_defaults_are_off_and_undiscoverable() {
+    let settings = Settings::default();
+
+    assert!(!settings.bluetooth.enabled);
+    assert!(!settings.bluetooth.discoverable);
+    assert!(settings.bluetooth.pin.is_none());
+    assert!(settings.bluetooth.devices.is_empty());
+    assert_eq!(
+        serde_json::to_value(&settings.bluetooth).unwrap(),
+        serde_json::json!({ "enabled": false, "discoverable": false })
+    );
+}
+
+/// The pairing code a device offers when none is declared: derived from its
+/// identifier, so it is fixed for this device and not shared with the fleet.
+#[test]
+fn the_derived_pairing_code_is_per_device_and_stable() {
+    let first = micad_settings::derived_pairing_pin("0123456789abcdef0123456789abcdef");
+    let second = micad_settings::derived_pairing_pin("fedcba9876543210fedcba9876543210");
+
+    assert_eq!(
+        first,
+        micad_settings::derived_pairing_pin("0123456789abcdef0123456789abcdef")
+    );
+    assert_ne!(first, second, "two devices share one pairing code");
+    assert_eq!(first.len(), 4);
+    assert!(first.bytes().all(|byte| byte.is_ascii_digit()), "{first}");
+    // A device with no identifier still has something to show.
+    assert_eq!(micad_settings::derived_pairing_pin(""), "0000");
+}
+
+/// What a pairing code may be, and what a device map may hold.
+#[test]
+fn a_pairing_code_and_a_device_map_are_refused_when_no_adapter_could_use_them() {
+    assert!(micad_settings::validate_pairing_pin("0000").is_ok());
+    assert!(micad_settings::validate_pairing_pin("1234567890123456").is_ok());
+    assert!(micad_settings::validate_pairing_pin("123").is_err());
+    assert!(micad_settings::validate_pairing_pin("12345678901234567").is_err());
+    assert!(micad_settings::validate_pairing_pin("abcd").is_err());
+
+    let mut settings = Settings::default();
+    let refused = settings.set(
+        "bluetooth.devices",
+        serde_json::json!({ "not-an-address": { "name": "phone", "trusted": true, "blocked": false } }),
+    );
+    assert!(
+        refused.is_err(),
+        "an address no adapter could name was accepted"
+    );
+    assert!(settings.bluetooth.devices.is_empty());
+
+    settings
+        .set(
+            "bluetooth.devices",
+            serde_json::json!({ "AA:BB:CC:DD:EE:FF": { "name": "phone", "trusted": true, "blocked": false } }),
+        )
+        .expect("a real address is accepted");
+    assert!(settings.bluetooth.devices["AA:BB:CC:DD:EE:FF"].trusted);
 }
