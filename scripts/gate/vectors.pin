@@ -1,0 +1,22 @@
+# The release-lock vectors this repository's reader is checked against.
+#
+# The vectors live in mica and are READ AT THIS COMMIT, not copied: a copy is a
+# snapshot, and on 2026-09-20 five repositories each held a different one. The
+# basename is uniform across the workspace (coordinator ruling) so that finding
+# every reader's pin is one command rather than a maintained list of paths.
+#
+# NOT locks/pins/: that directory means "a producer release we consume", mica
+# publishes no releases, and forcing it there would mean relaxing mica-pin v1 to
+# make RELEASE optional -- weakening a validated format for a thing it was not
+# designed for. Not a git row in locks/upstream.lock either: that file is for
+# third-party inputs, and a row there would assert mica is upstream of us.
+#
+# KNOWN DEFECTS AT THIS COMMIT: none. The x64-to-uefi-x64 sweep of 2026-09-16
+# renamed a third-party download URL in ten vector files
+# (bun-linux-x64.zip became bun-linux-uefi-x64.zip, while the arm64 row beside
+# it was untouched because "aarch64" contains no "x64"); mica repaired it in
+# ddf4edc8 and this commit is later. A pin is a statement about ONE commit and
+# never about the newest one, so this gate will not notice a later fix or a
+# later defect on its own -- when mica moves, this line moves with it.
+REPOSITORY=mica
+COMMIT=b2e3044ebfdef6df7e8e939e451c14eff3fc2e72
