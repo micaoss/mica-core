@@ -487,6 +487,14 @@ fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>) -> Result<
                 && fs::read_to_string(data_node.join("partition"))?.trim() == "3",
             "DATA is not on the authenticated system disk"
         );
+        // `prjquota` is applied HERE, at mount time, every boot, and nothing
+        // varies: this literal is on the one path that mounts DATA and reads
+        // nothing from the product, profile, board, command line or signed
+        // policy, so no product can differ. It is the CAPABILITY only --
+        // mica-system-base's mica-data-layout.service assigns the project ids
+        // and sets the limits on the mounted filesystem (chattr -p +P,
+        // setquota -P), and /mica/containers shows the option because a bind
+        // shares its filesystem's superblock. Nothing here creates the ext4.
         mount(
             control,
             &data,
