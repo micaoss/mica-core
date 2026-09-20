@@ -83,7 +83,7 @@ Every crate lives in `crates/<package name>/`.
 | `scripts/deb/` | The packer, the pool index and the package gate |
 | `scripts/gate/` | The gates: Rust, UI build contract, D-Bus policy, boot/shutdown, IO faults, and the lock and publisher tests |
 | `locks/` | The inputs: `mica-build-env.lock` (the lock asset of a `micaoss/mica-build-env` release, unchanged) with its pin `pins/mica-build-env.pin`, and `upstream.lock` |
-| `tests/vectors/` | The release lock specification's test vectors, copied unchanged |
+| `scripts/gate/vectors.pin` | The mica commit the release-lock vectors are READ at; they are never copied here (`scripts/gate/vectors-source.sh` fetches them into the git-ignored `repos/` cache) |
 | `docs/` | Tasks, plans and the changelog |
 
 ## Building

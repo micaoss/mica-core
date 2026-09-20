@@ -1,9 +1,0 @@
-# mica-lock v1
-release	mica-boards	20260914-2042	0123456789abcdef0123456789abcdef01234567
-pool	amd64	ghcr.io/micaoss/mica-boards:pool.amd64.20260914-2042@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-pool	arm64	ghcr.io/micaoss/mica-boards:pool.arm64.20260914-2042@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-package	mica-board-x64	amd64	0.1.0+git0123456789ab-1	1111111111111111111111111111111111111111111111111111111111111111
-package	mica-wifi	amd64	0.1.0+git0123456789ab-1	2222222222222222222222222222222222222222222222222222222222222222
-package	mica-wifi	arm64	0.1.0+git0123456789ab-1	2222222222222222222222222222222222222222222222222222222222222222
-board	cx3576	arm64	ghcr.io/micaoss/mica-boards:board.cx3576.20260914-2042@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-board	x64	amd64	ghcr.io/micaoss/mica-boards:board.x64.20260914-2042@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd

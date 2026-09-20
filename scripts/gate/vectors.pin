@@ -1,3 +1,4 @@
+# mica-vectors-pin v1
 # The release-lock vectors this repository's reader is checked against.
 #
 # The vectors live in mica and are READ AT THIS COMMIT, not copied: a copy is a

@@ -1,5 +1,0 @@
-# mica-pin v1
-REPOSITORY=mica-core
-RELEASE=offline
-SHA256SUMS=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-CHECKOUT=/srv/workspace/mica-core

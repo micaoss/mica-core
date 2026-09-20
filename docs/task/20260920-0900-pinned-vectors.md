@@ -1,6 +1,6 @@
 # 20260920-0900-pinned-vectors Read the release-lock vectors out of mica at a pinned commit
 
-- **status**: in_progress
+- **status**: completed
 - **priority**: P1
 - **owner**: vtv87o8e/mica-core
 - **createdAt**: 2026-09-20 09:00
@@ -53,7 +53,54 @@ everywhere.
    reader consumes would miss them, which is the trap in deriving from pins
    alone.
 
-## Open question, raised with the coordinator
+## What landed
+
+`scripts/gate/vectors-source.sh` reads the pin, fetches `mica` at that commit
+into the git-ignored `repos/` cache and verifies `HEAD` is the pinned commit --
+git refuses an object that does not hash to its name, **so the checkout is the
+pin**. A warm cache needs no network, so `make offline` keeps working: this
+repository keeps **no copy and still runs offline**, which answers the trade the
+coordinator had assumed bound. A copy in the tree can drift silently; a cache
+cannot, because its directory name is the commit and a mismatched `HEAD` is a
+refusal.
+
+`make locks-test`: **68 passed, 0 failed, 88 rows read, 35 outside the floor**,
+with both directions of the comparison: every vector file in the pinned tree is
+named by its manifest, and every manifest row is run rather than skipped.
+
+- **The `data` kind**, all six vectors correct. `data-file` needed what the spec
+  does not say in the word it uses: the **file** is a second key even though the
+  **name** is called the key, because two rows naming one asset leave a consumer
+  no way to say which it fetched. The first implementation passed that vector as
+  valid.
+- **The `vectors-pin` mode**, all seven vectors correct, and the gate validates
+  this repository's own `scripts/gate/vectors.pin` through it. That family did
+  not exist when this round started: the pin was written, the commit pinned, the
+  vectors read at it, and they refused the new file for missing its header --
+  within the hour, with nobody reviewing it.
+- **`board` and `apt` are deleted from the reader.** They were implemented from
+  an older spec and no lock here carries either. A stale implementation answered
+  `column-count`, *a claim about the row's shape*, where `kind-unknown` is the
+  honest answer. A wrong confident answer is worse than an absent one.
+- **The floor is derived from content, not from file names.** A vector is
+  outside it when its release row carries a scope or it holds a kind this reader
+  does not implement, both read out of the vector. `release-slash` was in the
+  first floor list **because of its name**: it is a `mica-boards` lock with
+  `uefi-x64/20260914-2042`, a scoped form this repository neither pins nor
+  emits. A name did the work a measurement should have done, in a list handed to
+  three other repositories.
+- **`tests/vectors/` is deleted**, which is also the repair of the hand-edited
+  `other-kind.lock`: a blob that is not in the tree cannot be edited.
+
+## Still open
+
+The scope rules (`release-scope`, `scope-content`) and the `index`, `board`
+component, `bundle`, `asset` and `update` kinds are unimplemented and their 35
+vectors are reported as outside the floor on every run. Implementing them is
+not required by the derivation and would be conformance nobody here needs --
+but the report is what keeps that a decision rather than an omission.
+
+## The pin format question, answered by the coordinator
 
 **Where the pin lives for an input that has no releases.** Every existing pin
 names a release: `locks/pins/<repository>.pin` is `mica-pin v1` with

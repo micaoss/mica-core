@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
-# The inputs' readers without GitHub: scripts/build/check-lock.sh over the
-# specification's vectors (tests/vectors/, a copy of
-# mica:docs/design/release-lock/vectors/), scripts/build/locks.sh over the
+# The inputs' readers: scripts/build/check-lock.sh over the specification's
+# vectors READ OUT OF mica AT THE COMMIT scripts/gate/vectors.pin NAMES (never
+# copied into this tree -- a copy is a snapshot, and on 2026-09-20 five
+# repositories each held a different one), scripts/build/locks.sh over the
 # committed locks and over file:// releases, and scripts/build/from.sh.
+#
+# WHICH VECTORS MUST PASS IS DERIVED, NOT DECLARED (mica:docs/design/release-lock.md
+# 9.1): what this repository pins, what it produces, the vectors that say what
+# its own forms may not be, and -- since it now writes one -- the vectors-pin
+# family. A vector carrying a row kind this reader does not implement, or a
+# scoped release row, is a form nothing here can meet; it is still run, and
+# reported with the reason, so the gap is visible on every run rather than
+# silently excluded.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECK="${REPO_ROOT}/scripts/build/check-lock.sh"
 LOCKS="${REPO_ROOT}/scripts/build/locks.sh"
 FROM="${REPO_ROOT}/scripts/build/from.sh"
-VECTORS="${REPO_ROOT}/tests/vectors"
+VECTORS="$(bash "${REPO_ROOT}/scripts/gate/vectors-source.sh")"
 TAB=$'\t'
 PASS=0
 FAIL=0
@@ -19,17 +28,70 @@ mkdir -p "${REPO_ROOT}/tmp"
 T="$(mktemp -d "${REPO_ROOT}/tmp/locks-test.XXXXXX")"
 trap 'rm -rf "${T}"' EXIT
 
-# The vectors, except repos/: this repository pins no archive of its own, so it has no source cache.
+# The kinds this reader implements. A vector carrying any other kind is outside
+# the floor: nothing here reads a lock that may carry one.
+KINDS_HERE='^(release|image|pool|package|upstream|data)$'
+OUTSIDE=0
+ROWS=0
+outside_floor() { # <vector path> -> the reason, or empty when it is in the floor
+    local file="${VECTORS}/$1" line kind
+    case "$1" in pins/* | vectors-pin/*) file="" ;; esac
+    case "$1" in pins/*scope*) echo "a scoped pin; this repository pins unscoped releases only"; return ;; esac
+    [ -n "${file}" ] && [ -f "${file}" ] || return 0
+    local release
+    while IFS= read -r line; do
+        case "${line}" in '#'* | '') continue ;; esac
+        kind="${line%%"${TAB}"*}"
+        # A scoped release row (<scope>.<release>) is a form this repository
+        # neither pins nor emits, whatever the file is called.
+        if [ "${kind}" = release ]; then
+            release="$(cut -f3 <<<"${line}")"
+            case "${release}" in *.*) echo "a scoped release row (${release}); this repository pins and emits unscoped releases only"; return ;; esac
+        fi
+        [[ "${kind}" =~ ${KINDS_HERE} ]] || { echo "carries a ${kind} row, a kind this reader does not implement"; return; }
+    done <"${file}"
+}
+
+# Every row of the canonical manifest is run; what is outside the floor is
+# reported rather than skipped, so both directions of the comparison hold.
 while IFS="${TAB}" read -r vector want rule mode; do
     case "${vector}" in '#'* | repos/*) continue ;; esac
+    ROWS=$((ROWS + 1))
     case "${vector}" in
     pins/*) got="$(bash "${CHECK}" pins "${VECTORS}/${vector}" "${mode}" 2>&1 || true)" ;;
+    vectors-pin/*) got="$(bash "${CHECK}" vectors-pin "${VECTORS}/${vector}" 2>&1 || true)" ;;
     *) got="$(bash "${CHECK}" "${vector%%/*}" "${VECTORS}/${vector}" 2>&1 || true)" ;;
     esac
     expected=valid
     [ "${want}" = valid ] || expected="refused ${rule}"
-    if [ "${got}" = "${expected}" ]; then pass "vector ${vector}: ${expected}"; else fail "vector ${vector}: '${got}', want '${expected}'"; fi
+    if [ "${got}" = "${expected}" ]; then
+        pass "vector ${vector}: ${expected}"
+    elif reason="$(outside_floor "${vector}")" && [ -n "${reason}" ]; then
+        OUTSIDE=$((OUTSIDE + 1))
+        echo "OUTSIDE THE FLOOR: ${vector} ${reason} (got '${got}', the spec says '${expected}')"
+    else
+        fail "vector ${vector}: '${got}', want '${expected}'"
+    fi
 done <"${VECTORS}/expected.tsv"
+echo "vectors: ${ROWS} rows read at $(sed -n 's/^COMMIT=//p' "${REPO_ROOT}/scripts/gate/vectors.pin"), ${OUTSIDE} outside this repository's floor"
+
+# SET EQUALITY, BOTH DIRECTIONS: every vector file the canonical tree holds is
+# named by its manifest, so an extra fixture cannot sit unrun -- the shape that
+# left a retired board's fixture green in another repository.
+# A pins/ vector is a DIRECTORY of locks and pins named as one row, and
+# expected.tsv and derived-from.tsv are manifests rather than vectors, so the
+# comparison is at the granularity the manifest names.
+UNNAMED=0
+while IFS= read -r vector; do
+    grep -q "^${vector}${TAB}" "${VECTORS}/expected.tsv" || { UNNAMED=$((UNNAMED + 1)); fail "vector not named by expected.tsv: ${vector}"; }
+done < <(cd "${VECTORS}" && find . -type f ! -name expected.tsv ! -name derived-from.tsv -printf '%P\n' |
+    grep -v '^repos/' | sed -E 's#^(pins/[^/]+/[^/]+)/.*#\1#' | sort -u)
+[ "${UNNAMED}" != 0 ] || pass "every vector file in the pinned tree is named by its manifest"
+
+# And this repository's own pin is one of the forms the family describes.
+expect_pin="$(bash "${CHECK}" vectors-pin "${REPO_ROOT}/scripts/gate/vectors.pin" 2>&1 || true)"
+[ "${expect_pin}" = valid ] && pass "scripts/gate/vectors.pin is a valid mica-vectors-pin v1" ||
+    fail "scripts/gate/vectors.pin: ${expect_pin}"
 
 expect() { # <0|1> <case> <needle> <command>...
     local want="$1" name="$2" needle="$3" rc=0 out
