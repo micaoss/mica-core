@@ -17,6 +17,12 @@ The update protocol becomes bytes both sides verify:
 - Building the vector caught that field order is part of the wire contract: an
   envelope re-serialised from a `Value` sorts its four fields alphabetically and
   is refused as `noncanonical envelope`. No prose said so.
+- `mica-deploy` and `mica-lifecycle` are `0.1.0-3`. The fixtures are test files
+  and excluded, but the regeneration **example** beside them is not: a
+  `crates/*/examples/**` file sits in the crate tree and moved both inputs
+  hashes. `scripts/deb/inputs.sh` now excludes examples -- a producer compiles
+  its binaries with `cargo build --bin`, which never builds one -- and
+  narrowing the manifest took the same one bump.
 
 ## 2026-09-19 10:30 [fix]
 

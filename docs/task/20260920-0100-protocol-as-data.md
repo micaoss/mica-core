@@ -58,6 +58,17 @@ before anyone took it.
 **It is the difference between a specification and a contract: a specification
 describes what to produce, a contract is a thing you can fail.**
 
+## What the guard caught, again
+
+The fixtures are test files and excluded from the inputs hash, so the claim
+"nothing moves" looked safe -- and it was wrong. The regeneration example,
+`crates/mica-deploy/examples/component-contract-fixtures.rs`, had to gain the
+fifth file, and `crates/*/examples/**` was **not** excluded. Both packages built
+from this crate moved, and the guard refused them at `0.1.0-2`. Examples are now
+excluded for the same reason tests are -- a producer compiles its binaries with
+`cargo build --bin`, which never builds an example -- and `mica-deploy` and
+`mica-lifecycle` are `0.1.0-3`, which is what narrowing the manifest costs once.
+
 ## Not done, deliberately
 
 The reader accepts v2 only. No v1 acceptance, no aliases, no transition path:
