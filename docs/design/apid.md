@@ -82,6 +82,43 @@ A settings or transient-password write returns micad's task id; clients poll
   structural redactor so secrets such as password hashes never leave
   (`redact.rs`).
 
+### Reaching a device shell
+
+Written here rather than only in the source, because it is what a person at a
+bench needs.
+
+1. **Claim the device.** `POST /api/v1/setup` with a password of at least 8
+   bytes, on an unclaimed device. It answers **201** with an API token that is
+   not recoverable afterwards. A device claimed by a provisioning document
+   (`mica-provisioning.toml`, `[admin]`) is already past this step.
+2. **Open SSH.** `access.ssh.enabled` is **false** on a fresh device, whatever
+   the image; the operator turns it on. Persistent access is a public key in
+   `access.ssh.authorizedKeys`, rendered for **both** managed accounts, `root`
+   and `mica`.
+3. **Or set a transient root password**, for the case a key cannot cover -- an
+   operator in front of a device with no key installed yet:
+   - API: `POST /api/v1/actions/transient-root-password`, body
+     `{"password": "..."}`, 8 to 72 bytes, no NUL, newline or carriage return.
+     Answers **202**; a **422** names the bound it broke and never repeats the
+     password.
+   - UI: the **Access** page, *Transient root password*, hinted "8-72 bytes;
+     removed at the next reboot."
+   - It is written into no setting, never logged, and gone at the next boot
+     (`crates/micad/src/transient.rs`). It sets the `root` hash in the
+     STATE-backed `/etc/shadow`, with its marker beside that file.
+
+**What authenticates the password.** `dropbear` on this image authenticates
+against `/etc/shadow` through `crypt(3)`; it does **not** use PAM. Measured
+2026-09-20 from the pinned `dropbear-bin 2025.89-1~deb13u1`
+(`mica-system-base:locks/upstream.lock`): its `Depends` name no `libpam`, and
+`/usr/sbin/dropbear` links `libtomcrypt`, `libtommath`, `libz`, `libcrypt`,
+`libc` and the loader -- no `libpam.so.0`. **That is a property of the Debian
+package, not a choice recorded anywhere**, and micad's transient password
+depends on it: a dropbear that grew a PAM dependency would make this path stop
+working with no other symptom. The assertion belongs where the package is
+pinned and the root composed (`mica-system-base`), not here
+(`docs/task/20260920-0620-ssh-without-pam.md`).
+
 ## 5. The web UI
 
 - **Built-in.** `crates/mica-apid/ui/` is a React + Vite application. It is

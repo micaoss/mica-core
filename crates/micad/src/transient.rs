@@ -6,6 +6,18 @@
 //! with no key installed yet — and must not outlive that session, so it is
 //! deliberately not a setting: nothing about it is persisted in the settings
 //! tree and nothing re-applies it on the next boot.
+//!
+//! # What authenticates it
+//!
+//! This hash is read by `dropbear` through `crypt(3)` against `/etc/shadow`.
+//! Dropbear on this image does **not** use PAM: the pinned `dropbear-bin`
+//! names no `libpam` in its `Depends` and `/usr/sbin/dropbear` does not link
+//! `libpam.so.0` (measured 2026-09-20). That is a property of the Debian
+//! package rather than a choice recorded anywhere, and this module depends on
+//! it — on 2026-09-20 every product shipped with an unassemblable PAM stack and
+//! console login aborted, while this path still worked. What asserts the
+//! property belongs where dropbear is pinned and the root composed; see
+//! `docs/task/20260920-0620-ssh-without-pam.md`.
 
 use std::path::{Path, PathBuf};
 

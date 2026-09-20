@@ -1,6 +1,10 @@
 //! SSH access reconciler: renders dropbear's arguments and the managed
 //! accounts' authorized keys from `access.ssh` and drives `dropbear.service`.
 //! Three system effects, in this order.
+//!
+//! Dropbear authenticates against `/etc/shadow` through `crypt(3)` and not
+//! through PAM (`crate::transient`); the key files this module writes and the
+//! transient password are the two ways into a device.
 
 use std::io::{Read, Write};
 use std::os::fd::OwnedFd;
