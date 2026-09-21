@@ -22,6 +22,6 @@
 - [x] [**20260920-0746-update-upload An update archive can be uploaded from the console**](20260920-0746-update-upload.md) `P2`
 - [x] [**20260920-0811-console-chrome-and-wifi The chrome follows micaos.dev, and Wi-Fi gains its missing halves**](20260920-0811-console-chrome-and-wifi.md) `P1`
 - [x] [**20260920-0813-bluetooth-pairing Bluetooth pairing on the device**](20260920-0813-bluetooth-pairing.md) `P2`
-- [-] [**20260920-0900-pinned-vectors Read the release-lock vectors out of mica at a pinned commit**](20260920-0900-pinned-vectors.md) `P1`
+- [x] [**20260920-0900-pinned-vectors Read the release-lock vectors out of mica at a pinned commit**](20260920-0900-pinned-vectors.md) `P1`
 - [ ] [**20260920-1010-system-log-view A read-only system log in the console**](20260920-1010-system-log-view.md) `P3`
 - [x] [**20260920-1035-console-brand-mark The console wears the brand mark**](20260920-1035-console-brand-mark.md) `P3`

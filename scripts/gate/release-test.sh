@@ -226,7 +226,10 @@ fresh commit-field; pool; release_json; deb mica-deploy amd64 "" "Mica-Source-Co
 run 1 "an archive carrying Mica-Source-Commit" "carries no commit"
 fresh no-inputs; pool; release_json; rm "${G}/_out/debs/amd64/inputs.tsv"
 run 1 "a pool without the inputs hashes" "inputs.tsv does not exist"
-fresh wrong-version; pool; release_json; deb micad arm64 "0.1.0-2"
+# An archive whose control says something other than what the producer
+# declares. The other version is DERIVED from the declared one so the case
+# cannot quietly become "the same version" the day micad is bumped.
+fresh wrong-version; pool; release_json; deb micad arm64 "${WANT[micad]}.other"
 run 1 "an archive of another version" "is Version"
 fresh wrong-tag; pool; release_json
 o="$(git -C "${G}" commit-tree -m other "${C}^{tree}")"
@@ -265,9 +268,11 @@ guard 1 "inputs changed without a version bump are refused" "inputs of micad cha
 pool; deb micad amd64 "" "" "other bytes"
 guard 1 "the same version with other bytes is refused" "does not rebuild byte-identically"
 pool; deb micad amd64 "0.0.9-1"
-guard 1 "a version lower than the released one is refused" "lower than 0.1.0-1"
-pool; deb micad amd64 "0.1.0-2" "" "bumped bytes"
-guard 0 "a bumped version with other bytes and inputs is new" "amd64 micad 0.1.0-2 new"
+guard 1 "a version lower than the released one is refused" "lower than ${WANT[micad]}"
+# A bump is one revision above whatever micad declares today.
+BUMPED="${WANT[micad]%-*}-$((${WANT[micad]##*-} + 1))"
+pool; deb micad amd64 "${BUMPED}" "" "bumped bytes"
+guard 0 "a bumped version with other bytes and inputs is new" "amd64 micad ${BUMPED} new"
 pool; mv "${FAKE}/registry/manifests" "${FAKE}/registry/manifests.gone"
 guard 1 "a previous pool that cannot be read back is refused" "cannot be read anonymously"
 rm -rf "${FAKE}/registry/manifests" && mv "${FAKE}/registry/manifests.gone" "${FAKE}/registry/manifests"

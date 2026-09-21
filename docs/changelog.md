@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-09-20 14:44 [progress]
+
+Three commits of 2026-09-20 afternoon had no entry here, and the
+`2026-09-15 01:15` entry below still describes `tests/vectors/`, which is gone.
+That entry stays as written -- it was true then -- and this one says what moved.
+
+- **The release-lock vectors are read, not copied** (`a55b5eb`).
+  `scripts/gate/vectors.pin` names the mica commit and
+  `scripts/gate/vectors-source.sh` fetches it into the git-ignored `repos/`
+  cache, verifying `HEAD` is that commit; `tests/vectors/` is deleted. So
+  `make locks-test` no longer runs a copy: it runs the specification's vectors
+  at a pinned commit, reports the ones outside this repository's floor with the
+  reason, and checks both directions of the comparison. The deleted copy was a
+  snapshot of mica at `4df34ee` with one blob hand-edited.
+- **`data` and `vectors-pin` are implemented, `board` and `apt` removed**
+  (`a55b5eb`). No lock here carries a `board` or `apt` row, and a stale
+  implementation answered `column-count` -- a claim about a row's shape --
+  where `kind-unknown` is the honest answer.
+- **Every refusal the reader can produce is accounted for** (`539b50a`).
+  `tests/contract_rule_coverage.rs` reads the rule list out of
+  `components.rs` at test time and requires each to be triggered there or named
+  with where it is exercised. Two are unreachable by any input and are recorded
+  as findings rather than counted as covered.
+- **`mica-deploy` and `mica-lifecycle` are `0.1.0-4`** and the release gate's
+  three version literals are derived from `producer.env`. The literals
+  (`0.1.0-1`, `0.1.0-2`) were written when micad carried them; the bump to
+  `0.1.0-2` in this set turned one case into a no-op and one into a false
+  failure, which is how CI on `main` went red. The bump itself is the comment
+  below: a Rust comment is in a file that builds the binary, so it moves the
+  inputs hash even though the archive rebuilds byte-identically.
+- **The project-quota chain is written where it is assumed** (`ed2cc93`).
+  `mica-runkit` applies `prjquota` when it mounts DATA as PID 1;
+  `mica-system-base`'s `mica-data-layout.service` assigns the project ids and
+  sets the limits. Nothing here creates the filesystem.
+
 ## 2026-09-20 10:40 [change]
 
 The console wears the brand mark (20260920-1035-console-brand-mark):
