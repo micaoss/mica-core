@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-09-21 13:35 [feature]
+
+- **An object is assembled from the chunks the device already holds**
+  (`bccab41`). `fetch` asks for `<object url>.index` before it transfers an
+  object whole, cuts its seeds -- the installed deployments' objects and the
+  acquisition store -- once per fetch, and pulls only what it is missing from
+  `<origin>/v1/chunks/<digest>`. The measurement that decided this: over the
+  published `uefi-x64-prod` roots `20260916-0845` -> `20260920-0622`, with
+  `mica-core`, `mica-podman`, `mica-system-base` and `mica-boards` all moved,
+  **2.11 MB of the 65.3 MB image is content the device does not already have**.
+  Nothing signed changed, because a delta is a transport for an object whose
+  digest is already signed: the index and the chunks are unsigned, the
+  assembled file goes through the same verification a whole download does, and
+  any failure falls back to the whole object. `crates/mica-deploy/src/chunks.rs`,
+  `tests/component-contracts/chunker.json`, `mica-deploy` and `mica-lifecycle`
+  at `0.1.0-5`.
+- **The update protocol an origin must serve is written down**
+  (`89c5a7c`, `bccab41`). `docs/plan/20260921-1245-delta-transfer-and-the-update-protocol.md`
+  Part 1 states the transport, the envelope wire order, catalog v2, selection,
+  deployment v2, the objects and `MICAUPD1` as the device enforces them -- as a
+  reader's guide to `tests/component-contracts/`, which stays the contract. It
+  exists because the question "should mica-core be an independent upgrade unit"
+  was answered no: splitting it out saves at most a fifth of the transfer on
+  core-only releases, for a schema break.
+
 ## 2026-09-20 14:44 [progress]
 
 Three commits of 2026-09-20 afternoon had no entry here, and the
