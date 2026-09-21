@@ -69,6 +69,41 @@ answer about the wrong artefact:
 the kernel *can*; a file in `/sys/fs/cgroup` says the device *does*. The
 measurement this replaces was a boot, so a boot replaces it.
 
+### The gate is discharged, by a run, on one product (2026-09-21)
+
+`mica-build` booted **uefi-x64-prod** (Mica OS `0.1.0+git940f870cc632-1`, board
+`uefi-x64.20260920-1536`, kernel 6.12.107) and read the device rather than its
+configuration:
+
+- `cgroup.controllers` carries `cpuset cpu io memory pids`, and
+  `cgroup.subtree_control` carries `memory pids` -- **so the controller is not
+  only compiled in, it is delegated**, which a kernel config cannot say.
+- `podman run --memory=64m` gave `memory.max = 67108864` inside the container.
+- And on the path this proposal's field actually travels: a `.container`
+  carrying **no resource key at all**, rendered by the shipped Quadlet, with no
+  `--pids-limit` in its `ExecStart` -- and the payload child at
+  `pids.max = 2048`, surviving `--cgroups=split`. **An absent `pids` is 2048,
+  measured on a device rather than read out of podman's source.**
+- The same payload showed `memory.max = max`: **a rendered container today is
+  bounded in pids and unbounded in memory and cpu, on a kernel that can bound
+  all three.** That is the gap this proposal closes, now measured rather than
+  inferred.
+
+**Scope, stated rather than assumed: that is one product.** The other three
+boards have the config census above -- the kernel *can* -- and not a boot. The
+fields land on all four anyway, for reasons that are about the failure mode
+rather than about optimism:
+
+- The half a boot adds over a config is **delegation**, and delegation is
+  `systemd`'s, from the same `mica-system-base` root on every product. The
+  variable the census cannot see is the one thing that does not vary by board.
+- If the assumption is wrong the container **refuses to start**, naming the
+  limit, with the unit in `failed`. That is loud, attributable and reversible by
+  removing the field -- not a silent unbounded container.
+- Acceptance therefore carries one addition: **read `cgroup.subtree_control` on
+  a FIT board the next time one is booted for any reason.** It is a line of
+  output on a boot that is happening anyway, not a round of work.
+
 ## Proposal
 
 1. **`pids` lands unconditionally.** `Option<u32>`, rendered as `PidsLimit=` in
@@ -90,6 +125,17 @@ measurement this replaces was a boot, so a boot replaces it.
 implemented only after the boot evidence exists; the asymmetric default stated
 in the type's documentation, in `docs/design/` and in the console; and a test
 that a unit declaring no limits renders exactly the file it renders today.
+
+## And the bind is meant to be inactive
+
+The same run nearly produced a bug report against this repository: two attempts
+found `/etc/containers/systemd` empty. That is the designed state --
+`mica-build`'s own check **refuses a statically enabled bind**, because a bind
+up on every boot lets anything able to write `/mnt/data/state/quadlet` obtain a
+root-capable container at the next reboot with no operator decision in the path.
+`ContainerReconciler::turn_on` -- enable the mount, start it, render, reload,
+start the units -- is the only sanctioned way in, and the third attempt took it.
+**The empty directory is the security property, not a broken rendering path.**
 
 ## Not in scope
 
