@@ -21,7 +21,7 @@ A proposal that listed them together would be wrong about the first.
 | --- | --- | --- | --- |
 | `pids` | **2048 on every container**, set by podman's `DefaultPidsLimit`; `mica-podman`'s `containers.conf` does not override it | **override** an existing ceiling | none |
 | `memory` | nothing | **create** a bound where none exists | a booted guest showing `memory.max` |
-| `cpu` | nothing | create a bound | a booted guest showing `cpu` **in `cgroup.subtree_control`**, which the 2026-09-21 boot did not |
+| `cpu` | nothing | create a bound | a booted guest showing `cpu.max` honoured -- **measured, same boot** |
 
 **So omitting a field means two different things in one struct: an absent
 `pids` is 2048 and an absent `memory` is unlimited.** Nothing in the type says
@@ -69,7 +69,7 @@ answer about the wrong artefact:
 the kernel *can*; a file in `/sys/fs/cgroup` says the device *does*. The
 measurement this replaces was a boot, so a boot replaces it.
 
-### The gate is discharged for `memory`, on one product, and not for `cpu` (2026-09-21)
+### The gate is discharged for all three, on one product (2026-09-21)
 
 `mica-build` booted **uefi-x64-prod** (Mica OS `0.1.0+git940f870cc632-1`, board
 `uefi-x64.20260920-1536`, kernel 6.12.107) and read the device rather than its
@@ -78,27 +78,44 @@ configuration:
 - `cgroup.controllers` carries `cpuset cpu io memory pids`, and
   `cgroup.subtree_control` carries `memory pids` -- **so the memory controller
   is not only compiled in, it is delegated**, which a kernel config cannot say.
-  **`cpu` appears in `controllers` and not in `subtree_control`, and not in
-  `system.slice`'s either.** That is the precise distinction this section exists
-  to draw, applied against the proposal that cites it: the symbol is present and
-  the delegation is **unobserved**. The likely explanation is benign -- systemd
-  enables a controller in `subtree_control` when a unit asks for it, and on that
-  guest nothing had asked -- but that is an inference about systemd's behaviour,
-  which is the class of claim a boot was demanded to replace. **So one run
-  discharges `memory` and leaves `cpu` where `memory` was yesterday.**
+  `cpu` is in `controllers` and **not** in the root's `subtree_control`, which
+  this record held for a day as "available and not delegated". **It is not that,
+  and the second run says so.**
 - `podman run --memory=64m` gave `memory.max = 67108864` inside the container.
+- **`podman run --cpus=0.5` gave `cpu.max = 50000 100000`**, read inside the
+  container and again on the scope from outside (`cpu.weight = 100`), and the
+  scope's own `cgroup.controllers` carried `cpu` -- which happens only if the
+  chain above it enabled it. **So `cpu` is delegated where and when something
+  asks, and handed back after**: the root's `subtree_control` read `memory pids`
+  both before and after. `cpu` and `memory` behave identically; what differs is
+  only what a bare `podman run` gets when nobody asks -- pids 2048 by engine
+  default, memory and cpu unbounded.
+- Two limits of that reading, stated rather than implied: the root was read
+  **before and after, not during**, so "the root's list changed and changed
+  back" is the only reading consistent with the scope's measurements and is an
+  **inference**; and the accounting-defaults explanation (memory and tasks on by
+  default, CPU off) is a **hypothesis** -- `DefaultCPUAccounting` was not read.
+  Neither affects the field: `cpu.max` inside the container is a measurement.
+
+**And the day this record spent holding `cpu` back came from reading a root
+cgroup file as a standing property when it is a snapshot of one instant on an
+idle system.** The root's `subtree_control` says what is delegated *now*, not
+what can be. This is the third costume of the same root-cgroup error in two
+days, after `cpu.max` at the root (which can never exist) and `cpu` listed in
+`controllers` without `CFS_BANDWIDTH` being implied. **Nothing in the file says
+which kind of thing it is, so the reader has to.**
 - And on the path this proposal's field actually travels: a `.container`
   carrying **no resource key at all**, rendered by the shipped Quadlet, with no
   `--pids-limit` in its `ExecStart` -- and the payload child at
   `pids.max = 2048`, surviving `--cgroups=split`. **An absent `pids` is 2048,
   measured on a device rather than read out of podman's source.**
 - The same payload showed `memory.max = max`: **a rendered container today is
-  bounded in pids and unbounded in memory and cpu, on a kernel that compiles in
-  all three and delegates two.** That is the gap this proposal closes, now
+  bounded in pids and unbounded in memory and cpu, on a kernel that bounds all
+  three when asked.** That is the gap this proposal closes, now
   measured rather than inferred.
 
-**Scope, stated rather than assumed: that is one product, and two resources of
-three.** The other three boards have the config census above -- the kernel *can* -- and not a boot. The
+**Scope, stated rather than assumed: that is one product.** All three resources
+are now measured on it; the other three boards have the config census above -- the kernel *can* -- and not a boot. The
 fields land on all four anyway, for reasons that are about the failure mode
 rather than about optimism:
 
@@ -112,32 +129,26 @@ rather than about optimism:
   a FIT board the next time one is booted for any reason.** It is a line of
   output on a boot that is happening anyway, not a round of work.
 
-**That reasoning is about boards and does not carry `cpu` across resources.**
-The board argument works because delegation comes from one `mica-system-base`
-root, so the unseen variable does not vary between products. Between resources
-it plainly does vary -- the same file lists `memory` and omits `cpu` -- so the
-same argument cannot be reused, and `cpu` stays gated on its own reading:
-`podman run --cpus=0.5` with `cpu.max` read inside the container, or
-`subtree_control` read again after a unit that declares a CPU limit. If `cpu`
-delegates on demand the way `memory` did, it joins `memory` and nothing else in
-this record changes. If it does not, **the `cpu` field is a different decision
-from the `memory` field**, and the cost of finding that out after it is written
-is a shipped field that refuses to start a container.
+**The board argument and the resource question are different axes, and only the
+resource one moved.** `cpu` was held back for a day not because the board
+argument was weaker for it but because there was nothing to extrapolate from;
+one command on a guest that was already up supplied the starting point, and the
+`cpu` row discharged without a single other sentence in this record needing to
+be re-argued. The board line is untouched: **the run is `uefi-x64-prod`**, the
+other three rest on config plus identical delegation, and the one-line
+acceptance above still stands.
 
 ## Proposal
 
 1. **`pids` lands unconditionally.** `Option<u32>`, rendered as `PidsLimit=` in
    the `.container` unit. Absent means "podman's default", which is 2048 and is
    documented as such rather than as "no limit".
-2. **`memory` lands on the 2026-09-21 boot**, as `Option<String>` (a byte size
-   rendered as `Memory=`), refused by `validate_container_units` when the syntax
-   is not what systemd accepts.
-3. **`cpu` waits for its own reading** -- `cpu` in `cgroup.subtree_control`, or
-   `cpu.max` inside a container started with a CPU limit -- and then lands in
-   the same shape (a quota/period pair rendered as `CPUQuota=`). It is held
-   separately from `memory` because the boot separated them, not because the
-   work differs.
-4. **The reconciler does not probe.** A device whose kernel lacks the controller
+2. **`memory` and `cpu` land together on the 2026-09-21 boot**, as
+   `Option<String>` each (a byte size rendered as `Memory=`, a quota/period pair
+   rendered as `CPUQuota=`), refused by `validate_container_units` when the
+   syntax is not what systemd accepts. **One decision, not two**: the guest
+   honoured both when asked.
+3. **The reconciler does not probe.** A device whose kernel lacks the controller
    and whose unit declares a limit fails at `crun`, loudly, with the unit in
    `failed` -- which is the observable failure. micad does not silently drop a
    declared limit: a dropped limit is a bound the operator believes in and does
@@ -145,9 +156,8 @@ is a shipped field that refuses to start a container.
 
 ## Acceptance
 
-`pids` declarable, rendered, and defaulted-documented; `memory` implemented on
-the boot evidence recorded above; `cpu` implemented only after a reading that
-shows the controller delegated rather than merely compiled in; the asymmetric default stated
+`pids` declarable, rendered, and defaulted-documented; `memory` and `cpu`
+implemented on the boot evidence recorded above; the asymmetric default stated
 in the type's documentation, in `docs/design/` and in the console; and a test
 that a unit declaring no limits renders exactly the file it renders today.
 
