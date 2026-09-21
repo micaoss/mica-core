@@ -25,3 +25,4 @@
 - [x] [**20260920-0900-pinned-vectors Read the release-lock vectors out of mica at a pinned commit**](20260920-0900-pinned-vectors.md) `P1`
 - [ ] [**20260920-1010-system-log-view A read-only system log in the console**](20260920-1010-system-log-view.md) `P3`
 - [x] [**20260920-1035-console-brand-mark The console wears the brand mark**](20260920-1035-console-brand-mark.md) `P3`
+- [ ] [**20260921-1300-delta-transfer A new root is 2 MB of new bytes and 65 MB of transfer**](20260921-1300-delta-transfer.md) `P1`

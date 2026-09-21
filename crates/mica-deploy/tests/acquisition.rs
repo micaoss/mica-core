@@ -431,7 +431,19 @@ fn transfer_accepts_chunked_catalog_and_close_delimited_object() {
     let mut object = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_vec();
     object.extend(vec![42; 12288]);
     let (dir, store, key, sha, source, server) = transfer_fixture(
-        |catalog| vec![(chunked(catalog.as_bytes()), NO_HOLD), (object, NO_HOLD)],
+        // The client probes for a transfer index first; this origin publishes
+        // none, so it answers 404 once and is asked for the whole object.
+        |catalog| {
+            vec![
+                (chunked(catalog.as_bytes()), NO_HOLD),
+                (
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_vec(),
+                    NO_HOLD,
+                ),
+                (object, NO_HOLD),
+            ]
+        },
         None,
     );
     let keys = [key];
@@ -440,7 +452,8 @@ fn transfer_accepts_chunked_catalog_and_close_delimited_object() {
     acq.fetch(selected).unwrap();
     let requests = server.join().unwrap();
     assert!(requests[0].starts_with("GET /v1/manifest.json HTTP/1.1\r\n"));
-    assert!(!requests[1].to_ascii_lowercase().contains("range:"));
+    assert!(requests[1].starts_with(&format!("GET /v1/objects/{sha}.index ")));
+    assert!(!requests[2].to_ascii_lowercase().contains("range:"));
     assert_eq!(fs::read(acq.objects().join(&sha)).unwrap(), vec![42; 12288]);
 }
 
@@ -677,4 +690,255 @@ fn https_transfer_verifies_the_server_certificate() {
     };
     assert!(format!("{error:#}").contains("UnknownIssuer"), "{error:#}");
     assert!(server.join().unwrap().is_err());
+}
+
+// --- delta transfer -------------------------------------------------------
+//
+// The index and the chunks are unsigned, so these tests are about two things:
+// that the bytes that land are the signed ones however they were assembled,
+// and that every way the delta path can fail ends in the whole object rather
+// than in a failed update.
+
+/// The catalog an origin serves for the single-object fixture.
+fn delta_catalog(
+    address: std::net::SocketAddr,
+    descriptor: &str,
+    sha: &str,
+    key: &[u8; 32],
+) -> Vec<u8> {
+    let payload = serde_json::to_vec(&json!({"schema":"mica/catalog/v2","revision":1,
+        "issuedAt":"2026-09-09T00:00:00.000Z","expiresAt":"2026-09-10T00:00:00.000Z",
+        "channels":[{"board":"uefi-x64","product":"uefi-x64-dev","channel":"stable","releaseId":"test","generation":1}],
+        "releases":[{"id":"test","channel":"stable","notes":"Delta test","deployment":descriptor,
+            "objects":[{"sha256":sha,"bytes":12288,"url":format!("http://{address}/v1/objects/{sha}")}]}]})).unwrap();
+    let signer = Ed25519KeyPair::from_seed_unchecked(&[9; 32]).unwrap();
+    let envelope = format!(
+        "{{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"{}\",\"payload\":\"{}\",\"signature\":\"{}\"}}",
+        hex::encode(digest::digest(&digest::SHA256, key)),
+        STANDARD.encode(&payload),
+        STANDARD.encode(signer.sign(&payload).as_ref())
+    );
+    http(200, envelope.as_bytes())
+}
+
+fn http(status: u16, body: &[u8]) -> Vec<u8> {
+    let reason = if status == 200 { "OK" } else { "Not Found" };
+    let mut response = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(body);
+    response
+}
+
+/// The object's chunks, cut by the shipped chunker, and the index bytes an
+/// origin would publish beside it.
+fn delta_index(bytes: &[u8]) -> (Vec<(String, u64)>, Vec<u8>) {
+    let mut chunks = Vec::new();
+    mica_deploy::chunks::chunk(&mut &bytes[..], |_, length, sha| chunks.push((sha, length)))
+        .unwrap();
+    let object = mica_deploy::components::Artifact {
+        sha256: hex::encode(digest::digest(&digest::SHA256, bytes)),
+        bytes: bytes.len() as u64,
+    };
+    let index = mica_deploy::chunks::write_index(&object, &chunks);
+    (chunks, index)
+}
+
+fn delta_acquisition<'a>(
+    dir: &TempDir,
+    store: &'a DeploymentStore,
+    keys: &'a [[u8; 32]],
+) -> Acquisition<'a> {
+    Acquisition {
+        root: dir.path().join("updates"),
+        store,
+        keys,
+        board: "uefi-x64",
+        arch: "amd64",
+        product: "uefi-x64-dev",
+        max_bytes: 2 * 1024 * 1024,
+    }
+}
+
+#[test]
+fn a_chunk_already_on_the_device_is_never_fetched() {
+    let (archive, key, sha) = archive();
+    let length = u32::from_be_bytes(archive[8..12].try_into().unwrap()) as usize;
+    let descriptor = String::from_utf8(archive[12..12 + length].to_vec()).unwrap();
+    let object = vec![42_u8; 12288];
+    let (_, index) = delta_index(&object);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let source = format!("http://{address}/v1/manifest.json");
+    let server = serve(
+        listener,
+        vec![
+            (
+                delta_catalog(address, &descriptor, &sha, &key),
+                std::time::Duration::ZERO,
+            ),
+            (http(200, &index), std::time::Duration::ZERO),
+        ],
+    );
+    let (dir, store) = fixture();
+    let keys = [key];
+    let acq = delta_acquisition(&dir, &store, &keys);
+    fs::create_dir_all(acq.objects()).unwrap();
+    // A donor with the same content under a name that is not its digest: the
+    // object is still missing, and every one of its chunks is already here.
+    fs::write(acq.objects().join("donor.img"), &object).unwrap();
+    let selected = acq
+        .check(&source, "stable", 1788915600)
+        .unwrap()
+        .selected
+        .unwrap();
+    acq.fetch(selected).unwrap();
+    let requests = server.join().unwrap();
+    assert_eq!(fs::read(acq.objects().join(&sha)).unwrap(), object);
+    assert_eq!(
+        requests.len(),
+        2,
+        "the origin was asked for more than the manifest and the index"
+    );
+    assert!(
+        requests[1].starts_with(&format!("GET /v1/objects/{sha}.index ")),
+        "{}",
+        requests[1]
+    );
+}
+
+#[test]
+fn a_chunk_that_is_not_here_is_fetched_from_the_chunk_store() {
+    let (archive, key, sha) = archive();
+    let length = u32::from_be_bytes(archive[8..12].try_into().unwrap()) as usize;
+    let descriptor = String::from_utf8(archive[12..12 + length].to_vec()).unwrap();
+    let object = vec![42_u8; 12288];
+    let (chunks, index) = delta_index(&object);
+    assert_eq!(chunks.len(), 1, "the fixture object is one chunk");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let source = format!("http://{address}/v1/manifest.json");
+    let server = serve(
+        listener,
+        vec![
+            (
+                delta_catalog(address, &descriptor, &sha, &key),
+                std::time::Duration::ZERO,
+            ),
+            (http(200, &index), std::time::Duration::ZERO),
+            (http(200, &object), std::time::Duration::ZERO),
+        ],
+    );
+    let (dir, store) = fixture();
+    let keys = [key];
+    let acq = delta_acquisition(&dir, &store, &keys);
+    let selected = acq
+        .check(&source, "stable", 1788915600)
+        .unwrap()
+        .selected
+        .unwrap();
+    acq.fetch(selected).unwrap();
+    let requests = server.join().unwrap();
+    assert_eq!(fs::read(acq.objects().join(&sha)).unwrap(), object);
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests[2].starts_with(&format!("GET /v1/chunks/{} ", chunks[0].0)),
+        "{}",
+        requests[2]
+    );
+}
+
+#[test]
+fn an_origin_without_an_index_still_serves_the_whole_object() {
+    for (name, index_response) in [
+        ("no index", http(404, b"nothing here")),
+        (
+            "a truncated index",
+            http(200, &delta_index(&vec![42_u8; 12288]).1[..40]),
+        ),
+        (
+            "an index for another object",
+            http(200, &delta_index(&vec![7_u8; 12288]).1),
+        ),
+    ] {
+        let (archive, key, sha) = archive();
+        let length = u32::from_be_bytes(archive[8..12].try_into().unwrap()) as usize;
+        let descriptor = String::from_utf8(archive[12..12 + length].to_vec()).unwrap();
+        let object = vec![42_u8; 12288];
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let source = format!("http://{address}/v1/manifest.json");
+        let server = serve(
+            listener,
+            vec![
+                (
+                    delta_catalog(address, &descriptor, &sha, &key),
+                    std::time::Duration::ZERO,
+                ),
+                (index_response, std::time::Duration::ZERO),
+                (http(200, &object), std::time::Duration::ZERO),
+            ],
+        );
+        let (dir, store) = fixture();
+        let keys = [key];
+        let acq = delta_acquisition(&dir, &store, &keys);
+        let selected = acq
+            .check(&source, "stable", 1788915600)
+            .unwrap()
+            .selected
+            .unwrap();
+        acq.fetch(selected)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let requests = server.join().unwrap();
+        assert_eq!(
+            fs::read(acq.objects().join(&sha)).unwrap(),
+            object,
+            "{name}"
+        );
+        assert!(
+            requests[2].starts_with(&format!("GET /v1/objects/{sha} ")),
+            "{name}: {}",
+            requests[2]
+        );
+    }
+}
+
+/// A chunk store that answers with the wrong bytes must not be able to put
+/// them on the device: the chunk is refused against the index, the delta
+/// fails, and the whole object is fetched instead.
+#[test]
+fn a_substituted_chunk_is_refused_and_the_object_still_lands() {
+    let (archive, key, sha) = archive();
+    let length = u32::from_be_bytes(archive[8..12].try_into().unwrap()) as usize;
+    let descriptor = String::from_utf8(archive[12..12 + length].to_vec()).unwrap();
+    let object = vec![42_u8; 12288];
+    let (_, index) = delta_index(&object);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let source = format!("http://{address}/v1/manifest.json");
+    let server = serve(
+        listener,
+        vec![
+            (
+                delta_catalog(address, &descriptor, &sha, &key),
+                std::time::Duration::ZERO,
+            ),
+            (http(200, &index), std::time::Duration::ZERO),
+            (http(200, &vec![7_u8; 12288]), std::time::Duration::ZERO),
+            (http(200, &object), std::time::Duration::ZERO),
+        ],
+    );
+    let (dir, store) = fixture();
+    let keys = [key];
+    let acq = delta_acquisition(&dir, &store, &keys);
+    let selected = acq
+        .check(&source, "stable", 1788915600)
+        .unwrap()
+        .selected
+        .unwrap();
+    acq.fetch(selected).unwrap();
+    server.join().unwrap();
+    assert_eq!(fs::read(acq.objects().join(&sha)).unwrap(), object);
 }

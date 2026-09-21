@@ -1,8 +1,9 @@
 # 20260921-1245-delta-transfer-and-the-update-protocol Delta transfer, and the update protocol an origin must serve
 
-- **status**: proposed
+- **status**: approved
 - **createdAt**: 2026-09-21 12:45
-- **relatedTask**: (none yet)
+- **approvedAt**: 2026-09-21 13:00
+- **relatedTask**: 20260921-1300-delta-transfer
 
 ## Context
 
@@ -39,24 +40,25 @@ thing in the root is not Debian, it is podman.** `mica-core` is roughly a fifth.
 
 ### The decisive measurement: 96.8% of a new root is already on the device
 
-Content-defined chunking (gear hash, ~16 KiB average chunk, 4 KiB/64 KiB
-bounds) over two **published** `uefi-x64-prod` roots, `20260916-0845` ->
-`20260920-0622`, a span in which `mica-core`, `mica-podman`,
-`mica-system-base` and `mica-boards` all moved:
+Content-defined chunking over two **published** `uefi-x64-prod` roots,
+`20260916-0845` -> `20260920-0622`, a span in which `mica-core`,
+`mica-podman`, `mica-system-base` and `mica-boards` all moved. Re-run
+2026-09-21 with the **shipped** parameters rather than the model that first
+suggested the number, by an independent Python implementation written from the
+derivation in `chunker.json` and checked against that vector first:
 
 ```
-old  81.4 MB / 3908 chunks          new  65.3 MB / 3119 chunks
-bytes of the new image not present in the old:  2.1 MB  (3.2%)
+old  81.4 MB / 4031 chunks          new  65.3 MB / 3220 chunks
+bytes of the new image not present in the old:  2.11 MB  (3.23%)
 ```
 
-**A device that holds the previous root needs 2.1 MB of genuinely new bytes and
-is sent 65.3 MB.** Stated as its limits: this is an ideal chunker; it excludes
-the chunk index (3119 chunks at ~40 bytes is ~125 KB, negligible) and
-per-request overhead; the old file was the `full` archive and the new one the
-`root` archive, so their framing differs, which content-defined chunking is
-specifically built to absorb. A real implementation does worse than 3.2% and
-not by an order of magnitude. **Neither limit reaches the conclusion, because
-the conclusion only needs the gap between 2.1 and 65.3.**
+**A device that holds the previous root needs 2.11 MB of genuinely new bytes
+and is sent 65.3 MB.** Stated as its limits: it excludes the index (3220
+chunks at 68 bytes is 219 KB, and it is fetched, so call it 2.3 MB delivered)
+and per-request overhead; the old file was the `full` archive and the new one
+the `root` archive, so their framing differs, which content-defined chunking is
+specifically built to absorb. **Neither limit reaches the conclusion, because
+the conclusion only needs the gap between 2.3 and 65.3.**
 
 ### So: not a new upgrade unit
 
@@ -339,7 +341,10 @@ recorded here so the choice is visible rather than implied.
 ### 2.6 Acceptance
 
 1. A vector file pins the chunker and a second implementation reproduces its
-   boundaries.
+   boundaries. **Done**: `tests/component-contracts/chunker.json`, and the
+   independent Python implementation used for the measurement above reproduced
+   all 14 chunks from the derivation alone before it was pointed at 145 MB of
+   published images.
 2. An origin serving `.index` and `/v1/chunks/` is driven end to end from a
    device holding the previous root, and the transferred bytes are **measured**
    -- the number to beat is 65.3 MB, and the modelled floor is 2.1 MB.

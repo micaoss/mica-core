@@ -1,5 +1,5 @@
-//! The generator of `tests/component-contracts/`: the four shared contract
-//! files, derived from their unsigned inputs with TEST-ONLY signing keys.
+//! The generator of `tests/component-contracts/`: the shared contract files,
+//! derived from their unsigned inputs with TEST-ONLY signing keys.
 //!
 //! Inputs are the unsigned parts of the committed `cases.json` (the valid
 //! descriptor, the refused mutations, the running identity) and
@@ -15,7 +15,10 @@
 //! server or production trust set.
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use mica_deploy::components::component_id;
+use mica_deploy::{
+    chunks,
+    components::{Artifact, component_id},
+};
 use ring::{
     digest,
     signature::{Ed25519KeyPair, KeyPair},
@@ -47,6 +50,20 @@ pub struct Fixtures {
     pub firmware: String,
     pub cases: String,
     pub catalog: String,
+    pub chunker: String,
+}
+
+/// The chunker vector's input, derived so that a port reproduces it without
+/// shipping 256 KiB of test data: `sha256("mica-chunker-vector/v1" || uint32be(i))`
+/// for `i` in `0..8192`, concatenated.
+pub fn chunker_vector_input() -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(8192 * 32);
+    for index in 0_u32..8192 {
+        let mut seed = b"mica-chunker-vector/v1".to_vec();
+        seed.extend_from_slice(&index.to_be_bytes());
+        bytes.extend_from_slice(digest::digest(&digest::SHA256, &seed).as_ref());
+    }
+    bytes
 }
 
 /// The Ed25519 key a label names.
@@ -180,11 +197,62 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
         "envelope": serde_json::from_str::<Value>(&sign(&deployment_key, &payload)).expect("envelope"),
     }));
 
+    // The chunker vector is signed by nothing and depends on no input above:
+    // a delta is a transport for an object whose digest is already signed, so
+    // what this file pins is agreement between two implementations of the cut,
+    // which is the only thing a delta needs and the only thing a port can get
+    // wrong silently.
+    let input = chunker_vector_input();
+    let mut cut = Vec::new();
+    chunks::chunk(&mut input.as_slice(), |offset, length, sha| {
+        cut.push(json!({"offset": offset, "length": length, "sha256": sha}));
+    })
+    .expect("chunking a slice cannot fail");
+    let object = Artifact {
+        sha256: hex::encode(digest::digest(&digest::SHA256, &input)),
+        bytes: input.len() as u64,
+    };
+    let entries: Vec<(String, u64)> = cut
+        .iter()
+        .map(|chunk| {
+            (
+                chunk["sha256"].as_str().expect("digest").to_owned(),
+                chunk["length"].as_u64().expect("length"),
+            )
+        })
+        .collect();
+    let chunker = pretty(&json!({
+        "note": "The cut both sides must agree on. The origin chunks what it publishes; \
+                 the device re-chunks what it already holds. Disagreement does not fail \
+                 loudly -- it silently reuses nothing.",
+        "input": {
+            "derivation": "sha256(\"mica-chunker-vector/v1\" || uint32be(i)) for i in 0..8192, concatenated",
+            "bytes": object.bytes,
+            "sha256": object.sha256,
+        },
+        "parameters": {
+            "gear": "GEAR[b] = sha256(\"mica-chunker/v1\" || b)[0..8] as big-endian uint64",
+            "roll": "hash = (hash << 1) + GEAR[byte], wrapping at 64 bits, reset at every cut",
+            "mask": "0xFFFC000000000000",
+            "cutWhen": "length >= minChunk and (hash & mask) == 0, or length == maxChunk",
+            "minChunk": chunks::MIN_CHUNK,
+            "maxChunk": chunks::MAX_CHUNK,
+        },
+        "gearPrefix": (0..4).map(|b| format!("{:016x}", {
+            let mut seed = b"mica-chunker/v1".to_vec();
+            seed.push(b as u8);
+            u64::from_be_bytes(digest::digest(&digest::SHA256, &seed).as_ref()[..8].try_into().expect("8 bytes"))
+        })).collect::<Vec<_>>(),
+        "chunks": cut,
+        "index": hex::encode(chunks::write_index(&object, &entries)),
+    }));
+
     Fixtures {
         deployment,
         envelope,
         firmware,
         cases: pretty(&cases),
         catalog,
+        chunker,
     }
 }

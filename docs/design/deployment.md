@@ -93,6 +93,48 @@ and synced, and the fault suite (`scripts/gate/file-ab-faults/`) interrupts the
 real transaction code before and after each observed IO operation to prove
 recovery.
 
+### Delta transfer: the bytes on the wire, and nothing else
+
+A device that holds the previous root already holds **96.8%** of the next one:
+measured 2026-09-21 over the published `uefi-x64-prod` roots `20260916-0845`
+and `20260920-0622`, with `mica-core`, `mica-podman`, `mica-system-base` and
+`mica-boards` all moved between them, 2.11 MB of a 65.3 MB image is content the
+device does not have. `fetch` therefore tries to assemble each missing object
+from what is here before it transfers it whole.
+
+- `GET <object url>.index`, whose ceiling is derived from the **signed** object
+  length before it is fetched (`chunks::index_limit`). The index is
+  `MICAIDX1`: the object digest and length, then each chunk's digest and
+  length, which must sum to that length.
+- Chunks not found locally come from `<origin>/v1/chunks/<digest>` and are
+  checked against the index entry that named them.
+- The seeds are the objects of the installed deployments and whatever earlier
+  acquisition left in the object store, cut **once** per fetch.
+- The assembled file is written beside the partial and renamed onto it only on
+  success, so a resumable transfer is never truncated to attempt a delta. An
+  object with bytes already on disk is resumed instead: those bytes are paid
+  for.
+- **Any failure falls back to the whole object**, and one failure stops the
+  probing for the rest of that fetch.
+
+**Nothing in this path is trusted.** The index and the chunks are unsigned; the
+assembled object goes through the same digest-and-length verification a whole
+download does, and an object that fails it is deleted rather than promoted. So
+a hostile index or chunk store can waste bandwidth and cannot place a byte. It
+is also why no signed document changed: an origin that publishes no index is
+still a conforming origin.
+
+**The cut is pinned, because both sides perform it.** `GEAR[b] =
+sha256("mica-chunker/v1" || b)[0..8]` big-endian; `hash = (hash << 1) +
+GEAR[byte]` wrapping at 64 bits; cut when at least 4096 bytes are held and the
+**top 14 bits** of the hash are zero, or at 65536 bytes. The top bits and not
+the low ones: a left shift feeds zeros into bit 0, so the low bits depend on
+the last few bytes alone. `tests/component-contracts/chunker.json` fixes the
+boundaries and the index bytes for a derived 256 KiB input, so a second
+implementation is checked rather than described -- content-defined and not
+fixed-size, because squashfs lays compressed blocks end to end and one block
+changing length shifts every byte after it.
+
 ### What "confirmed" means, and what it deliberately does not
 
 `confirm` is not a statement that the product works. It removes the trial

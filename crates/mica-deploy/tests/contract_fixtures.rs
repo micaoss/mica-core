@@ -14,6 +14,7 @@ const ENVELOPE: &str = include_str!("component-contracts/envelope.json");
 const FIRMWARE: &str = include_str!("component-contracts/firmware.json");
 const CASES: &str = include_str!("component-contracts/cases.json");
 const CATALOG: &str = include_str!("component-contracts/catalog.json");
+const CHUNKER: &str = include_str!("component-contracts/chunker.json");
 
 #[test]
 fn committed_fixtures_are_the_generators_fixed_point() {
@@ -25,6 +26,7 @@ fn committed_fixtures_are_the_generators_fixed_point() {
     assert_eq!(generated.firmware, FIRMWARE, "firmware.json");
     assert_eq!(generated.cases, CASES, "cases.json");
     assert_eq!(generated.catalog, CATALOG, "catalog.json");
+    assert_eq!(generated.chunker, CHUNKER, "chunker.json");
     // Regenerating from the generated inputs changes nothing.
     let again = generate(
         &serde_json::from_str(&generated.cases).unwrap(),
@@ -33,6 +35,7 @@ fn committed_fixtures_are_the_generators_fixed_point() {
     assert_eq!(again.firmware, generated.firmware);
     assert_eq!(again.cases, generated.cases);
     assert_eq!(again.catalog, generated.catalog);
+    assert_eq!(again.chunker, generated.chunker);
 }
 
 #[test]

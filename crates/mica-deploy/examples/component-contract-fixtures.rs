@@ -6,7 +6,7 @@
 //! ```
 //!
 //! It reads the unsigned inputs from the directory's `cases.json` and
-//! `firmware.json` and writes all four files, signed with the TEST-ONLY keys
+//! `firmware.json` and writes every file, signed with the TEST-ONLY keys
 //! `tests/support/contract_fixtures.rs` derives from its labels. Running it
 //! twice changes nothing; `tests/contract_fixtures.rs` holds the committed
 //! files to that.
@@ -35,5 +35,6 @@ fn main() -> anyhow::Result<()> {
     fs::write(directory.join("firmware.json"), generated.firmware)?;
     fs::write(directory.join("cases.json"), generated.cases)?;
     fs::write(directory.join("catalog.json"), generated.catalog)?;
+    fs::write(directory.join("chunker.json"), generated.chunker)?;
     Ok(())
 }

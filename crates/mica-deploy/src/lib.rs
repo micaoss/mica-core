@@ -4,6 +4,7 @@
 pub mod acquisition;
 pub mod boot;
 pub mod catalog;
+pub mod chunks;
 pub mod components;
 pub mod deployments;
 pub mod firmware;

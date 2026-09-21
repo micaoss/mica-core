@@ -1,6 +1,9 @@
 //! Bounded online acquisition and streaming offline component archives.
 use crate::{
-    catalog::{self, CatalogCheckpoint, CatalogRequest, SelectedRelease, VerifiedCatalog},
+    catalog::{
+        self, CatalogCheckpoint, CatalogRequest, SelectedRelease, SourceObject, VerifiedCatalog,
+    },
+    chunks,
     components::{Artifact, Deployment, authenticate_deployment, component_id},
     deployments::{
         DeploymentStore, atomic_write, directory, read_bounded, sync_directory, verify_file,
@@ -244,11 +247,110 @@ impl Acquisition<'_> {
         self.reserve(needed + 24576)
     }
 
+    /// Every file on this device that a chunk may be copied out of: the objects
+    /// of the installed deployments, and whatever earlier acquisition left in
+    /// the object store. A seed is read, never trusted -- each chunk taken from
+    /// one is checked against the digest that named it, and the assembled
+    /// object against the signed digest -- so a seed that cannot be read or
+    /// authenticated is skipped rather than refused.
+    fn seeds(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        for entry in self.store.entries().unwrap_or_default() {
+            let Ok(bytes) = read_bounded(
+                &self
+                    .store
+                    .system
+                    .join(format!("deployments/{}.json", entry.id)),
+                24576,
+            ) else {
+                continue;
+            };
+            let Ok(deployment) = authenticate_deployment(&bytes, self.keys) else {
+                continue;
+            };
+            paths.extend(
+                self.store
+                    .object_paths(&deployment)
+                    .into_iter()
+                    .map(|(path, _)| path),
+            );
+        }
+        if let Ok(stored) = fs::read_dir(self.objects()) {
+            paths.extend(stored.flatten().map(|entry| entry.path()));
+        }
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    /// Assemble one object from chunks this device already holds plus the ones
+    /// it does not. The index and the chunks are unsigned and unauthenticated:
+    /// what makes this safe is that the result goes through the same promotion
+    /// a whole download does, so the worst a hostile index achieves is wasted
+    /// bandwidth. Any failure here is an ordinary `Err` and the caller falls
+    /// back to fetching the whole object.
+    fn delta(
+        &self,
+        object: &SourceObject,
+        partial: &Path,
+        seeds: &BTreeMap<String, (PathBuf, u64, u64)>,
+    ) -> Result<()> {
+        let artifact = Artifact {
+            sha256: object.sha256.clone(),
+            bytes: object.bytes,
+        };
+        let limit = chunks::index_limit(object.bytes);
+        self.reserve(limit + chunks::MAX_CHUNK)?;
+        let index_path = self.root.join(format!("downloads/{}.index", object.sha256));
+        let source = url::Url::parse(&object.url)?;
+        download(&format!("{}.index", object.url), &index_path, limit, false)?;
+        let index = chunks::parse_index(&read_bounded(&index_path, limit)?, &artifact)?;
+        fs::remove_file(&index_path)?;
+        let chunk_path = self.root.join(format!("downloads/{}.chunk", object.sha256));
+        // Assembled beside the partial, never into it: a partial is a resumable
+        // transfer, and truncating one to try a delta would throw away bytes
+        // that are already here if the delta then failed.
+        let assembly = self
+            .root
+            .join(format!("downloads/{}.assembly", object.sha256));
+        let mut output = File::create(&assembly)?;
+        for (sha, length) in index.0 {
+            let bytes = match seeds.get(&sha) {
+                Some((path, offset, held)) if *held == length => {
+                    chunks::read_seed(path, *offset, length, &sha)?
+                }
+                _ => {
+                    let url = source.join(&format!("/v1/chunks/{sha}"))?;
+                    download(url.as_str(), &chunk_path, length, false)?;
+                    verify_file(
+                        &chunk_path,
+                        &Artifact {
+                            sha256: sha.clone(),
+                            bytes: length,
+                        },
+                    )?;
+                    read_bounded(&chunk_path, length)?
+                }
+            };
+            output.write_all(&bytes)?;
+        }
+        output.sync_all()?;
+        let _ = fs::remove_file(&chunk_path);
+        fs::rename(&assembly, partial)?;
+        Ok(())
+    }
+
     pub fn fetch(&self, selected: SelectedRelease) -> Result<ReadyDeployment> {
         self.validate(&selected.deployment)?;
         self.prepare()?;
         let missing = self.missing(&selected.deployment)?;
         self.reserve_missing(&missing)?;
+        let mut seeds = None;
+        // One probe per fetch, not one per object: an origin that did not serve
+        // the first index is not expected to serve the next, and being wrong
+        // about that costs exactly what this repository did before deltas --
+        // the whole object.
+        let mut origin_has_indexes = true;
         for (sha, bytes) in missing {
             let object = selected
                 .objects
@@ -256,6 +358,32 @@ impl Acquisition<'_> {
                 .find(|object| object.sha256 == sha && object.bytes == bytes)
                 .context("missing acquisition URL")?;
             let partial = self.root.join(format!("downloads/{sha}.partial"));
+            let held = if partial.try_exists()? {
+                partial.metadata()?.len()
+            } else {
+                0
+            };
+            // An interrupted transfer is resumed rather than restarted as a
+            // delta: the bytes on disk are already paid for.
+            if held == 0 && origin_has_indexes {
+                // The seeds are cut once and reused for every object of this
+                // deployment: re-reading them per object would multiply the
+                // slowest step by the number of objects for nothing.
+                let cut = match &seeds {
+                    Some(cut) => cut,
+                    None => seeds.insert(chunks::seed_map(&self.seeds())?),
+                };
+                if self.delta(object, &partial, cut).is_err() {
+                    origin_has_indexes = false;
+                    for leftover in [
+                        self.root.join(format!("downloads/{sha}.assembly")),
+                        self.root.join(format!("downloads/{sha}.index")),
+                        self.root.join(format!("downloads/{sha}.chunk")),
+                    ] {
+                        let _ = fs::remove_file(leftover);
+                    }
+                }
+            }
             if !partial.try_exists()? || partial.metadata()?.len() < bytes {
                 download(&object.url, &partial, bytes, true)?;
             }
