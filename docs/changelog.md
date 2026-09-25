@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-25 13:00 [plan]
+
+- **Board facts from the signed boot policy** (plan and task
+  `20260925-1300-board-facts-from-the-boot-policy`, approved, unclaimed): the FIT record geometry,
+  the boot backend, the firmware target and the kernel format leave the board-name tables of
+  `mica-deploy` for a required `board` section of `boot.json`, so a board `mica-build` adds as data
+  needs no `mica-core` change. `mica-build` pins the release and writes the section in one commit.
+
 ## 2026-09-21 13:35 [feature]
 
 - **An object is assembled from the chunks the device already holds**

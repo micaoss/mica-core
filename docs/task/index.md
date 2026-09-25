@@ -26,3 +26,4 @@
 - [ ] [**20260920-1010-system-log-view A read-only system log in the console**](20260920-1010-system-log-view.md) `P3`
 - [x] [**20260920-1035-console-brand-mark The console wears the brand mark**](20260920-1035-console-brand-mark.md) `P3`
 - [ ] [**20260921-1300-delta-transfer A new root is 2 MB of new bytes and 65 MB of transfer**](20260921-1300-delta-transfer.md) `P1`
+- [ ] [**20260925-1300-board-facts-from-the-boot-policy The device reads its board facts from the signed boot policy, not from the board's name**](20260925-1300-board-facts-from-the-boot-policy.md) `P1`
