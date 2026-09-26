@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Check files against the file rules of mica-lock v1 and mica-pin v1
-# (mica:docs/design/release-lock.md) and print `valid`, or `refused <rule>` and
+# Check files against the file rules of mica-lock v1 and mica-pin v1 and print
+# `valid`, or `refused <rule>` and
 # exit 1 at the first rule broken.
 #
 #   bash scripts/build/check-lock.sh lock <file>             a release lock (1.1 to 1.5)
@@ -66,7 +66,7 @@ if [ "${1-}" = pins ]; then
 fi
 
 # `vectors-pin <file>`: the file naming the mica commit a repository reads the
-# release-lock vectors at (mica:docs/design/release-lock.md section 9.1). Its
+# release-lock vectors at. Its
 # own vectors are vectors-pin/ -- a repository that pins the vectors produces
 # one of these, so the family is in its floor.
 if [ "${1-}" = vectors-pin ]; then
@@ -103,10 +103,8 @@ FILE="$2"
 [ -f "${FILE}" ] || { echo "error: ${FILE} is not a file" >&2; exit 2; }
 
 # THE KINDS THIS READER IMPLEMENTS, which is the set of forms this repository
-# reads or emits. `board` and `apt` were implemented from an older spec and are
-# carried by no lock here; a stale implementation answers `column-count`, a
-# claim about the row's shape, where `kind-unknown` is the honest answer -- so
-# they are gone rather than maintained against a spec nothing here consumes.
+# reads or emits. Any other kind answers `kind-unknown`, which says what is
+# true of the row, rather than a claim about its shape.
 KINDS=(release image pool package upstream data)
 declare -A COLUMNS=([release]=4 [image]=5 [pool]=3 [package]=5 [upstream]=7 [data]=4)
 kind_index() { local i; for i in "${!KINDS[@]}"; do [ "${KINDS[$i]}" != "$1" ] || { echo "$i"; return; }; done; }

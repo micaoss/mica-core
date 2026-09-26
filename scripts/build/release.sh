@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Publish _out/debs/{amd64,arm64}/pool of a clean HEAD for the published GitHub
-# Release <tag> of this repository, as mica:docs/design/release-lock.md
-# describes a release:
+# Release <tag> of this repository:
 #   - the OCI pools ghcr.io/micaoss/<repository>:pool.<arch>.<tag>, one manifest
 #     per architecture with one layer per archive, read back anonymously. Every
 #     package is at its producer's declared version and passes scripts/build/reuse.sh

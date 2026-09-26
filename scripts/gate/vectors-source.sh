@@ -2,10 +2,10 @@
 # The release-lock vectors at the commit scripts/gate/vectors.pin names, in the
 # git-ignored source cache. Prints the directory; fetches only when the cache
 # does not already hold that commit, so a warm cache and `make offline` need no
-# network (mica:docs/design/release-lock.md section 9.1).
+# network.
 #
-# The vectors are READ, never copied into this tree: a copy is a snapshot, and
-# on 2026-09-20 five repositories each held a different one.
+# The vectors are READ, never copied into this tree: a copy is a snapshot that
+# drifts from the specification.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

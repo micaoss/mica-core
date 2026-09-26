@@ -179,15 +179,12 @@ fn encode_psk(psk: &str) -> Result<String> {
     {
         return Ok(psk.to_string());
     }
-    // IEEE 802.11i's passphrase bounds, called and no longer restated: they
-    // were lifted into `micad-settings` beside the typed model so
-    // that the crate holding `WifiNetwork` states its own field's rule and
-    // every write surface can run the same one. The reason they are checked at
-    // all is unchanged — wpa_supplicant rejects an out-of-range passphrase by
-    // refusing the WHOLE configuration file, which silently takes every other
+    // IEEE 802.11i's passphrase bounds, from `micad-settings`, which states the
+    // rule beside `WifiNetwork` so every write surface runs the same one. They
+    // are checked because wpa_supplicant rejects an out-of-range passphrase by
+    // refusing the WHOLE configuration file, which takes every other
     // configured network down with it while the reconcile still reports
-    // `applied` — and so is the message, which never names the length
-    // observed.
+    // `applied`. The message never names the length observed.
     micad_settings::validate_wifi_psk(psk).map_err(|message| anyhow!(message))?;
     if !is_quotable(psk) {
         return Err(anyhow!(

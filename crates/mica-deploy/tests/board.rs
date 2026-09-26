@@ -134,7 +134,7 @@ fn an_inconsistent_board_section_is_refused_by_name() {
             json!({"format": "emmc-boot", "area": "boot2", "payloadOffset": 512, "maxBytes": 4193792}),
             "unknown variant",
         ),
-        // The vendor-named formats are gone, not aliased.
+        // A format name this device does not implement is refused, with no alias.
         (
             "cx3576",
             "/firmware",

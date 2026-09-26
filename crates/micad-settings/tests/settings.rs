@@ -747,11 +747,10 @@ fn the_wireguard_subtree_holds_no_secret() {
 
 // --- Quoted path segments --------------------------------------------------
 
-/// The reproduction as a fixture: the write of a VLAN-named entry
-/// used to fail with `unknown field \`100\`` because the dot-path split the
-/// key into two segments. Quoted, it lands on the key `eth0.100`, and every
-/// layer — get, set of a leaf inside it, TOML persistence, reload — spells it
-/// the same way.
+/// A VLAN-named entry: unquoted, the dot-path would split `eth0.100` into two
+/// segments and fail with `unknown field \`100\``. Quoted, it lands on the key
+/// `eth0.100`, and every layer — get, set of a leaf inside it, TOML
+/// persistence, reload — spells it the same way.
 #[test]
 fn a_quoted_segment_round_trips_a_dotted_interface_key() {
     let mut settings = Settings::default();

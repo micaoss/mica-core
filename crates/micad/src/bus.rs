@@ -152,6 +152,9 @@ pub struct MicadService {
     /// whole reason it is here: the agent blocks on a decision that arrives
     /// through the bus members below.
     agent: Arc<BluetoothAgent>,
+    /// The features the product carries. A member or a settings write that
+    /// belongs to any other is refused by name.
+    features: micad_settings::Features,
     /// The unit control the three container actions drive.
     ///
     /// `StartContainer` and its two siblings are systemd verbs on the unit
@@ -263,6 +266,7 @@ impl MicadService {
             bluetooth: Arc::new(crate::bluetooth::NoAdapter),
             agent: Arc::new(BluetoothAgent::default()),
             units: Arc::new(crate::reconciler::systemd::NoUnits),
+            features: micad_settings::Features::all(),
             storage_pressure: Arc::new(PressureTracker::default()),
             update,
             refusals: Arc::new(RwLock::new(Vec::new())),
@@ -291,6 +295,7 @@ impl MicadService {
     /// switched off, rather than letting it fail as a bus error about an
     /// object that does not exist.
     async fn require_bluetooth(&self) -> fdo::Result<()> {
+        self.require_feature(micad_settings::Feature::Bluetooth)?;
         if !self.inner.read().await.settings.bluetooth.enabled {
             return Err(fdo::Error::Failed(
                 "Bluetooth is switched off on this device; enable `bluetooth.enabled` first"
@@ -310,6 +315,7 @@ impl MicadService {
     /// way to drive an arbitrary systemd unit through a container-shaped
     /// argument: a name nobody declared is refused before any bus call.
     async fn container_action(&self, name: &str, action: ContainerAction) -> fdo::Result<()> {
+        self.require_feature(micad_settings::Feature::Containers)?;
         let settings = self.inner.read().await.settings.clone();
         if !settings.container.units.contains_key(name) {
             return Err(fdo::Error::InvalidArgs(format!(
@@ -455,6 +461,26 @@ impl MicadService {
         self.engine = engine;
         self.units = units;
         self
+    }
+
+    /// Serve only `features`.
+    #[must_use]
+    pub fn with_features(mut self, features: micad_settings::Features) -> Self {
+        self.features = features;
+        self
+    }
+
+    /// Refuse a member of a feature the product does not carry, by name,
+    /// rather than letting it fail against hardware or a daemon that is not
+    /// there.
+    fn require_feature(&self, feature: micad_settings::Feature) -> fdo::Result<()> {
+        if self.features.has(feature) {
+            Ok(())
+        } else {
+            Err(fdo::Error::NotSupported(format!(
+                "feature not in this product: {feature}"
+            )))
+        }
     }
 
     /// Attach the Bluetooth adapter and the pairing agent's state
@@ -748,6 +774,14 @@ impl MicadService {
     ///
     /// # Errors
     async fn persist_setting(&self, path: &str, value: Value) -> Result<(), SettingsError> {
+        // A path inside a feature the product does not carry is refused before
+        // its value is read, so the answer is the same whatever was sent.
+        if let Some(feature) = self.features.refuses(path) {
+            return Err(SettingsError::NotServed {
+                path: path.to_string(),
+                feature,
+            });
+        }
         // **A refused document keeps its bytes unless this write is the one
         // that repairs it**. A refused subtree sits at
         // its schema default in the addressed tree, and `save` writes every
@@ -767,6 +801,18 @@ impl MicadService {
             let mut inner = self.inner.write().await;
             let mut candidate = inner.settings.clone();
             candidate.set(path, value)?;
+            // A feature the product does not carry keeps whatever it holds: a
+            // write around its subtree that would change it is refused too.
+            for feature in micad_settings::Feature::ALL {
+                if !self.features.has(feature)
+                    && candidate.get(feature.subtree())? != inner.settings.get(feature.subtree())?
+                {
+                    return Err(SettingsError::NotServed {
+                        path: path.to_string(),
+                        feature,
+                    });
+                }
+            }
             let preserve: Vec<&str> = preserve.iter().map(String::as_str).collect();
             self.store.preserving(&preserve).save(&candidate)?;
             inner.settings = candidate;
@@ -1063,7 +1109,11 @@ impl zbus::DBusError for SettingsFault {
 /// Map settings errors onto D-Bus error names.
 fn to_bus_error(err: SettingsError) -> SettingsFault {
     match err {
-        SettingsError::NotFound(_) => SettingsFault::NotFound(err.to_string()),
+        // What the product does not carry is not there, like a path that
+        // names nothing.
+        SettingsError::NotFound(_) | SettingsError::NotServed { .. } => {
+            SettingsFault::NotFound(err.to_string())
+        }
         SettingsError::ReadOnly(_) => SettingsFault::ReadOnly(err.to_string()),
         SettingsError::Validation { .. } => {
             SettingsFault::Fdo(fdo::Error::InvalidArgs(err.to_string()))
@@ -1261,6 +1311,8 @@ impl MicadService {
     /// container nobody declared are both real states, and a merged answer
     /// could not tell them apart.
     async fn get_containers(&self) -> Result<String, SettingsFault> {
+        self.require_feature(micad_settings::Feature::Containers)
+            .map_err(SettingsFault::Fdo)?;
         let settings = self.inner.read().await.settings.clone();
         let declared = serde_json::to_value(&settings.container.units)
             .unwrap_or_else(|_| serde_json::json!({}));
@@ -1279,6 +1331,8 @@ impl MicadService {
     /// the station role does, not an arbitrary radio operation, so there is no
     /// interface argument to point somewhere else.
     async fn scan_wifi(&self) -> Result<String, SettingsFault> {
+        self.require_feature(micad_settings::Feature::Wifi)
+            .map_err(SettingsFault::Fdo)?;
         let settings = self.inner.read().await.settings.clone();
         let interface = settings.wifi.client.interface.clone();
         let root = std::path::PathBuf::from("/");
@@ -1314,6 +1368,8 @@ impl MicadService {
     /// The declared Bluetooth trust list, what BlueZ reports, the pairing code
     /// and whatever is waiting to be confirmed.
     async fn get_bluetooth(&self) -> Result<String, SettingsFault> {
+        self.require_feature(micad_settings::Feature::Bluetooth)
+            .map_err(SettingsFault::Fdo)?;
         let settings = self.inner.read().await.settings.clone();
         let pin = self.pairing_pin(&settings).await;
         let mut value = crate::bluetooth::observed_json(
@@ -1405,6 +1461,7 @@ impl MicadService {
 
     /// Answer the passkey the agent is holding.
     async fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> fdo::Result<()> {
+        self.require_feature(micad_settings::Feature::Bluetooth)?;
         if self.agent.answer(address, accept).await {
             Ok(())
         } else {
@@ -1416,6 +1473,7 @@ impl MicadService {
 
     /// Drop a device: out of the trust list, and out of the adapter.
     async fn remove_bluetooth_device(&self, address: &str) -> fdo::Result<()> {
+        self.require_feature(micad_settings::Feature::Bluetooth)?;
         let _apply = self.apply_lock.lock().await;
         let mut devices = self.inner.read().await.settings.bluetooth.devices.clone();
         if devices.remove(address).is_none() {
@@ -2569,6 +2627,97 @@ mod tests {
 
         assert!(format!("{error}").contains("container.enabled"), "{error}");
         assert!(calls.lock().expect("call log").is_empty());
+    }
+
+    /// A product without a feature: its members are refused by name before
+    /// they touch a unit, an adapter or a radio.
+    #[tokio::test]
+    async fn the_members_of_a_feature_the_product_does_not_carry_are_refused_by_name() {
+        let (service, calls, _dir) = service_with_container(true);
+        let service = service.with_features(micad_settings::Features::only(&[
+            micad_settings::Feature::Mqtt,
+        ]));
+
+        let error = service
+            .start_container("node-red")
+            .await
+            .expect_err("containers are not in this product");
+        assert!(
+            format!("{error}").contains("feature not in this product: containers"),
+            "{error}"
+        );
+        assert!(calls.lock().expect("call log").is_empty());
+        for error in [
+            format!(
+                "{:?}",
+                service.get_containers().await.expect_err("containers")
+            ),
+            format!("{:?}", service.scan_wifi().await.expect_err("wifi")),
+            format!(
+                "{:?}",
+                service.get_bluetooth().await.expect_err("bluetooth")
+            ),
+            format!(
+                "{:?}",
+                service
+                    .confirm_bluetooth_pairing("AA:BB:CC:DD:EE:FF", true)
+                    .await
+                    .expect_err("bluetooth")
+            ),
+        ] {
+            assert!(error.contains("feature not in this product"), "{error}");
+        }
+    }
+
+    /// A settings write that would change a feature the product does not
+    /// carry is refused, whether it names the subtree or a tree around it, and
+    /// leaves the tree as it was; a write elsewhere lands.
+    #[tokio::test]
+    async fn a_write_into_a_feature_the_product_does_not_carry_is_refused() {
+        let (service, _calls, _dir) = service_with_container(true);
+        let service = service.with_features(micad_settings::Features::only(&[
+            micad_settings::Feature::Containers,
+        ]));
+
+        let error = service
+            .persist_setting("wifi.ap.enabled", serde_json::json!(true))
+            .await
+            .expect_err("wifi is not in this product");
+        assert!(
+            matches!(
+                error,
+                micad_settings::SettingsError::NotServed {
+                    feature: micad_settings::Feature::Wifi,
+                    ..
+                }
+            ),
+            "{error}"
+        );
+        assert!(matches!(
+            crate::bus::to_bus_error(error),
+            crate::bus::SettingsFault::NotFound(_)
+        ));
+
+        let mut whole = serde_json::to_value(&service.inner.read().await.settings).unwrap();
+        whole["mqtt"]["enabled"] = serde_json::json!(true);
+        let error = service
+            .persist_setting("", whole)
+            .await
+            .expect_err("a whole-tree write that changes mqtt");
+        assert!(
+            format!("{error}").contains("feature not in this product: mqtt"),
+            "{error}"
+        );
+        assert!(!service.inner.read().await.settings.mqtt.enabled);
+
+        service
+            .persist_setting("hostname", serde_json::json!("edge-7"))
+            .await
+            .expect("a write outside every feature lands");
+        service
+            .persist_setting("container.enabled", serde_json::json!(false))
+            .await
+            .expect("a write into a feature the product carries lands");
     }
 
     /// The read names both sides and merges neither.

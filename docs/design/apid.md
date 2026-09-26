@@ -60,6 +60,23 @@ document differs from `mica-apid --openapi`. Resource groups:
 | Diagnostics | `GET/POST /diagnostics/snapshots`, `GET/DELETE /diagnostics/snapshots/{id}` | `diagnostics.rs`, `/mica/diagnostics` |
 | UI bundles | `GET /ui`, `PUT/DELETE /ui/active`, `GET/POST /ui/bundles`, `DELETE /ui/bundles/{generation}` | `bundle.rs`, `/mica/ui` |
 
+**What the product carries decides what is served.** apid reads `FEATURES` from
+`/usr/lib/mica/product.conf` (the dm-verity root, written when the root is composed)
+through `micad_settings::Features`. The routes of a feature the product does not
+carry are not mounted and answer 404 `not_found`, authenticated or not:
+
+| Feature | Routes |
+| --- | --- |
+| `wifi` | `/wifi/*` |
+| `bluetooth` | `/bluetooth*` |
+| `ssh` | `/ssh/*` |
+| `containers` | `/containers*` |
+| `mqtt` | `/mqtt` |
+
+`GET /meta` lists `features`, and the console hides the panes of the features it
+does not list. A root with no `product.conf`, or one without a `FEATURES` line, serves
+every feature. Each gated operation in `openapi.json` names its feature.
+
 A settings or transient-password write returns micad's task id; clients poll
 `GET /tasks/{id}`. apid mirrors task records from `TaskChanged` and caches the
 `access` subtree, invalidated by `SettingsChanged` (`task_registry.rs`,

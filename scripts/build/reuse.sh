@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# The package-version guard (mica:docs/decisions/2026-09-15-package-versions.md
-# R5): the archives of _out/debs/{amd64,arm64}/pool against the latest release
+# The package-version guard: the archives of _out/debs/{amd64,arm64}/pool against the latest release
 # of this repository, read anonymously. It prints one line per archive,
 # "<arch> <package> <version> new|reused <sha256>", and refuses:
 #   - a package at the version it was released at whose inputs hash

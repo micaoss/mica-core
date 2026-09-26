@@ -17,10 +17,8 @@ import {
 /// same two controls: the icon carries the meaning, the accessible name is on
 /// the trigger, and the current value is the checked item in the popup.
 ///
-/// The language picker used to be a combobox with a text input. In a 160px
-/// chrome slot that read as an empty search box rather than as the language
-/// the console is in, and it was the only control in the header that did not
-/// look like the others.
+/// Neither picker is a text input: in a narrow header slot a combobox reads as
+/// an empty search box rather than as the language the console is in.
 const TRIGGER = 'flex-none gap-1 border-transparent bg-transparent px-2 text-sm'
 
 function browserLocales(): readonly string[] {

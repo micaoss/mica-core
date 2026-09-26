@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# The inputs this repository builds from, in locks/ (mica:docs/design/release-lock.md
-# section 4): locks/mica-build-env.lock with locks/pins/mica-build-env.pin, and
+# The inputs this repository builds from, in locks/: locks/mica-build-env.lock with locks/pins/mica-build-env.pin, and
 # locks/upstream.lock.
 #
 #   bash scripts/build/locks.sh check     the file rules of every lock and pin, offline

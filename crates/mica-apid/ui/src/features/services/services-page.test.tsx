@@ -1,4 +1,4 @@
-import { cleanup, screen } from '@testing-library/react'
+import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderRoute, stubFetch } from '@/shared/testing/panel'
@@ -22,7 +22,14 @@ function renderPage() {
 }
 
 describe('the services page', () => {
-  it('reports a service switch, which used to change nothing visible', async () => {
+  it('lists only the services the device serves', async () => {
+    stubFetch({ ...routes, '/api/v1/meta': { api: 'v1', features: ['mqtt'] } })
+    renderPage()
+    await waitFor(() => expect(screen.queryByRole('switch', { name: 'Container runtime' })).toBeNull())
+    expect(await screen.findByRole('switch', { name: 'MQTT' })).toBeTruthy()
+  })
+
+  it('reports a service switch', async () => {
     stubFetch({ ...routes, 'PUT /api/v1/settings/container.enabled': () => jsonResponse({ taskId: 'task-1' }, 202) })
     renderPage()
 

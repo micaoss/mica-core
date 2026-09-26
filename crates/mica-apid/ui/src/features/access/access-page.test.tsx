@@ -18,6 +18,13 @@ afterEach(() => {
 })
 
 describe('the access page', () => {
+  it('shows no SSH section on a device that does not serve SSH', async () => {
+    stubFetch({ ...routes, '/api/v1/meta': { api: 'v1', features: ['mqtt'] } })
+    renderPanel(<AccessPage />)
+    expect(await screen.findByRole('button', { name: 'Revoke fleet agent' })).toBeTruthy()
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'SSH' })).toBeNull())
+  })
+
   it('closes the revoke confirmation and reports which token went', async () => {
     const fetch = stubFetch({
       ...routes,
@@ -34,8 +41,8 @@ describe('the access page', () => {
   })
 
   it('names the action that failed rather than pooling refusals into one line', async () => {
-    // Four mutations used to share a single callout, so a failed revoke and a
-    // failed key removal were the same sentence in the same place.
+    // Each mutation reports on its own, so a failed revoke and a failed key
+    // removal are different sentences.
     stubFetch({
       ...routes,
       'DELETE /api/v1/tokens/tok_01HX': () => jsonResponse({ error: { code: 'rotation_required', message: 'this device still holds its bootstrap credential' } }, 409),

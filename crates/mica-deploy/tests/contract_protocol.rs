@@ -4,8 +4,7 @@
 //! The vector is what an online update looks like on the wire -- one signed
 //! `mica/catalog/v2` document serving the golden deployment from a real source
 //! URL. A server implementation has bytes to verify itself against rather than
-//! a schema string it spells from memory, which is what let a second update
-//! server be written on the superseded protocol without anything failing.
+//! a schema string it spells from memory.
 
 // The generator module is shared with `contract_fixtures.rs` and the
 // regeneration example; this test uses its keys and signer, not its writer.
@@ -149,10 +148,9 @@ fn the_vector_selects_nothing_for_another_product() {
 }
 
 /// THE PROTOCOL VOCABULARY. The accepted strings are the ones the shared
-/// fixtures carry; every retired or unknown spelling is refused, with no
-/// aliases and no transition. `mica/catalog/v1`, `mica/deployment/v1` and
-/// `mica/rootfs/v1` are listed because a second update server implements them
-/// today; a reader that quietly took them would hide that.
+/// fixtures carry; every other spelling is refused, with no aliases.
+/// `mica/catalog/v1`, `mica/deployment/v1` and `mica/rootfs/v1` are listed as
+/// refused by name, so a reader that quietly took one fails here.
 #[test]
 fn schema_vocabulary() {
     let cases = cases();

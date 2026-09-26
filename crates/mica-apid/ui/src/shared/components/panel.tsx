@@ -2,9 +2,7 @@ import type { ReactNode } from 'react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/components/ui/card'
 import { cn } from '@/shared/lib/utils'
 
-/// The console's one card. Every page used to reach for either a local `Card`
-/// that rendered `.surface` or a `Surface` that rendered the same markup, and
-/// then style the result inline; both are this.
+/// The console's one card: every page's titled surface is this component.
 export function Panel({ title, description, action, children, className, contentClassName }: {
   title?: string
   description?: string

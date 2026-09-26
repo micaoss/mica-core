@@ -512,6 +512,7 @@
           "resources"
         ],
         "summary": "Read the Bluetooth surface: the trust list, the adapter, the devices, the\npairing code and whatever is waiting to be confirmed.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_read",
         "responses": {
           "200": {
@@ -561,7 +562,7 @@
           "resources"
         ],
         "summary": "Configure the adapter.",
-        "description": "**The trust list is not here.** Devices arrive by pairing and leave by\nbeing removed; a route that replaced the whole list would let a client\ndeclare a device it never paired with, which the adapter would then have\nno keys for.",
+        "description": "**The trust list is not here.** Devices arrive by pairing and leave by\nbeing removed; a route that replaced the whole list would let a client\ndeclare a device it never paired with, which the adapter would then have\nno keys for.\n\nServed only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_write",
         "requestBody": {
           "content": {
@@ -673,6 +674,7 @@
           "resources"
         ],
         "summary": "Drop a device: out of the trust list, and out of the adapter's keys.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_device_remove",
         "parameters": [
           {
@@ -768,7 +770,7 @@
           "actions"
         ],
         "summary": "Pair with a device, or answer the confirmation a pairing is waiting on.",
-        "description": "Two verbs on one path because they are two halves of one exchange: `pair`\nstarts it, and `confirm` answers the passkey BlueZ asked about in the\nmiddle of it.",
+        "description": "Two verbs on one path because they are two halves of one exchange: `pair`\nstarts it, and `confirm` answers the passkey BlueZ asked about in the\nmiddle of it.\n\nServed only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_device_action",
         "parameters": [
           {
@@ -894,6 +896,7 @@
           "actions"
         ],
         "summary": "Start or stop a Bluetooth scan.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_discovery",
         "requestBody": {
           "content": {
@@ -1060,6 +1063,7 @@
           "resources"
         ],
         "summary": "The declared containers and what the engine reports, as micad joins them.",
+        "description": "Served only when the product carries the `containers` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_containers_read",
         "responses": {
           "200": {
@@ -1111,7 +1115,7 @@
           "resources"
         ],
         "summary": "Declare or replace one container, validated against the whole map.",
-        "description": "**A `PUT` replaces the entry entirely.** Creating and replacing are one\noperation, so there is no 404 here: a name that is not declared becomes\none that is.",
+        "description": "**A `PUT` replaces the entry entirely.** Creating and replacing are one\noperation, so there is no 404 here: a name that is not declared becomes\none that is.\n\nServed only when the product carries the `containers` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_container_write",
         "parameters": [
           {
@@ -1232,7 +1236,7 @@
           "resources"
         ],
         "summary": "Remove one container, re-validating the rest of the map without it.",
-        "description": "**The volumes are not deleted with it.** A container's data under `/mica/`\noutlives the declaration, which is what makes removing and re-declaring a\ncontainer a safe way to change its image.",
+        "description": "**The volumes are not deleted with it.** A container's data under `/mica/`\noutlives the declaration, which is what makes removing and re-declaring a\ncontainer a safe way to change its image.\n\nServed only when the product carries the `containers` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_container_remove",
         "parameters": [
           {
@@ -1335,7 +1339,7 @@
           "actions"
         ],
         "summary": "Start, stop or restart one declared container.",
-        "description": "The verb drives the unit Quadlet generated for the container. micad refuses\na name it does not hold, so this is not a way to drive an arbitrary systemd\nunit through a container-shaped path.",
+        "description": "The verb drives the unit Quadlet generated for the container. micad refuses\na name it does not hold, so this is not a way to drive an arbitrary systemd\nunit through a container-shaped path.\n\nServed only when the product carries the `containers` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_container_action",
         "parameters": [
           {
@@ -1761,7 +1765,7 @@
           "discovery"
         ],
         "summary": "Report what the caller is talking to.",
-        "description": "Answers the API major version, the daemon name, and\n`settingsSchemaVersion` — a settings document format version, which moves\nindependently of the API version. Authenticated.\n\n**The settings tree has no single version.** Storage\nis one document per reconciler in `/mica/config/` plus the remainder on\nSTATE, and each carries its own `schema_version` starting at v1, because a\nnamespace-wide version could not be bumped without rewriting every document\nacross renames with no transaction between them. This member therefore\nreports the STATE document's version — the one document that is still one\ndocument — and it is read live from `micad_settings` rather than copied,\nwhich is the property a version read needs.",
+        "description": "Answers the API major version, the daemon name,\n`settingsSchemaVersion` — a settings document format version, which moves\nindependently of the API version — and `features`, the parts of the API\nthis product serves. Authenticated.\n\n**The settings tree has no single version.** Storage\nis one document per reconciler in `/mica/config/` plus the remainder on\nSTATE, and each carries its own `schema_version` starting at v1, because a\nnamespace-wide version could not be bumped without rewriting every document\nacross renames with no transaction between them. This member therefore\nreports the STATE document's version — the one document that is still one\ndocument — and it is read live from `micad_settings` rather than copied,\nwhich is the property a version read needs.",
         "operationId": "api_v1_meta",
         "responses": {
           "200": {
@@ -1803,6 +1807,7 @@
           "resources"
         ],
         "summary": "Read the MQTT configuration together with the reconciler's live state.",
+        "description": "Served only when the product carries the `mqtt` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_mqtt_read",
         "responses": {
           "200": {
@@ -1862,7 +1867,7 @@
           "resources"
         ],
         "summary": "Replace the MQTT configuration, applied as one reconcile.",
-        "description": "**A `PUT` replaces the whole subtree**: send the document that was read,\nwith the fields that changed. Answers the apply task's id, which is what\n`GET /api/v1/tasks/{id}` follows -- the broker and the bridge are brought\nto the new configuration by the `mqtt` reconciler, not by this call.",
+        "description": "**A `PUT` replaces the whole subtree**: send the document that was read,\nwith the fields that changed. Answers the apply task's id, which is what\n`GET /api/v1/tasks/{id}` follows -- the broker and the bridge are brought\nto the new configuration by the `mqtt` reconciler, not by this call.\n\nServed only when the product carries the `mqtt` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_mqtt_write",
         "requestBody": {
           "content": {
@@ -2870,7 +2875,7 @@
           "actions"
         ],
         "summary": "Recover the management credential: rotate, never reveal.",
-        "description": "**Presence is the authority, and the only one.** An authenticated\nmanagement session may NOT run this flow — a session that can rotate the\ncredential it authenticated with is a session-fixation lever, and an\noperator holding a working credential needs\n`POST /api/v1/actions/change-password` rather than recovery. So the route\ntakes no credential extractor and refuses a caller that presents one.\n\n**What it does, in order.** It MINTS a new password — it never\ndiscloses, decrypts or derives the previous secret, and there is no code\npath from here to a stored plaintext. It publishes the new one exactly\nonce, on the channel that proved presence. Only then does it commit, in ONE\nwrite of `access`: the new hash, the emptied token list, the claim record\nand the bumped generation together. Publishing first is the safe\ndirection — a crash between the two must not be a self-inflicted lockout —\nso the worst outcome here is a credential the operator saw and that never\nworked, which the flow being cheap to re-run answers.\n\n**The previous credential stops working at that commit**, and so does every\nAPI token: \"any client or automation holding it must\nbe re-enrolled\". Every session goes with it, for the reason a password\nchange drops them.\n\n**A device-claimed by a provisioning document is the seam P2 named.** Its\nbootstrap secret sat in plaintext on a medium, and losing it before the\nforced rotation is a recovery case rather than a claim case. A recovery writes the claim record with the channel that claimed the\ndevice preserved and `rotationRequired` FALSE: the credential this flow\nmints was drawn by the device from `OsRng` and shown once at the device, so\nit is not a bootstrap secret, and demanding a rotation of a credential that\nwas just rotated under physical presence would be a bound with nothing left\nto protect.\n\n**An unclaimed device is refused**, pointing at `POST /api/v1/setup`. There\nis nothing to recover on a device that has no credential, and minting one\nhere would be a third channel that can claim a device —\n`micad_settings::ClaimChannel` has exactly two members and says why.\n\n**One rotation per presence assertion**. The assertion is read and\nspent inside one guard, so a second request — concurrent, or later inside\nthe same fifteen-minute window — finds it spent and is refused `403`\n`presence_required`, having minted, published and written nothing. The next\nrotation needs presence asserted again at the device.",
+        "description": "**Presence is the authority, and the only one.** An authenticated\nmanagement session may NOT run this flow — a session that can rotate the\ncredential it authenticated with is a session-fixation lever, and an\noperator holding a working credential needs\n`POST /api/v1/actions/change-password` rather than recovery. So the route\ntakes no credential extractor and refuses a caller that presents one.\n\n**What it does, in order.** It MINTS a new password — it never\ndiscloses, decrypts or derives the previous secret, and there is no code\npath from here to a stored plaintext. It publishes the new one exactly\nonce, on the channel that proved presence. Only then does it commit, in ONE\nwrite of `access`: the new hash, the emptied token list, the claim record\nand the bumped generation together. Publishing first is the safe\ndirection — a crash between the two must not be a self-inflicted lockout —\nso the worst outcome here is a credential the operator saw and that never\nworked, which the flow being cheap to re-run answers.\n\n**The previous credential stops working at that commit**, and so does every\nAPI token: \"any client or automation holding it must\nbe re-enrolled\". Every session goes with it, for the reason a password\nchange drops them.\n\n**A device claimed by a provisioning document.** Its\nbootstrap secret sat in plaintext on a medium, and losing it before the\nforced rotation is a recovery case rather than a claim case. A recovery writes the claim record with the channel that claimed the\ndevice preserved and `rotationRequired` FALSE: the credential this flow\nmints was drawn by the device from `OsRng` and shown once at the device, so\nit is not a bootstrap secret, and demanding a rotation of a credential that\nwas just rotated under physical presence would be a bound with nothing left\nto protect.\n\n**An unclaimed device is refused**, pointing at `POST /api/v1/setup`. There\nis nothing to recover on a device that has no credential, and minting one\nhere would be a third channel that can claim a device —\n`micad_settings::ClaimChannel` has exactly two members and says why.\n\n**One rotation per presence assertion**. The assertion is read and\nspent inside one guard, so a second request — concurrent, or later inside\nthe same fifteen-minute window — finds it spent and is refused `403`\n`presence_required`, having minted, published and written nothing. The next\nrotation needs presence asserted again at the device.",
         "operationId": "api_v1_recovery_credential",
         "responses": {
           "200": {
@@ -3572,7 +3577,7 @@
           "resources"
         ],
         "summary": "List every authorized SSH key.",
-        "description": "Each entry carries the fingerprint that identifies it for removal. The\nresponse also carries a `notice`: every authorized key grants root.",
+        "description": "Each entry carries the fingerprint that identifies it for removal. The\nresponse also carries a `notice`: every authorized key grants root.\n\nServed only when the product carries the `ssh` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_ssh_keys_list",
         "responses": {
           "200": {
@@ -3642,7 +3647,7 @@
           "resources"
         ],
         "summary": "Authorize one SSH public key.",
-        "description": "The key line is validated as submitted; a malformed line is **422**.\n\n**Every authorized key grants root.** `AuthorizedKeysFile` is `%u`-expanded\nover one shared list, so the response carries a `notice` saying so\nalongside the created entry.",
+        "description": "The key line is validated as submitted; a malformed line is **422**.\n\n**Every authorized key grants root.** `AuthorizedKeysFile` is `%u`-expanded\nover one shared list, so the response carries a `notice` saying so\nalongside the created entry.\n\nServed only when the product carries the `ssh` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_ssh_keys_add",
         "requestBody": {
           "content": {
@@ -3764,7 +3769,7 @@
           "resources"
         ],
         "summary": "Remove one authorized SSH key by its fingerprint.",
-        "description": "The fingerprint is the only accepted identifier; the key text is not.\nAnswers **404** when no authorized key carries it.",
+        "description": "The fingerprint is the only accepted identifier; the key text is not.\nAnswers **404** when no authorized key carries it.\n\nServed only when the product carries the `ssh` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_ssh_keys_remove",
         "parameters": [
           {
@@ -6131,6 +6136,7 @@
           "resources"
         ],
         "summary": "Read the access-point configuration, with its key redacted.",
+        "description": "Served only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_ap_read",
         "responses": {
           "200": {
@@ -6190,7 +6196,7 @@
           "resources"
         ],
         "summary": "Configure the access point: switch it on, name it, key it, place it.",
-        "description": "**`psk` absent keeps the stored key**, for the reason the known-network\nroute gives: a read substitutes the redaction sentinel, so an operator\nchanging the channel has not been shown the key, and treating absence as\n\"no key\" would publish an open access point.",
+        "description": "**`psk` absent keeps the stored key**, for the reason the known-network\nroute gives: a read substitutes the redaction sentinel, so an operator\nchanging the channel has not been shown the key, and treating absence as\n\"no key\" would publish an open access point.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_ap_write",
         "requestBody": {
           "content": {
@@ -6302,7 +6308,7 @@
           "resources"
         ],
         "summary": "Read which radio the WiFi station runs on, and whether it runs.",
-        "description": "The known networks are not here: they are their own collection, because\nthey carry secrets this document would then have to redact.",
+        "description": "The known networks are not here: they are their own collection, because\nthey carry secrets this document would then have to redact.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_client_read",
         "responses": {
           "200": {
@@ -6362,7 +6368,7 @@
           "resources"
         ],
         "summary": "Bind the WiFi station to a radio, and switch it on or off.",
-        "description": "**The known networks are untouched**: they are written through their own\ncollection, and a route that replaced them here would drop every stored\npre-shared key the moment someone moved the station to another radio.",
+        "description": "**The known networks are untouched**: they are written through their own\ncollection, and a route that replaced them here would drop every stored\npre-shared key the moment someone moved the station to another radio.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_client_write",
         "requestBody": {
           "content": {
@@ -6474,7 +6480,7 @@
           "resources"
         ],
         "summary": "List every known WiFi network.",
-        "description": "Each entry's pre-shared key is redacted. Posting an entry back with the\nredaction sentinel still in place is refused rather than stored.",
+        "description": "Each entry's pre-shared key is redacted. Posting an entry back with the\nredaction sentinel still in place is refused rather than stored.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_networks_list",
         "responses": {
           "200": {
@@ -6547,7 +6553,7 @@
           "resources"
         ],
         "summary": "Add one known WiFi network.",
-        "description": "The redaction sentinel is rejected before anything else: a client that read\nthis list and posted an entry back would otherwise store the literal\n`\"<redacted>\"` as the `psk` and destroy a working key.\n\nAnswers **422** for a malformed entry or a redacted `psk`.",
+        "description": "The redaction sentinel is rejected before anything else: a client that read\nthis list and posted an entry back would otherwise store the literal\n`\"<redacted>\"` as the `psk` and destroy a working key.\n\nAnswers **422** for a malformed entry or a redacted `psk`.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_networks_add",
         "requestBody": {
           "content": {
@@ -6669,7 +6675,7 @@
           "resources"
         ],
         "summary": "Replace one known network, keeping its stored key unless a new one is sent.",
-        "description": "**`psk` absent keeps the stored key.** An operator changing a network's\npriority has not been shown the key -- a read substitutes the redaction\nsentinel for it -- so a `PUT` that treated absence as \"open network\" would\nsilently drop the credential of a network that still works.",
+        "description": "**`psk` absent keeps the stored key.** An operator changing a network's\npriority has not been shown the key -- a read substitutes the redaction\nsentinel for it -- so a `PUT` that treated absence as \"open network\" would\nsilently drop the credential of a network that still works.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_networks_replace",
         "parameters": [
           {
@@ -6800,6 +6806,7 @@
           "resources"
         ],
         "summary": "malformed-SSID case: any non-empty path segment is a possible name.",
+        "description": "Served only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_networks_remove",
         "parameters": [
           {
@@ -6895,7 +6902,7 @@
           "actions"
         ],
         "summary": "Scan for WiFi networks on the station's radio.",
-        "description": "**POST**, because it puts the radio to work: a scan sweeps every channel\nand briefly costs the station its link. Nothing that merely follows a link\nshould do that.\n\nThe answer is micad's: `available` with the networks it found, or\n`available: false` with the reason -- an interface with no station running\non it has no answer, and an empty list would claim there is nothing on the\nair.",
+        "description": "**POST**, because it puts the radio to work: a scan sweeps every channel\nand briefly costs the station its link. Nothing that merely follows a link\nshould do that.\n\nThe answer is micad's: `available` with the networks it found, or\n`available: false` with the reason -- an interface with no station running\non it has no answer, and an empty list would claim there is nothing on the\nair.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_scan",
         "responses": {
           "200": {
@@ -7124,7 +7131,8 @@
         "required": [
           "api",
           "settingsSchemaVersion",
-          "daemon"
+          "daemon",
+          "features"
         ],
         "properties": {
           "api": {
@@ -7132,6 +7140,13 @@
           },
           "daemon": {
             "type": "string"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The features this device serves, from the product it was built as:\nany of `wifi`, `bluetooth`, `ssh`, `containers`, `mqtt`. The routes of\na feature not listed are not served and answer 404."
           },
           "settingsSchemaVersion": {
             "type": "integer",
@@ -8218,7 +8233,7 @@
       },
       "SetupResult": {
         "type": "object",
-        "description": "`POST /api/v1/setup` response body.\n\n**No API token.** Setup used to mint one unconditionally, from a time when\na server-rendered wizard and this route were two different clients. There\nis one client now -- the console -- and it authenticates with the password\nit just set, so the mint handed every operator a long-lived bearer\ncredential they never asked for and could not decline. A caller that wants\none asks for it: `POST /api/v1/tokens`, authenticated by the credential\nthis route created.",
+        "description": "`POST /api/v1/setup` response body.\n\n**No API token.** The console authenticates with the password this route\nsets, so setup mints no long-lived bearer credential nobody asked for. A\ncaller that wants one asks for it: `POST /api/v1/tokens`, authenticated by\nthe credential this route created.",
         "required": [
           "csrfToken"
         ],

@@ -7,9 +7,9 @@ import { Progress, ProgressTrack, ProgressIndicator } from '@/shared/components/
 
 /// A file chosen for upload, with the upload's own progress.
 ///
-/// The raw `<input type="file">` it replaces rendered the browser's own control
-/// — "Choose File / No file chosen", unstyled, untranslated — beside buttons
-/// from the design system.
+/// The native `<input type="file">` stays hidden: the browser's own control
+/// ("Choose File / No file chosen") is unstyled and untranslated beside the
+/// design system's buttons.
 export function FilePicker({ label, hint, accept, chooseLabel, emptyLabel, submitLabel, pendingLabel, progress, pending, disabled, onSubmit }: {
   label: string
   hint?: string

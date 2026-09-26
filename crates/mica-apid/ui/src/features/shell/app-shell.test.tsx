@@ -38,9 +38,9 @@ describe('the shell', () => {
     expect(await screen.findByText('9e12aa77bb33')).toBeTruthy()
   })
 
-  /// The language picker used to be a dialog rendered inside the settings
-  /// menu, which left the menu open and painted over its own backdrop. It is
-  /// its own header control now, so it is reachable without opening anything.
+  /// The language picker is its own header control, outside the settings
+  /// menu, so it is reachable without opening anything and no menu is left
+  /// open over its own backdrop.
   /// That the menu closes is overlay behaviour and the Playwright suite is what
   /// sees it; this asserts the structure that makes the overlap impossible.
   it('puts the language control outside the settings menu', async () => {

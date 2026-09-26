@@ -229,10 +229,9 @@ fn archive_cases() {
 /// keeps these same fixture bytes, so a board whose facts change on one side
 /// and not the other fails a gate instead of reaching a device.
 ///
-/// There is no vocabulary of accepted names any more. Which board a device is,
-/// is its policy's to say; a deployment or firmware for another board, the
-/// retired `x64` and `virt-arm64` included, is refused because it is not the
-/// board the policy names (`components.rs`
+/// No list of accepted board names exists: which board a device is, is its
+/// policy's to say, and a deployment or firmware for any other board is refused
+/// because it is not the board the policy names (`components.rs`
 /// `a_deployment_for_another_board_is_refused_by_the_device`).
 #[test]
 fn board_policies() {

@@ -489,15 +489,13 @@ mod tests {
     /// without it an attacker hammering a throttled endpoint converts every
     /// refusal into an fsync — flash wear bought with an HTTP request.
     ///
-    /// Nothing here is timed. The earlier form asserted that fifty
-    /// consecutive calls were all refused, which made the armed window a
-    /// deadline the whole loop had to fit inside: one failure arms
-    /// `BACKOFF_BASE`, a second, and on a loaded machine the window lapsed
-    /// mid-loop and the assertion read "still throttled" while the product
-    /// was behaving correctly. The loop below stops at the first ADMITTED
-    /// attempt instead — an admission is the window expiring, which is
-    /// allowed and legitimately writes — and asserts the property once per
-    /// refusal, so the count is evidence rather than a budget.
+    /// Nothing here is timed: asserting that N consecutive calls are all
+    /// refused would make the armed window a deadline the loop must fit
+    /// inside, and a loaded machine would fail it while the product behaves
+    /// correctly. The loop stops at the first ADMITTED attempt — an admission
+    /// is the window expiring, which is allowed and legitimately writes — and
+    /// asserts the property once per refusal, so the count is evidence rather
+    /// than a budget.
     #[test]
     fn a_refused_attempt_does_not_rewrite_the_file() {
         let dir = tempfile::tempdir().unwrap();

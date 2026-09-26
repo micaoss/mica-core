@@ -127,6 +127,9 @@ pub struct AppState {
     /// The built-in console, when the `mica-apid-ui` package installed one.
     /// Absent, `/_ui` answers 404 and the API is unchanged.
     builtin: Arc<Option<crate::assets::builtin::Builtin>>,
+    /// The features the product carries; the routes of any other are not
+    /// mounted.
+    pub(crate) features: micad_settings::Features,
 }
 
 impl AppState {
@@ -171,7 +174,15 @@ impl AppState {
             // No console until one is attached: constructing state reads no
             // directory, like every store above.
             builtin: Arc::new(None),
+            features: micad_settings::Features::all(),
         }
+    }
+
+    /// Serve only the routes of `features`.
+    #[must_use]
+    pub fn with_features(mut self, features: micad_settings::Features) -> Self {
+        self.features = features;
+        self
     }
 
     /// Attach the built-in console indexed from `dir`. An absent directory is
@@ -364,7 +375,7 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/_ui/", get(crate::assets::builtin::index))
         .route("/healthz", get(healthz))
-        .nest(API, api_router())
+        .nest(API, api_router(&state.features))
         .route("/api/", any(api_not_found))
         .fallback(serve::fallback)
         .with_state(state)
@@ -706,8 +717,23 @@ const CURRENT_VERSION: &str = "v1";
 /// Each route is declared here from the same constant its `utoipa::path`
 /// attribute documents it under, so the served path and the documented path
 /// are one string and cannot disagree.
-fn api_router() -> Router<AppState> {
-    Router::new()
+fn api_router(features: &micad_settings::Features) -> Router<AppState> {
+    use micad_settings::Feature;
+    // A feature the product does not carry is not mounted: its paths answer
+    // the subtree's own 404, like any path the API does not serve.
+    let mut router = Router::new();
+    for (feature, routes) in [
+        (Feature::Ssh, ssh_routes as fn() -> Router<AppState>),
+        (Feature::Wifi, wifi_routes),
+        (Feature::Bluetooth, bluetooth_routes),
+        (Feature::Containers, container_routes),
+        (Feature::Mqtt, mqtt_routes),
+    ] {
+        if features.has(feature) {
+            router = router.merge(routes());
+        }
+    }
+    router
         .route(VERSIONS_PATH, get(api_versions))
         .route(V1_META_PATH, get(api_v1_meta))
         .route(
@@ -762,62 +788,11 @@ fn api_router() -> Router<AppState> {
         .route(V1_TOKEN_ROUTE, delete(api_v1_tokens_revoke))
         // Array resources share the same credential extractor as the rest of
         // the management API.
-        .route(
-            V1_SSH_KEYS_PATH,
-            get(api_v1_ssh_keys_list).post(api_v1_ssh_keys_add),
-        )
-        .route(V1_SSH_KEY_ROUTE, delete(api_v1_ssh_keys_remove))
-        .route(
-            V1_WIFI_NETWORKS_PATH,
-            get(api_v1_wifi_networks_list).post(api_v1_wifi_networks_add),
-        )
-        .route(
-            V1_WIFI_NETWORK_ROUTE,
-            put(api_v1_wifi_networks_replace).delete(api_v1_wifi_networks_remove),
-        )
-        .route(
-            V1_WIFI_CLIENT_PATH,
-            get(api_v1_wifi_client_read).put(api_v1_wifi_client_write),
-        )
-        .route(V1_WIFI_SCAN_PATH, post(api_v1_wifi_scan))
-        // Bluetooth: one document, one write for the adapter, and the verbs
-        // that pair.
-        .route(
-            V1_BLUETOOTH_PATH,
-            get(api_v1_bluetooth_read).put(api_v1_bluetooth_write),
-        )
-        .route(
-            V1_BLUETOOTH_DISCOVERY_PATH,
-            post(api_v1_bluetooth_discovery),
-        )
-        .route(
-            V1_BLUETOOTH_DEVICE_ROUTE,
-            delete(api_v1_bluetooth_device_remove),
-        )
-        .route(
-            V1_BLUETOOTH_DEVICE_ACTION_ROUTE,
-            post(api_v1_bluetooth_device_action),
-        )
-        .route(
-            V1_WIFI_AP_PATH,
-            get(api_v1_wifi_ap_read).put(api_v1_wifi_ap_write),
-        )
         // The network cluster. Typed rather than a dot-path passthrough
         // because the rules under `network` are relational: a bridge port has to
         // name a declared entry, which no check confined to the entry being
         // written could see. `PUT /api/v1/settings/network...` is refused at
         // 409 by [`settings_write_refusal`] and names these routes.
-        // The containers: declared as settings, observed through the engine,
-        // driven as units.
-        .route(V1_CONTAINERS_PATH, get(api_v1_containers_read))
-        .route(
-            V1_CONTAINER_ROUTE,
-            put(api_v1_container_write).delete(api_v1_container_remove),
-        )
-        .route(V1_CONTAINER_ACTION_ROUTE, post(api_v1_container_action))
-        // One document for the broker and the bridge: the declared subtree and
-        // the reconciler's own report of what it did with it.
-        .route(V1_MQTT_PATH, get(api_v1_mqtt_read).put(api_v1_mqtt_write))
         .route(
             V1_NETWORK_PATH,
             get(api_v1_network_read).put(api_v1_network_write),
@@ -912,6 +887,78 @@ fn api_router() -> Router<AppState> {
         // reached.
         .method_not_allowed_fallback(api_method_not_allowed)
         .fallback(api_not_found)
+}
+
+/// SSH keys (`ssh`).
+fn ssh_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            V1_SSH_KEYS_PATH,
+            get(api_v1_ssh_keys_list).post(api_v1_ssh_keys_add),
+        )
+        .route(V1_SSH_KEY_ROUTE, delete(api_v1_ssh_keys_remove))
+}
+
+/// The Wi-Fi station and access point (`wifi`).
+fn wifi_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            V1_WIFI_NETWORKS_PATH,
+            get(api_v1_wifi_networks_list).post(api_v1_wifi_networks_add),
+        )
+        .route(
+            V1_WIFI_NETWORK_ROUTE,
+            put(api_v1_wifi_networks_replace).delete(api_v1_wifi_networks_remove),
+        )
+        .route(
+            V1_WIFI_CLIENT_PATH,
+            get(api_v1_wifi_client_read).put(api_v1_wifi_client_write),
+        )
+        .route(V1_WIFI_SCAN_PATH, post(api_v1_wifi_scan))
+        .route(
+            V1_WIFI_AP_PATH,
+            get(api_v1_wifi_ap_read).put(api_v1_wifi_ap_write),
+        )
+}
+
+/// Bluetooth: one document, one write for the adapter, and the verbs that pair
+/// (`bluetooth`).
+fn bluetooth_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            V1_BLUETOOTH_PATH,
+            get(api_v1_bluetooth_read).put(api_v1_bluetooth_write),
+        )
+        .route(
+            V1_BLUETOOTH_DISCOVERY_PATH,
+            post(api_v1_bluetooth_discovery),
+        )
+        .route(
+            V1_BLUETOOTH_DEVICE_ROUTE,
+            delete(api_v1_bluetooth_device_remove),
+        )
+        .route(
+            V1_BLUETOOTH_DEVICE_ACTION_ROUTE,
+            post(api_v1_bluetooth_device_action),
+        )
+}
+
+/// The containers: declared as settings, observed through the engine, driven
+/// as units (`containers`).
+fn container_routes() -> Router<AppState> {
+    Router::new()
+        .route(V1_CONTAINERS_PATH, get(api_v1_containers_read))
+        .route(
+            V1_CONTAINER_ROUTE,
+            put(api_v1_container_write).delete(api_v1_container_remove),
+        )
+        .route(V1_CONTAINER_ACTION_ROUTE, post(api_v1_container_action))
+}
+
+/// One document for the broker and the bridge: the declared subtree and the
+/// reconciler's own report of what it did with it (`mqtt`).
+fn mqtt_routes() -> Router<AppState> {
+    Router::new().route(V1_MQTT_PATH, get(api_v1_mqtt_read).put(api_v1_mqtt_write))
 }
 
 /// The envelope for a method a declared route does not serve.
@@ -1995,6 +2042,10 @@ pub(crate) struct ApiMeta {
     api: &'static str,
     settings_schema_version: u32,
     daemon: &'static str,
+    /// The features this device serves, from the product it was built as:
+    /// any of `wifi`, `bluetooth`, `ssh`, `containers`, `mqtt`. The routes of
+    /// a feature not listed are not served and answer 404.
+    features: Vec<&'static str>,
 }
 
 /// List the API major versions this build serves.
@@ -2020,9 +2071,10 @@ pub(crate) async fn api_versions() -> Response {
 
 /// Report what the caller is talking to.
 ///
-/// Answers the API major version, the daemon name, and
+/// Answers the API major version, the daemon name,
 /// `settingsSchemaVersion` — a settings document format version, which moves
-/// independently of the API version. Authenticated.
+/// independently of the API version — and `features`, the parts of the API
+/// this product serves. Authenticated.
 ///
 /// **The settings tree has no single version.** Storage
 /// is one document per reconciler in `/mica/config/` plus the remainder on
@@ -2043,13 +2095,17 @@ pub(crate) async fn api_versions() -> Response {
         (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
     ),
 )]
-pub(crate) async fn api_v1_meta(_credential: ApiCredential) -> Response {
+pub(crate) async fn api_v1_meta(
+    State(state): State<AppState>,
+    _credential: ApiCredential,
+) -> Response {
     api_response(
         StatusCode::OK,
         ApiMeta {
             api: CURRENT_VERSION,
             settings_schema_version: micad_settings::STATE_SCHEMA_VERSION,
             daemon: "apid",
+            features: state.features.words(),
         },
     )
 }
@@ -2397,11 +2453,9 @@ fn settings_write_refusal(path: &str) -> Response {
     if !is_settings_root(root) {
         return item_not_found(SETTINGS_COLLECTION, path);
     }
-    // `schema_version` used to take an arm of its own here. It is not a
-    // settings root any more: the version lives on each document
-    // instead of on the tree, so a path naming it is a path that names nothing
-    // and `is_settings_root` above answers it with the 404 every other absent
-    // root gets.
+    // `schema_version` is not a settings root: the version lives on each
+    // document, not on the tree, so a path naming it names nothing and
+    // `is_settings_root` above answers it with the 404 every absent root gets.
     refused(match root {
         // Named rather than folded into the sentence below, because this is
         // the subtree where a passthrough is actively destructive rather than
@@ -6476,13 +6530,9 @@ const HOSTNAME_RULES: &str =
 /// was already over the floor before this function existed. Named rather than
 /// inlined so the comparison, and not only the number, has one spelling.
 ///
-/// The number itself is [`micad_settings::MIN_ADMIN_PASSWORD_LEN`] and no
-/// longer a copy of it. apid used to state its own `MIN_PASSWORD_BYTES = 8`
-/// beside micad's, with a comment in each naming the other; two statements of
-/// one rule agree with each other right up until one of them moves, and the
-/// thing they would disagree about is whether a credential this device
-/// accepts is one it will keep accepting. `micad-settings` is the crate both
-/// binaries link, so it is where the bound lives.
+/// The number itself is [`micad_settings::MIN_ADMIN_PASSWORD_LEN`], the one
+/// statement of the rule: `micad-settings` is the crate apid and micad both
+/// link, so a credential this device accepts is one it keeps accepting.
 fn password_under_floor(password: &str) -> bool {
     password.len() < MIN_ADMIN_PASSWORD_LEN
 }
@@ -6532,8 +6582,7 @@ fn valid_hostname(name: &str) -> bool {
 /// Interface form validation shared by `/network` and the setup wizard.
 ///
 /// DHCP off with an empty address is an interface with **no** addressing, not
-/// an error. It used to be one, and it stopped being one when bridges became
-/// expressible: a bridge port *must* carry neither `dhcp` nor `static`
+/// an error: a bridge port *must* carry neither `dhcp` nor `static`
 /// (`validate_network` in `micad/src/reconciler/network.rs`), and it must be a
 /// declared entry before a bridge may name it, so a pane that insisted on an
 /// address made a bridge unbuildable through the form. An address that is
@@ -6752,13 +6801,10 @@ pub(crate) struct SetupRequest {
 
 /// `POST /api/v1/setup` response body.
 ///
-/// **No API token.** Setup used to mint one unconditionally, from a time when
-/// a server-rendered wizard and this route were two different clients. There
-/// is one client now -- the console -- and it authenticates with the password
-/// it just set, so the mint handed every operator a long-lived bearer
-/// credential they never asked for and could not decline. A caller that wants
-/// one asks for it: `POST /api/v1/tokens`, authenticated by the credential
-/// this route created.
+/// **No API token.** The console authenticates with the password this route
+/// sets, so setup mints no long-lived bearer credential nobody asked for. A
+/// caller that wants one asks for it: `POST /api/v1/tokens`, authenticated by
+/// the credential this route created.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetupResult {
@@ -7169,8 +7215,8 @@ async fn claim_status(state: &AppState, access: &Value) -> ClaimStatus {
     ClaimStatus {
         state: "claimed",
         via: Some(ClaimChannel::ProvisioningDocument),
-        // P1 already records WHEN, in the import record this reads; the claim
-        // does not copy it into a second field that could disagree.
+        // The import record this reads holds WHEN; the claim does not copy it
+        // into a second field that could disagree.
         at: document
             .get("document")
             .and_then(|record| record.get("lastImport"))
@@ -7734,7 +7780,7 @@ pub(crate) async fn api_v1_reset(
 /// be re-enrolled". Every session goes with it, for the reason a password
 /// change drops them.
 ///
-/// **A device-claimed by a provisioning document is the seam P2 named.** Its
+/// **A device claimed by a provisioning document.** Its
 /// bootstrap secret sat in plaintext on a medium, and losing it before the
 /// forced rotation is a recovery case rather than a claim case. A recovery writes the claim record with the channel that claimed the
 /// device preserved and `rotationRequired` FALSE: the credential this flow
@@ -7757,9 +7803,9 @@ pub(crate) async fn api_v1_reset(
 // copies this rustdoc into `apid/openapi.json` as the operation's description,
 // and `the_committed_openapi_document_is_the_generated_one` fails until the
 // committed document is regenerated. So what goes above is the contract a
-// caller needs, never the history of the defect that used to break it; that
-// history is in the body, at the guard. A note to the next editor does not
-// belong in a published API document either, which is what this line is.
+// caller needs; the reasoning behind the guard is in the body, at the guard. A
+// note to the next editor does not belong in a published API document either,
+// which is what this line is.
 #[utoipa::path(
     post,
     path = V1_RECOVERY_CREDENTIAL_PATH,
@@ -7912,7 +7958,7 @@ pub(crate) async fn api_v1_recovery_credential(
             // credential, not the history.
             via: claim.via.unwrap_or(ClaimChannel::ProvisioningDocument),
             // WHEN the device was claimed does not move because its credential
-            // did; P2's precedent, and 0 is the reading an unset clock gives.
+            // did, and 0 is the reading an unset clock gives.
             at: claim.at.unwrap_or(0),
             rotation_required: false,
         })

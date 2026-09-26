@@ -11,6 +11,14 @@ pub enum SettingsError {
     /// The dot-path exists but rejects writes.
     #[error("settings path is read-only: `{0}`")]
     ReadOnly(String),
+    /// The write reaches a feature the product does not carry.
+    #[error("feature not in this product: {feature} (`{path}`)")]
+    NotServed {
+        /// Dot-path of the refused write.
+        path: String,
+        /// The feature the path belongs to.
+        feature: crate::Feature,
+    },
     /// The value (or path shape) does not fit the typed settings tree.
     #[error("invalid settings value at `{path}`: {message}")]
     Validation {

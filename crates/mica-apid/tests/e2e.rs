@@ -402,7 +402,8 @@ async fn web_flow_end_to_end() -> anyhow::Result<()> {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await?, "e2e-host2");
 
-    // Every retired form mutation is inert and cannot change the device.
+    // A form post to a path the API does not serve is inert and cannot change
+    // the device.
     for path in [
         "/containers/enable",
         "/mqtt/enable",

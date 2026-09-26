@@ -696,6 +696,57 @@ async fn builtin_prefix_releases_ui_to_the_custom_owner() {
     assert!(!body_string(builtin).await.contains("CUSTOM-BUILTIN-SHADOW"));
 }
 
+/// A product without a feature: that feature's routes are not served -- a
+/// 404 from the API's own not-found handler, authenticated or not -- and
+/// `meta` lists only what is served. The rest of the API is unchanged.
+#[tokio::test]
+async fn a_feature_the_product_does_not_carry_is_not_served() {
+    use micad_settings::{Feature, Features};
+    let fake = Arc::new(FakeSettings::new(configured_tree("hunter2secret")));
+    let router = app(AppState::new(fake, SIGNING_KEY)
+        .with_features(Features::only(&[Feature::Mqtt, Feature::Containers])));
+    let cookie = login(&router, "hunter2secret").await;
+
+    for path in [
+        "/api/v1/wifi/client",
+        "/api/v1/wifi/ap",
+        "/api/v1/wifi/client/networks",
+        "/api/v1/bluetooth",
+        "/api/v1/ssh/authorized-keys",
+    ] {
+        for credential in [None, Some(cookie.as_str())] {
+            let response = get(&router, path, credential).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+            let body: serde_json::Value =
+                serde_json::from_str(&body_string(response).await).expect("API error JSON");
+            assert_eq!(body["error"]["code"], "not_found", "{path}");
+        }
+    }
+    for path in ["/api/v1/mqtt", "/api/v1/containers", "/api/v1/network"] {
+        let response = get(&router, path, Some(&cookie)).await;
+        assert_ne!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+
+    let meta: serde_json::Value =
+        serde_json::from_str(&body_string(get(&router, "/api/v1/meta", Some(&cookie)).await).await)
+            .expect("meta JSON");
+    assert_eq!(meta["features"], json!(["containers", "mqtt"]));
+}
+
+/// With every feature, as on a development host, `meta` names all five.
+#[tokio::test]
+async fn a_development_host_serves_every_feature() {
+    let (router, _fake) = test_app(configured_tree("hunter2secret"));
+    let cookie = login(&router, "hunter2secret").await;
+    let meta: serde_json::Value =
+        serde_json::from_str(&body_string(get(&router, "/api/v1/meta", Some(&cookie)).await).await)
+            .expect("meta JSON");
+    assert_eq!(
+        meta["features"],
+        json!(["wifi", "bluetooth", "ssh", "containers", "mqtt"])
+    );
+}
+
 #[test]
 fn the_console_index_admits_the_tree_sorted_and_safe() {
     let builtin = crate::assets::builtin::Builtin::load(console())
@@ -1420,7 +1471,7 @@ const VERSIONS_BODY: &str = r#"{"versions":["v1"],"current":"v1"}"#;
 // The exact document the discovery table gives for `/api/v1/meta`.
 fn meta_body() -> String {
     format!(
-        r#"{{"api":"v1","settingsSchemaVersion":{},"daemon":"apid"}}"#,
+        r#"{{"api":"v1","settingsSchemaVersion":{},"daemon":"apid","features":["wifi","bluetooth","ssh","containers","mqtt"]}}"#,
         micad_settings::STATE_SCHEMA_VERSION
     )
 }
@@ -1546,7 +1597,7 @@ async fn every_other_api_path_has_one_answer_in_every_mode() {
         // password at all: the reserved subtree's own envelope, byte for byte,
         // three times. The router is the same one in the first two cases and a
         // freshly built one in setup mode, which is the case a path-prefix
-        // gate used to break.
+        // gate would break.
         for (mode, response) in [
             ("with a session", get(&router, path, Some(&cookie)).await),
             ("without one", get(&router, path, None).await),
@@ -3821,7 +3872,7 @@ async fn an_unreachable_micad_is_503_with_retry_after() {
 
 // The HTML half of the same condition: a pane whose micad call fails answers
 // **503 with `Retry-After`**, exactly like the API path above, so one outage
-// no longer reports as 502 on one surface and 503 on the other.
+// reports one status on both surfaces.
 
 // A dot-path that does not exist answers **404 `settings_not_found`**, no
 // longer 422: micad names `SettingsError::NotFound` with its own error name
@@ -4764,8 +4815,8 @@ async fn bearer_json(
 // once, the tree keeps only a digest, and the token then authenticates the
 // API on its own.
 
-// **Bearer only.** Every `/api/v1/` route takes the bearer,
-// and the session cookie that used to work on the shipped four is now a 401.
+// **Bearer only.** Every `/api/v1/` route takes the bearer, and a session
+// cookie alone is a 401.
 
 // The three token routes take a bearer and
 // nothing else, and a session cookie presented to any of them is a 401.
@@ -4901,12 +4952,9 @@ async fn an_absent_token_id_is_404_and_a_malformed_one_is_422() {
     // The empty spelling is not this route -- measured, and not assumed from
     // the rotate action, whose empty `{iface}` segment is interior rather than
     // trailing and IS served. `/api/v1/tokens/` reaches the reserved subtree's
-    // own not-found handler. That measurement carried a consequence until
-    // `token_id` had to refuse this spelling, or the gate would
-    // release an unauthenticated caller to a 404 where a redirect was owed --
-    // and the consequence is gone now that the gate releases the whole subtree
-    // either way. What is left is the measurement of which handler answers,
-    // and this arm's answer is unchanged in status, code and body.
+    // own not-found handler. The gate releases the whole subtree either way,
+    // so what this arm pins is which handler answers, in status, code and
+    // body.
     let cookie = login(&router, "hunter2secret").await;
     let response = request(&router, "DELETE", "/api/v1/tokens/", Some(&cookie), None).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -5684,8 +5732,8 @@ async fn a_duplicate_key_is_409_and_the_stored_list_is_unchanged() {
         json!([stored_key(REAL_ED25519_LINE)])
     );
 
-    // And a malformed key is still 422, which is the distinction the third
-    // clause buys: one status no longer covers two conditions.
+    // And a malformed key is still 422: the two conditions answer two
+    // different statuses.
     let response = bearer_json(
         &router,
         "POST",

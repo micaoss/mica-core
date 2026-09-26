@@ -32,6 +32,19 @@ pub trait Reconciler: Send + Sync {
     async fn apply(&self, settings: &Settings) -> anyhow::Result<serde_json::Value>;
 }
 
+/// The reconcilers of the features the product carries: one whose subtree
+/// belongs to a feature it does not carry is not registered, so nothing renders
+/// that feature's files or drives its units.
+pub fn for_features(features: &micad_settings::Features) -> Vec<Box<dyn Reconciler>> {
+    all()
+        .into_iter()
+        .filter(|reconciler| {
+            micad_settings::Feature::owning(reconciler.subtree())
+                .is_none_or(|feature| features.has(feature))
+        })
+        .collect()
+}
+
 /// All reconcilers compiled into micad with production executors.
 ///
 /// Safe to call anywhere: executors connect to the system bus lazily, so
@@ -55,4 +68,40 @@ pub fn all() -> Vec<Box<dyn Reconciler>> {
             std::sync::Arc::new(crate::bluetooth::BlueZ),
         )),
     ]
+}
+
+#[cfg(test)]
+mod feature_tests {
+    use micad_settings::{Feature, Features};
+
+    /// The reconcilers of a feature the product does not carry are not
+    /// registered; the ones every product needs always are.
+    #[test]
+    fn only_the_features_the_product_carries_are_reconciled() {
+        let subtrees = |features: &Features| {
+            super::for_features(features)
+                .iter()
+                .map(|r| r.subtree())
+                .collect::<Vec<_>>()
+        };
+        let all = subtrees(&Features::all());
+        let minimal = subtrees(&Features::only(&[]));
+        for always in ["hostname", "network", "time"] {
+            assert!(minimal.contains(&always), "{always}: {minimal:?}");
+        }
+        for gated in [
+            "access.ssh",
+            "wifi.client",
+            "wifi",
+            "container",
+            "mqtt",
+            "bluetooth",
+        ] {
+            assert!(all.contains(&gated), "{gated}: {all:?}");
+            assert!(!minimal.contains(&gated), "{gated}: {minimal:?}");
+        }
+        let mqtt_only = subtrees(&Features::only(&[Feature::Mqtt]));
+        assert!(mqtt_only.contains(&"mqtt"));
+        assert!(!mqtt_only.contains(&"container"));
+    }
 }

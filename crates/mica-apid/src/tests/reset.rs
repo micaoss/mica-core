@@ -638,8 +638,7 @@ async fn a_rotation_that_cannot_publish_is_aborted_and_writes_nothing() {
 // --- Power loss, and the retry ---------------------------------------------
 
 /// A [`SettingsApi`] that fails the FIRST write of a chosen dot-path and then
-/// behaves normally — P2's `InterruptOnce`, for the same reason and modelled
-/// at the same place: the commit is one `Store::save`, whose only two outcomes
+/// behaves normally, modelled at the commit: one `Store::save`, whose only two outcomes
 /// are "landed" and "did not", and a write that does not land is one the
 /// caller sees fail.
 struct InterruptOnce {

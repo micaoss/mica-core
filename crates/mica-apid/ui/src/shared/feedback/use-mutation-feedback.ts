@@ -4,7 +4,7 @@ import { failureDetail, notifyFailure, notifySuccess } from './toast'
 
 interface FeedbackOptions<TData, TVariables> extends Omit<UseMutationOptions<TData, Error, TVariables>, 'onSuccess' | 'onError'> {
   /// What the operator is told when the device accepted the request. Required:
-  /// a write with nothing to say on success is the defect this exists to close.
+  /// every write says something when it succeeds.
   success: string | ((data: TData, variables: TVariables) => string)
   /// The headline for a refusal. The device's own sentence goes underneath it,
   /// so this names the action rather than restating the error.

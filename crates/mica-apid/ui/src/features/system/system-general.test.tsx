@@ -64,8 +64,8 @@ describe('the custom UI switch', () => {
 
 describe('the hostname form', () => {
   it('reports the save and falls back to the value the device confirmed', async () => {
-    // The draft used to survive a successful save, so the field kept showing
-    // what this browser typed rather than what the device accepted.
+    // After a successful save the draft is dropped, so the field shows what
+    // the device accepted rather than what this browser typed.
     let current = 'mica-cm4'
     stubFetch({
       '/api/v1/settings/hostname': () => jsonResponse(current),

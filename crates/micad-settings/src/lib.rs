@@ -16,6 +16,7 @@ pub mod configuration;
 // have one.
 mod documents;
 mod error;
+mod features;
 mod model;
 mod path;
 mod recovery;
@@ -41,6 +42,7 @@ pub use documents::{
     TimeDocument, WIFI_DOCUMENT, WIFI_SCHEMA_VERSION, WifiDocument, document_subtrees,
 };
 pub use error::SettingsError;
+pub use features::{Feature, Features, PRODUCT_FILE};
 pub use model::{
     AccessSettings, ApMode, ApiToken, AuthorizedKey, BluetoothSettings, BridgeConfig,
     CONTAINER_VOLUME_ROOT, ClaimChannel, ClaimSettings, ConsoleSettings, ContainerSettings,

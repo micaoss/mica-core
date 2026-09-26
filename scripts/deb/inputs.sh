@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # The inputs hash of one producer for one architecture: the sha256 of a sorted
 # "<sha256>  <path>" manifest of every tracked file in this repository that
-# determines the producer's bytes, followed by "arch <arch>"
-# (mica:docs/decisions/2026-09-15-package-versions.md R4). It guards against
+# determines the producer's bytes, followed by "arch <arch>". It guards against
 # inputs that changed without a version bump; it never decides reuse on its own.
 #
 #   bash scripts/deb/inputs.sh --producer <name> --arch <amd64|arm64> [--manifest]
@@ -64,8 +63,7 @@ for c in ${CONTEXTS}; do PATHS+=("${c#*=}"); done
 # check-only tooling beside them build nothing a package carries: a producer
 # compiles its binaries with `cargo build --bin`, which never builds an example. They are excluded because
 # the hash is a guard over the bytes: repository housekeeping must not look like
-# a package that changed and force a version bump
-# (mica:docs/decisions/2026-09-15-package-versions.md, Rationale).
+# a package that changed and force a version bump.
 EXCLUDE=(':(exclude,glob)crates/*/tests/**' ':(exclude,glob)crates/*/benches/**'
     ':(exclude,glob)crates/*/examples/**'
     ':(exclude,glob)crates/mica-apid/ui/e2e/**' ':(exclude,glob)crates/mica-apid/ui/**/*.test.ts'

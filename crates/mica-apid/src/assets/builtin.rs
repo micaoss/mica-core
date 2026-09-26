@@ -1,10 +1,10 @@
 //! The built-in console, served from the directory the `mica-apid-ui`
 //! package installs.
 //!
-//! The console is not compiled into apid: a product that wants the API and not
-//! the console leaves the package out, and then `/_ui` answers 404 and nothing
-//! else changes. The directory is in the dm-verity root, so what is served is
-//! as authenticated as the embedded tree it replaces.
+//! The console is not part of apid's binary: a product that wants the API and
+//! not the console leaves the package out, and then `/_ui` answers 404 and
+//! nothing else changes. The directory is in the dm-verity root, so what is
+//! served is authenticated like the binary itself.
 //!
 //! The tree is indexed once, when apid starts: regular files only, every name a
 //! safe logical path, bounded in count and size. A request is answered from the

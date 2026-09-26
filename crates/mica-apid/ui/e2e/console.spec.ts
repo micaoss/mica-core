@@ -79,7 +79,7 @@ test('applies a typed interface edit through the review dialog', async ({ page, 
 
   await expect(page.getByRole('heading', { name: 'eth0' })).toBeVisible()
   // The mode control is the registry's toggle group: single-select buttons
-  // carrying aria-pressed, where the page previously hand-rolled a radiogroup.
+  // carrying aria-pressed.
   await page.getByRole('button', { name: 'Static', exact: true }).click()
   await page.getByRole('textbox', { name: 'Address / prefix' }).fill('192.168.1.24/24')
   await page.getByRole('button', { name: 'Review and save' }).click()
@@ -124,9 +124,9 @@ test('labels every route that contains simulated behavior', async ({ page }, tes
 
 test('keeps a tall dialog inside a short appliance screen', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the geometry')
-  // A 1024x600 panel is a normal appliance display. The dialog used to be
-  // centred with no height bound and no internal scroll, so at 520px its title
-  // sat at -37px and both footer buttons were below the fold.
+  // A 1024x600 panel is a normal appliance display. The dialog is height
+  // bounded and scrolls inside, so at 520px its title and both footer buttons
+  // stay on screen.
   await page.setViewportSize({ width: 1024, height: 520 })
   await page.goto('./network')
   await page.getByRole('button', { name: 'Add interface' }).click()
@@ -144,8 +144,8 @@ test('keeps a tall dialog inside a short appliance screen', async ({ page }, tes
 
 test('opens the language picker without a second layer behind it', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the overlay contract')
-  // The picker used to be a dialog rendered inside the header menu, which left
-  // the menu open and painted above its own backdrop.
+  // The picker is not a dialog inside the header menu, so no menu is left open
+  // above its own backdrop.
   await page.goto('./')
   await page.getByRole('combobox', { name: 'Language' }).click()
 

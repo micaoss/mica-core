@@ -6,3 +6,4 @@
 - [ ] [**20260921-1245-delta-transfer-and-the-update-protocol Delta transfer, and the update protocol an origin must serve**](20260921-1245-delta-transfer-and-the-update-protocol.md) `proposed`
 - [-] [**20260925-1300-board-facts-from-the-boot-policy The device reads its board facts from the signed boot policy, not from the board's name**](20260925-1300-board-facts-from-the-boot-policy.md) `implementing`
 - [ ] [**20260926-0841-one-binary-and-an-optional-console One management binary, an optional console, stripped executables**](20260926-0841-one-binary-and-an-optional-console.md) `approved`
+- [ ] [**20260926-1000-features-decide-the-surface The product's features decide which API a device serves**](20260926-1000-features-decide-the-surface.md) `approved`

@@ -39,10 +39,25 @@ afterEach(() => {
 })
 
 describe('the network page', () => {
+  it('shows no Wi-Fi or Bluetooth tab on a device that does not serve them', async () => {
+    stubFetch({ ...routes, '/api/v1/meta': { api: 'v1', features: ['containers', 'mqtt'] } })
+    renderRoute(<NetworkPage />)
+    await screen.findByRole('tab', { name: 'Interfaces' })
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'Bluetooth' })).toBeNull())
+    expect(screen.queryByRole('tab', { name: 'Known Wi-Fi' })).toBeNull()
+    expect(screen.getByRole('tab', { name: 'WireGuard' })).toBeTruthy()
+  })
+
+  it('shows every tab while the device has not said otherwise', async () => {
+    stubFetch(routes)
+    renderRoute(<NetworkPage />)
+    expect(await screen.findByRole('tab', { name: 'Known Wi-Fi' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Bluetooth' })).toBeTruthy()
+  })
+
   it('gives each interface one link and no second navigation behind it', async () => {
-    // The row used to carry an onClick to the same route as the link it
-    // contained, so a click on the name navigated twice and the keyboard
-    // reached neither.
+    // The row has no onClick of its own: the link is the one navigation, so a
+    // click on the name navigates once and the keyboard reaches it.
     stubFetch(routes)
     renderRoute(<NetworkPage />)
 

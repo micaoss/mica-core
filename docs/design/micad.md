@@ -97,6 +97,15 @@ same resolver.
 
 ## 4. Reconcilers
 
+micad reads the product's `FEATURES` (`/usr/lib/mica/product.conf`) at start. A
+reconciler whose subtree belongs to a feature the product does not carry -- `wifi`
+(`wifi`), `bluetooth` (`bluetooth`), `ssh` (`access.ssh`), `containers` (`container`),
+`mqtt` (`mqtt`) -- is not registered. A settings write that would change such a
+subtree is refused as `feature not in this product` (the bus's not-found error), and
+the feature's members (`ScanWifi`, the Bluetooth and container members) refuse by
+the same name; the Bluetooth pairing agent is not registered. A dry-run daemon and
+a root with no product file serve every feature.
+
 Contract (`crates/micad/src/reconciler/mod.rs`): a stable `name` (its key
 in the live-state tree), the `subtree` dot-path it watches, and `apply`, which
 converges the system to the settings and returns the applied state as JSON.

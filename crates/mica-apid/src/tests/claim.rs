@@ -459,8 +459,8 @@ async fn no_claim_surface_emits_the_password() {
 ///
 /// There is one route that answers "how was this device claimed", and it
 /// answers for both. The document channel writes no record of its own — micad's
-/// importer is the one writer that does not — and is read off the evidence P1
-/// already persists, so there is no second field that could disagree with
+/// importer is the one writer that does not — and is read off the evidence the
+/// import already persists, so there is no second field that could disagree with
 /// `access.webAdmin` about whether the device is claimed.
 #[tokio::test]
 async fn a_document_claim_and_a_route_claim_answer_one_projection() {
@@ -488,7 +488,7 @@ async fn a_document_claim_and_a_route_claim_answer_one_projection() {
     assert_eq!(by_document["state"], json!("claimed"));
     assert_eq!(by_document["via"], json!("provisioning-document"));
     assert_eq!(by_document["rotationRequired"], json!(true));
-    // WHEN comes from the import record P1 already writes, not from a copy.
+    // WHEN comes from the import record, not from a copy.
     assert_eq!(by_document["at"], json!(1_700_000_000_u64));
 }
 

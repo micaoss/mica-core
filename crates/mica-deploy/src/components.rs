@@ -226,10 +226,10 @@ impl Deployment {
             self.schema == "mica/deployment/v2" && self.data_policy == "unchanged",
             "unsupported deployment schema or DATA policy",
         )?;
-        // No board table: which board, architecture and boot format a device
-        // accepts is its signed boot policy's to say ([`admit`]). What a
-        // deployment must be on its own is one of the architectures and boot
-        // formats the device runs, with every component agreeing with it.
+        // Which board, architecture and boot format a device accepts is its
+        // signed boot policy's to say ([`admit`]). What a deployment must be on
+        // its own is one of the architectures and boot formats the device runs,
+        // with every component agreeing with it.
         name(&self.board)?;
         require(
             matches!(self.arch.as_str(), "amd64" | "arm64"),

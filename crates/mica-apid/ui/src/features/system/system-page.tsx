@@ -106,9 +106,9 @@ interface UpdateStateDoc {
 
 const activeUpdateStates = new Set(['checking', 'downloading', 'installing', 'discarding'])
 
-/// One query key, one `queryFn`. Two panes used to declare the same key with
-/// different result types, which is a cache entry whose shape depends on which
-/// pane mounted first.
+/// One query key, one `queryFn`, shared by every pane: two declarations of the
+/// same key with different result types would be a cache entry whose shape
+/// depends on which pane mounted first.
 function useUpdateState() {
   return useQuery({
     queryKey: ['update-state'],

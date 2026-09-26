@@ -552,9 +552,9 @@ check "mqttd: root can still reach ${NAME}" "OK" \
     "$(as_root call "${MQTTD_SOCK}" "${NAME}")"
 
 echo
-# Even the former read-only exception is gone: device identity is runtime
-# configuration, not a micad call.
-check "mqttd: the bridge's uid CANNOT call the removed GetDeviceId member" \
+# No read-only exception either: device identity is runtime configuration, not
+# a micad call.
+check "mqttd: the bridge's uid CANNOT call GetDeviceId, which micad does not serve" \
     "ERROR org.freedesktop.DBus.Error.AccessDenied" \
     "$(as_mqttd call "${MQTTD_SOCK}" "${NAME}" com.mica.micad1 GetDeviceId /com/mica/micad)"
 

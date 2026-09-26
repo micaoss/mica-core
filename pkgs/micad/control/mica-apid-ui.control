@@ -4,7 +4,7 @@ Architecture: @ARCH@
 Maintainer: mica build <mica@example.invalid>
 Section: admin
 Priority: optional
-Depends: mica-apid (= 0.1.0-5)
+Depends: mica-apid (= 0.1.0-6)
 Description: Mica OS web console
  The built-in web console mica-apid serves at /_ui. A device without it is
  API-only: /_ui answers 404 and the API is unchanged.

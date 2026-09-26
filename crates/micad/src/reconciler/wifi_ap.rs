@@ -408,10 +408,8 @@ fn derived_ssid(device_id: &str) -> String {
 /// the hostapd configuration directory is a separate mount from `/etc` on the
 /// read-only root.
 fn write_atomically(path: &Path, contents: &str, mode: u32) -> Result<()> {
-    // One implementation, in crate::fswrite. This was a second copy of the
-    // temp-and-rename dance; transient.rs had a third. They agreed, which is
-    // the reason the duplication survived -- and the hostname reconciler then
-    // needed a FOURTH variant, for a path where rename cannot work at all.
+    // The one implementation of temp-and-rename, in crate::fswrite, which also
+    // handles a target that is itself a mount point.
     crate::fswrite::write_config(path, contents, mode)
 }
 

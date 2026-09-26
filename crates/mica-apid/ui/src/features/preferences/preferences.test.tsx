@@ -79,9 +79,8 @@ describe('display preferences', () => {
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
   })
 
-  /// Neither control is a text box. The language picker used to be a combobox
-  /// with a search input, which in a header slot read as an empty search field
-  /// rather than as the language the console is in.
+  /// Neither control is a text box: in a header slot a search input reads as an
+  /// empty search field rather than as the language the console is in.
   it('is a pair of triggers rather than a text input', async () => {
     renderPreferences()
 
@@ -95,9 +94,8 @@ describe('display preferences', () => {
     expect(language.querySelector('.sr-only')).toBeTruthy()
   })
 
-  /// The picker used to be a dialog rendered inside the header's dropdown menu,
-  /// which left the menu open on top of its own backdrop. It anchors to its own
-  /// trigger now, so there is no second layer to leave behind.
+  /// The picker anchors to its own trigger rather than opening a dialog inside
+  /// a menu, so there is no second layer to leave open behind it.
   it('opens no dialog layer of its own', async () => {
     renderPreferences()
 

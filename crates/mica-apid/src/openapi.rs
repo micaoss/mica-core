@@ -109,6 +109,49 @@ struct ApiDoc;
 
 /// The document as the exact bytes `--openapi` prints and `openapi.json`
 /// holds: pretty-printed, with one trailing newline.
+/// The path prefixes each feature's routes live under; a route of a feature the
+/// product does not carry is not served.
+const FEATURE_PATHS: [(&str, &str); 5] = [
+    ("/api/v1/wifi/", "wifi"),
+    ("/api/v1/bluetooth", "bluetooth"),
+    ("/api/v1/ssh/", "ssh"),
+    ("/api/v1/containers", "containers"),
+    ("/api/v1/mqtt", "mqtt"),
+];
+
+/// Say on every operation of a feature's routes that it is served only when the
+/// product carries that feature.
+fn note_features(document: &mut utoipa::openapi::OpenApi) {
+    for (path, item) in &mut document.paths.paths {
+        let Some((_, feature)) = FEATURE_PATHS
+            .iter()
+            .find(|(prefix, _)| path.starts_with(prefix))
+        else {
+            continue;
+        };
+        let note = format!(
+            "Served only when the product carries the `{feature}` feature \
+             (`GET /api/v1/meta` lists `features`); otherwise every method \
+             answers 404 `not_found`."
+        );
+        for operation in [
+            &mut item.get,
+            &mut item.put,
+            &mut item.post,
+            &mut item.delete,
+            &mut item.patch,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            operation.description = Some(match operation.description.take() {
+                Some(description) => format!("{description}\n\n{note}"),
+                None => note.clone(),
+            });
+        }
+    }
+}
+
 pub fn document_json() -> String {
     let mut document = ApiDoc::openapi();
     // The crates declare no `license`, so the derive fills the object in from
@@ -116,6 +159,7 @@ pub fn document_json() -> String {
     // field is the empty string states nothing; there is no licence to name,
     // so there is no object.
     document.info.license = None;
+    note_features(&mut document);
     let mut json = document
         .to_pretty_json()
         .expect("a document of derived schemas serialises");

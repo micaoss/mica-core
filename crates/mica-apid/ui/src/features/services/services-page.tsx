@@ -12,14 +12,16 @@ import { SimulationNotice } from '@/shared/simulation/simulation-notice'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
 import { serviceCatalog, serviceEndpoint, type ServiceDefinition } from './service-catalog'
+import { useFeatures } from '@/shared/lib/features'
 
 export function ServicesPage() {
   const { t } = useTranslation()
+  const serves = useFeatures()
   return (
     <Page>
       <PageHeader title={t('services.title')} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {serviceCatalog.map((service) => <ServiceCard key={service.id} service={service} />)}
+        {serviceCatalog.filter((service) => serves(service.id)).map((service) => <ServiceCard key={service.id} service={service} />)}
       </div>
       <SimulationNotice scope={t('services.title')} />
     </Page>

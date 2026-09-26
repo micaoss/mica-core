@@ -22,6 +22,7 @@ import { Input } from '@/shared/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select'
 import { Switch } from '@/shared/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs'
+import { useFeatures } from '@/shared/lib/features'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
 import { ObservedNetworkPanel } from '@/features/network/observed-network-panel'
@@ -59,6 +60,8 @@ export function NetworkPage() {
     format: (kind: string, method: string) => t('network.summary.value', { kind, method }),
   }
 
+  const serves = useFeatures()
+
   return (
     <Page>
       <PageHeader title={t('network.title')} action={<Button onClick={() => setAdding(true)}><Plus />{t('network.actions.addInterface')}</Button>} />
@@ -67,9 +70,9 @@ export function NetworkPage() {
       <Tabs defaultValue="interfaces">
         <TabsList aria-label={t('network.title')}>
           <TabsTrigger value="interfaces">{t('network.tabs.interfaces')}</TabsTrigger>
-          <TabsTrigger value="wifi">{t('network.tabs.wifi')}</TabsTrigger>
+          {serves('wifi') ? <TabsTrigger value="wifi">{t('network.tabs.wifi')}</TabsTrigger> : null}
           <TabsTrigger value="wireguard">{t('network.tabs.wireguard')}</TabsTrigger>
-          <TabsTrigger value="bluetooth">{t('network.tabs.bluetooth')}</TabsTrigger>
+          {serves('bluetooth') ? <TabsTrigger value="bluetooth">{t('network.tabs.bluetooth')}</TabsTrigger> : null}
           <TabsTrigger value="observed">{t('network.tabs.observed')}</TabsTrigger>
         </TabsList>
         <TabsContent value="interfaces" className="grid gap-6 pt-4">
@@ -92,9 +95,8 @@ export function NetworkPage() {
                 { id: 'addresses', header: t('network.table.addresses'), cell: (row) => <span className="font-mono text-[0.8125rem] break-all">{summarize(row.observed?.addresses)}</span> },
                 { id: 'age', header: t('network.table.lastObserved'), align: 'end', cell: (row) => row.observed ? age : '—' },
               ]}
-              // One focus stop and one navigation per row. The row used to
-              // carry an onClick beside a nested link, so a click on the name
-              // navigated twice and the keyboard reached neither.
+              // One focus stop and one navigation per row: the link, and no
+              // onClick on the row around it.
               rowHref={(row) => (
                 <Link to="/network/$name" params={{ name: row.name }} className="flex items-center gap-1 font-mono font-medium text-primary hover:underline">
                   {row.name}<ChevronRight className="size-3.5" aria-hidden="true" />
@@ -103,9 +105,9 @@ export function NetworkPage() {
             />
           </CollectionPanel>
         </TabsContent>
-        <TabsContent value="wifi" className="grid gap-6 pt-4"><WifiPanel /></TabsContent>
+        {serves('wifi') ? <TabsContent value="wifi" className="grid gap-6 pt-4"><WifiPanel /></TabsContent> : null}
         <TabsContent value="wireguard" className="grid gap-6 pt-4"><WireguardPanel configured={(network.data?.configured ?? {}) as Record<string, InterfaceConfig>} /></TabsContent>
-        <TabsContent value="bluetooth" className="grid gap-6 pt-4"><BluetoothPanel /></TabsContent>
+        {serves('bluetooth') ? <TabsContent value="bluetooth" className="grid gap-6 pt-4"><BluetoothPanel /></TabsContent> : null}
         {/* What the device sees, device-wide: routes, DNS, radios. The
             per-interface half of it is on each interface's own page, which is
             where an operator who clicked a row is already looking. */}
@@ -292,8 +294,8 @@ function WifiPanel() {
   })
   const addNetwork = () => api<WifiNetwork>('/api/v1/wifi/client/networks', json('POST', { ssid, ...(psk ? { psk } : {}), hidden, priority: Number(priority) }))
     .then(() => {
-      // Every field resets, not just the two that used to: a reopened dialog
-      // showing the previous network's priority is a value nobody chose.
+      // Every field resets: a reopened dialog showing the previous network's
+      // priority is a value nobody chose.
       setSsid(''); setPsk(''); setHidden(false); setPriority('0')
       return queryClient.invalidateQueries({ queryKey: ['wifi-networks'] })
     })

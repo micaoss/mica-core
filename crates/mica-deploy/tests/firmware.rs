@@ -188,7 +188,7 @@ fn amlogic_receipt_checks_payload_after_the_vendor_header() {
         json!({"format":"emmc-boot","area":"boot0","payloadOffset":0,"maxBytes":4193792}),
         json!({"format":"emmc-boot","area":"boot0","payloadOffset":512,"maxBytes":4194304}),
         json!({"format":"emmc-boot","area":"boot1","payloadOffset":512,"maxBytes":4193792}),
-        // The vendor-named format is gone, not aliased.
+        // A format name this device does not implement is refused, with no alias.
         json!({"format":"amlogic-boot0","payloadOffset":512,"maxBytes":4193792}),
     ] {
         value["target"] = target;

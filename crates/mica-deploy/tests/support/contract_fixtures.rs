@@ -117,8 +117,8 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
     // re-serialises the envelope and compares it against the bytes it was
     // handed, so the four fields must arrive in the declared order; a `Value`
     // sorts them alphabetically and is refused as `noncanonical envelope`. The
-    // note says so in the bytes, because the alternative is each new consumer
-    // learning it by debugging (mica-build hit it on 2026-09-20).
+    // note says so in the fixture's own bytes, so a consumer reading only the
+    // fixture learns it.
     let envelope = pretty(&json!({
         "publicKey": STANDARD.encode(deployment_key.public_key().as_ref()),
         "envelopeWireOrder": WIRE_ORDER,

@@ -234,10 +234,18 @@ async fn serve() -> anyhow::Result<()> {
         tracing::info!(?outcome, state_dir = %state_dir.display(), "provisioning checked");
     }
 
+    // What the product carries decides what runs. A dry-run daemon and a host
+    // with no product file serve everything.
+    let features = if dry_run {
+        micad_settings::Features::all()
+    } else {
+        product_features(std::path::Path::new(micad_settings::PRODUCT_FILE))
+    };
+    tracing::info!(features = ?features.words(), "product features");
     let reconcilers = if dry_run {
         Vec::new()
     } else {
-        reconciler::all()
+        reconciler::for_features(&features)
     };
     // Under dry-run the production control is never constructed, so a daemon
     // started by a test cannot reach systemd's manager at all.
@@ -298,7 +306,8 @@ async fn serve() -> anyhow::Result<()> {
         power,
         transient::production_shadow_path(),
         Value::Object(state),
-    );
+    )
+    .with_features(features.clone());
     if !dry_run {
         service =
             service.with_network_state(Arc::new(network_state::SystemdNetworkState::production()));
@@ -316,9 +325,11 @@ async fn serve() -> anyhow::Result<()> {
         // The adapter and the pairing agent. The agent's state is shared with
         // the `org.bluez.Agent1` object registered below: it blocks on a
         // decision the console makes through the bus.
-        let agent = Arc::new(bluetooth::Agent::default());
-        pairing_agent = Some(Arc::clone(&agent));
-        service = service.with_bluetooth(Arc::new(bluetooth::BlueZ), Arc::clone(&agent));
+        if features.has(micad_settings::Feature::Bluetooth) {
+            let agent = Arc::new(bluetooth::Agent::default());
+            pairing_agent = Some(Arc::clone(&agent));
+            service = service.with_bluetooth(Arc::new(bluetooth::BlueZ), Arc::clone(&agent));
+        }
         service = service.with_containers(
             Arc::new(containers::Podman::default()),
             Arc::new(reconciler::systemd::Systemd::new()),
@@ -457,6 +468,17 @@ fn state_dir_for(settings_path: &str) -> PathBuf {
 /// service registry away from a device that would otherwise have one.
 fn service_scan_enabled(dry_run: bool, scan_override: Option<&str>) -> bool {
     !dry_run || scan_override == Some("1")
+}
+
+/// The features of the product file at `path`. A file that exists and cannot be
+/// read is reported and treated as every feature: a daemon that cannot manage
+/// the device at all is worse than one that serves more than the product
+/// carries.
+fn product_features(path: &std::path::Path) -> micad_settings::Features {
+    micad_settings::Features::load(path).unwrap_or_else(|err| {
+        tracing::error!(path = %path.display(), error = %err, "product features unreadable; serving every feature");
+        micad_settings::Features::all()
+    })
 }
 
 #[cfg(test)]

@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-09-26 10:40 [feature]
+
+The product's features decide which API a device serves
+(20260926-1000-features-decide-the-surface):
+
+- `micad_settings::Features` reads `FEATURES` from `/usr/lib/mica/product.conf`, the dm-verity
+  root's statement of the product. mica-core acts on `wifi`, `bluetooth`, `ssh`, `containers` and
+  `mqtt`; everything else is always present. No product file, or no `FEATURES` line, serves every
+  feature.
+- micad registers only the reconcilers of the features the product carries, refuses a settings
+  write that would change another feature's subtree as `feature not in this product` (not found on
+  the bus), refuses that feature's members by the same name, and registers no Bluetooth pairing
+  agent without `bluetooth`.
+- apid mounts only those features' routes; the rest answer 404 `not_found`, authenticated or not.
+  `GET /api/v1/meta` lists `features`, and `openapi.json` names the feature of every gated
+  operation.
+- The console hides the Wi-Fi and Bluetooth tabs, the container and MQTT services and the SSH
+  section of a feature `meta` does not list.
+- The transient root password stays available without `ssh`: it also opens the physical console.
+- mica-build lists `ssh` in `FEATURES` for a product that carries `mica-ssh`, in the commit that
+  pins this release; a product that does not loses the SSH API.
+- Comments in the code describe behaviour only: references to plans, tasks, decisions, design
+  documents and dates are gone, and so is history narrated as "used to" and "no longer".
+- Versions: the micad producer (`micad`, `mica-apid`, `mica-apid-ui`) `0.1.0-6`; the mqtt producer
+  `0.1.0-5`; `mica-deploy` and `mica-lifecycle` `0.1.0-7`; `mica-sftp-server` `0.1.0-3` -- the
+  workspace manifest is an input to every producer.
+
 ## 2026-09-26 09:20 [fix]
 
 The Wi-Fi client joins WPA3 networks:

@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # The inputs' readers: scripts/build/check-lock.sh over the specification's
 # vectors READ OUT OF mica AT THE COMMIT scripts/gate/vectors.pin NAMES (never
-# copied into this tree -- a copy is a snapshot, and on 2026-09-20 five
-# repositories each held a different one), scripts/build/locks.sh over the
-# committed locks and over file:// releases, and scripts/build/from.sh.
+# copied into this tree: a copy is a snapshot that drifts from the
+# specification), scripts/build/locks.sh over the committed locks and over
+# file:// releases, and scripts/build/from.sh.
 #
-# WHICH VECTORS MUST PASS IS DERIVED, NOT DECLARED (mica:docs/design/release-lock.md
-# 9.1): what this repository pins, what it produces, the vectors that say what
+# WHICH VECTORS MUST PASS IS DERIVED, NOT DECLARED: what this repository pins, what it produces, the vectors that say what
 # its own forms may not be, and -- since it now writes one -- the vectors-pin
 # family. A vector carrying a row kind this reader does not implement, or a
 # scoped release row, is a form nothing here can meet; it is still run, and
@@ -76,8 +75,7 @@ done <"${VECTORS}/expected.tsv"
 echo "vectors: ${ROWS} rows read at $(sed -n 's/^COMMIT=//p' "${REPO_ROOT}/scripts/gate/vectors.pin"), ${OUTSIDE} outside this repository's floor"
 
 # SET EQUALITY, BOTH DIRECTIONS: every vector file the canonical tree holds is
-# named by its manifest, so an extra fixture cannot sit unrun -- the shape that
-# left a retired board's fixture green in another repository.
+# named by its manifest, so an extra fixture cannot sit unrun and pass unseen.
 # A pins/ vector is a DIRECTORY of locks and pins named as one row, and
 # expected.tsv and derived-from.tsv are manifests rather than vectors, so the
 # comparison is at the granularity the manifest names.

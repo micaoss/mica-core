@@ -26,6 +26,16 @@ mod session;
 mod settings_api;
 mod startup;
 mod task_registry;
+/// The features of the product this root was built as. An unreadable product
+/// file is reported and treated as every feature, the answer micad gives too.
+fn product_features() -> micad_settings::Features {
+    let path = std::path::Path::new(micad_settings::PRODUCT_FILE);
+    micad_settings::Features::load(path).unwrap_or_else(|err| {
+        tracing::error!(path = %path.display(), error = %err, "product features unreadable; serving every feature");
+        micad_settings::Features::all()
+    })
+}
+
 #[cfg(test)]
 mod tests;
 mod tls;
@@ -140,7 +150,8 @@ async fn serve() -> anyhow::Result<()> {
     // too: one STATE-backed directory, one set of permissions to reason about.
     let state = routes::AppState::new(api, signing_key)
         .with_persistence(&config.state_dir)
-        .with_builtin_ui(&config.ui_dir);
+        .with_builtin_ui(&config.ui_dir)
+        .with_features(product_features());
     // The SettingsChanged watcher that keeps the gate's access cache honest;
     // until it reports a live subscription the gate reads the bus directly,
     // so a micad that is not up yet costs latency, never staleness.

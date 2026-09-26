@@ -18,6 +18,7 @@ import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
 import { Switch } from '@/shared/components/ui/switch'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
+import { useFeatures } from '@/shared/lib/features'
 import { failureDetail } from '@/shared/feedback/toast'
 import type { TaskAccepted } from '@/lib/types'
 import { ClaimPanel } from '@/features/onboarding/claim-panel'
@@ -30,12 +31,13 @@ interface AuthorizedKeys { keys: AuthorizedKey[]; notice: string }
 
 export function AccessPage() {
   const { t } = useTranslation()
+  const serves = useFeatures()
   return (
     <Page>
       <PageHeader title={t('access.title')} />
       <PageSection title={t('access.password.title')} description={t('access.password.description')}><PasswordPanel /></PageSection>
       <PageSection title={t('access.tokens.title')} description={t('access.tokens.description')}><TokenPanel /></PageSection>
-      <PageSection title={t('access.ssh.title')} description={t('access.ssh.sectionCopy')}><SshPanel /></PageSection>
+      {serves('ssh') ? <PageSection title={t('access.ssh.title')} description={t('access.ssh.sectionCopy')}><SshPanel /></PageSection> : null}
       <PageSection title={t('access.root.title')} description={t('access.root.description')} tone="danger"><RootPanel /></PageSection>
       <PageSection title={t('access.onboarding.title')} description={t('access.onboarding.addition')}>
         <div className="grid gap-3 lg:grid-cols-2"><ClaimPanel /><ProvisioningPanel /></div>
