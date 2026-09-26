@@ -1,4 +1,8 @@
 //! Process-interruption and ENOSPC acceptance for the real transaction implementation.
+
+#[path = "support/boards.rs"]
+mod boards;
+
 use base64::{Engine, engine::general_purpose::STANDARD};
 use mica_deploy::{
     boot::BootKind,
@@ -25,7 +29,7 @@ fn store(root: &Path, fit: bool) -> DeploymentStore {
         root.join("store/system"),
         if fit {
             BootBackend::Fit {
-                layout: mica_deploy::fit_env::FitLayout::Cx3576,
+                layout: boards::layout("cx3576"),
                 firmware: root.join("store/firmware.img"),
             }
         } else {
@@ -169,11 +173,7 @@ fn seed(root: &Path, fit: bool, operation: &str) {
     if fit {
         let mut file = fs::File::create(root.join("store/firmware.img")).unwrap();
         file.set_len(18 * 1048576 - 32768).unwrap();
-        for (i, offset) in mica_deploy::fit_env::FitLayout::Cx3576
-            .offsets()
-            .into_iter()
-            .enumerate()
-        {
+        for (i, offset) in boards::layout("cx3576").offsets().into_iter().enumerate() {
             file.seek(SeekFrom::Start(offset)).unwrap();
             file.write_all(&encode(&records, i as u8).unwrap()).unwrap();
         }
@@ -228,11 +228,9 @@ fn seed(root: &Path, fit: bool, operation: &str) {
     }
     if !["install", "reuse"].contains(&operation) {
         if let BootBackend::Fit { firmware, .. } = &store.boot {
-            let mut environment = mica_deploy::fit_env::Environment::load(
-                firmware,
-                mica_deploy::fit_env::FitLayout::Cx3576,
-            )
-            .unwrap();
+            let mut environment =
+                mica_deploy::fit_env::Environment::load(firmware, boards::layout("cx3576"))
+                    .unwrap();
             environment.records[0].tries_left = Some(2);
             environment.save(firmware).unwrap();
         } else {
@@ -298,7 +296,7 @@ fn validate(root: &Path, fit: bool) {
     );
     if let BootBackend::Fit { firmware, .. } = &store.boot {
         let bytes = fs::read(firmware).unwrap();
-        for offset in mica_deploy::fit_env::FitLayout::Cx3576.offsets() {
+        for offset in boards::layout("cx3576").offsets() {
             // Either CRC-valid redundant copy must refer only to complete
             // deployments, even if a later read loses the newest copy.
             let mut isolated = tempfile::NamedTempFile::new().unwrap();
@@ -309,10 +307,9 @@ fn validate(root: &Path, fit: bool) {
                     &bytes[offset as usize..offset as usize + mica_deploy::fit_env::ENV_SIZE],
                 )
                 .unwrap();
-            if let Ok(environment) = mica_deploy::fit_env::Environment::load(
-                isolated.path(),
-                mica_deploy::fit_env::FitLayout::Cx3576,
-            ) {
+            if let Ok(environment) =
+                mica_deploy::fit_env::Environment::load(isolated.path(), boards::layout("cx3576"))
+            {
                 let records = environment.records;
                 for record in records {
                     if !entries.iter().any(|entry| entry.id == record.id) {
@@ -612,11 +609,9 @@ fn install_requires_the_confirmed_running_receipt_and_reconciles_activation() {
             "unlaunched trial was confirmed"
         );
         if let BootBackend::Fit { firmware, .. } = &store.boot {
-            let mut env = mica_deploy::fit_env::Environment::load(
-                firmware,
-                mica_deploy::fit_env::FitLayout::Cx3576,
-            )
-            .unwrap();
+            let mut env =
+                mica_deploy::fit_env::Environment::load(firmware, boards::layout("cx3576"))
+                    .unwrap();
             env.records[0].tries_left = Some(2);
             env.save(firmware).unwrap();
         } else {
@@ -710,11 +705,9 @@ fn an_unconfirmed_running_trial_cannot_retire_the_other_deployment() {
             serde_json::from_slice(&fs::read(root.path().join("current-receipt.json")).unwrap())
                 .unwrap();
         if let BootBackend::Fit { firmware, .. } = &store.boot {
-            let mut env = mica_deploy::fit_env::Environment::load(
-                firmware,
-                mica_deploy::fit_env::FitLayout::Cx3576,
-            )
-            .unwrap();
+            let mut env =
+                mica_deploy::fit_env::Environment::load(firmware, boards::layout("cx3576"))
+                    .unwrap();
             env.records
                 .iter_mut()
                 .for_each(|entry| entry.tries_left = Some(2));

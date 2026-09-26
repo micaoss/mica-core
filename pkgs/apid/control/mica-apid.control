@@ -4,7 +4,7 @@ Architecture: @ARCH@
 Maintainer: mica build <mica@example.invalid>
 Section: admin
 Priority: optional
-Depends: micad (= 0.1.0-2), mica-system, ${shlibs:Depends}
+Depends: micad (= 0.1.0-3), mica-system, ${shlibs:Depends}
 Description: Mica OS HTTPS API and web dashboard
  Serves the management API and the built-in web UI over HTTPS and changes the
  device only through micad. Starts at boot.

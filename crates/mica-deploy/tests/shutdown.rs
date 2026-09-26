@@ -65,6 +65,7 @@ fn fixture() -> (Ownership, Fake) {
         mappings: vec![mapping],
         mounts: mounts[1..].to_vec(),
         allow_extra_loops: false,
+        watchdog: String::new(),
     };
     (
         owner,

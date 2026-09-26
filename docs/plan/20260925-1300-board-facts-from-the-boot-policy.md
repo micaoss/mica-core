@@ -1,6 +1,6 @@
 # 20260925-1300-board-facts-from-the-boot-policy The device reads its board facts from the signed boot policy, not from the board's name
 
-- **status**: approved
+- **status**: implementing
 - **createdAt**: 2026-09-25 13:00
 - **approvedAt**: 2026-09-25 13:00 (user: "mica-deploy 在设备端按板卡名写死了 FIT 引导记录的位置，这个也需要修复，可以引入配置文件形式", then "你写一个计划给core我让core去执行"; the carrier and the scope take the recommended answers below)
 - **relatedTask**: 20260925-1300-board-facts-from-the-boot-policy
@@ -155,4 +155,66 @@ update archive format.
 
 ## Progress
 
+- 2026-09-26: implemented in `mica-core` (items 1-7, plus the partition numbers below). The
+  device reads `board` in `mica-runkit` (`init.rs` `Config`) and `mica-deploy` (`Policy`) and
+  validates it before use (`src/board.rs`); `FitLayout` is a struct deserialized from `records`
+  with a validating constructor; `BootKind::for_board`, `FitLayout::for_board`, the firmware
+  board tables and the deployment board table are gone; `Operation::Retire` carries the section.
+  `grep -rE '"(cx3576|s905x5m|uefi-x64|uefi-arm64)"' crates --include='*.rs'` outside tests finds
+  nothing. `mica-deploy` tests 140/140 (`make rust-gate`: 1347 passed, after the declarations below); the contract cases carry `boardPolicies` in place of the
+  `boards` vocabulary. Remaining: a release, and `mica-build`'s counterpart commit.
+
 ## Annotations
+
+- 2026-09-26 (implementation): **the scope grew by the partition numbers.** Beyond the four sites
+  in the table, the device assumed the boot partition is GPT number 1, SYSTEM 2 and DATA 3
+  (`bin/mica-deploy.rs` `require_mount`, `deployments.rs` `boot_partition`, `mica-runkit`
+  `init.rs`'s DATA check). `mica-build`'s layout rules allow any numbering with `data` last, and
+  its own contract test builds a board with a vendor partition, which a device would have refused
+  at first boot. So the section carries `partitions: {boot, system, data}` and `records` loses its
+  own `partition` key (the records live in the boot partition). The schema as implemented:
+
+  ```json
+  "board": {
+    "boot": "uboot-fit",
+    "kernel": "fit",
+    "partitions": { "boot": 1, "system": 2, "data": 3 },
+    "firmware": { "format": "rockchip-loader", "diskOffset": 32768, "maxBytes": 16744448 },
+    "records": { "startSector": 64, "sectors": 36800, "offsets": [16744448, 17793024], "size": 65536 }
+  }
+  ```
+
+  An EFI firmware target's `partition` must equal `partitions.boot`. The four boards' sections are
+  `crates/mica-deploy/tests/component-contracts/cases.json` `boardPolicies`, which is what
+  `mica-build` writes and what its `deploy-pool --check` holds in place of `boards.tsv`.
+- 2026-09-26 (implementation): **three shared negatives now fire another rule first, measured.**
+  With no board table in the parser, `wrong-board`, `wrong-arch` (both refused as `component target
+  mismatch`: the case edits one pointer, so the kernel still names the other target) and
+  `wrong-boot-format` (`component identity mismatch`: the format is valid, the kernel id is not
+  re-derived) are refused by the parser before the device's check; all three are `alsoRefusedBy`.
+  `board/architecture mismatch` and `wrong boot format` are the device's `admit`, exercised by
+  `components.rs` `a_deployment_for_another_board_is_refused_by_the_device`. The retired `x64` and
+  `virt-arm64` are no longer a list: a deployment naming them is another board's.
+- 2026-09-26 (implementation): no producer bump: `mica-deploy` and `mica-lifecycle` are already
+  `0.1.0-5`, unreleased (the latest release, `20260921-0726`, carries `0.1.0-4`).
+- 2026-09-26 (user: "可以后面不动core部分代码吗？用声明方式来做？统一修改1-3"): **the remaining
+  board assumptions become declarations too**, in the same unreleased schema so `mica-build` changes
+  once:
+  1. `board.watchdog` (optional `{identity}`): the watchdog whose sysfs `identity` matches exactly;
+     absent is `watchdog0`, which every current board uses. Startup PID1 reads the policy before
+     arming and records the resolved `watchdog<N>` in the shutdown ramdisk's ownership record.
+  2. micad's storage observer finds the tiers from the boot policy (UUIDs and `partitions.boot`)
+     and reports the disk's own GPT names; the fixed labels are only its fallback without a policy.
+  3. Firmware targets are named by mechanism: `rockchip-loader` is `disk-range` (inside or before
+     the boot partition, after the primary GPT, clear of the records; read back from the whole
+     disk when it lies before the partition), `amlogic-boot0` is `emmc-boot` with `area`
+     `boot0`/`boot1`, and `efi` takes the declared path in the ESP's `EFI/` tree instead of the
+     architecture's fixed name. The old names are refused, not aliased: a firmware receipt
+     recorded on a device under them no longer reads, which the development-phase rule allows.
+
+  The four boards' sections as `mica-build` writes them are `cases.json` `boardPolicies`.
+  Still code by design: the two boot backends, the three firmware mechanisms and the two
+  architectures (`docs/design/deployment.md` 4.1.1).
+- 2026-09-26: `micad` changes too (the storage observer), and its `0.1.0-2` is released: `micad`
+  `0.1.0-3`, and the three packages that pin it move with the pin (`mica-apid` `0.1.0-4`, the mqtt
+  producer `0.1.0-3`).

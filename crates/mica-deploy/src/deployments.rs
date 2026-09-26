@@ -81,7 +81,6 @@ pub struct DeploymentStore {
     pub meta: PathBuf,
 }
 
-/// Resolve partition 1 on the disk containing the authenticated SYSTEM UUID.
 /// The device a deployment must name: the board and architecture of the signed
 /// boot policy and the product of the running root.
 pub struct Target<'a> {
@@ -90,17 +89,25 @@ pub struct Target<'a> {
     pub product: &'a str,
 }
 
-pub fn boot_partition(system: &Path, kind: crate::boot::BootKind, board: &str) -> Result<PathBuf> {
+/// Resolve the boot partition on the disk holding the authenticated SYSTEM
+/// partition, by the GPT numbers the signed boot policy names.
+///
+/// On a FIT board the partition is also held to the policy's geometry -- its
+/// start and length -- before anything is written to it: a disk's geometry is
+/// fixed at the factory, and a later kernel whose policy names another must
+/// refuse rather than write records where this disk does not keep them.
+pub fn boot_partition(system: &Path, board: &crate::board::BoardFacts) -> Result<PathBuf> {
     use std::os::unix::fs::FileTypeExt;
     ensure!(
-        fs::read_to_string(system.join("partition"))?.trim() == "2",
+        fs::read_to_string(system.join("partition"))?.trim() == board.partitions.system.to_string(),
         "invalid SYSTEM partition"
     );
     let parent = system.parent().context("SYSTEM has no physical disk")?;
+    let boot = board.partitions.boot.to_string();
     let mut partitions = Vec::new();
     for child in fs::read_dir(parent)? {
         let child = child?.path();
-        if fs::read_to_string(child.join("partition")).is_ok_and(|number| number.trim() == "1") {
+        if fs::read_to_string(child.join("partition")).is_ok_and(|number| number.trim() == boot) {
             partitions.push(child);
         }
     }
@@ -109,12 +116,12 @@ pub fn boot_partition(system: &Path, kind: crate::boot::BootKind, board: &str) -
         "boot partition is absent or ambiguous"
     );
     let physical = &partitions[0];
-    if kind == crate::boot::BootKind::UbootFit {
+    if let Some(layout) = board.records {
         ensure!(
-            fs::read_to_string(physical.join("start"))?.trim() == "64"
+            fs::read_to_string(physical.join("start"))?.trim() == layout.start_sector().to_string()
                 && fs::read_to_string(physical.join("size"))?.trim()
-                    == FitLayout::for_board(board)?.sectors().to_string(),
-            "FIRMWARE geometry differs from the compiled layout"
+                    == layout.sectors().to_string(),
+            "FIRMWARE geometry differs from the signed boot policy"
         );
     }
     let device = Path::new("/dev").join(physical.file_name().context("missing boot device")?);

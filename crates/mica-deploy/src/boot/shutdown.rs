@@ -313,6 +313,10 @@ pub struct Block {
 #[serde(deny_unknown_fields)]
 pub struct Ownership {
     pub deployment: String,
+    /// The watchdog startup armed, as `watchdog<N>`: the shutdown PID1 feeds
+    /// the same one without the boot policy in reach. Empty is `watchdog0`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub watchdog: String,
     pub backings: BTreeSet<Device>,
     pub backing_generations: Vec<(Device, u64)>,
     pub loops: Vec<LoopIdentity>,
@@ -562,8 +566,10 @@ pub enum Operation {
     DetachLoop(LoopIdentity),
     Retire {
         id: String,
-        backend: super::BootKind,
-        board: String,
+        /// The board section of the signed boot policy startup PID1 read:
+        /// the backend, the partitions and the record geometry, carried rather
+        /// than re-derived from a name.
+        board: crate::board::BoardFacts,
         system: String,
         system_device: String,
         boot_device: String,
@@ -767,6 +773,35 @@ fn write_diagnostic(fd: impl std::os::fd::AsFd, message: &str) -> Result<()> {
     Ok(())
 }
 
+/// The watchdog a board's policy names, as `watchdog<N>` under `class`
+/// (`/sys/class/watchdog` on a device).
+///
+/// `None` is `watchdog0`, what the device has always armed. An identity is
+/// matched exactly against each watchdog's `identity`, and exactly one must
+/// match: which watchdog guards the boot is the board's declaration, never the
+/// kernel's probe order.
+pub fn resolve_watchdog(class: &Path, identity: Option<&str>) -> Result<String> {
+    let Some(identity) = identity else {
+        return Ok("watchdog0".to_owned());
+    };
+    let mut found = Vec::new();
+    for entry in fs::read_dir(class)? {
+        let name = entry?.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with("watchdog")
+            && read_text(class.join(name).join("identity"), 64)
+                .is_ok_and(|text| text.trim_end_matches('\n') == identity)
+        {
+            found.push(name.to_owned());
+        }
+    }
+    ensure!(
+        found.len() == 1,
+        "the declared watchdog is absent or ambiguous"
+    );
+    Ok(found.remove(0))
+}
+
 /// The only watchdog owner. All files are close-on-exec; children cannot feed it.
 pub struct Supervisor {
     started: Instant,
@@ -801,8 +836,16 @@ impl Supervisor {
             .try_into()
             .unwrap_or(u64::MAX)
     }
-    pub fn arm(&mut self) -> Result<()> {
+    /// Arm `name` (`watchdog<N>`, from [`resolve_watchdog`]).
+    pub fn arm(&mut self, name: &str) -> Result<()> {
         ensure!(self.watchdog.is_none(), "watchdog already owned");
+        ensure!(
+            name.strip_prefix("watchdog").is_some_and(|n| !n.is_empty()
+                && n.len() <= 3
+                && n.bytes().all(|b| b.is_ascii_digit())),
+            "invalid watchdog name"
+        );
+        let class = Path::new("/sys/class/watchdog").join(name);
         let file = OpenOptions::new()
             .write(true)
             .custom_flags(
@@ -810,14 +853,14 @@ impl Supervisor {
                     | rustix::fs::OFlags::NONBLOCK.bits() as i32
                     | rustix::fs::OFlags::NOFOLLOW.bits() as i32,
             )
-            .open("/dev/watchdog0")
+            .open(Path::new("/dev").join(name))
             .context("required watchdog unavailable")?;
         let metadata = file.metadata()?;
         ensure!(
             metadata.file_type().is_char_device(),
             "watchdog is not a character device"
         );
-        let device = Device::parse(read_text("/sys/class/watchdog/watchdog0/dev", 64)?.trim())?;
+        let device = Device::parse(read_text(class.join("dev"), 64)?.trim())?;
         ensure!(
             Device::from_raw(metadata.rdev()) == device,
             "watchdog device identity mismatch"
@@ -828,7 +871,7 @@ impl Supervisor {
         self.timeout = lifecycle_sys::watchdog_timeout(fd)?;
         Budget::new(self.now_ms(), self.timeout)?;
         ensure!(
-            read_text("/sys/class/watchdog/watchdog0/nowayout", 64)?.trim() == "1",
+            read_text(class.join("nowayout"), 64)?.trim() == "1",
             "watchdog NOWAYOUT is not enforced"
         );
         lifecycle_sys::watchdog_keepalive(fd)?;
@@ -1784,7 +1827,6 @@ fn perform(op: &Operation) -> Result<()> {
         }
         Operation::Retire {
             id,
-            backend,
             board,
             system,
             system_device,
@@ -1795,15 +1837,12 @@ fn perform(op: &Operation) -> Result<()> {
                 "record retirement requires startup PID1"
             );
             crate::deployments::valid_id(id)?;
-            ensure!(
-                super::BootKind::for_board(board)? == *backend,
-                "retirement board mismatch"
-            );
+            let backend = &board.boot;
             let name = Path::new(system_device)
                 .file_name()
                 .context("SYSTEM name")?;
             let node = fs::canonicalize(sysfs()?.join("class/block").join(name))?;
-            let expected = crate::deployments::boot_partition(&node, *backend, board)?;
+            let expected = crate::deployments::boot_partition(&node, board)?;
             ensure!(
                 expected == Path::new(boot_device),
                 "retirement boot device mismatch"
@@ -1835,7 +1874,9 @@ fn perform(op: &Operation) -> Result<()> {
                 }
                 super::BootKind::UbootFit => crate::deployments::BootBackend::Fit {
                     firmware: expected,
-                    layout: crate::fit_env::FitLayout::for_board(board)?,
+                    layout: board
+                        .records
+                        .context("FIT boot records absent from the boot policy")?,
                 },
             };
             let store = crate::deployments::DeploymentStore::new(

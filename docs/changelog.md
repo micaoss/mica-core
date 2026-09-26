@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-09-26 06:52 [change]
+
+The device reads its board from the signed boot policy, not from the board's name
+(20260925-1300-board-facts-from-the-boot-policy):
+
+- `boot.json` gains a required `board` section -- `boot`, `kernel`, `partitions`, `firmware` and,
+  on a FIT board, `records` -- read by `mica-runkit` and `mica-deploy` and validated before use
+  (`crates/mica-deploy/src/board.rs`). `BootKind::for_board`, the `FitLayout` enum, the firmware
+  write-range tables and the deployment board table are gone; no board name is left in any crate's
+  source. A board `mica-build` declares as data needs no `mica-core` change.
+- **The partition numbers are the policy's too.** The device assumed boot 1, SYSTEM 2, DATA 3 in
+  three places, which the plan's table did not list; `mica-build`'s layout rules allow a vendor
+  partition, and such a disk would have been refused at first boot. `partitions` carries them, and
+  `records` loses its `partition` key.
+- **Disk contents still never choose writable offsets.** `FitLayout` is valid by construction
+  (65536-byte copies, sector aligned, inside the partition, apart), and `boot_partition` holds the
+  disk's boot partition to the policy's number, start and length before anything is written.
+- A deployment and a firmware receipt are read in two steps: their shape (`parse_deployment`,
+  `parse_firmware`), then the device (`components::admit`, `firmware::admit_firmware`). The parser
+  gains `unsupported architecture` and `unsupported boot format`; `board/architecture mismatch` and
+  `wrong boot format` are the device's. `wrong-board`, `wrong-arch` and `wrong-boot-format` now
+  fire the parser's rule first, measured and recorded in `cases.json`.
+- **Contract fixtures:** `cases.json` replaces the `boards` vocabulary with `boardPolicies`, each
+  concrete board's section. `mica-build` pins the release that carries this and, in one commit,
+  writes `board` into `boot.json`, follows `boardPolicies` in `deploy-pool --check` and deletes
+  `src/image/device-fit-geometry.ts`. Until then its kernels carry no `board` and this device code
+  would refuse them, which is why the pin and the section move together.
+- **The rest of the board is declared as well**, in the same unreleased schema: `board.watchdog`
+  names the watchdog by its driver identity (absent: `watchdog0`), micad's storage observer finds
+  its tiers through the policy and reports the disk's own partition names, and firmware targets
+  are named by mechanism -- `disk-range` and `emmc-boot` replace `rockchip-loader` and
+  `amlogic-boot0`, which are refused rather than aliased, and `efi` takes a declared path. A board
+  that uses an existing boot backend, firmware mechanism and architecture needs no code here.
+- Versions: `mica-deploy` and `mica-lifecycle` are already an unreleased `0.1.0-5`. `micad` is
+  `0.1.0-3` (its `0.1.0-2` is released, `20260921-0726`), so `mica-apid`, `mica-mqttd` and
+  `mica-mqtt-broker` pin `micad (= 0.1.0-3)` and move with it: `mica-apid` `0.1.0-4`, the mqtt
+  producer `0.1.0-3`.
+
 ## 2026-09-25 13:00 [plan]
 
 - **Board facts from the signed boot policy** (plan and task

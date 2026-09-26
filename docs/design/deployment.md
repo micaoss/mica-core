@@ -188,8 +188,8 @@ the only selector.
    enforces signatures.
 2. Arm the boot watchdog before touching deployment storage.
 3. Read the device policy (`/etc/mica/boot.json` in the signed initramfs:
-   identity, public keys, SYSTEM and DATA partition UUIDs) and check the running
-   kernel release against it.
+   identity, public keys, SYSTEM and DATA partition UUIDs and the `board`
+   section below) and check the running kernel release against it.
 4. Select the deployment the boot record names, authenticate its descriptor,
    and open the root and support images as signed dm-verity mappings.
 5. Establish persistent identity on DATA, bind kernel modules and firmware from
@@ -197,6 +197,58 @@ the only selector.
 
 No network and no shell are available at this stage, and no policy can enable
 them.
+
+### 4.1.1 The board, as the policy states it
+
+Nothing in `mica-deploy` or `mica-runkit` knows a board by its name. What a
+device needs to know about its board travels in the `board` section of the same
+signed policy (`src/board.rs`), which the assembly writes from the board's
+`layout.tsv` and firmware facts:
+
+```json
+"board": {
+  "boot": "uboot-fit",
+  "kernel": "fit",
+  "partitions": { "boot": 1, "system": 2, "data": 3 },
+  "firmware": { "format": "disk-range", "diskOffset": 32768, "maxBytes": 16744448 },
+  "records": { "startSector": 64, "sectors": 36800, "offsets": [16744448, 17793024], "size": 65536 }
+}
+```
+
+| Key | What the device does with it |
+| --- | --- |
+| `boot` | `uefi` or `uboot-fit`: how the deployment is selected and where records are written |
+| `kernel` | `uki` or `fit`, and must agree with `boot`; a deployment whose kernel format differs is refused (`wrong boot format`) |
+| `partitions` | The GPT numbers of the boot partition (the ESP, or the raw firmware partition), SYSTEM and DATA. Mounts and the startup bind are checked against them; nothing assumes 1, 2 and 3 |
+| `firmware` | Exactly the `target` a firmware receipt for this board must carry, named by mechanism and never by vendor: `efi` (`partition`, `path` in the ESP's `EFI/` tree), `disk-range` (`diskOffset`, `maxBytes`: bytes a boot ROM reads from the disk, inside or before the boot partition, after the primary GPT and clear of the record copies) or `emmc-boot` (`area` `boot0`/`boot1`, `payloadOffset`, `maxBytes`). A receipt naming another target is refused |
+| `records` | Present exactly on `uboot-fit`: the boot partition's start and length in sectors and the two record copies' offsets inside it, each `65536` bytes, sector aligned, inside the partition and apart |
+| `watchdog` | Optional `{ "identity": ... }`: the watchdog whose `/sys/class/watchdog/*/identity` matches exactly, and exactly one must. Absent, `watchdog0`. Startup records the resolved device in the shutdown ramdisk's ownership record, which is how the shutdown PID1 feeds the same one |
+
+The section is validated before use: the backend, kernel format and firmware
+format agree; partition numbers are distinct and in range; an EFI loader is on
+the boot partition; a disk range stays inside the boot partition's end and off
+the record copies.
+
+**What still takes code, deliberately.** A board is data as long as it uses a
+mechanism the device has: the two boot backends (`uefi` with the systemd-boot
+entry variable, `uboot-fit` with the MICA record format and the device-tree
+`mica,deployment-id` property -- mica's own protocols with the loaders it
+builds), the three firmware mechanisms above, and the `amd64`/`arm64`
+lifecycle ABI. A new bootloader family, a new kind of firmware placement or a
+new architecture is a new mechanism, and that is a change here.
+
+**Disk contents never choose writable offsets.** The records' geometry is
+authenticated data, and before anything is written the boot partition on the
+disk is held to it -- its number, start and length -- so a later kernel whose
+policy names another geometry refuses rather than writing records where this
+disk does not keep them.
+
+A deployment and a firmware receipt are each read in two steps: their own shape
+(`parse_deployment`, `parse_firmware`: an architecture the device family runs,
+a known boot format, a target shape within bounds), then the device
+(`components::admit`, `firmware::admit_firmware`: this board, this
+architecture, this kernel format, this firmware target). The contract cases
+carry each concrete board's section as `boardPolicies`.
 
 ### 4.2 `shutdown`: the exit ramdisk PID 1
 

@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use mica_deploy::{
+    board::BoardFacts,
     boot::{
         BootKind, copy_exitrd, exitrd_tmpfs_bytes, fit_selected, persistent_machine_id,
         selected_entry,
@@ -30,6 +31,7 @@ use std::{
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Config {
     identity: BootIdentity,
+    board: BoardFacts,
     public_keys: Vec<String>,
     system_part_uuid: String,
     data_part_uuid: String,
@@ -46,9 +48,8 @@ impl std::error::Error for SharedSystemFailure {}
 
 struct BootAttempt {
     id: String,
-    backend: BootKind,
     system_device: String,
-    board: String,
+    board: BoardFacts,
 }
 
 struct BootControl {
@@ -102,7 +103,7 @@ impl BootAttempt {
                     .context("missing SYSTEM device")?,
             ),
         )?;
-        let device = boot_partition(&system, self.backend, &self.board)?;
+        let device = boot_partition(&system, &self.board)?;
         let boot_device = device.to_str().context("invalid boot device")?.to_owned();
         control.backing(&boot_device)?;
         let state = control.observe()?;
@@ -125,7 +126,6 @@ impl BootAttempt {
         .execute(
             &Operation::Retire {
                 id: self.id.clone(),
-                backend: self.backend,
                 board: self.board.clone(),
                 system: system_root,
                 system_device: self.system_device.clone(),
@@ -308,12 +308,20 @@ fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>) -> Result<
         fs::read_to_string("/sys/module/dm_verity/parameters/require_signatures")?.trim() == "Y",
         "signature enforcement is disabled"
     );
+    // The policy is read first because it names the watchdog; it is a file of
+    // the signed initramfs, and nothing of deployment storage is touched yet.
+    let config: Config = serde_json::from_slice(&bounded_file("/etc/mica/boot.json", 4096)?)?;
+    config.board.validate(&config.identity.arch)?;
     // Arming is synchronous and precedes access to deployment storage. The
     // signed cmdline fixes the timeout; NOWAYOUT keeps it armed across exec.
-    control.supervisor.arm()?;
+    let watchdog = shutdown::resolve_watchdog(
+        Path::new("/sys/class/watchdog"),
+        config.board.watchdog.as_ref().map(|w| w.identity.as_str()),
+    )?;
+    control.supervisor.arm(&watchdog)?;
+    control.storage.watchdog = watchdog;
     eprintln!("mica-init: boot watchdog armed");
     eprintln!("mica-init: pseudo-filesystems and signature policy ready");
-    let config: Config = serde_json::from_slice(&bounded_file("/etc/mica/boot.json", 4096)?)?;
     for uuid in [&config.system_part_uuid, &config.data_part_uuid] {
         ensure!(
             uuid.len() == 36 && uuid.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'),
@@ -334,7 +342,7 @@ fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>) -> Result<
                 .map_err(|_| anyhow::anyhow!("invalid metadata key length"))
         })
         .collect::<Result<Vec<_>>>()?;
-    let backend = BootKind::for_board(&config.identity.board)?;
+    let backend = config.board.boot;
     let (selected, id, secure_boot) = match backend {
         BootKind::Uefi => {
             mount(
@@ -397,13 +405,12 @@ fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>) -> Result<
     .context(SharedSystemFailure)?;
     *attempt = Some(BootAttempt {
         id: id.clone(),
-        backend,
         system_device: device.clone(),
-        board: config.identity.board.clone(),
+        board: config.board.clone(),
     });
     eprintln!("mica-init: SYSTEM mounted read-only");
     let envelope = bounded_file(&format!("/system/deployments/{id}.json"), 24576)?;
-    let deployment = verify_deployment(&envelope, &keys, &config.identity)?;
+    let deployment = verify_deployment(&envelope, &keys, &config.identity, config.board.kernel)?;
     let value = serde_json::to_value(&deployment)?;
     ensure!(
         component_id(&value)? == id,
@@ -483,8 +490,10 @@ fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>) -> Result<
         ))?;
         ensure!(
             system_node.parent() == data_node.parent()
-                && fs::read_to_string(system_node.join("partition"))?.trim() == "2"
-                && fs::read_to_string(data_node.join("partition"))?.trim() == "3",
+                && fs::read_to_string(system_node.join("partition"))?.trim()
+                    == config.board.partitions.system.to_string()
+                && fs::read_to_string(data_node.join("partition"))?.trim()
+                    == config.board.partitions.data.to_string(),
             "DATA is not on the authenticated system disk"
         );
         // `prjquota` is applied HERE, at mount time, every boot, and nothing

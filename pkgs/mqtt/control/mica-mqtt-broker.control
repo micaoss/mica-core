@@ -4,7 +4,7 @@ Architecture: @ARCH@
 Maintainer: mica build <mica@example.invalid>
 Section: admin
 Priority: optional
-Depends: micad (= 0.1.0-2), passwd, ${shlibs:Depends}
+Depends: micad (= 0.1.0-3), passwd, ${shlibs:Depends}
 Description: Mica OS local MQTT broker
  An MQTT 3.1.1 broker configured by micad from the mqtt settings. Started by
  micad when MQTT is enabled.

@@ -226,13 +226,15 @@ impl Deployment {
             self.schema == "mica/deployment/v2" && self.data_policy == "unchanged",
             "unsupported deployment schema or DATA policy",
         )?;
-        let (arch, format) = match self.board.as_str() {
-            "uefi-x64" => ("amd64", "uki"),
-            "uefi-arm64" => ("arm64", "uki"),
-            "cx3576" | "s905x5m" => ("arm64", "fit"),
-            _ => return Err(ContractError("unsupported board")),
-        };
-        require(self.arch == arch, "board/architecture mismatch")?;
+        // No board table: which board, architecture and boot format a device
+        // accepts is its signed boot policy's to say ([`admit`]). What a
+        // deployment must be on its own is one of the architectures and boot
+        // formats the device runs, with every component agreeing with it.
+        name(&self.board)?;
+        require(
+            matches!(self.arch.as_str(), "amd64" | "arm64"),
+            "unsupported architecture",
+        )?;
         integer(self.generation, MAX_INTEGER)?;
         name(&self.version)?;
         name(&self.product)?;
@@ -250,7 +252,10 @@ impl Deployment {
         hash(&r.id)?;
         hash(&k.build_id)?;
         name(&k.release)?;
-        require(k.boot.format == format, "wrong boot format")?;
+        require(
+            matches!(k.boot.format.as_str(), "uki" | "fit"),
+            "unsupported boot format",
+        )?;
         k.boot.artifact.validate(MAX_INTEGER)?;
         k.support.validate()?;
         r.content.validate()?;
@@ -364,17 +369,34 @@ pub fn authenticate_deployment(bytes: &[u8], public_keys: &[[u8; 32]]) -> Result
     )?)
 }
 
+/// Hold a parsed deployment to the device its signed boot policy describes:
+/// this board, this architecture, this kernel format.
+///
+/// The parser cannot: a deployment for another board is well formed, and only
+/// the device knows it is not the board it is running on.
+pub fn admit(
+    d: &Deployment,
+    running: &BootIdentity,
+    kernel: crate::board::KernelFormat,
+) -> Result<()> {
+    require(
+        d.board == running.board && d.arch == running.arch,
+        "board/architecture mismatch",
+    )?;
+    require(d.kernel.boot.format == kernel.as_str(), "wrong boot format")
+}
+
 /// Boot additionally binds the signed deployment to the running UKI/FIT.
 pub fn verify_deployment(
     bytes: &[u8],
     public_keys: &[[u8; 32]],
     running: &BootIdentity,
+    kernel: crate::board::KernelFormat,
 ) -> Result<Deployment> {
     let d = authenticate_deployment(bytes, public_keys)?;
+    admit(&d, running, kernel)?;
     require(
-        d.board == running.board
-            && d.arch == running.arch
-            && d.kernel.build_id == running.kernel_build_id
+        d.kernel.build_id == running.kernel_build_id
             && d.kernel.release == running.kernel_release
             && component_id(
                 &serde_json::to_value(&d.kernel.support)

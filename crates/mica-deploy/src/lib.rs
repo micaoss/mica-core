@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod acquisition;
+pub mod board;
 pub mod boot;
 pub mod catalog;
 pub mod chunks;

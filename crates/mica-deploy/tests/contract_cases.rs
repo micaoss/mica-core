@@ -224,42 +224,55 @@ fn archive_cases() {
     }
 }
 
-/// The BOARD VOCABULARY of `cases.json`, driven through both readers that match
-/// on a board name. The names are data here rather than a literal each
-/// repository happens to spell the same way: the assembly keeps these same
-/// fixture bytes, so a board renamed on one side and not the other fails a gate
-/// instead of reaching a device (the 2026-09-16 rename reached a published
-/// image because nothing stated the vocabulary in a form a gate reads).
-/// The retired `x64` and `virt-arm64` are listed as refused, which is what
-/// "no aliases" means in practice.
+/// The BOARD POLICIES of `cases.json`: the `board` section each concrete
+/// board's signed boot policy carries, as the assembly writes it. The assembly
+/// keeps these same fixture bytes, so a board whose facts change on one side
+/// and not the other fails a gate instead of reaching a device.
+///
+/// There is no vocabulary of accepted names any more. Which board a device is,
+/// is its policy's to say; a deployment or firmware for another board, the
+/// retired `x64` and `virt-arm64` included, is refused because it is not the
+/// board the policy names (`components.rs`
+/// `a_deployment_for_another_board_is_refused_by_the_device`).
 #[test]
-fn board_vocabulary() {
-    for case in cases()["boards"].as_array().unwrap() {
-        let name = case["name"].as_str().unwrap();
-        let accepted = case["result"] == "accepted";
-
-        let backend = mica_deploy::boot::BootKind::for_board(name);
-        assert_eq!(backend.is_ok(), accepted, "BootKind::for_board({name})");
-        if accepted {
-            let want = match case["backend"].as_str().unwrap() {
-                "uefi" => mica_deploy::boot::BootKind::Uefi,
-                _ => mica_deploy::boot::BootKind::UbootFit,
-            };
-            assert_eq!(backend.unwrap(), want, "backend of {name}");
-        }
-
+fn board_policies() {
+    let cases = cases();
+    let policies = cases["boardPolicies"].as_object().unwrap();
+    assert!(!policies.is_empty());
+    for (name, entry) in policies {
+        let facts: mica_deploy::board::BoardFacts = serde_json::from_value(entry["board"].clone())
+            .unwrap_or_else(|e| panic!("{name}: {e:#}"));
+        facts
+            .validate(entry["arch"].as_str().unwrap())
+            .unwrap_or_else(|e| panic!("{name}: {e:#}"));
+        // The spelling round-trips, so what the device reads is what the
+        // assembly wrote and nothing the reader filled in.
+        assert_eq!(
+            serde_json::to_value(&facts).unwrap(),
+            entry["board"],
+            "{name}"
+        );
         let mut d: Value = serde_json::from_str(PAYLOAD).unwrap();
         d["board"] = json!(name);
-        d["arch"] = json!(case["arch"]);
+        d["arch"] = entry["arch"].clone();
         d["kernel"]["board"] = json!(name);
-        d["kernel"]["arch"] = json!(case["arch"]);
-        d["kernel"]["boot"]["format"] = json!(case["format"]);
-        d["rootfs"]["arch"] = json!(case["arch"]);
+        d["kernel"]["arch"] = entry["arch"].clone();
+        d["kernel"]["boot"]["format"] = json!(facts.kernel.as_str());
+        d["rootfs"]["arch"] = entry["arch"].clone();
         d["kernel"]["id"] = component_id(&d["kernel"]).unwrap().into();
         d["rootfs"]["id"] = component_id(&d["rootfs"]).unwrap().into();
         let parsed = mica_deploy::components::parse_deployment(
             serde_json::to_string(&d).unwrap().as_bytes(),
-        );
-        assert_eq!(parsed.is_ok(), accepted, "parse_deployment board {name}");
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e:#}"));
+        let identity = mica_deploy::components::BootIdentity {
+            board: name.clone(),
+            arch: entry["arch"].as_str().unwrap().to_owned(),
+            kernel_build_id: String::new(),
+            kernel_release: String::new(),
+            support_id: String::new(),
+        };
+        mica_deploy::components::admit(&parsed, &identity, facts.kernel)
+            .unwrap_or_else(|e| panic!("{name}: {e:#}"));
     }
 }

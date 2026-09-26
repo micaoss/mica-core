@@ -42,7 +42,7 @@
       }
     },
     {
-      "envelope": "{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"f9534d95ea93b8e5604c955799120d5ce580d63ef0273978a0aabbec7066fe19\",\"payload\":\"eyJhcmNoIjoiYXJtNjQiLCJhcnRpZmFjdCI6eyJieXRlcyI6MTA0ODU3Niwic2hhMjU2IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9LCJib2FyZCI6ImN4MzU3NiIsImdlbmVyYXRpb24iOjEsImlkIjoiNWE1N2YxNzVmZDFmMzIzYWM1YTliNGVlY2Y2MmRlZTQ4MjY1OTQ2ODk5NjI2NDVlODMyMWE0Y2U3YTM3MjYxZCIsInNjaGVtYSI6Im1pY2EvZmlybXdhcmUvdjEiLCJ0YXJnZXQiOnsiZGlza09mZnNldCI6MzI3NjgsImZvcm1hdCI6InJvY2tjaGlwLWxvYWRlciIsIm1heEJ5dGVzIjoxNjc0NDQ0OH0sInZlcnNpb24iOiJmaXJtd2FyZS0xIn0=\",\"signature\":\"+S+TZcFAch9oEl7cyLFubyZgqgdnFB41ep9oO0VJ0W8uvz8WVtixaLWGWdEwsEc0c0XTaeI5QRTziK32LfbvCw==\"}",
+      "envelope": "{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"f9534d95ea93b8e5604c955799120d5ce580d63ef0273978a0aabbec7066fe19\",\"payload\":\"eyJhcmNoIjoiYXJtNjQiLCJhcnRpZmFjdCI6eyJieXRlcyI6MTA0ODU3Niwic2hhMjU2IjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9LCJib2FyZCI6ImN4MzU3NiIsImdlbmVyYXRpb24iOjEsImlkIjoiMDNiZjhmZTQwZjkwYzZkMTFhYWVkMjA2NDM2ZTNhYjJlM2VkZGNhMGJmNzViMWIwZjU4M2JhYzJkMzkzZmU2MiIsInNjaGVtYSI6Im1pY2EvZmlybXdhcmUvdjEiLCJ0YXJnZXQiOnsiZGlza09mZnNldCI6MzI3NjgsImZvcm1hdCI6ImRpc2stcmFuZ2UiLCJtYXhCeXRlcyI6MTY3NDQ0NDh9LCJ2ZXJzaW9uIjoiZmlybXdhcmUtMSJ9\",\"signature\":\"13taEBLx++QNHMg8/XAqaXOGGwDEW16+6YbrDOOsiICXwLjEsxlL63cgr8eb3Ic8fpvkbgvIpi9Q4KwDYsBsAg==\"}",
       "manifest": {
         "arch": "arm64",
         "artifact": {
@@ -51,11 +51,11 @@
         },
         "board": "cx3576",
         "generation": 1,
-        "id": "5a57f175fd1f323ac5a9b4eecf62dee4826594689962645e8321a4ce7a37261d",
+        "id": "03bf8fe40f90c6d11aaed206436e3ab2e3eddca0bf75b1b0f583bac2d393fe62",
         "schema": "mica/firmware/v1",
         "target": {
           "diskOffset": 32768,
-          "format": "rockchip-loader",
+          "format": "disk-range",
           "maxBytes": 16744448
         },
         "version": "firmware-1"

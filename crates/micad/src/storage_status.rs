@@ -19,9 +19,11 @@ use serde_json::{Value as Json, json};
 pub struct TierSpec {
     /// Stable name of the tier on the wire, lowercase.
     pub name: &'static str,
-    /// GPT partition name, from board.env `<TIER>_LABEL`.
+    /// The GPT name the tier is looked up by when no boot policy is readable.
+    /// With one, the policy's partition UUIDs and numbers find the tier and the
+    /// name reported is the one on the disk.
     pub partition_label: &'static str,
-    /// board.env `<TIER>_ROLE`.
+    /// The tier's role in the layout.
     pub role: &'static str,
     /// Fixed mountpoint, absent for the raw firmware partition.
     pub mount: Option<&'static str>,
@@ -55,6 +57,51 @@ pub const TIERS: &[TierSpec] = &[
         mount: Some(DATA_MOUNT),
     },
 ];
+
+/// The signed boot policy `mica-runkit` copies into the running root, relative
+/// to the observer's root.
+pub const BOOT_POLICY_PATH: &str = "run/mica/boot-policy.json";
+
+/// The partitions the signed boot policy names: by UUID for SYSTEM and DATA,
+/// by GPT number on the same disk for the boot partition, which is the `esp`
+/// tier on a UEFI board and the `firmware` tier on a FIT one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyPartitions {
+    pub boot_tier: &'static str,
+    pub boot_number: u32,
+    pub system_uuid: String,
+    pub data_uuid: String,
+}
+
+impl PolicyPartitions {
+    /// Read the fields the observer needs out of a boot policy, or `None`
+    /// when any is missing. Tolerant of every other key: the policy is
+    /// `mica-deploy`'s document, and this is an observer of it.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let value: Json = serde_json::from_str(text).ok()?;
+        let boot_tier = match value.pointer("/board/boot")?.as_str()? {
+            "uefi" => "esp",
+            "uboot-fit" => "firmware",
+            _ => return None,
+        };
+        let uuid = |key: &str| {
+            value
+                .get(key)?
+                .as_str()
+                .filter(|uuid| {
+                    !uuid.is_empty() && uuid.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+                })
+                .map(str::to_ascii_lowercase)
+        };
+        Some(Self {
+            boot_tier,
+            boot_number: u32::try_from(value.pointer("/board/partitions/boot")?.as_u64()?).ok()?,
+            system_uuid: uuid("systemPartUuid")?,
+            data_uuid: uuid("dataPartUuid")?,
+        })
+    }
+}
 
 /// Where the DATA partition itself mounts.
 pub const DATA_MOUNT: &str = "/mnt/data";
@@ -203,6 +250,8 @@ pub struct TierEvidence {
     pub space: Option<FsSpace>,
     /// The last check systemd recorded for the tier's device.
     pub check: Option<CheckEvidence>,
+    /// The partition's GPT name as the disk carries it, when sysfs reports it.
+    pub partition_label: Option<String>,
 }
 
 /// Normalized media wear, or the reason there is none.
@@ -571,7 +620,14 @@ fn tier_json(spec: &TierSpec, evidence: Option<&TierEvidence>, pressure: &Pressu
     let mut root = serde_json::Map::new();
     root.insert("name".to_string(), json!(spec.name));
     root.insert("role".to_string(), json!(spec.role));
-    root.insert("partitionLabel".to_string(), json!(spec.partition_label));
+    root.insert(
+        "partitionLabel".to_string(),
+        json!(
+            evidence
+                .and_then(|evidence| evidence.partition_label.as_deref())
+                .unwrap_or(spec.partition_label)
+        ),
+    );
     if let Some(mount) = spec.mount {
         root.insert("expectedMount".to_string(), json!(mount));
     }
@@ -991,6 +1047,49 @@ impl HostStorage {
         Some(format!("/dev/{name}"))
     }
 
+    /// The device of `spec`'s tier: from the boot policy when there is one,
+    /// by GPT name when there is not.
+    fn tier_device(&self, spec: &TierSpec, policy: Option<&PolicyPartitions>) -> Option<String> {
+        let Some(policy) = policy else {
+            return self.resolve_dev(&format!("/dev/disk/by-partlabel/{}", spec.partition_label));
+        };
+        let by_uuid = |uuid: &str| self.resolve_dev(&format!("/dev/disk/by-partuuid/{uuid}"));
+        match spec.name {
+            "system" => by_uuid(&policy.system_uuid),
+            "data" => by_uuid(&policy.data_uuid),
+            name if name == policy.boot_tier => {
+                let system = by_uuid(&policy.system_uuid)?;
+                self.sibling_partition(&system, policy.boot_number)
+            }
+            // The other boot tier: not on this board, which is an answer.
+            _ => None,
+        }
+    }
+
+    /// The partition numbered `number` on the disk holding `device`.
+    fn sibling_partition(&self, device: &str, number: u32) -> Option<String> {
+        let name = device.strip_prefix("/dev/")?;
+        let node = std::fs::canonicalize(self.path("sys/class/block").join(name)).ok()?;
+        let disk = node.parent()?;
+        let wanted = number.to_string();
+        std::fs::read_dir(disk).ok()?.flatten().find_map(|entry| {
+            let number = std::fs::read_to_string(entry.path().join("partition")).ok()?;
+            (number.trim() == wanted)
+                .then(|| format!("/dev/{}", entry.file_name().to_string_lossy()))
+        })
+    }
+
+    /// `device`'s GPT name, from its sysfs `uevent`.
+    fn partition_name(&self, device: &str) -> Option<String> {
+        let name = device.strip_prefix("/dev/")?;
+        let uevent =
+            std::fs::read_to_string(self.path("sys/class/block").join(name).join("uevent")).ok()?;
+        uevent
+            .lines()
+            .find_map(|line| line.strip_prefix("PARTNAME="))
+            .map(str::to_string)
+    }
+
     /// Every whole-disk medium, with its partitions' sizes.
     fn media(&self) -> (Vec<MediumEvidence>, BTreeMap<String, u64>) {
         let mut media = Vec::new();
@@ -1306,11 +1405,12 @@ impl StorageStatusSource for HostStorage {
         let mounts = self.mounts();
         let checks = checks_by_device(&self.checks().await, |device| self.resolve_dev(device));
 
+        let policy = self
+            .read_trimmed(BOOT_POLICY_PATH)
+            .and_then(|text| PolicyPartitions::parse(&text));
         let mut tiers = BTreeMap::new();
         for spec in TIERS {
-            let Some(device) =
-                self.resolve_dev(&format!("/dev/disk/by-partlabel/{}", spec.partition_label))
-            else {
+            let Some(device) = self.tier_device(spec, policy.as_ref()) else {
                 // No partition with this label: the tier is not on this board,
                 // which is an answer and is reported as one.
                 continue;
@@ -1334,6 +1434,7 @@ impl StorageStatusSource for HostStorage {
                 TierEvidence {
                     partition_bytes: partition_sizes.get(&device).copied(),
                     check: checks.get(&device).cloned(),
+                    partition_label: self.partition_name(&device),
                     device: Some(device),
                     mount,
                     space,
@@ -1783,6 +1884,7 @@ mod tests {
                     result: Some("success".to_string()),
                     exit_status: Some(1),
                 }),
+                partition_label: None,
             },
         );
         tiers.insert(
@@ -1946,6 +2048,116 @@ mod tests {
 
     /// The observer's assembly — label to device to mount to medium — over a
     /// fixture sysfs, so the pairing that would break silently on a device is
+    /// A board whose disk names its partitions its own way and puts a vendor
+    /// partition ahead of SYSTEM: the signed boot policy's UUIDs and numbers
+    /// find every tier, and the names reported are the disk's own.
+    #[tokio::test]
+    async fn the_boot_policy_finds_the_tiers_whatever_the_board_names_them() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let path = root.path();
+        let write = |relative: &str, contents: &str| {
+            let target = path.join(relative);
+            std::fs::create_dir_all(target.parent().expect("a parent")).expect("mkdir");
+            std::fs::write(target, contents).expect("write");
+        };
+        write("sys/block/mmcblk0/size", "60000000\n");
+        for (number, name, size) in [
+            (1, "loader", 36800),
+            (2, "vendor", 2048),
+            (3, "rootfs-store", 524288),
+            (4, "userdata", 40000000),
+        ] {
+            let part = format!("sys/block/mmcblk0/mmcblk0p{number}");
+            write(&format!("{part}/partition"), &format!("{number}\n"));
+            write(&format!("{part}/size"), &format!("{size}\n"));
+            write(
+                &format!("{part}/uevent"),
+                &format!("MAJOR=179\nPARTN={number}\nPARTNAME={name}\n"),
+            );
+            std::fs::create_dir_all(path.join("sys/class/block")).expect("mkdir");
+            std::os::unix::fs::symlink(
+                format!("../../block/mmcblk0/mmcblk0p{number}"),
+                path.join(format!("sys/class/block/mmcblk0p{number}")),
+            )
+            .expect("symlink");
+        }
+        std::fs::create_dir_all(path.join("dev/disk/by-partuuid")).expect("mkdir");
+        std::os::unix::fs::symlink(
+            "../../mmcblk0p3",
+            path.join("dev/disk/by-partuuid/5ac35760-0003"),
+        )
+        .expect("symlink");
+        std::os::unix::fs::symlink(
+            "../../mmcblk0p4",
+            path.join("dev/disk/by-partuuid/5ac35760-0004"),
+        )
+        .expect("symlink");
+        write(
+            BOOT_POLICY_PATH,
+            r#"{"board":{"boot":"uboot-fit","kernel":"fit","partitions":{"boot":1,"system":3,"data":4}},
+                "systemPartUuid":"5AC35760-0003","dataPartUuid":"5ac35760-0004","identity":{}}"#,
+        );
+        write("proc/self/mountinfo", "");
+
+        let evidence = HostStorage::at(path)
+            .observe()
+            .await
+            .expect("the fixture observes");
+        let mut names: Vec<&str> = evidence.tiers.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["data", "firmware", "system"],
+            "no esp on a FIT board"
+        );
+        for (tier, device, label) in [
+            ("firmware", "/dev/mmcblk0p1", "loader"),
+            ("system", "/dev/mmcblk0p3", "rootfs-store"),
+            ("data", "/dev/mmcblk0p4", "userdata"),
+        ] {
+            assert_eq!(
+                evidence.tiers[tier].device.as_deref(),
+                Some(device),
+                "{tier}"
+            );
+            assert_eq!(
+                evidence.tiers[tier].partition_label.as_deref(),
+                Some(label),
+                "{tier}"
+            );
+        }
+        let status = status_json(&evidence, &PressureTracker::default());
+        let firmware = status["tiers"]
+            .as_array()
+            .expect("tiers")
+            .iter()
+            .find(|tier| tier["name"] == "firmware")
+            .expect("the firmware tier");
+        assert_eq!(firmware["partitionLabel"], "loader");
+    }
+
+    #[test]
+    fn a_boot_policy_missing_what_the_observer_needs_is_not_read() {
+        let full = r#"{"board":{"boot":"uefi","partitions":{"boot":1}},"systemPartUuid":"aa-1","dataPartUuid":"aa-2"}"#;
+        assert_eq!(
+            PolicyPartitions::parse(full),
+            Some(PolicyPartitions {
+                boot_tier: "esp",
+                boot_number: 1,
+                system_uuid: "aa-1".to_string(),
+                data_uuid: "aa-2".to_string(),
+            })
+        );
+        for broken in [
+            r#"{"board":{"boot":"grub","partitions":{"boot":1}},"systemPartUuid":"aa-1","dataPartUuid":"aa-2"}"#,
+            r#"{"board":{"boot":"uefi"},"systemPartUuid":"aa-1","dataPartUuid":"aa-2"}"#,
+            r#"{"board":{"boot":"uefi","partitions":{"boot":1}},"systemPartUuid":"../x","dataPartUuid":"aa-2"}"#,
+            "not json",
+        ] {
+            assert_eq!(PolicyPartitions::parse(broken), None, "{broken}");
+        }
+    }
+
     /// exercised on the build host.
     #[tokio::test]
     async fn the_host_observer_pairs_tiers_with_their_devices_and_media() {

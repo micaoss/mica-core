@@ -51,6 +51,18 @@ fn triggered() -> Vec<(&'static str, Entry, String)> {
             mutate("/kernel/arch", json!("arm64")),
         ),
         ("invalid JSON", Entry::Descriptor, "not json".to_string()),
+        // No board table: an architecture or boot format the device family
+        // does not run at all is the parser's to refuse, whatever the board.
+        (
+            "unsupported architecture",
+            Entry::Descriptor,
+            mutate("/arch", json!("riscv64")),
+        ),
+        (
+            "unsupported boot format",
+            Entry::Descriptor,
+            mutate("/kernel/boot/format", json!("efi")),
+        ),
         (
             "envelope too large",
             Entry::Envelope,
@@ -115,14 +127,14 @@ fn rules_in_source() -> Vec<String> {
 /// cannot fail, so no input reaches that arm. It is kept because removing it
 /// would silently widen the `?` above it, and it is recorded here rather than
 /// pretended to be covered.
-const ELSEWHERE: [(&str, &str); 30] = [
+const ELSEWHERE: [(&str, &str); 29] = [
     (
         "artifact length or digest mismatch",
         "deployments.rs, verify_file over a truncated object",
     ),
     (
         "board/architecture mismatch",
-        "cases.json wrong-board, wrong-arch",
+        "components.rs a_deployment_for_another_board_is_refused_by_the_device, the device's admit",
     ),
     (
         "component identity mismatch",
@@ -209,10 +221,6 @@ const ELSEWHERE: [(&str, &str); 30] = [
         "cases.json unknown-field, float, free-verity-options, rootfs-version",
     ),
     (
-        "unsupported board",
-        "contract_cases.rs board_vocabulary, the retired x64 and virt-arm64",
-    ),
-    (
         "unsupported deployment schema or DATA policy",
         "cases.json wrong-schema, unsupported-policy",
     ),
@@ -224,7 +232,10 @@ const ELSEWHERE: [(&str, &str); 30] = [
         "untrusted metadata key",
         "components.rs signed_schema_substitution_and_tampering_fail",
     ),
-    ("wrong boot format", "cases.json wrong-boot-format"),
+    (
+        "wrong boot format",
+        "components.rs a_deployment_for_another_board_is_refused_by_the_device, the device's admit",
+    ),
     (
         "wrong component schema",
         "contract_protocol.rs schema_vocabulary",

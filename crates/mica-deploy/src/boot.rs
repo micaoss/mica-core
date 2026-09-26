@@ -12,21 +12,12 @@ use std::{
     path::Path,
 };
 
+/// The boot backend, as the signed boot policy's `board.boot` names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BootKind {
     Uefi,
     UbootFit,
-}
-
-impl BootKind {
-    pub fn for_board(board: &str) -> anyhow::Result<Self> {
-        match board {
-            "uefi-x64" | "uefi-arm64" => Ok(Self::Uefi),
-            "cx3576" | "s905x5m" => Ok(Self::UbootFit),
-            _ => anyhow::bail!("unsupported boot backend board"),
-        }
-    }
 }
 
 pub fn fit_selected(property: &[u8]) -> anyhow::Result<String> {

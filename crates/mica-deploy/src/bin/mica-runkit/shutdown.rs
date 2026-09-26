@@ -7,12 +7,8 @@ use std::{
     os::unix::fs::{MetadataExt, PermissionsExt},
 };
 
-fn shutdown(supervisor: &mut Supervisor, args: &[String]) -> Result<()> {
-    let request = Request::parse(args)?;
-    let action = request.action;
-    supervisor.arm()?;
-    let budget = supervisor.limit_shutdown(request.timeout_ms)?;
-    supervisor.prepare_process()?;
+/// The ownership record startup left in the retained payload.
+fn startup_record() -> Result<Ownership> {
     let file = File::from(
         rustix::fs::openat2(
             rustix::fs::CWD,
@@ -40,6 +36,24 @@ fn shutdown(supervisor: &mut Supervisor, args: &[String]) -> Result<()> {
         owner.allow_extra_loops,
         "partial startup record is not an exitrd handoff"
     );
+    Ok(owner)
+}
+
+fn shutdown(supervisor: &mut Supervisor, args: &[String]) -> Result<()> {
+    let request = Request::parse(args)?;
+    let action = request.action;
+    // The record comes first because it names the watchdog startup armed:
+    // this PID1 has no boot policy to resolve it from. It is a bounded read
+    // of the memory-only payload, before anything touches storage.
+    let owner = startup_record()?;
+    let watchdog = if owner.watchdog.is_empty() {
+        "watchdog0"
+    } else {
+        owner.watchdog.as_str()
+    };
+    supervisor.arm(watchdog)?;
+    let budget = supervisor.limit_shutdown(request.timeout_ms)?;
+    supervisor.prepare_process()?;
     shutdown::diagnostic(&format!(
         "MICA_SHUTDOWN stage=entered action={} source=exitrd deployment={}",
         action.as_str(),

@@ -5,6 +5,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use clap::{Parser, Subcommand};
 use mica_deploy::{
     acquisition::Acquisition,
+    board::BoardFacts,
     boot::BootKind,
     components::BootIdentity,
     deployments::{
@@ -76,6 +77,7 @@ enum Action {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Policy {
     identity: BootIdentity,
+    board: BoardFacts,
     public_keys: Vec<String>,
     system_part_uuid: String,
     data_part_uuid: String,
@@ -145,7 +147,7 @@ fn mount_device(text: &str, path: &str, filesystem: &str, writable: bool) -> Res
     }
     Ok(fields[2].to_string())
 }
-fn require_mount(path: &str, filesystem: &str, writable: bool, number: u8) -> Result<PathBuf> {
+fn require_mount(path: &str, filesystem: &str, writable: bool, number: u32) -> Result<PathBuf> {
     let device = mount_device(
         &std::fs::read_to_string("/proc/self/mountinfo")?,
         path,
@@ -188,6 +190,7 @@ fn policy() -> Result<(Policy, Vec<[u8; 32]>)> {
         !policy.system_part_uuid.is_empty(),
         "missing SYSTEM binding"
     );
+    policy.board.validate(&policy.identity.arch)?;
     let keys = policy
         .public_keys
         .iter()
@@ -216,15 +219,16 @@ fn execute() -> Result<()> {
     let cli = Cli::parse();
     let receipt = receipt().context("authenticated boot receipt is unavailable")?;
     let (policy, keys) = policy()?;
-    let backend = BootKind::for_board(&policy.identity.board)?;
+    let backend = policy.board.boot;
+    let partitions = policy.board.partitions;
     ensure!(
         receipt.backend == backend,
         "boot receipt backend differs from signed policy"
     );
-    let system = require_mount("/mnt/system", "ext4", false, 2)?;
+    let system = require_mount("/mnt/system", "ext4", false, partitions.system)?;
     let boot = match backend {
         BootKind::Uefi => {
-            let esp = require_mount("/boot", "vfat", false, 1)?;
+            let esp = require_mount("/boot", "vfat", false, partitions.boot)?;
             ensure!(
                 system.parent() == esp.parent(),
                 "ESP and SYSTEM are on different disks"
@@ -234,17 +238,16 @@ fn execute() -> Result<()> {
             }
         }
         BootKind::UbootFit => BootBackend::Fit {
-            layout: mica_deploy::fit_env::FitLayout::for_board(&policy.identity.board)?,
-            firmware: mica_deploy::deployments::boot_partition(
-                &system,
-                backend,
-                &policy.identity.board,
-            )?,
+            layout: policy
+                .board
+                .records
+                .context("FIT boot records absent from the boot policy")?,
+            firmware: mica_deploy::deployments::boot_partition(&system, &policy.board)?,
         },
     };
     let store = DeploymentStore::new("/mnt/system".into(), boot, "/mnt/data/meta".into());
     let data_check = (|| -> Result<()> {
-        let data = require_mount("/mnt/data", "ext4", true, 3)?;
+        let data = require_mount("/mnt/data", "ext4", true, partitions.data)?;
         ensure!(
             system.parent() == data.parent(),
             "DATA and SYSTEM are on different disks"
@@ -300,10 +303,7 @@ fn execute() -> Result<()> {
     if let Action::FirmwareReadback { manifest, record } = &cli.command {
         let envelope = read_bounded(manifest, 6500)?;
         let firmware = mica_deploy::firmware::authenticate_firmware(&envelope, &keys)?;
-        ensure!(
-            firmware.board == policy.identity.board && firmware.arch == policy.identity.arch,
-            "firmware target differs from signed board policy"
-        );
+        mica_deploy::firmware::admit_firmware(&firmware, &policy.identity, &policy.board)?;
         mica_deploy::firmware::verify_installed(&firmware, &store.boot)?;
         if *record {
             mica_deploy::deployments::atomic_write(

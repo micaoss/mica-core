@@ -1,8 +1,8 @@
 # 20260925-1300-board-facts-from-the-boot-policy The device reads its board facts from the signed boot policy, not from the board's name
 
-- **status**: pending
+- **status**: in_progress
 - **priority**: P1
-- **owner**: (unclaimed; the mica-core agent claims it)
+- **owner**: vtv87o8e/mica-core
 - **createdAt**: 2026-09-25 13:00
 
 ## Description
@@ -32,7 +32,7 @@ Acceptance:
 
 ## ActiveForm
 
-Waiting to be claimed.
+Moving the device's board facts into the signed boot policy
 
 ## Dependencies
 
@@ -43,3 +43,6 @@ Waiting to be claimed.
 
 - 2026-09-25 13:00: plan written from `mica-build` (`d63ad16a`) at the user's request; measured at
   `mica-core` `1a028e3`, where `make rust-gate` passes (the baseline for this work).
+- 2026-09-26 06:52: implemented and green (`make rust-gate`: 1347 passed; `mica-deploy` 140/140);
+  scope grew by the partition numbers (plan annotation). Open: commit, the release, and telling
+  `mica-build` the release so it lands its counterpart.

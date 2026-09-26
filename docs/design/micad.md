@@ -354,7 +354,7 @@ Bus name `com.mica.micad`, object `/com/mica/micad`, interface
 | `GetNetworkState` | Links, addresses and routes as networkd, wpa_supplicant and resolved report them |
 | `GetObservedNetwork` | The observed network view the dashboard shows |
 | `GetTimeStatus` | timesyncd synchronisation state |
-| `GetStorageStatus` | Storage tiers, bind namespaces, usage, quotas, media health |
+| `GetStorageStatus` | Storage tiers, bind namespaces, usage, quotas, media health. The tiers are found from the signed boot policy (`/run/mica/boot-policy.json`): SYSTEM and DATA by partition UUID, the boot partition (`esp` or `firmware`) by its GPT number on the same disk, and each is reported under the name the disk gives it. GPT names are only the fallback where no policy is readable |
 | `GetSystemInfo` | What the device is, assembled from where each fact already lives |
 | `GetTelemetry` | Board temperature, watchdog and reset reason |
 | `GetFailureEvidence` | Failed units and a bounded journal excerpt |

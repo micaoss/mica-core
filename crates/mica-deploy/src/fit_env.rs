@@ -1,5 +1,6 @@
 //! The bounded MICA boot record inside U-Boot's redundant MMC environment.
 use anyhow::{Context, Result, ensure};
+use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
@@ -7,35 +8,103 @@ use std::{
 };
 
 pub const ENV_SIZE: usize = 65536;
-/// Compiled board geometry; disk contents never choose writable offsets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FitLayout {
-    Cx3576,
-    S905x5m,
+
+/// The largest boot partition the device accepts, in 512-byte sectors (1 TiB):
+/// a bound on arithmetic, not on any board.
+const MAX_SECTORS: u64 = 1 << 31;
+
+/// Where the two boot record copies live, from the signed boot policy.
+///
+/// Authenticated data, never the disk: disk contents do not choose writable
+/// offsets. Every value is valid by construction -- both copies are
+/// `ENV_SIZE` long, sector aligned, inside the partition and apart -- so a
+/// caller holding one can seek without checking again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "Records", into = "Records")]
+pub struct FitLayout {
+    start_sector: u64,
+    sectors: u64,
+    offsets: [u64; 2],
+}
+
+/// The policy's spelling of a [`FitLayout`]: the boot partition's start and
+/// length in sectors, the copies' offsets inside it, and their size.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Records {
+    start_sector: u64,
+    sectors: u64,
+    offsets: [u64; 2],
+    size: u64,
 }
 
 impl FitLayout {
-    pub fn for_board(board: &str) -> Result<Self> {
-        match board {
-            "cx3576" => Ok(Self::Cx3576),
-            "s905x5m" => Ok(Self::S905x5m),
-            _ => anyhow::bail!("unsupported FIT layout"),
+    /// A layout of two `ENV_SIZE` copies at `offsets` inside the partition of
+    /// `sectors` sectors starting at `start_sector`.
+    ///
+    /// # Errors
+    ///
+    /// Names the first rule the geometry breaks.
+    pub fn new(start_sector: u64, sectors: u64, offsets: [u64; 2]) -> Result<Self> {
+        ensure!(
+            (1..=MAX_SECTORS).contains(&start_sector) && (1..=MAX_SECTORS).contains(&sectors),
+            "invalid boot partition geometry"
+        );
+        let size = ENV_SIZE as u64;
+        for offset in offsets {
+            ensure!(offset % 512 == 0, "boot record copy is not sector aligned");
+            ensure!(
+                offset + size <= sectors * 512,
+                "boot record copy outside its partition"
+            );
         }
+        ensure!(
+            offsets[0].abs_diff(offsets[1]) >= size,
+            "boot record copies overlap"
+        );
+        Ok(Self {
+            start_sector,
+            sectors,
+            offsets,
+        })
     }
 
-    /// Relative to FIRMWARE, which starts at absolute disk sector 64.
+    /// Relative to the boot partition, which starts at [`Self::start_sector`].
+    #[must_use]
     pub const fn offsets(self) -> [u64; 2] {
-        let mib = match self {
-            Self::Cx3576 => [16, 17],
-            Self::S905x5m => [120, 124],
-        };
-        [mib[0] * 1048576 - 32768, mib[1] * 1048576 - 32768]
+        self.offsets
     }
 
+    #[must_use]
+    pub const fn start_sector(self) -> u64 {
+        self.start_sector
+    }
+
+    #[must_use]
     pub const fn sectors(self) -> u64 {
-        match self {
-            Self::Cx3576 => 36800,
-            Self::S905x5m => 262080,
+        self.sectors
+    }
+}
+
+impl TryFrom<Records> for FitLayout {
+    type Error = anyhow::Error;
+
+    fn try_from(records: Records) -> Result<Self> {
+        ensure!(
+            records.size == ENV_SIZE as u64,
+            "boot record size is not {ENV_SIZE}"
+        );
+        Self::new(records.start_sector, records.sectors, records.offsets)
+    }
+}
+
+impl From<FitLayout> for Records {
+    fn from(layout: FitLayout) -> Self {
+        Self {
+            start_sector: layout.start_sector,
+            sectors: layout.sectors,
+            offsets: layout.offsets,
+            size: ENV_SIZE as u64,
         }
     }
 }

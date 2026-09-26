@@ -1,6 +1,19 @@
+#[path = "support/boards.rs"]
+mod boards;
+
 use base64::{Engine, engine::general_purpose::STANDARD};
-use mica_deploy::firmware::{authenticate_firmware, parse_firmware, verify_installed};
+use mica_deploy::firmware::{
+    Firmware, admit_firmware, authenticate_firmware, parse_firmware, verify_installed,
+};
 use serde_json::{Value, json};
+
+/// What a device running `board` does with a manifest: its shape, then its
+/// board's signed policy.
+fn read_on(board: &str, manifest: &Value) -> anyhow::Result<Firmware> {
+    let firmware = parse_firmware(&serde_json::to_vec(manifest)?)?;
+    admit_firmware(&firmware, &boards::identity(board), &boards::policy(board))?;
+    Ok(firmware)
+}
 
 fn golden() -> Value {
     serde_json::from_str(include_str!("component-contracts/firmware.json")).unwrap()
@@ -25,34 +38,74 @@ fn firmware_manifests_match_the_shared_signed_contract() {
     }
 }
 
+/// Every golden record is the firmware of exactly one board: its own board's
+/// policy admits it, and every other board's refuses it. No table here or in
+/// the device says which is which; the policies do.
+#[test]
+fn each_golden_record_is_admitted_by_its_own_board_alone() {
+    for record in golden()["records"].as_array().unwrap() {
+        let manifest = &record["manifest"];
+        let own = manifest["board"].as_str().unwrap();
+        for board in boards::names() {
+            assert_eq!(
+                read_on(&board, manifest).is_ok(),
+                board == own,
+                "{own}'s firmware on {board}"
+            );
+        }
+    }
+}
+
 #[test]
 fn firmware_constraints_reject_out_of_range_and_cross_board_writes() {
     let fixture = golden();
     let original = fixture["records"][2]["manifest"].clone();
+    let board = original["board"].as_str().unwrap().to_owned();
+    let mutate = |field: &str, value: Value| {
+        let mut manifest = original.clone();
+        manifest[field] = value;
+        manifest["id"] = json!(mica_deploy::components::component_id(&manifest).unwrap());
+        manifest
+    };
+    // Refused by the manifest's own shape, before any board is consulted.
     for (field, value) in [
         ("generation", json!(0)),
-        ("arch", json!("amd64")),
-        ("board", json!("unknown")),
         ("online", json!(true)),
         (
             "artifact",
             json!({"bytes":16744449,"sha256":"a".repeat(64)}),
         ),
+        ("board", json!("Unknown Board")),
+    ] {
+        assert!(
+            parse_firmware(&serde_json::to_vec(&mutate(field, value)).unwrap()).is_err(),
+            "{field}"
+        );
+    }
+    // Well formed, and refused by the device: another architecture, another
+    // board, or a write range other than the one its signed policy names.
+    for (field, value) in [
+        ("arch", json!("amd64")),
+        ("board", json!("unknown")),
+        // A range aimed at the boot records, long enough for the artifact.
         (
             "target",
-            json!({"format":"rockchip-loader","diskOffset":16777216,"maxBytes":65536}),
+            json!({"format":"disk-range","diskOffset":16777216,"maxBytes":1048576}),
         ),
         (
             "target",
             json!({"format":"efi","partition":2,"path":"EFI/BOOT/BOOTAA64.EFI"}),
         ),
     ] {
-        let mut manifest = original.clone();
-        manifest[field] = value;
-        manifest["id"] = json!(mica_deploy::components::component_id(&manifest).unwrap());
+        let manifest = mutate(field, value);
         assert!(
-            parse_firmware(&serde_json::to_vec(&manifest).unwrap()).is_err(),
-            "{field}"
+            parse_firmware(&serde_json::to_vec(&manifest).unwrap()).is_ok(),
+            "{field} is refused by its shape, not by the device"
+        );
+        let error = read_on(&board, &manifest).expect_err(field).to_string();
+        assert!(
+            error.contains("firmware target differs from signed board policy"),
+            "{field}: {error}"
         );
     }
     let mut payload = serde_json::to_vec(&original).unwrap();
@@ -89,7 +142,7 @@ fn firmware_readback_checks_only_the_bound_loader_bytes_and_never_changes_counte
             fs::write(&file, image).unwrap();
             (
                 BootBackend::Fit {
-                    layout: mica_deploy::fit_env::FitLayout::Cx3576,
+                    layout: boards::layout("cx3576"),
                     firmware: file.clone(),
                 },
                 file,
@@ -112,29 +165,34 @@ fn amlogic_receipt_checks_payload_after_the_vendor_header() {
     let digest = hex::encode(ring::digest::digest(&ring::digest::SHA256, payload));
     let mut value = golden()["records"][2]["manifest"].clone();
     value["board"] = json!("s905x5m");
-    value["target"] = json!({"format":"amlogic-boot0","payloadOffset":512,"maxBytes":4193792});
+    value["target"] =
+        json!({"format":"emmc-boot","area":"boot0","payloadOffset":512,"maxBytes":4193792});
     value["artifact"] = json!({"bytes":payload.len(),"sha256":digest});
     value["id"] = json!(mica_deploy::components::component_id(&value).unwrap());
-    let manifest = parse_firmware(&serde_json::to_vec(&value).unwrap()).unwrap();
+    let manifest = read_on("s905x5m", &value).unwrap();
     let path = directory.path().join("boot0");
     let mut bytes = vec![42; 512];
     bytes.extend_from_slice(payload);
     std::fs::write(&path, &bytes).unwrap();
-    mica_deploy::firmware::verify_boot0_payload(&manifest, &path).unwrap();
+    mica_deploy::firmware::verify_emmc_payload(&manifest, &path).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
     bytes[0] ^= 1;
     std::fs::write(&path, &bytes).unwrap();
-    mica_deploy::firmware::verify_boot0_payload(&manifest, &path).unwrap();
+    mica_deploy::firmware::verify_emmc_payload(&manifest, &path).unwrap();
     bytes[512] ^= 1;
     std::fs::write(&path, &bytes).unwrap();
-    assert!(mica_deploy::firmware::verify_boot0_payload(&manifest, &path).is_err());
+    assert!(mica_deploy::firmware::verify_emmc_payload(&manifest, &path).is_err());
     for target in [
-        json!({"format":"amlogic-boot0","payloadOffset":0,"maxBytes":4193792}),
-        json!({"format":"amlogic-boot0","payloadOffset":512,"maxBytes":4194304}),
-        json!({"format":"amlogic-boot1","payloadOffset":512,"maxBytes":4193792}),
+        // Another payload offset, another length, the other boot area: each
+        // well formed and not the range this board's policy names.
+        json!({"format":"emmc-boot","area":"boot0","payloadOffset":0,"maxBytes":4193792}),
+        json!({"format":"emmc-boot","area":"boot0","payloadOffset":512,"maxBytes":4194304}),
+        json!({"format":"emmc-boot","area":"boot1","payloadOffset":512,"maxBytes":4193792}),
+        // The vendor-named format is gone, not aliased.
+        json!({"format":"amlogic-boot0","payloadOffset":512,"maxBytes":4193792}),
     ] {
         value["target"] = target;
         value["id"] = json!(mica_deploy::components::component_id(&value).unwrap());
-        assert!(parse_firmware(&serde_json::to_vec(&value).unwrap()).is_err());
+        assert!(read_on("s905x5m", &value).is_err());
     }
 }

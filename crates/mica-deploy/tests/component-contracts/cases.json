@@ -66,50 +66,95 @@
       "result": "refused"
     }
   ],
-  "boards": [
-    {
+  "boardPolicies": {
+    "cx3576": {
+      "arch": "arm64",
+      "board": {
+        "boot": "uboot-fit",
+        "firmware": {
+          "diskOffset": 32768,
+          "format": "disk-range",
+          "maxBytes": 16744448
+        },
+        "kernel": "fit",
+        "partitions": {
+          "boot": 1,
+          "data": 3,
+          "system": 2
+        },
+        "records": {
+          "offsets": [
+            16744448,
+            17793024
+          ],
+          "sectors": 36800,
+          "size": 65536,
+          "startSector": 64
+        }
+      }
+    },
+    "s905x5m": {
+      "arch": "arm64",
+      "board": {
+        "boot": "uboot-fit",
+        "firmware": {
+          "area": "boot0",
+          "format": "emmc-boot",
+          "maxBytes": 4193792,
+          "payloadOffset": 512
+        },
+        "kernel": "fit",
+        "partitions": {
+          "boot": 1,
+          "data": 3,
+          "system": 2
+        },
+        "records": {
+          "offsets": [
+            125796352,
+            129990656
+          ],
+          "sectors": 262080,
+          "size": 65536,
+          "startSector": 64
+        }
+      }
+    },
+    "uefi-arm64": {
+      "arch": "arm64",
+      "board": {
+        "boot": "uefi",
+        "firmware": {
+          "format": "efi",
+          "partition": 1,
+          "path": "EFI/BOOT/BOOTAA64.EFI"
+        },
+        "kernel": "uki",
+        "partitions": {
+          "boot": 1,
+          "data": 3,
+          "system": 2
+        }
+      }
+    },
+    "uefi-x64": {
       "arch": "amd64",
-      "backend": "uefi",
-      "format": "uki",
-      "name": "uefi-x64",
-      "result": "accepted"
-    },
-    {
-      "arch": "arm64",
-      "backend": "uefi",
-      "format": "uki",
-      "name": "uefi-arm64",
-      "result": "accepted"
-    },
-    {
-      "arch": "arm64",
-      "backend": "uboot-fit",
-      "format": "fit",
-      "name": "cx3576",
-      "result": "accepted"
-    },
-    {
-      "arch": "arm64",
-      "backend": "uboot-fit",
-      "format": "fit",
-      "name": "s905x5m",
-      "result": "accepted"
-    },
-    {
-      "arch": "amd64",
-      "backend": "uefi",
-      "format": "uki",
-      "name": "x64",
-      "result": "refused"
-    },
-    {
-      "arch": "arm64",
-      "backend": "uefi",
-      "format": "uki",
-      "name": "virt-arm64",
-      "result": "refused"
+      "board": {
+        "boot": "uefi",
+        "firmware": {
+          "format": "efi",
+          "partition": 1,
+          "path": "EFI/BOOT/BOOTX64.EFI"
+        },
+        "kernel": "uki",
+        "partitions": {
+          "boot": 1,
+          "data": 3,
+          "system": 2
+        }
+      }
     }
-  ],
+  },
   "catalog": {
     "channel": "stable",
     "expiresAt": "2026-10-19T00:00:00Z",
@@ -139,14 +184,14 @@
       "alsoRefusedBy": true,
       "name": "wrong-board",
       "pointer": "/board",
-      "refusal": "board/architecture mismatch",
+      "refusal": "component target mismatch",
       "value": "cx3576"
     },
     {
       "alsoRefusedBy": true,
       "name": "wrong-arch",
       "pointer": "/arch",
-      "refusal": "board/architecture mismatch",
+      "refusal": "component target mismatch",
       "value": "arm64"
     },
     {
@@ -217,9 +262,10 @@
       "value": "migrate"
     },
     {
+      "alsoRefusedBy": true,
       "name": "wrong-boot-format",
       "pointer": "/kernel/boot/format",
-      "refusal": "wrong boot format",
+      "refusal": "component identity mismatch",
       "value": "fit"
     },
     {
