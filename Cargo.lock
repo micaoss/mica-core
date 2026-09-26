@@ -1784,6 +1784,7 @@ dependencies = [
  "bcrypt",
  "chrono",
  "hex",
+ "mica-apid",
  "mica-busname",
  "micad-settings",
  "ring",

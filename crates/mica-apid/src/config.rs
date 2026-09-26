@@ -22,6 +22,9 @@ pub struct Config {
     pub state_dir: PathBuf,
     /// Bus to reach `micad` on (`APID_BUS`).
     pub bus: BusKind,
+    /// Where the built-in console is installed (`APID_UI_DIR`); absent is an
+    /// API-only device.
+    pub ui_dir: PathBuf,
 }
 
 impl Config {
@@ -43,11 +46,16 @@ impl Config {
             Ok("session") => BusKind::Session,
             Ok(other) => anyhow::bail!("APID_BUS must be `system` or `session`, got `{other}`"),
         };
+        let ui_dir = PathBuf::from(
+            std::env::var("APID_UI_DIR")
+                .unwrap_or_else(|_| crate::assets::builtin::DEFAULT_DIR.to_string()),
+        );
         Ok(Self {
             https_addr,
             http_addr,
             state_dir,
             bus,
+            ui_dir,
         })
     }
 }

@@ -47,34 +47,37 @@ if grep -Eq 'bun (install|run)|command -v bun' "${CHECK_SCRIPT}"; then
     fail "the frontend quality gate still owns a second Bun execution path"
 fi
 
-grep -q 'MICA_APID_UI_DIST_DIR' "${ROOT}/crates/mica-apid/build.rs" ||
-    fail "crates/mica-apid/build.rs does not require the generated UI directory"
-
+# The console is a package of its own (mica-apid-ui), not part of apid's
+# binary: nothing compiles it in, and nothing hands its output to Cargo.
+[ ! -e "${ROOT}/crates/mica-apid/build.rs" ] ||
+    fail "crates/mica-apid/build.rs exists again; the console is served from /usr/share/mica-apid/ui, not embedded"
 for entry in \
     "scripts/build/check.sh" \
-    "scripts/build/build-deb.sh"
+    "scripts/build/build-deb.sh" \
+    "scripts/gate/rust-gate.sh"
 do
-    grep -q 'apid/ui/build.sh' "${ROOT}/${entry}" ||
-        fail "${entry} does not build the UI before Cargo"
-    grep -q 'MICA_APID_UI_DIST_DIR' "${ROOT}/${entry}" ||
-        fail "${entry} does not pass the generated UI directory to Cargo"
-    if grep -q 'apid/ui/dist' "${ROOT}/${entry}"; then
-        fail "${entry} still consumes generated assets from the UI source tree"
+    if grep -q 'MICA_APID_UI_DIST_DIR' "${ROOT}/${entry}"; then
+        fail "${entry} still passes a generated UI directory to Cargo"
     fi
 done
 
-for entry in \
-    "scripts/build/build-deb.sh"
-do
-    grep -q -- '-v "${REPO_ROOT}:/src:ro"' "${ROOT}/${entry}" ||
-        fail "${entry} does not mount repository source read-only"
-    grep -q -- '-v "${APID_UI_DIST}:/build/apid-ui:ro"' "${ROOT}/${entry}" ||
-        fail "${entry} does not mount generated UI assets read-only"
-    grep -q 'MICA_APID_UI_DIST_DIR=/build/apid-ui' "${ROOT}/${entry}" ||
-        fail "${entry} does not name the isolated UI mount for Cargo"
-    grep -q 'CARGO_TARGET_DIR=/target' "${ROOT}/${entry}" ||
-        fail "${entry} does not move Cargo writes out of the source tree"
-done
+# The one place the console is built for a package: the micad producer, which
+# stages the ignored output for mica-apid-ui and never the source tree's.
+PREPARE="pkgs/micad/prepare.sh"
+grep -q 'apid/ui/build.sh' "${ROOT}/${PREPARE}" ||
+    fail "${PREPARE} does not build the console for mica-apid-ui"
+grep -q '_out/apid-ui/dist' "${ROOT}/${PREPARE}" ||
+    fail "${PREPARE} does not stage the console from the ignored build output"
+if grep -q 'apid/ui/dist' "${ROOT}/${PREPARE}"; then
+    fail "${PREPARE} consumes generated assets from the UI source tree"
+fi
+grep -q 'mica-apid-ui' "${ROOT}/pkgs/micad/producer.env" ||
+    fail "the micad producer does not ship mica-apid-ui"
+
+grep -q -- '-v "${REPO_ROOT}:/src:ro"' "${ROOT}/scripts/build/build-deb.sh" ||
+    fail "scripts/build/build-deb.sh does not mount repository source read-only"
+grep -q 'CARGO_TARGET_DIR=/target' "${ROOT}/scripts/build/build-deb.sh" ||
+    fail "scripts/build/build-deb.sh does not move Cargo writes out of the source tree"
 
 if grep -q 'apid/ui/dist' "${ROOT}/.github/workflows/build.yml"; then
     fail "CI still consumes generated UI assets from the source tree"

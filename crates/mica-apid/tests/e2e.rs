@@ -193,6 +193,7 @@ async fn web_flow_end_to_end() -> anyhow::Result<()> {
         .env("DBUS_SESSION_BUS_ADDRESS", &address)
         .env("APID_BUS", "session")
         .env("APID_STATE_DIR", dir.path().join("apid"))
+        .env("APID_UI_DIR", console(dir.path())?)
         .env("APID_HTTPS_ADDR", "127.0.0.1:0")
         .env("APID_HTTP_ADDR", "127.0.0.1:0")
         .stdout(Stdio::piped())
@@ -827,4 +828,17 @@ async fn a_poured_document_is_adopted_and_its_secret_reaches_no_served_record() 
     );
 
     Ok(())
+}
+
+/// A console tree shaped like the `mica-apid-ui` package's, under `dir`: the
+/// entry document with the console's title and a hashed module script.
+fn console(dir: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
+    let root = dir.join("ui");
+    std::fs::create_dir_all(root.join("assets"))?;
+    std::fs::write(
+        root.join("index.html"),
+        "<!doctype html><title>mica console</title>\n<script type=\"module\" crossorigin src=\"/_ui/assets/index-a1b2c3.js\"></script>",
+    )?;
+    std::fs::write(root.join("assets/index-a1b2c3.js"), "export {}")?;
+    Ok(root)
 }

@@ -50,16 +50,6 @@ CARGO_CACHE="${REPO_ROOT}/_out/cargo"
 mkdir -p "${CARGO_CACHE}/registry" "${CARGO_CACHE}/git" "${TARGET_DIR}"
 RUST_IMAGE="$(bash "${REPO_ROOT}/scripts/build/from.sh" --arch="${HOST_ARCH}" --ref rust)"
 
-# mica-apid embeds the built UI.
-APID_UI_ARGS=()
-case " ${BINS} " in
-*" mica-apid "*)
-    APID_UI_DIST="${REPO_ROOT}/_out/apid-ui/dist"
-    bash "${REPO_ROOT}/crates/mica-apid/ui/build.sh"
-    APID_UI_ARGS=(-v "${APID_UI_DIST}:/build/apid-ui:ro" -e "MICA_APID_UI_DIST_DIR=/build/apid-ui")
-    ;;
-esac
-
 docker run --rm --label ai-agent=true --platform "linux/${HOST_ARCH}" \
     -v "${REPO_ROOT}:/src:ro" \
     -v "${TARGET_DIR}:/target" \
@@ -68,7 +58,6 @@ docker run --rm --label ai-agent=true --platform "linux/${HOST_ARCH}" \
     -w /src \
     -e "TARGET=${TRIPLE}" -e "ELF_ARCH=${ELF_ARCH}" -e "BINS=${BINS}" \
     -e "CARGO_TARGET_DIR=/target" -e "MICA_PACKAGE_VERSION=${MICA_DEB_VERSION}" \
-    "${APID_UI_ARGS[@]}" \
     --entrypoint /bin/bash "${RUST_IMAGE}" -c '
         set -euo pipefail
         . /etc/mica-build/rust.env

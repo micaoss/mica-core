@@ -29,7 +29,7 @@ gate) answer without starting the daemon.
 | `/api/v1/...` | The JSON management API (below) |
 | `/api/versions` | The API major versions this build serves |
 | `/healthz` | Liveness for the boot health gate |
-| `/_ui/` | The built-in single-page application, embedded in the binary |
+| `/_ui/` | The built-in single-page application, from the `mica-apid-ui` package at `/usr/share/mica-apid/ui`; 404 on a device without it |
 | `/` | The active custom UI bundle if one is valid, otherwise a redirect to `/_ui/` |
 
 Custom assets are consulted only by the final fallback, so neither UI can
@@ -126,10 +126,15 @@ pinned and the root composed (`mica-system-base`), not here
 
 ## 5. The web UI
 
-- **Built-in.** `crates/mica-apid/ui/` is a React + Vite application. It is
-  built with Bun inside the base build image (`crates/mica-apid/ui/build.sh`)
-  and embedded into the binary at compile time from `MICA_APID_UI_DIST_DIR`.
-  It is always available at `/_ui/`.
+- **Built-in.** `crates/mica-apid/ui/` is a React + Vite application, built
+  with Bun inside the base build image (`crates/mica-apid/ui/build.sh`) and
+  shipped as its own package, `mica-apid-ui`, at `/usr/share/mica-apid/ui`
+  (`APID_UI_DIR`) -- inside the dm-verity root, so as authenticated as the
+  binary. apid indexes the tree once at start (regular files only, safe
+  logical paths, bounded count and size, an `index.html`) and answers `/_ui/`
+  from that index alone. A product without the package is API-only: `/_ui/`
+  and `/` answer 404 and the API is unchanged. A tree that breaks a rule is no
+  console, logged, and never takes the API down with it.
 - **Custom bundles.** An operator can upload a `.mica-ui.zip`
   (`POST /ui/bundles`). apid streams it to `/mica/ui` on DATA, validates and
   extracts it off the async worker (`crates/mica-ui-bundle`), and installs it as
@@ -157,6 +162,12 @@ sockets.
 
 ## 8. Compatibility with micad
 
-mica-apid is its own executable and package so an API upgrade never repacks
-micad. Today `mica-apid` depends on `micad` at exactly the same version, because
-the two speak `com.mica.micad1` from one commit.
+apid and micad are one executable: `/usr/bin/mica-apid` is a symlink to
+`micad`, which runs apid's entry point when started under that name and is micad
+under any other. They were one version already -- `mica-apid` depends on `micad`
+at exactly its version, because the two speak `com.mica.micad1` from one commit
+-- so the split into two executables (2026-09-13, "so an API upgrade never
+repacks micad") bought no independence and linked the same stack twice. What
+keeps the daemons apart is their units and their sandboxing (section 7), not
+their files. The `micad` producer ships `micad`, `mica-apid` and `mica-apid-ui`
+from one build (`docs/plan/20260926-0841-one-binary-and-an-optional-console.md`).

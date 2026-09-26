@@ -1,0 +1,11 @@
+Package: mica-apid
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: mica build <mica@example.invalid>
+Section: admin
+Priority: optional
+Depends: micad (= 0.1.0-5), mica-system
+Description: Mica OS HTTPS API
+ Serves the management API over HTTPS and changes the device only through
+ micad, whose executable it runs under the name mica-apid. Starts at boot.
+ The web console is the separate mica-apid-ui package.

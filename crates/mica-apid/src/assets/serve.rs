@@ -10,7 +10,8 @@
 //! guard for spellings Axum did not structurally claim, not a fallback into
 //! either reserved domain. [`root`] is `GET /`, the single declared
 //! exception: the active bundle's `index.html` when a bundle is active and its
-//! index is readable, and a redirect to the reserved built-in `/_ui/` otherwise.
+//! index is readable, a redirect to the reserved built-in `/_ui/` otherwise, and
+//! a 404 on a device with no console installed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,6 +47,10 @@ pub async fn root(State(state): State<AppState>) -> Response {
         .and_then(serve_index)
     {
         Some(response) => response,
+        // With no console installed there is nowhere to send a browser: the
+        // device is API-only, and `/` says so with a 404 rather than a
+        // redirect to one.
+        None if state.builtin().is_none() => not_found(),
         None => Redirect::to("/_ui/").into_response(),
     }
 }

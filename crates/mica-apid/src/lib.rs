@@ -138,7 +138,9 @@ async fn serve() -> anyhow::Result<()> {
     // The state dir already exists (ensure_state_dir above) and already holds
     // the TLS material, so the backoff counter and the audit ring go there
     // too: one STATE-backed directory, one set of permissions to reason about.
-    let state = routes::AppState::new(api, signing_key).with_persistence(&config.state_dir);
+    let state = routes::AppState::new(api, signing_key)
+        .with_persistence(&config.state_dir)
+        .with_builtin_ui(&config.ui_dir);
     // The SettingsChanged watcher that keeps the gate's access cache honest;
     // until it reports a live subscription the gate reads the bus directly,
     // so a micad that is not up yet costs latency, never staleness.

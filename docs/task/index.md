@@ -27,3 +27,4 @@
 - [x] [**20260920-1035-console-brand-mark The console wears the brand mark**](20260920-1035-console-brand-mark.md) `P3`
 - [ ] [**20260921-1300-delta-transfer A new root is 2 MB of new bytes and 65 MB of transfer**](20260921-1300-delta-transfer.md) `P1`
 - [-] [**20260925-1300-board-facts-from-the-boot-policy The device reads its board facts from the signed boot policy, not from the board's name**](20260925-1300-board-facts-from-the-boot-policy.md) `P1`
+- [-] [**20260926-0841-one-binary-and-an-optional-console One management binary, an optional console, stripped executables**](20260926-0841-one-binary-and-an-optional-console.md) `P2`

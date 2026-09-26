@@ -70,7 +70,7 @@ reload units.
 | Component | Package | Unit | Runs as | Role |
 | --- | --- | --- | --- | --- |
 | `micad` | `micad` | `micad.service` (`Type=dbus`) | root | Owns the settings and live-state trees, runs the reconcilers, updates, provisioning, recovery; the only writer of system configuration |
-| `mica-apid` | `mica-apid` | `apid.service` | root | HTTPS API and web UI; authenticates operators and calls micad |
+| `mica-apid` | `mica-apid` (the `micad` executable under this name), optionally `mica-apid-ui` for the web console | `apid.service` | root | HTTPS API and, with `mica-apid-ui`, the web console; authenticates operators and calls micad |
 | `mica-mqtt-broker` | `mica-mqtt-broker` | `mica-mqtt-broker.service` | `mica-mqtt-broker` | Local MQTT 3.1.1 broker (rumqttd as a library) |
 | `mica-mqttd` | `mica-mqttd` | `mica-mqttd.service` | `mica-mqttd` | Bridges enrolled application item trees to MQTT; has no access to micad |
 | `sftp-server` | `mica-sftp-server` | exec'd by dropbear | the logged-in user | SFTP version 3 on stdin/stdout |

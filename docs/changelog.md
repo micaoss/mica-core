@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-09-26 08:55 [change]
+
+One management executable, an optional console, stripped binaries
+(20260926-0841-one-binary-and-an-optional-console):
+
+- **Every executable is stripped** (`[profile.release] strip = "symbols"`). Only `mica-runkit` was;
+  the symbol tables were 23% of `micad` and of `mica-apid`. A device backtrace is resolved
+  against an unstripped build of the same commit.
+- **The console is a package, `mica-apid-ui`,** at `/usr/share/mica-apid/ui` in the dm-verity root,
+  no longer compiled into apid: `build.rs` and `MICA_APID_UI_DIST_DIR` are gone, and apid and the
+  Rust gate compile without Bun. apid indexes the tree once at start (regular files, safe logical
+  paths, bounded, an `index.html`) and serves `/_ui/` from the index alone; `APID_UI_DIR` moves
+  it. A product without the package is API-only: `/_ui/` and `/` answer 404, the API is unchanged,
+  and a console tree that breaks a rule is logged and served as no console.
+- **`mica-apid` is `micad` under another name.** `micad` runs apid's entry point when started as
+  `mica-apid` and is micad under every other name; `/usr/bin/mica-apid` is a symlink. The
+  2026-09-13 split ("so an API upgrade never repacks micad") never bought independence --
+  `mica-apid` has always depended on `micad` at exactly its version -- and linked tokio, zbus,
+  serde and the settings crate twice. The units and their sandboxing are unchanged.
+- **One producer, three packages:** `pkgs/micad` ships `micad`, `mica-apid` (the symlink, the unit,
+  the OpenAPI document) and `mica-apid-ui`; `pkgs/apid` is gone.
+- Measured against `20260926-0815` (amd64, installed): `micad` + `mica-apid` 29.0 MB before;
+  18.4 MB API-only and 19.7 MB with the console after (`micad` 18.06 MB, `openapi.json` 0.31 MB,
+  console 1.31 MB). The archives go from 6.83 MB to 5.23 MB.
+- Versions: `micad`, `mica-apid` and `mica-apid-ui` `0.1.0-5` (`mica-apid` is released at
+  `0.1.0-4` and never goes back); the mqtt producer `0.1.0-4` for the `micad (= 0.1.0-5)` pin;
+  `mica-deploy` and `mica-lifecycle` `0.1.0-6` and `mica-sftp-server` `0.1.0-2`, because the
+  release profile strips their binaries too.
+
 ## 2026-09-26 06:52 [change]
 
 The device reads its board from the signed boot policy, not from the board's name

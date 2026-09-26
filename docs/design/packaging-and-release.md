@@ -43,8 +43,7 @@ A producer is a directory under `pkgs/` (`pkgs/README.md` is the contract):
 
 | Producer | Packages | Compiles |
 | --- | --- | --- |
-| `micad` | `micad` | `micad` |
-| `apid` | `mica-apid` | `mica-apid` (with the built UI) and its OpenAPI document |
+| `micad` | `micad`, `mica-apid`, `mica-apid-ui` | `micad` (which runs apid as `mica-apid`, a symlink), the OpenAPI document and the web console |
 | `mqtt` | `mica-mqttd`, `mica-mqtt-broker` | both binaries |
 | `sftp` | `mica-sftp-server` | `mica-sftp-server` |
 | `deploy` | `mica-deploy` | `mica-deploy` |
@@ -79,9 +78,12 @@ information report. A release never changes a version and nothing in a package
 names a commit, so a package's bytes change only with its version:
 
 - **Bump.** A packaging-only change bumps the revision; a source change bumps
-  the crate version and the upstream part and resets the revision. A `micad`
-  bump bumps the revision of `mica-apid`, `mica-mqttd` and `mica-mqtt-broker`,
-  which depend on its exact version.
+  the crate version and the upstream part and resets the revision. `micad`,
+  `mica-apid` and `mica-apid-ui` share one producer and one version; a `micad`
+  bump bumps the revision of `mica-mqttd` and `mica-mqtt-broker`, which depend
+  on its exact version. Every executable is stripped (`[profile.release]
+  strip = "symbols"`); a device backtrace is resolved against an unstripped
+  build of the same commit.
 - **Guard.** `scripts/build/reuse.sh` reads, anonymously, the lock and pools of
   the newest release whose pool layers carry `mica.inputs` (a release made
   before these rules carries none and is passed over; with none, every package

@@ -4,14 +4,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(cd "${HERE}/../.." && pwd)"
-REPO_ROOT="${WORKSPACE}"
 cd "${WORKSPACE}"
 export PATH="$HOME/.cargo/bin:$PATH"
-
-if [ -z "${MICA_APID_UI_DIST_DIR:-}" ]; then
-    bash crates/mica-apid/ui/build.sh
-    export MICA_APID_UI_DIST_DIR="${REPO_ROOT}/_out/apid-ui/dist"
-fi
 
 # EVERY PRODUCER'S VERSION IS ITS BINARIES' CRATE VERSION. pkgs/<producer>/producer.env
 # declares VERSION=<upstream>-<revision>; the upstream part must be the version of
@@ -58,8 +52,7 @@ cargo run --locked -p mica-apid --bin mica-apid -- --openapi >"${openapi_tmp}/op
 diff -u crates/mica-apid/openapi.json "${openapi_tmp}/openapi.json" || {
     echo "error: crates/mica-apid/openapi.json is not what mica-apid --openapi prints." >&2
     echo "       Regenerate it from :" >&2
-    echo "         bash crates/mica-apid/ui/build.sh" >&2
-    echo '         MICA_APID_UI_DIST_DIR="$PWD/_out/apid-ui/dist" cargo run -p mica-apid --bin mica-apid -- --openapi > crates/mica-apid/openapi.json' >&2
+    echo '         cargo run -p mica-apid --bin mica-apid -- --openapi > crates/mica-apid/openapi.json' >&2
     exit 1
 }
 echo "crates/mica-apid/openapi.json matches mica-apid --openapi"

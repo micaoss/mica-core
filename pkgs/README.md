@@ -5,8 +5,7 @@ packages. Each producer is a directory here:
 
 | Producer | Binaries | Packages |
 | --- | --- | --- |
-| `micad` | `micad` | `micad` |
-| `apid` | `mica-apid` (UI embedded) | `mica-apid` |
+| `micad` | `micad` (also `mica-apid`, a symlink to it) | `micad`, `mica-apid`, `mica-apid-ui` (the web console, optional) |
 | `mqtt` | `mica-mqttd`, `mica-mqtt-broker` | `mica-mqttd`, `mica-mqtt-broker` |
 | `sftp` | `mica-sftp-server` | `mica-sftp-server` |
 | `deploy` | `mica-deploy` | `mica-deploy` |

@@ -68,12 +68,11 @@ the decision.
 
 ## 3. Working with cargo
 
-The Rust gate is `scripts/gate/rust-gate.sh`: it builds the UI, then runs
-`scripts/build/check.sh` in the Rust image with the repository mounted
-read-only at `/src`. For an interactive loop, open a shell in the same image:
+The Rust gate is `scripts/gate/rust-gate.sh`: it runs `scripts/build/check.sh`
+in the Rust image with the repository mounted read-only at `/src`. No UI build
+is needed: the console is a package of its own. For an interactive loop, open a shell in the same image:
 
 ```sh
-bash crates/mica-apid/ui/build.sh          # once, and after UI changes; apid embeds the result
 IMAGE=$(bash scripts/build/from.sh --ref rust)
 mkdir -p _out/cargo/registry _out/cargo/git _out/dev-target
 docker run --rm -it \
@@ -81,7 +80,6 @@ docker run --rm -it \
     -v "$PWD/_out/cargo/registry:/usr/local/cargo/registry" \
     -v "$PWD/_out/cargo/git:/usr/local/cargo/git" \
     -v "$PWD/_out/dev-target:/target" -e CARGO_TARGET_DIR=/target \
-    -v "$PWD/_out/apid-ui/dist:/build/apid-ui:ro" -e MICA_APID_UI_DIST_DIR=/build/apid-ui \
     --entrypoint /bin/bash "$IMAGE"
 ```
 
@@ -94,8 +92,8 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all
 ```
 
-`mica-apid` refuses to build without `MICA_APID_UI_DIST_DIR` pointing at a built
-UI, because the binary embeds it.
+To serve the console from a local apid, build it (`bash crates/mica-apid/ui/build.sh`)
+and point `APID_UI_DIR` at `_out/apid-ui/dist`; without it apid is API-only.
 
 ### 3.1 Running the daemons locally
 
@@ -166,8 +164,7 @@ Handlers and their OpenAPI annotations live in `crates/mica-apid/src/`. After a
 change, regenerate the committed document:
 
 ```sh
-MICA_APID_UI_DIST_DIR="$PWD/_out/apid-ui/dist" \
-  cargo run -p mica-apid --bin mica-apid -- --openapi > crates/mica-apid/openapi.json
+cargo run -p mica-apid --bin mica-apid -- --openapi > crates/mica-apid/openapi.json
 ```
 
 (inside the Rust image shell). The Rust gate fails when the committed document

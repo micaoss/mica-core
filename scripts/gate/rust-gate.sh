@@ -2,8 +2,8 @@
 # The Rust gate: scripts/build/check.sh, UNMODIFIED, inside the mica-build-env rust image
 # -- the VERSION agreement, `cargo fmt --all --check`, clippy at `-D warnings`,
 # nextest, doctests, `cargo deny check licenses bans advisories` and the
-# OpenAPI document against `apid --openapi`. The built-in UI is built first
-# in the pinned Bun image, because apid embeds it and the gate compiles apid.
+# OpenAPI document against `apid --openapi`. No UI is built: the console is
+# a package of its own (`mica-apid-ui`), and apid compiles without it.
 # The repository is mounted read-only at the fixed path /src, so rustc's
 # recorded paths do not depend on where the checkout lives and the gate
 # cannot fix what it found; the image records what it is and the log reads
@@ -24,9 +24,6 @@ command -v docker >/dev/null 2>&1 || { echo "error: docker is required and not o
 IMAGE_ARCH=amd64
 IMAGE="$(bash "${REPO_ROOT}/scripts/build/from.sh" --arch="${IMAGE_ARCH}" --ref rust)"
 
-APID_UI_DIST="${REPO_ROOT}/_out/apid-ui/dist"
-bash "${REPO_ROOT}/crates/mica-apid/ui/build.sh"
-
 CARGO_CACHE="${REPO_ROOT}/_out/cargo"
 TARGET_DIR="${REPO_ROOT}/_out/rust-gate"
 mkdir -p "${CARGO_CACHE}/registry" "${CARGO_CACHE}/git" "${TARGET_DIR}"
@@ -39,10 +36,8 @@ docker run --rm \
     -v "${TARGET_DIR}:/target" \
     -v "${CARGO_CACHE}/registry:/usr/local/cargo/registry" \
     -v "${CARGO_CACHE}/git:/usr/local/cargo/git" \
-    -v "${APID_UI_DIST}:/build/apid-ui:ro" \
     -w /src \
     -e "CARGO_TARGET_DIR=/target" \
-    -e "MICA_APID_UI_DIST_DIR=/build/apid-ui" \
     --entrypoint /bin/bash \
     "${IMAGE}" -c '
         set -euo pipefail

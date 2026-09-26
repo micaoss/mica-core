@@ -96,3 +96,10 @@ rumqttd = { version = "0.20", default-features = false }
 # its packets decode from and encode to.
 russh-sftp = "3.0.0"
 bytes = "1"
+
+# Every shipped executable is stripped: the symbol tables were a fifth of
+# mica-apid and nothing on a device reads them. A backtrace from a device is
+# resolved against an unstripped build of the same commit, which is
+# reproducible. (mica-runkit's build already strips; this makes it redundant.)
+[profile.release]
+strip = "symbols"

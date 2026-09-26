@@ -124,6 +124,9 @@ pub struct AppState {
     /// assertion and spending it are one step rather than two. See
     /// [`api_v1_recovery_credential`] for why the atomicity is here.
     rotation: Arc<tokio::sync::Mutex<()>>,
+    /// The built-in console, when the `mica-apid-ui` package installed one.
+    /// Absent, `/_ui` answers 404 and the API is unchanged.
+    builtin: Arc<Option<crate::assets::builtin::Builtin>>,
 }
 
 impl AppState {
@@ -165,7 +168,31 @@ impl AppState {
             // marker is read when something asks for presence and never at
             // construction.
             presence: Arc::new(MarkerPresence::at_default()),
+            // No console until one is attached: constructing state reads no
+            // directory, like every store above.
+            builtin: Arc::new(None),
         }
+    }
+
+    /// Attach the built-in console indexed from `dir`. An absent directory is
+    /// no console; a tree that breaks the rules is no console either, and is
+    /// said so, because a bad console must not take the API down with it.
+    #[must_use]
+    pub fn with_builtin_ui(mut self, dir: &std::path::Path) -> Self {
+        let builtin = match crate::assets::builtin::Builtin::load(dir) {
+            Ok(builtin) => builtin,
+            Err(err) => {
+                tracing::warn!(dir = %dir.display(), error = %err, "built-in console refused");
+                None
+            }
+        };
+        self.builtin = Arc::new(builtin);
+        self
+    }
+
+    /// The built-in console, if one is installed.
+    pub(crate) fn builtin(&self) -> Option<&crate::assets::builtin::Builtin> {
+        self.builtin.as_ref().as_ref()
     }
 
     /// The gate's access cache, for `main.rs` to hand to the

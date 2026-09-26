@@ -40,9 +40,42 @@ const SIGNING_KEY: [u8; 32] = [7u8; 32];
 
 fn test_app(tree: serde_json::Value) -> (Router, Arc<FakeSettings>) {
     let fake = Arc::new(FakeSettings::new(tree));
-    let state = AppState::new(fake.clone(), SIGNING_KEY);
+    let state = AppState::new(fake.clone(), SIGNING_KEY).with_builtin_ui(console());
     (app(state), fake)
 }
+
+/// The built-in console these tests serve: a tree shaped like the package's,
+/// written once for the whole process because apid reads a file when it is
+/// asked for it, so the tree has to outlive every router.
+fn console() -> &'static Path {
+    static CONSOLE: std::sync::OnceLock<TempDir> = std::sync::OnceLock::new();
+    CONSOLE
+        .get_or_init(|| {
+            let dir = TempDir::new().unwrap();
+            for (path, body) in CONSOLE_FILES {
+                let file = dir.path().join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, body).unwrap();
+            }
+            dir
+        })
+        .path()
+}
+
+/// The fixture console: an entry document, a hashed script and lazy chunk
+/// under `assets/`, and a file outside it.
+const CONSOLE_FILES: [(&str, &str); 4] = [
+    (
+        "index.html",
+        "<!doctype html><title>mica console</title><script type=module src=/_ui/assets/index-a1b2.js></script>",
+    ),
+    ("assets/index-a1b2.js", "console.log('built-in')"),
+    ("assets/zh-cn-c3d4.js", "export default {}"),
+    ("favicon.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>"),
+];
+
+/// The console's script, which a custom bundle tries to shadow.
+const CONSOLE_JS: &str = "assets/index-a1b2.js";
 
 fn unconfigured_tree() -> serde_json::Value {
     json!({ "hostname": "mica", "network": {}, "access": {} })
@@ -598,7 +631,9 @@ fn test_app_serving(tree: serde_json::Value, bundle_root: &Path) -> Router {
     // A fixed uptime, so the status pane renders its uptime line (which
     // `without_the_uptime_line` requires) from the fake like everything else.
     fake.set_state_entry("uptime", json!(90_061));
-    app(AppState::new(fake, SIGNING_KEY).with_bundle_root(bundle_root))
+    app(AppState::new(fake, SIGNING_KEY)
+        .with_bundle_root(bundle_root)
+        .with_builtin_ui(console()))
 }
 
 #[tokio::test]
@@ -620,9 +655,7 @@ async fn ui_boundary_selects_custom_at_root_and_always_reserves_builtin_ui() {
     let old_builtin = request(&router, "GET", "/ui", None, Some(BROWSER_ACCEPT)).await;
     assert_eq!(old_builtin.status(), StatusCode::NOT_FOUND);
 
-    let builtin_js = crate::assets::builtin::embedded_paths()
-        .find(|path| path.ends_with(".js"))
-        .expect("the built-in VFS contains JavaScript");
+    let builtin_js = CONSOLE_JS;
     let custom_shadow = format!("_ui/{builtin_js}");
     let builtin_url = format!("/_ui/{builtin_js}");
 
@@ -641,9 +674,7 @@ async fn ui_boundary_selects_custom_at_root_and_always_reserves_builtin_ui() {
 
 #[tokio::test]
 async fn builtin_prefix_releases_ui_to_the_custom_owner() {
-    let builtin_js = crate::assets::builtin::embedded_paths()
-        .find(|path| path.ends_with(".js"))
-        .expect("the built-in VFS contains JavaScript");
+    let builtin_js = CONSOLE_JS;
     let custom_shadow = format!("_ui/{builtin_js}");
     let bundle = install_bundle(&[
         ("index.html", "<!doctype html><title>custom-root</title>"),
@@ -666,29 +697,70 @@ async fn builtin_prefix_releases_ui_to_the_custom_owner() {
 }
 
 #[test]
-fn built_in_vfs_contains_sorted_split_output() {
-    let paths = crate::assets::builtin::embedded_paths().collect::<Vec<_>>();
-    assert!(paths.contains(&"index.html"), "{paths:?}");
-    assert!(
-        paths.len() > 3,
-        "the built-in VFS must not regress to a fixed three-file set: {paths:?}"
-    );
-    assert!(
-        paths.windows(2).all(|pair| pair[0] < pair[1]),
-        "generated VFS paths must be sorted: {paths:?}"
-    );
-    assert!(
-        paths
-            .iter()
-            .any(|path| path.starts_with("assets/zh-cn-") && path.ends_with(".js")),
-        "the Chinese catalog must remain a lazy chunk: {paths:?}"
-    );
-    for path in paths {
-        assert!(
-            crate::assets::path::LogicalPath::parse(path).is_ok(),
-            "generated asset is not a safe logical path: {path}"
-        );
+fn the_console_index_admits_the_tree_sorted_and_safe() {
+    let builtin = crate::assets::builtin::Builtin::load(console())
+        .unwrap()
+        .expect("a console is installed");
+    let paths = builtin.paths().collect::<Vec<_>>();
+    let mut want = CONSOLE_FILES.map(|(path, _)| path).to_vec();
+    want.sort_unstable();
+    assert_eq!(paths, want);
+}
+
+/// A product that leaves out `mica-apid-ui` is an API-only device: `/_ui`
+/// and `/` answer 404, and the API is exactly what it was.
+#[tokio::test]
+async fn without_the_console_package_the_device_is_api_only() {
+    let absent = TempDir::new().unwrap();
+    let fake = Arc::new(FakeSettings::new(configured_tree("hunter2secret")));
+    let router = app(AppState::new(fake, SIGNING_KEY)
+        .with_bundle_root(absent.path())
+        .with_builtin_ui(&absent.path().join("no-console")));
+    for path in [
+        "/",
+        "/_ui",
+        "/_ui/",
+        "/_ui/network",
+        &format!("/_ui/{CONSOLE_JS}"),
+    ] {
+        let response = get(&router, path, None).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
+    assert_eq!(
+        get(&router, "/healthz", None).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        get(&router, "/api/versions", None).await.status(),
+        StatusCode::OK
+    );
+}
+
+/// The console tree is indexed by rules, and a tree that breaks one is no
+/// console rather than a partial one.
+#[test]
+fn a_console_tree_that_breaks_a_rule_is_refused() {
+    use crate::assets::builtin::Builtin;
+    let absent = TempDir::new().unwrap();
+    assert!(
+        Builtin::load(&absent.path().join("missing"))
+            .unwrap()
+            .is_none()
+    );
+
+    let no_index = TempDir::new().unwrap();
+    std::fs::write(no_index.path().join("app.js"), "x").unwrap();
+    assert!(Builtin::load(no_index.path()).is_err());
+
+    let linked = TempDir::new().unwrap();
+    std::fs::write(linked.path().join("index.html"), "x").unwrap();
+    std::os::unix::fs::symlink("/etc/passwd", linked.path().join("passwd")).unwrap();
+    assert!(Builtin::load(linked.path()).is_err());
+
+    let unsafe_name = TempDir::new().unwrap();
+    std::fs::write(unsafe_name.path().join("index.html"), "x").unwrap();
+    std::fs::write(unsafe_name.path().join("back\\slash.js"), "x").unwrap();
+    assert!(Builtin::load(unsafe_name.path()).is_err());
 }
 
 #[tokio::test]
@@ -696,7 +768,7 @@ async fn built_in_vfs_serves_every_asset_with_owner_local_cache_rules() {
     let empty = TempDir::new().unwrap();
     let router = test_app_serving(configured_tree("hunter2secret"), empty.path());
 
-    for path in crate::assets::builtin::embedded_paths() {
+    for (path, _) in CONSOLE_FILES {
         let response = get(&router, &format!("/_ui/{path}"), None).await;
         assert_eq!(response.status(), StatusCode::OK, "{path}");
         assert!(response.headers().contains_key(CONTENT_TYPE), "{path}");

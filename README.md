@@ -25,8 +25,9 @@ no commit.
 
 | Package | Built from | Installs | Starts at boot | Depends on |
 | --- | --- | --- | --- | --- |
-| `micad` | `crates/micad` | `/usr/bin/micad`, `micad.service`, the D-Bus policy `com.mica.micad.conf` | yes | `dbus-system-bus`, `mica-system` |
-| `mica-apid` | `crates/mica-apid` | `/usr/bin/mica-apid` (UI embedded), `apid.service`, `/usr/share/mica-apid/openapi.json` | yes | `micad` (same version), `mica-system` |
+| `micad` | `crates/micad`, `crates/mica-apid` | `/usr/bin/micad` (micad, and apid when started as `mica-apid`), `micad.service`, the D-Bus policy `com.mica.micad.conf` | yes | `dbus-system-bus`, `mica-system` |
+| `mica-apid` | the `micad` executable | `/usr/bin/mica-apid` (a symlink to `micad`), `apid.service`, `/usr/share/mica-apid/openapi.json` | yes | `micad` (same version), `mica-system` |
+| `mica-apid-ui` | `crates/mica-apid/ui` | the web console at `/usr/share/mica-apid/ui`; optional, an API-only device leaves it out | — | `mica-apid` (same version) |
 | `mica-mqttd` | `crates/mica-mqttd` | `/usr/bin/mica-mqttd`, `mica-mqttd.service`; its `postinst` creates the service account | no | `micad` (same version), `passwd` |
 | `mica-mqtt-broker` | `crates/mica-mqtt-broker` | `/usr/bin/mica-mqtt-broker`, `mica-mqtt-broker.service`; its `postinst` creates the service account | no | `micad` (same version), `passwd` |
 | `mica-sftp-server` | `crates/mica-sftp-server` | `/usr/lib/sftp-server`, the SFTP subsystem dropbear runs | — | shared libraries only |
@@ -62,7 +63,7 @@ Every crate lives in `crates/<package name>/`.
 | Crate | Kind | What it is |
 | --- | --- | --- |
 | `micad` | binary `micad` | The management-plane daemon: the settings and live-state trees and the reconcilers (network, radios, containers, SSH/dropbear, updates), exposed on D-Bus as `com.mica.micad` at `/com/mica/micad` |
-| `mica-apid` | binary `mica-apid` | The HTTPS API daemon and web dashboard; it changes the system only through micad's D-Bus interface. The UI is `crates/mica-apid/ui/` (React + Vite, built with Bun and embedded at compile time); the API is described by `crates/mica-apid/openapi.json` |
+| `mica-apid` | library (and a development binary) | The HTTPS API daemon, run on a device by the `micad` executable under the name `mica-apid`; it changes the system only through micad's D-Bus interface. The console is `crates/mica-apid/ui/` (React + Vite, built with Bun, shipped as `mica-apid-ui`); the API is described by `crates/mica-apid/openapi.json` |
 | `mica-mqttd` | binary | The MQTT application-data bridge for enrolled `com.mica.*` services |
 | `mica-mqtt-broker` | binary | The local MQTT broker (rumqttd as a library), configured from the file micad renders |
 | `mica-sftp-server` | binary | An SFTP version 3 server on stdin/stdout, run by dropbear as the logged-in user |
