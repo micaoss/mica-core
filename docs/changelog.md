@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-26 09:20 [fix]
+
+The Wi-Fi client joins WPA3 networks:
+
+- A passphrase network was rendered `key_mgmt=WPA-PSK` alone, so a WPA3-only access point --
+  mandatory on 6 GHz (Wi-Fi 6E/7), and the default on more new routers -- could not be joined,
+  whatever wpa_supplicant build the image carried. It is `key_mgmt=WPA-PSK SAE` with
+  `ieee80211w=1` now: one block joins WPA2, WPA3 and transition-mode access points, with PMF
+  offered, which SAE requires.
+- `sae_pwe=2` in the global section admits SAE's hash-to-element as well as hunting-and-pecking.
+  The default is the second alone, and WPA3 on 6 GHz requires the first, so SAE without it still
+  failed there.
+- A network stored as a raw 64-hex PMK stays `key_mgmt=WPA-PSK`: SAE derives its keys from the
+  password itself, which a PMK does not carry.
+- The access point is unchanged (802.11g, WPA2): it serves provisioning. No version bump: `micad`
+  is the unreleased `0.1.0-5`.
+
 ## 2026-09-26 08:55 [change]
 
 One management executable, an optional console, stripped binaries

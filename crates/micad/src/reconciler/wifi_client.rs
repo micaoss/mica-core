@@ -206,6 +206,10 @@ fn render_config(client: &WifiClientSettings) -> Result<String> {
     let mut out = String::from(CONFIG_HEADER);
     out.push_str("ctrl_interface=/run/wpa_supplicant\n");
     out.push_str("update_config=0\n");
+    // SAE's password element by both hunting-and-pecking and hash-to-element.
+    // The default is the first alone, and WPA3 on 6 GHz (Wi-Fi 6E/7) requires
+    // the second: SAE without this still fails there.
+    out.push_str("sae_pwe=2\n");
     for network in ordered {
         out.push_str("\nnetwork={\n");
         out.push_str(&format!("\tssid={}\n", encode_ssid(&network.ssid)));
@@ -215,9 +219,19 @@ fn render_config(client: &WifiClientSettings) -> Result<String> {
         out.push_str(&format!("\tpriority={}\n", network.priority));
         match &network.psk {
             Some(psk) => {
-                out.push_str("\tkey_mgmt=WPA-PSK\n");
                 let encoded = encode_psk(psk)
                     .with_context(|| format!("render the network {:?}", network.ssid.as_str()))?;
+                if encoded.starts_with('"') {
+                    // A passphrase: one block joins WPA2, WPA3 (SAE) and
+                    // transition-mode networks, and PMF is offered, which
+                    // SAE requires and WPA2 may use.
+                    out.push_str("\tkey_mgmt=WPA-PSK SAE\n");
+                    out.push_str("\tieee80211w=1\n");
+                } else {
+                    // A raw PMK: SAE derives its keys from the password
+                    // itself, so a network stored as a PMK is WPA2 only.
+                    out.push_str("\tkey_mgmt=WPA-PSK\n");
+                }
                 out.push_str(&format!("\tpsk={encoded}\n"));
             }
             None => out.push_str("\tkey_mgmt=NONE\n"),
@@ -452,19 +466,22 @@ mod tests {
     const GOLDEN_MULTI: &str = "# Managed by micad from wifi.client. Do not edit.\n\
         ctrl_interface=/run/wpa_supplicant\n\
         update_config=0\n\
+        sae_pwe=2\n\
         \n\
         network={\n\
         \tssid=\"hidden-lab\"\n\
         \tscan_ssid=1\n\
         \tpriority=20\n\
-        \tkey_mgmt=WPA-PSK\n\
+        \tkey_mgmt=WPA-PSK SAE\n\
+        \tieee80211w=1\n\
         \tpsk=\"labsecret1\"\n\
         }\n\
         \n\
         network={\n\
         \tssid=\"office\"\n\
         \tpriority=10\n\
-        \tkey_mgmt=WPA-PSK\n\
+        \tkey_mgmt=WPA-PSK SAE\n\
+        \tieee80211w=1\n\
         \tpsk=\"officepass\"\n\
         }\n\
         \n\
@@ -476,7 +493,8 @@ mod tests {
     /// Golden render of a station with no networks configured.
     const GOLDEN_EMPTY: &str = "# Managed by micad from wifi.client. Do not edit.\n\
         ctrl_interface=/run/wpa_supplicant\n\
-        update_config=0\n";
+        update_config=0\n\
+        sae_pwe=2\n";
     /// Golden networkd unit for `wlan0`.
     const GOLDEN_NETWORKD: &str = "[Match]\nName=wlan0\n\n[Network]\nDHCP=yes\n";
     /// Pre-shared key used by the leak test; distinctive enough that a
@@ -748,7 +766,7 @@ mod tests {
         .unwrap();
 
         assert!(rendered.contains("\tpsk=\"s3cretpass\"\n"), "{rendered}");
-        assert!(rendered.contains("\tkey_mgmt=WPA-PSK\n"), "{rendered}");
+        assert!(rendered.contains("\tkey_mgmt=WPA-PSK SAE\n"), "{rendered}");
         assert!(
             !rendered.contains("key_mgmt=NONE"),
             "a protected network must never be downgraded to open: {rendered}"
@@ -843,6 +861,33 @@ mod tests {
              over-long passphrase and rejects the file: {rendered}"
         );
         assert!(!rendered.contains(&format!("psk=\"{pmk}\"")), "{rendered}");
+        // SAE needs the password itself, so a PMK network is WPA2 only and
+        // offers no SAE a WPA3 access point would then fail.
+        assert!(rendered.contains("\tkey_mgmt=WPA-PSK\n"), "{rendered}");
+        assert!(!rendered.contains("SAE"), "{rendered}");
+    }
+
+    /// A passphrase network joins WPA2, WPA3-only and transition-mode access
+    /// points from one block, with PMF offered (SAE requires it), and the
+    /// global section admits hash-to-element, which WPA3 on 6 GHz requires.
+    #[test]
+    fn a_passphrase_network_joins_wpa2_and_wpa3_and_6_ghz() {
+        let rendered = render_config(&client(
+            true,
+            vec![network("office", Some("officepass"), false, 0)],
+        ))
+        .unwrap();
+        assert!(rendered.contains("\nsae_pwe=2\n"), "{rendered}");
+        assert!(
+            rendered.contains("\tkey_mgmt=WPA-PSK SAE\n\tieee80211w=1\n\tpsk=\"officepass\"\n"),
+            "{rendered}"
+        );
+        let open = render_config(&client(true, vec![network("guest", None, false, 0)])).unwrap();
+        assert!(open.contains("\tkey_mgmt=NONE\n"), "{open}");
+        assert!(
+            !open.contains("ieee80211w"),
+            "an open network asks for no PMF: {open}"
+        );
     }
 
     #[test]

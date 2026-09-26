@@ -107,7 +107,7 @@ converges the system to the settings and returns the applied state as JSON.
 | `hostname` | `/etc/hostname` | the running hostname via hostnamed |
 | `network` | `/run/systemd/network/*.network`, `*.netdev`; WireGuard private keys (generated on the device, never in settings) | systemd-networkd reload |
 | `sshd` | `/run/mica/dropbear.env` (`DROPBEAR_ARGS`), `~/.ssh/authorized_keys` of `root` and `mica` | `dropbear.service` restart when changed |
-| `wifi_client` | wpa_supplicant configuration, the link's networkd unit | `wpa_supplicant@<iface>.service` |
+| `wifi_client` | wpa_supplicant configuration, the link's networkd unit. A passphrase network is `key_mgmt=WPA-PSK SAE` with `ieee80211w=1`, so one block joins WPA2, WPA3 and transition-mode access points; a network stored as a raw PMK is WPA2 only, since SAE needs the password; `sae_pwe=2` admits hash-to-element, which WPA3 on 6 GHz requires | `wpa_supplicant@<iface>.service` |
 | `wifi_ap` | hostapd configuration, the AP's networkd unit with its DHCP server | `hostapd@<iface>.service` |
 | `container` | the mount unit binding `/etc/containers/systemd` from STATE, and a `50-mica-<name>.container` per declared container | systemd daemon-reload, so Quadlet units exist only while enabled; each declared unit to the state its `autoStart` asks for |
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env` | `mica-mqtt-broker.service`, `mica-mqttd.service` |
