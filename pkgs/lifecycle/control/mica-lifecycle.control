@@ -1,0 +1,10 @@
+Package: mica-lifecycle
+Version: 0.0.2-1
+Source-Date-Epoch: 1789430400
+Architecture: @ARCH@
+Maintainer: mica build <mica@example.invalid>
+Section: admin
+Priority: optional
+Description: Mica OS early-boot and shutdown executable
+ The static mica-runkit, run as init in the signed initramfs and as shutdown
+ in the exit ramdisk. Read by the image assembly; not installed into a root.

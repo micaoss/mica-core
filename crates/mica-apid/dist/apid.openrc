@@ -1,0 +1,38 @@
+#!/sbin/openrc-run
+# mica-apid on an OpenRC root: apid.service's counterpart.
+
+description="mica API daemon (serves the web dashboard)"
+command=/usr/bin/mica-apid
+supervisor=supervise-daemon
+respawn_delay=2
+output_logger="logger -t mica-apid -p daemon.info"
+error_logger="logger -t mica-apid -p daemon.warn"
+
+depend() {
+    need micad
+    after net
+}
+
+start_pre() {
+    # StateDirectory=mica/apid and RuntimeDirectory=mica.
+    checkpath -d -m 0700 /var/lib/mica/apid && checkpath -d -m 0755 /run/mica
+}
+
+# How long apid may take to answer, systemd's default start timeout. A first
+# boot with HTTPS on makes apid's TLS identity before it listens.
+: "${apid_ready_timeout:=90}"
+
+# Started means apid answers GET /healthz: supervise-daemon reports a service
+# started once the process exists, and the health gate runs right after every
+# service, so a first boot would otherwise be refused before apid listens.
+start_post() {
+    waited=0
+    while ! /usr/bin/mica-apid --healthcheck >/dev/null 2>&1; do
+        if [ "$waited" -ge "$apid_ready_timeout" ]; then
+            eerror "apid did not answer /healthz within ${apid_ready_timeout}s"
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+}

@@ -1,0 +1,419 @@
+//! The provisioning status: the applied document and the operator's.
+
+use axum::http::StatusCode;
+use serde_json::json;
+use std::collections::BTreeSet;
+
+use super::*;
+
+/// A device that applied a document from the boot medium, and was claimed by
+/// it. The digest is the one micad would have recorded; the secrets the
+/// document carried live where they belong and are not in this subtree.
+pub(super) fn applied_tree() -> serde_json::Value {
+    let mut tree = configured_tree("hunter2secret");
+    tree["provisioning"] = json!({
+        "state": "complete",
+        "deviceId": "0123456789abcdef0123456789abcdef",
+        "seededGeneration": 1,
+        "document": {
+            "appliedVersion": 1,
+            "appliedDigest": "9f2c1d0e5a7b4c3d2e1f00112233445566778899aabbccddeeff001122334455",
+            "lastImport": {
+                "source": "boot",
+                "outcome": "applied",
+                "at": 1_700_000_000,
+            },
+        },
+    });
+    tree
+}
+
+/// A device nothing has ever been offered to: provisioned by Layer 1, no
+/// document record, and no administrator credential.
+pub(super) fn unclaimed_tree() -> serde_json::Value {
+    let mut tree = unconfigured_tree();
+    tree["provisioning"] = json!({
+        "state": "complete",
+        "deviceId": "0123456789abcdef0123456789abcdef",
+        "seededGeneration": 1,
+    });
+    tree
+}
+
+#[tokio::test]
+pub(super) async fn the_status_reports_the_applied_document_and_requires_a_credential() {
+    let (tree, token) = with_token(applied_tree());
+    let (router, _meta) = provisioning_app(tree);
+
+    let anonymous = get(&router, STATUS_PATH, None).await;
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(envelope(anonymous).await["code"], "not_authenticated");
+
+    let response = bearer(&router, "GET", STATUS_PATH, &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_api_headers(&response, STATUS_PATH);
+    let status = body_json(response).await;
+    assert_eq!(status["documentVersion"], 1);
+    assert_eq!(
+        status["documentDigest"],
+        "9f2c1d0e5a7b4c3d2e1f00112233445566778899aabbccddeeff001122334455"
+    );
+    assert_eq!(status["lastImport"]["source"], "boot");
+    assert_eq!(status["lastImport"]["outcome"], "applied");
+    assert_eq!(status["lastImport"]["at"], 1_700_000_000_u64);
+    assert_eq!(
+        status["unclaimed"], false,
+        "a device with an admin credential is claimed"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn a_device_no_document_reached_reports_nulls_and_unclaimed() {
+    let (tree, token) = with_token(unclaimed_tree());
+    let (router, _meta) = provisioning_app(tree);
+
+    let status = body_json(bearer(&router, "GET", STATUS_PATH, &token).await).await;
+    assert_eq!(status["documentVersion"], serde_json::Value::Null);
+    assert_eq!(status["documentDigest"], serde_json::Value::Null);
+    assert_eq!(status["lastImport"], serde_json::Value::Null);
+    assert_eq!(
+        status["unclaimed"], true,
+        "with no admin credential the device is still claimable"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn the_status_resolves_the_isolated_operator_document_over_its_baked_fixture() {
+    let (tree, token) = with_token(applied_tree());
+    let (router, _meta) = provisioning_app_with_updates(
+        tree,
+        Some(
+            r#"{
+          "checkIntervalMinutes": 60,
+          "source": {
+            "url": "https://operator.example/update/",
+            "maxBytes": 123456789
+          },
+          "policy": "off",
+          "network": { "mode": "offline" },
+          "rebootGate": {
+            "blockingStatuses": ["UNPROJECTED-SECRET-SENTINEL"]
+          }
+        }"#,
+        ),
+    );
+
+    let response = bearer(&router, "GET", STATUS_PATH, &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_string(response).await;
+    assert!(!body.contains("UNPROJECTED-SECRET-SENTINEL"), "{body}");
+    for unprojected_key in ["maxBytes", "network", "rebootGate", "blockingStatuses"] {
+        assert!(!body.contains(unprojected_key), "{body}");
+    }
+    let status: serde_json::Value = serde_json::from_str(&body).expect("provisioning status");
+    assert_eq!(
+        status["baked"],
+        serde_json::from_str::<serde_json::Value>(BAKED_MANIFEST).expect("baked fixture")
+    );
+    let baked_digest = hex::encode(aws_lc_rs::digest::digest(
+        &aws_lc_rs::digest::SHA256,
+        BAKED_MANIFEST.as_bytes(),
+    ));
+    assert_eq!(
+        status["bakedDigests"],
+        json!({ "updates/manifest.json": baked_digest })
+    );
+    assert_eq!(
+        status["operator"],
+        json!({
+            "update": {
+                "source": "https://operator.example/update/",
+                    "policy": "off",
+            },
+        })
+    );
+    assert_eq!(
+        status["effective"],
+        json!({
+            "update": {
+                "source": "https://operator.example/update/",
+                    "policy": "off",
+            },
+            "fleet": { "url": null, "enabled": false, "reporting": false },
+        })
+    );
+    assert_eq!(
+        status["effective"]
+            .as_object()
+            .expect("effective projection")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["fleet", "update"])
+    );
+    assert_eq!(
+        status["operator"]
+            .as_object()
+            .expect("operator projection")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["update"])
+    );
+    assert_eq!(
+        status["operator"]["update"]
+            .as_object()
+            .expect("operator update projection")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["policy", "source"])
+    );
+    assert_eq!(
+        status["effective"]["update"]
+            .as_object()
+            .expect("effective update projection")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["policy", "source"])
+    );
+    assert_eq!(
+        status["effective"]["fleet"]
+            .as_object()
+            .expect("effective fleet projection")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["enabled", "reporting", "url"])
+    );
+}
+
+#[tokio::test]
+pub(super) async fn absent_and_null_operator_sources_remain_distinct_while_both_use_baked() {
+    let (tree, token) = with_token(applied_tree());
+    let (absent_router, _absent_tree) = provisioning_app(tree.clone());
+    let absent = body_json(bearer(&absent_router, "GET", STATUS_PATH, &token).await).await;
+
+    let (null_router, _null_tree) =
+        provisioning_app_with_updates(tree, Some(r#"{ "source": { "url": null } }"#));
+    let explicit_null = body_json(bearer(&null_router, "GET", STATUS_PATH, &token).await).await;
+
+    assert_eq!(absent["operator"], json!({}));
+    assert_eq!(
+        explicit_null["operator"],
+        json!({ "update": { "source": null } })
+    );
+    for status in [&absent, &explicit_null] {
+        assert_eq!(
+            status["effective"]["update"]["source"], "https://baked.example/update/",
+            "absent and explicit null both clear an override back to baked"
+        );
+    }
+}
+
+#[tokio::test]
+pub(super) async fn invalid_operator_documents_fail_closed_without_disclosing_rejected_values() {
+    const REJECTED_SECRET: &str = "REJECTED-SECRET-SENTINEL";
+    let documents = [
+        (
+            r#"{ "source": { "url": "REJECTED-SECRET-SENTINEL" } } trailing"#,
+            "malformed JSON",
+        ),
+        (
+            r#"{ "source": { "signingKeys": ["REJECTED-SECRET-SENTINEL"] } }"#,
+            "operator trust anchor",
+        ),
+        (
+            r#"{
+              "policy": "auto",
+              "rebootGate": {
+                "blockingStatuses": ["REJECTED-SECRET-SENTINEL"]
+              }
+            }"#,
+            "validation-invalid policy",
+        ),
+    ];
+
+    for (document, case) in documents {
+        let (tree, token) = with_token(applied_tree());
+        let (router, _meta) = provisioning_app_with_updates(tree, Some(document));
+        let response = bearer(&router, "GET", STATUS_PATH, &token).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{case}"
+        );
+        let body = body_string(response).await;
+        let error: serde_json::Value = serde_json::from_str(&body).expect("API error envelope");
+        assert_eq!(
+            error["error"]["code"], "configuration_unavailable",
+            "{case}"
+        );
+        assert!(
+            !body.contains(REJECTED_SECRET),
+            "{case} disclosed the rejected value: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+pub(super) async fn an_unreadable_operator_path_fails_closed() {
+    let (tree, token) = with_token(applied_tree());
+    let (router, meta) = provisioning_app(tree);
+    std::fs::create_dir_all(meta.path().join("config/updates.json"))
+        .expect("directory in place of operator document");
+
+    let response = bearer(&router, "GET", STATUS_PATH, &token).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        envelope(response).await["code"],
+        "configuration_unavailable"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn a_refused_document_is_reported_with_its_key_path_and_no_value() {
+    let mut tree = unclaimed_tree();
+    tree["provisioning"]["document"] = json!({
+        "lastImport": {
+            "source": "media",
+            "outcome": "rejected",
+            "reason": "`wifi.networks[0].psk`: a WPA2 passphrase is 8 to 63 characters \
+                       (or a 64-digit hex PMK)",
+            "at": 0,
+        },
+    });
+    let (tree, token) = with_token(tree);
+    let (router, _meta) = provisioning_app(tree);
+
+    let status = body_json(bearer(&router, "GET", STATUS_PATH, &token).await).await;
+    // A refusal applied nothing, so there is no applied version or digest to
+    // report — the two halves of the record are independent on purpose.
+    assert_eq!(status["documentVersion"], serde_json::Value::Null);
+    assert_eq!(status["documentDigest"], serde_json::Value::Null);
+    assert_eq!(status["lastImport"]["outcome"], "rejected");
+    let reason = status["lastImport"]["reason"].as_str().expect("a reason");
+    assert!(
+        reason.contains("wifi.networks[0].psk"),
+        "the reason must name the key path: {reason}"
+    );
+    assert_eq!(
+        status["unclaimed"], true,
+        "a refused document must leave a claimable appliance"
+    );
+}
+
+// Read-only, and the whole surface: no verb here applies, re-applies or clears
+// a document, so a write is the method_not_allowed envelope and not a 404.
+#[tokio::test]
+pub(super) async fn the_provisioning_surface_is_read_only() {
+    let (tree, token) = with_token(applied_tree());
+    let (router, _fake) = test_app(tree);
+
+    for method in ["PUT", "POST", "DELETE", "PATCH"] {
+        let response = bearer_json(&router, method, STATUS_PATH, &token, "{}").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method} on the provisioning status"
+        );
+        assert_eq!(envelope(response).await["code"], "method_not_allowed");
+    }
+
+    // And there is no route beside it that would apply one.
+    for path in [
+        "/api/v1/provisioning",
+        "/api/v1/provisioning/apply",
+        "/api/v1/provisioning/document",
+        "/api/v1/actions/provision",
+    ] {
+        let response = bearer(&router, "GET", path, &token).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        let response = bearer_json(&router, "POST", path, &token, "{}").await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+// The secret-safety half apid owns. Two sentinels are planted where a careless
+// handler would pick them up — the admin hash the claim check reads, and a
+// secret-named field under `provisioning` — and neither may reach the body.
+#[tokio::test]
+pub(super) async fn the_status_serves_no_secret_from_either_subtree_it_reads() {
+    let mut tree = applied_tree();
+    // A secret-named field inside the subtree this route reads. micad's schema
+    // has none, and this is the fail-closed half of that: the day one appears,
+    // the redactor already covers it rather than it being served in the clear
+    // until somebody remembers this route.
+    tree["provisioning"]["document"]["psk"] = json!("PSK-SENTINEL-FROM-THE-TREE");
+    let admin_hash = tree["access"]["webAdmin"]["password_hash"]
+        .as_str()
+        .expect("a hash")
+        .to_string();
+    let (tree, token) = with_token(tree);
+    let (router, _meta) = provisioning_app(tree);
+
+    let body = body_string(bearer(&router, "GET", STATUS_PATH, &token).await).await;
+    assert!(
+        !body.contains("PSK-SENTINEL-FROM-THE-TREE"),
+        "a secret-named field under `provisioning` reached the wire: {body}"
+    );
+    assert!(
+        !body.contains(&admin_hash),
+        "the administrator hash reached the wire: {body}"
+    );
+    // The positive control: the route did answer, and answered about this
+    // device, so the assertions above are not passing on an empty body.
+    assert!(body.contains("documentDigest"), "{body}");
+    assert!(body.contains("\"unclaimed\":false"), "{body}");
+}
+
+// A client reading only `openapi.json` has to be able to learn this route and
+// what it answers.
+#[test]
+pub(super) fn the_openapi_document_covers_the_provisioning_status_route() {
+    let document: serde_json::Value =
+        serde_json::from_str(&crate::openapi::document_json().unwrap())
+            .expect("the document is JSON");
+    let paths = document["paths"].as_object().expect("paths is an object");
+    let entry = paths
+        .get(STATUS_PATH)
+        .unwrap_or_else(|| panic!("{STATUS_PATH} is not in the document: {paths:?}"));
+    let get = &entry["get"];
+    for status in ["200", "401", "405", "500", "503", "504"] {
+        assert!(
+            get["responses"][status].is_object(),
+            "{status} is undocumented: {get:?}"
+        );
+    }
+    // GET and nothing else: the document is the route table, so this is the
+    // assertion that no write verb was added beside it.
+    assert_eq!(
+        entry.as_object().expect("an operation map").len(),
+        1,
+        "the provisioning surface must serve GET alone: {entry:?}"
+    );
+
+    // The response schema names what it answers and nothing more.
+    let schema = &document["components"]["schemas"]["ProvisioningStatus"]["properties"];
+    for member in [
+        "documentVersion",
+        "documentDigest",
+        "lastImport",
+        "unclaimed",
+        "baked",
+        "bakedDigests",
+        "operator",
+        "effective",
+    ] {
+        assert!(
+            schema[member].is_object(),
+            "{member} is missing: {schema:?}"
+        );
+    }
+    assert_eq!(
+        schema.as_object().expect("a property map").len(),
+        8,
+        "the status must carry exactly the eight documented members: {schema:?}"
+    );
+}

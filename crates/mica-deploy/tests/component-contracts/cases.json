@@ -1,0 +1,519 @@
+{
+  "archives": [
+    {
+      "archive": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature",
+        "/rootfs/content/image",
+        "/rootfs/content/signature"
+      ],
+      "name": "full",
+      "present": [],
+      "result": "accepted"
+    },
+    {
+      "archive": [
+        "/rootfs/content/image",
+        "/rootfs/content/signature"
+      ],
+      "name": "root-only-with-kernel-present",
+      "present": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature"
+      ],
+      "result": "accepted"
+    },
+    {
+      "archive": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature"
+      ],
+      "name": "kernel-only-with-root-present",
+      "present": [
+        "/rootfs/content/image",
+        "/rootfs/content/signature"
+      ],
+      "result": "accepted"
+    },
+    {
+      "archive": [
+        "/rootfs/content/image",
+        "/rootfs/content/signature"
+      ],
+      "name": "partial-with-an-absent-object",
+      "present": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image"
+      ],
+      "refusal": "deployment objects are incomplete",
+      "result": "refused"
+    },
+    {
+      "archive": [
+        "/rootfs/content/image",
+        "/rootfs/content/signature",
+        "unnamed"
+      ],
+      "name": "unnamed-object",
+      "present": [
+        "/kernel/boot/artifact",
+        "/kernel/support/image",
+        "/kernel/support/signature"
+      ],
+      "result": "refused"
+    }
+  ],
+  "boardPolicies": {
+    "cx3576": {
+      "arch": "arm64",
+      "board": {
+        "boot": "uboot-fit",
+        "firmware": {
+          "diskOffset": 32768,
+          "format": "disk-range",
+          "maxBytes": 16744448
+        },
+        "kernel": "fit",
+        "partitions": {
+          "boot": 1,
+          "data": 3,
+          "system": 2
+        },
+        "records": {
+          "offsets": [
+            16744448,
+            17793024
+          ],
+          "sectors": 36800,
+          "size": 65536,
+          "startSector": 64
+        }
+      }
+    },
+    "s905x5m": {
+      "arch": "arm64",
+      "board": {
+        "boot": "uboot-fit",
+        "firmware": {
+          "area": "boot0",
+          "format": "emmc-boot",
+          "maxBytes": 4193792,
+          "payloadOffset": 512
+        },
+        "kernel": "fit",
+        "partitions": {
+          "boot": 1,
+          "data": 3,
+          "system": 2
+        },
+        "records": {
+          "offsets": [
+            125796352,
+            129990656
+          ],
+          "sectors": 262080,
+          "size": 65536,
+          "startSector": 64
+        }
+      }
+    },
+    "uefi-arm64": {
+      "arch": "arm64",
+      "board": {
+        "boot": "uefi",
+        "firmware": {
+          "format": "efi",
+          "partition": 1,
+          "path": "EFI/BOOT/BOOTAA64.EFI"
+        },
+        "kernel": "uki",
+        "partitions": {
+          "boot": 1,
+          "data": 3,
+          "system": 2
+        }
+      }
+    },
+    "uefi-x64": {
+      "arch": "amd64",
+      "board": {
+        "boot": "uefi",
+        "firmware": {
+          "format": "efi",
+          "partition": 1,
+          "path": "EFI/BOOT/BOOTX64.EFI"
+        },
+        "kernel": "uki",
+        "partitions": {
+          "boot": 1,
+          "data": 3,
+          "system": 2
+        }
+      }
+    }
+  },
+  "catalog": {
+    "downloadBase": "https://dl.updates.example/",
+    "files": [
+      {
+        "form": "full",
+        "kind": "update",
+        "path": "mica-uefi-x64-dev-20261002-1200.micaupd",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "size": 1
+      }
+    ],
+    "notes": "The shared catalog vector: one release, the golden deployment.",
+    "publishedAt": "2026-10-02T12:00:00.000Z",
+    "releaseId": "release-1",
+    "revision": 1,
+    "source": "https://updates.example/update/",
+    "stamp": "20261002-1200",
+    "variant": "dev",
+    "version": "dev-20261002-1200"
+  },
+  "context": {
+    "arch": "amd64",
+    "board": "uefi-x64",
+    "kernelBuildId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "kernelRelease": "6.12.107",
+    "supportId": "4b667330fb3b5b1701191406853acd959c4046abbdc330f8e4d8fc8525ce0924"
+  },
+  "deploymentId": "8a1b766db5d18653a8db34a9ac17ef522c428e145a1bdd88d6b75500a50e9156",
+  "invalid": [
+    {
+      "name": "wrong-schema",
+      "pointer": "/schema",
+      "refusal": "unsupported deployment schema or DATA policy",
+      "value": "mica/update-catalog/v1"
+    },
+    {
+      "alsoRefusedBy": true,
+      "name": "wrong-board",
+      "pointer": "/board",
+      "refusal": "component target mismatch",
+      "value": "cx3576"
+    },
+    {
+      "alsoRefusedBy": true,
+      "name": "wrong-arch",
+      "pointer": "/arch",
+      "refusal": "component target mismatch",
+      "value": "arm64"
+    },
+    {
+      "alsoRefusedBy": true,
+      "name": "traversal",
+      "pointer": "/kernel/id",
+      "refusal": "invalid digest",
+      "value": "../../root"
+    },
+    {
+      "name": "unknown-field",
+      "pointer": "/extra",
+      "refusal": "unknown, missing or invalid fields",
+      "value": "ignored"
+    },
+    {
+      "name": "kernel-substitution",
+      "pointer": "/kernel/id",
+      "refusal": "component identity mismatch",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "root-substitution",
+      "pointer": "/rootfs/id",
+      "refusal": "component identity mismatch",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "name": "support-substitution",
+      "pointer": "/kernel/support/image/sha256",
+      "refusal": "component identity mismatch",
+      "value": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "name": "unsafe-release",
+      "pointer": "/kernel/release",
+      "refusal": "invalid identifier",
+      "value": "../../modules"
+    },
+    {
+      "name": "unsafe-version",
+      "pointer": "/version",
+      "refusal": "invalid identifier",
+      "value": "x\ninit=/bin/sh"
+    },
+    {
+      "name": "unsafe-integer",
+      "pointer": "/generation",
+      "refusal": "invalid integer",
+      "value": 9007199254740992
+    },
+    {
+      "name": "float",
+      "pointer": "/generation",
+      "refusal": "unknown, missing or invalid fields",
+      "value": 1.5
+    },
+    {
+      "name": "zero-generation",
+      "pointer": "/generation",
+      "refusal": "invalid integer",
+      "value": 0
+    },
+    {
+      "name": "unsupported-policy",
+      "pointer": "/dataPolicy",
+      "refusal": "unsupported deployment schema or DATA policy",
+      "value": "migrate"
+    },
+    {
+      "alsoRefusedBy": true,
+      "name": "wrong-boot-format",
+      "pointer": "/kernel/boot/format",
+      "refusal": "component identity mismatch",
+      "value": "fit"
+    },
+    {
+      "name": "verity-version",
+      "pointer": "/rootfs/content/verity/version",
+      "refusal": "unsupported verity geometry",
+      "value": 0
+    },
+    {
+      "name": "algorithm",
+      "pointer": "/rootfs/content/verity/algorithm",
+      "refusal": "unsupported verity geometry",
+      "value": "sha512"
+    },
+    {
+      "name": "block-size",
+      "pointer": "/rootfs/content/verity/dataBlockSize",
+      "refusal": "unsupported verity geometry",
+      "value": 512
+    },
+    {
+      "name": "hash-block-size",
+      "pointer": "/rootfs/content/verity/hashBlockSize",
+      "refusal": "unsupported verity geometry",
+      "value": 8192
+    },
+    {
+      "name": "zero-blocks",
+      "pointer": "/rootfs/content/verity/dataBlocks",
+      "refusal": "invalid integer",
+      "value": 0
+    },
+    {
+      "name": "overlap",
+      "pointer": "/rootfs/content/verity/hashOffset",
+      "refusal": "hash tree must immediately follow data",
+      "value": 4096
+    },
+    {
+      "name": "unaligned",
+      "pointer": "/rootfs/content/verity/hashOffset",
+      "refusal": "hash tree must immediately follow data",
+      "value": 8193
+    },
+    {
+      "name": "truncated-tree",
+      "pointer": "/rootfs/content/image/bytes",
+      "refusal": "image length does not match verity tree",
+      "value": 8192
+    },
+    {
+      "name": "extra-image-data",
+      "pointer": "/rootfs/content/image/bytes",
+      "refusal": "image length does not match verity tree",
+      "value": 16384
+    },
+    {
+      "name": "uppercase-hash",
+      "pointer": "/rootfs/content/rootHash",
+      "refusal": "invalid digest",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "name": "invalid-salt",
+      "pointer": "/rootfs/content/verity/salt",
+      "refusal": "invalid digest",
+      "value": "00"
+    },
+    {
+      "name": "zero-signature",
+      "pointer": "/rootfs/content/signature/bytes",
+      "refusal": "invalid integer",
+      "value": 0
+    },
+    {
+      "name": "large-signature",
+      "pointer": "/rootfs/content/signature/bytes",
+      "refusal": "invalid integer",
+      "value": 65537
+    },
+    {
+      "name": "free-verity-options",
+      "pointer": "/rootfs/content/verity/options",
+      "refusal": "unknown, missing or invalid fields",
+      "value": "ignore_corruption"
+    },
+    {
+      "name": "trailing-newline-name",
+      "pointer": "/version",
+      "refusal": "invalid identifier",
+      "value": "dev\n"
+    },
+    {
+      "name": "trailing-newline-hash",
+      "pointer": "/kernel/buildId",
+      "refusal": "invalid digest",
+      "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n"
+    },
+    {
+      "name": "invalid-product",
+      "pointer": "/product",
+      "refusal": "invalid identifier",
+      "value": "X64 dev"
+    },
+    {
+      "name": "rootfs-version",
+      "pointer": "/rootfs/version",
+      "refusal": "unknown, missing or invalid fields",
+      "value": "dev-1"
+    }
+  ],
+  "product": {
+    "file": "/usr/lib/mica/product.conf",
+    "fixture": "PRODUCT=uefi-x64-dev\nBOARD=uefi-x64\nPROFILE=dev\nFEATURES=\"micad mqtt containers\"\nCOMPONENTS=\"\"\n",
+    "key": "PRODUCT",
+    "product": "uefi-x64-dev"
+  },
+  "productCases": [
+    {
+      "device": "uefi-x64-dev",
+      "name": "matching-product",
+      "result": "accepted"
+    },
+    {
+      "device": "uefi-x64-prod",
+      "name": "other-product",
+      "result": "refused"
+    },
+    {
+      "device": "uefi-x64-dev",
+      "name": "missing-product-field",
+      "remove": "/product",
+      "result": "refused"
+    }
+  ],
+  "schemas": {
+    "accepted": {
+      "catalog": "mica/catalog/v2",
+      "deployment": "mica/deployment/v1",
+      "envelope": "mica/update-envelope/v1",
+      "firmware": "mica/firmware/v1",
+      "kernel": "mica/kernel/v1",
+      "release": "mica/release/v1",
+      "rootfs": "mica/rootfs/v1"
+    },
+    "refused": {
+      "catalog": [
+        "mica/catalog/v1",
+        "mica/catalog/v3",
+        "mica/update-catalog/v1"
+      ],
+      "deployment": [
+        "mica/deployment/v2"
+      ],
+      "envelope": [
+        "mica/update-envelope/v2",
+        "mica/envelope/v1"
+      ],
+      "kernel": [
+        "mica/kernel/v2"
+      ],
+      "release": [
+        "mica/release/v2",
+        "mica/catalog/v2"
+      ],
+      "rootfs": [
+        "mica/rootfs/v2"
+      ]
+    }
+  },
+  "valid": {
+    "arch": "amd64",
+    "board": "uefi-x64",
+    "dataPolicy": "unchanged",
+    "generation": 1,
+    "kernel": {
+      "arch": "amd64",
+      "board": "uefi-x64",
+      "boot": {
+        "artifact": {
+          "bytes": 100000,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        "format": "uki"
+      },
+      "buildId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "id": "f6f85b8cd250a537e4a0f5947b2d2d74eb6e1e60d558412feb48b2450093d74a",
+      "release": "6.12.107",
+      "schema": "mica/kernel/v1",
+      "support": {
+        "image": {
+          "bytes": 12288,
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "rootHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "signature": {
+          "bytes": 400,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "verity": {
+          "algorithm": "sha256",
+          "dataBlockSize": 4096,
+          "dataBlocks": 2,
+          "hashBlockSize": 4096,
+          "hashOffset": 8192,
+          "salt": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "version": 1
+        }
+      }
+    },
+    "product": "uefi-x64-dev",
+    "rootfs": {
+      "arch": "amd64",
+      "content": {
+        "image": {
+          "bytes": 12288,
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "rootHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "signature": {
+          "bytes": 400,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "verity": {
+          "algorithm": "sha256",
+          "dataBlockSize": 4096,
+          "dataBlocks": 2,
+          "hashBlockSize": 4096,
+          "hashOffset": 8192,
+          "salt": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "version": 1
+        }
+      },
+      "id": "cb13f733bb14a44c247c26e977971db64f00502b4c95c52c4d8fceacfb190738",
+      "interfaceLevel": 1,
+      "schema": "mica/rootfs/v1"
+    },
+    "schema": "mica/deployment/v1",
+    "version": "dev-1"
+  }
+}

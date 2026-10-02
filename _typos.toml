@@ -1,0 +1,29 @@
+# typos: what reads as a misspelling here and is not.
+
+[default]
+extend-ignore-re = [
+    # Hex digests, ids and hashes.
+    "\\b[0-9a-f]{8,}\\b",
+]
+
+[default.extend-words]
+# A published outcome code (`client-output-unparseable`) and the prose around it.
+unparseable = "unparseable"
+# "mis-targets", "mis-clicked".
+mis = "mis"
+# shadow's chage(1).
+chage = "chage"
+# `café` split at the escape in a test string.
+caf = "caf"
+# Deliberate misspellings: test inputs a validator must refuse.
+netwrok = "netwrok"
+acess = "acess"
+alwys = "alwys"
+hiden = "hiden"
+abd = "abd"
+
+[default.extend-identifiers]
+# O_WRONLY.
+WRONLY = "WRONLY"
+# The DesignWare watchdog's vendor.
+Synopsys = "Synopsys"

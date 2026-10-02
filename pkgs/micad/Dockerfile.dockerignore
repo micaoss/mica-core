@@ -1,0 +1,4 @@
+# Only the core component templates come from the producer directory; binaries
+# and the copyright file arrive through the bin and pkgs build contexts.
+*
+!core/*.json
