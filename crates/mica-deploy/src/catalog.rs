@@ -151,7 +151,7 @@ pub fn source_url(source: &str) -> Result<Url> {
     );
     ensure!(
         url.path().ends_with('/'),
-        "the catalog source is an update root ending in `/`, such as https://res.micaos.dev/update/; this reader fetches {MANIFEST_PATH} below it"
+        "the catalog source is an update root: an http(s) URL ending in `/`; this reader fetches {MANIFEST_PATH} below it"
     );
     Ok(url)
 }
