@@ -131,3 +131,27 @@ pub(super) async fn sweep_spares_a_wifi_unit_whose_iface_embeds_mica() {
 
     assert!(dir.path().join("90-wifi-client-a-mica-b.network").exists());
 }
+
+/// A DHCP entry's own servers replace the lease's in every way a lease or a
+/// router advertisement can name one.
+#[tokio::test]
+pub(super) async fn a_dhcp_iface_with_its_own_dns_ignores_the_leases() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, _calls) = reconciler_in(dir.path());
+    let settings = settings_with(&[(
+        "eth0",
+        IfaceSettings {
+            dns: vec!["1.1.1.1".to_string(), "2606:4700:4700::1111".to_string()],
+            ..dhcp_iface()
+        },
+    )]);
+
+    reconciler.apply(&settings).await.unwrap();
+
+    let rendered = std::fs::read_to_string(dir.path().join("50-mica-eth0.network")).unwrap();
+    assert_eq!(
+        rendered,
+        "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nDNS=1.1.1.1\nDNS=2606:4700:4700::1111\n\n\
+[DHCPv4]\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n"
+    );
+}

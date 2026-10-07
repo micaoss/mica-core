@@ -91,6 +91,7 @@ pub(super) fn the_network_schema_matches_the_settings_model() {
             gateway: Some("10.8.0.1".to_string()),
             dns: vec!["1.1.1.1".to_string()],
         }),
+        dns: vec!["9.9.9.9".to_string()],
         vlan: Some(micad_settings::VlanConfig {
             parent: "eth0".to_string(),
             id: 100,

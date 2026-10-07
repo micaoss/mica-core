@@ -23,7 +23,7 @@ use anyhow::{Result, bail};
 use micad_settings::{IfaceKind, IfaceSettings, Settings, StaticConfig};
 use serde_json::json;
 
-use super::{kind_name, validate_iface_name, validate_static};
+use super::{kind_name, validate_dns_override, validate_iface_name, validate_static};
 use crate::openrc::{Commands, Host};
 use crate::reconciler::Reconciler;
 
@@ -77,6 +77,7 @@ impl IfupdownReconciler {
 /// Refuse what ifupdown here cannot configure, naming it.
 fn validate(iface: &str, cfg: &IfaceSettings) -> Result<()> {
     validate_iface_name(iface)?;
+    validate_dns_override(iface, cfg)?;
     let refused = if !matches!(cfg.kind, IfaceKind::Physical) {
         Some(kind_name(cfg.kind))
     } else if cfg.vlan.is_some() {
@@ -130,11 +131,36 @@ fn netmask_v4(prefix: u8) -> String {
     std::net::Ipv4Addr::from(bits).to_string()
 }
 
-fn dhcp_stanza(out: &mut String, iface: &str) {
+/// A DHCP client on `iface`. With servers of its own in `dns`, the lease is
+/// asked for no DNS option and the servers go into a resolver file that sorts
+/// before the lease's, so they are the ones a resolver reads first even from a
+/// server that names its own unasked.
+fn dhcp_stanza(out: &mut String, iface: &str, dns: &[String]) {
     let _ = write!(
         out,
-        "\nauto {iface}\niface {iface} inet dhcp\n    script {UDHCPC_SCRIPT}\n    udhcpc_opts -b -S\n"
+        "\nauto {iface}\niface {iface} inet dhcp\n    script {UDHCPC_SCRIPT}\n"
     );
+    if dns.is_empty() {
+        let _ = writeln!(out, "    udhcpc_opts -b -S");
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "    udhcpc_opts -b -S -o -O subnet -O router -O broadcast"
+    );
+    resolver_lines(out, &format!("00-{iface}"), dns);
+}
+
+/// The `up` and `down` lines that put `dns` into the resolver file `name` and
+/// rebuild the resolver configuration from every file.
+fn resolver_lines(out: &mut String, name: &str, dns: &[String]) {
+    let rebuild = format!("{{ cat {RESOLVERS_DIR}/* 2>/dev/null || :; }} >{RESOLV_CONF}");
+    let _ = writeln!(
+        out,
+        "    up mkdir -p {RESOLVERS_DIR} && printf 'nameserver %s\\n' {} >{RESOLVERS_DIR}/{name} && {rebuild}",
+        dns.join(" ")
+    );
+    let _ = writeln!(out, "    down rm -f {RESOLVERS_DIR}/{name} && {rebuild}");
 }
 
 fn static_stanza(out: &mut String, iface: &str, cfg: &StaticConfig) -> Result<()> {
@@ -155,13 +181,7 @@ fn static_stanza(out: &mut String, iface: &str, cfg: &StaticConfig) -> Result<()
         let _ = writeln!(out, "    gateway {gateway}");
     }
     if !cfg.dns.is_empty() {
-        let rebuild = format!("{{ cat {RESOLVERS_DIR}/* 2>/dev/null || :; }} >{RESOLV_CONF}");
-        let _ = writeln!(
-            out,
-            "    up mkdir -p {RESOLVERS_DIR} && printf 'nameserver %s\\n' {} >{RESOLVERS_DIR}/{iface} && {rebuild}",
-            cfg.dns.join(" ")
-        );
-        let _ = writeln!(out, "    down rm -f {RESOLVERS_DIR}/{iface} && {rebuild}");
+        resolver_lines(out, iface, &cfg.dns);
     }
     Ok(())
 }
@@ -179,14 +199,14 @@ pub(super) fn render(
     for (iface, cfg) in network {
         match &cfg.static_ {
             Some(static_) => static_stanza(&mut out, iface, static_)?,
-            None if cfg.dhcp => dhcp_stanza(&mut out, iface),
+            None if cfg.dhcp => dhcp_stanza(&mut out, iface, &cfg.dns),
             None => {
                 let _ = write!(out, "\nauto {iface}\niface {iface} inet manual\n");
             }
         }
     }
     for iface in wired.iter().filter(|iface| !network.contains_key(*iface)) {
-        dhcp_stanza(&mut out, iface);
+        dhcp_stanza(&mut out, iface, &[]);
     }
     Ok(out)
 }

@@ -2057,8 +2057,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "The map was replaced; the reconciler has re-rendered every unit from it"
+          "202": {
+            "description": "The map was replaced and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
           },
           "400": {
             "description": "The body is not JSON (`request_invalid`)",
@@ -2245,8 +2252,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "The entry was written; the reconciler has re-rendered its units"
+          "202": {
+            "description": "The entry was written and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
           },
           "400": {
             "description": "The body is not JSON (`request_invalid`)",
@@ -8446,6 +8460,13 @@
                 "description": "The DHCP server this interface offers. Absent offers none, and a link\nwith no static address of its own may not offer one."
               }
             ]
+          },
+          "dns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "DNS servers a DHCP entry uses instead of the ones its lease gives.\nOnly with `dhcp`; a static entry names its servers in `static.dns`."
           },
           "kind": {
             "type": "string",

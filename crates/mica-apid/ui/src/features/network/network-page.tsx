@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Cable, ChevronRight, KeyRound, Plus, Radar, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
-import { configuredSummary, networkRows, physicalInterfaces, visibleNetworkRows, type NetworkRow } from '@/lib/network'
+import { configuredSummary, networkRows, physicalInterfaces, visibleNetworkRows, type NetworkRow, listedAddresses } from '@/lib/network'
 import type { NetworkOverview, ObservedNetworkState, TaskAccepted, WifiScan } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
@@ -92,7 +92,7 @@ export function NetworkPage() {
                     {row.observed?.operationalState ? formatKnownState(row.observed.operationalState, t) : t('network.notObserved')}
                   </StatusBadge>
                 ) },
-                { id: 'addresses', header: t('network.table.addresses'), cell: (row) => <span className="font-mono text-[0.8125rem] break-all">{summarize(row.observed?.addresses)}</span> },
+                { id: 'addresses', header: t('network.table.addresses'), cell: (row) => <span className="font-mono text-[0.8125rem] break-all">{listedAddresses(row.observed?.addresses)}</span> },
                 { id: 'age', header: t('network.table.lastObserved'), align: 'end', cell: (row) => row.observed ? age : '—' },
               ]}
               // One focus stop and one navigation per row: the link, and no
@@ -587,21 +587,6 @@ function WireguardPanel({ configured }: { configured: Record<string, InterfaceCo
       </FormDialog>
     </>
   )
-}
-
-function summarize(items: unknown[] | undefined) {
-  if (!items?.length) return '—'
-  return items.map((item) => {
-    if (typeof item === 'string') return item
-    if (item && typeof item === 'object') {
-      const value = item as Record<string, unknown>
-      const address = value.Address ?? value.address
-      const prefix = value.PrefixLength ?? value.prefixLength
-      if (Array.isArray(address)) return `${address.join('.')}${prefix === undefined ? '' : `/${prefix}`}`
-      if (typeof address === 'string') return `${address}${prefix === undefined ? '' : `/${prefix}`}`
-    }
-    return 'address'
-  }).join(', ')
 }
 
 function splitList(value: string) { return value.split(',').map((item) => item.trim()).filter(Boolean) }

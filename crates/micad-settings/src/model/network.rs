@@ -39,6 +39,12 @@ pub struct IfaceSettings {
     /// Static addressing, used when `dhcp` is false.
     #[serde(rename = "static", default, skip_serializing_if = "Option::is_none")]
     pub static_: Option<StaticConfig>,
+    /// DNS servers a DHCP entry uses instead of the ones its lease gives.
+    /// Only with `dhcp`: a static entry names its servers in `static.dns`.
+    ///
+    /// Empty and skipped when empty, like `routes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dns: Vec<String>,
     /// VLAN parameters, for `kind = "vlan"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vlan: Option<VlanConfig>,

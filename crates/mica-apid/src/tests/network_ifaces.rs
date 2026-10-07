@@ -177,9 +177,9 @@ pub(super) async fn the_interface_route_declares_replaces_and_removes() {
             .to_string(),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(header_value(&response, CACHE_CONTROL), "no-store");
-    assert!(body_string(response).await.is_empty());
+    assert!(body_json(response).await["taskId"].is_string());
     assert_eq!(fake.set_paths(), vec!["network.eth2".to_string()]);
     assert_eq!(
         fake.get_settings("network.eth2").await.unwrap(),
@@ -196,7 +196,7 @@ pub(super) async fn the_interface_route_declares_replaces_and_removes() {
         &json!({ "dhcp": true }).to_string(),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(
         fake.get_settings("network.eth2").await.unwrap(),
         json!({ "dhcp": true })
@@ -337,7 +337,7 @@ pub(super) async fn the_whole_map_put_replaces_atomically_and_validates_relation
         .to_string(),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(fake.set_paths(), vec![NETWORK_DOT_PATH.to_string()]);
     // Replaced and not merged: every entry the old map had is gone.
     let map = stored_network_map(&fake).await;
@@ -447,7 +447,7 @@ pub(super) async fn the_typed_network_writes_refuse_an_address_that_is_not_a_cid
     ] {
         let response =
             bearer_json(&router, "PUT", &iface_url(iface), &token, &body.to_string()).await;
-        assert_eq!(response.status(), StatusCode::NO_CONTENT, "{iface} {body}");
+        assert_eq!(response.status(), StatusCode::ACCEPTED, "{iface} {body}");
     }
 }
 
@@ -466,7 +466,7 @@ pub(super) async fn a_dotted_interface_name_round_trips_through_the_quoted_path_
             .to_string(),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(fake.set_paths(), vec![r#"network."eth0.100""#.to_string()]);
 
     // And the error envelope quotes it too, because that is the dot-path an operator

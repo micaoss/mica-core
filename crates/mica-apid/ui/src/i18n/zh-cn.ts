@@ -112,7 +112,7 @@ export const zhCN: Translation = {
     detail: {
       overview: '概览', addressing: '寻址', danger: '危险操作',
       mac: 'MAC', mtu: 'MTU', memberOf: '所属网桥', noBridge: '不是网桥端口', link: '链路',
-      mode: '模式', static: '静态', dhcpNote: '地址、网关与 DNS 来自 DHCP 租约。',
+      mode: '模式', static: '静态', dhcpNote: '地址、网关与 DNS 来自 DHCP 租约。', dhcpDnsHint: '可选。填写后使用这里的服务器，不再使用租约下发的 DNS。',
       address: '地址 / 前缀', gateway: '网关', dns: 'DNS 服务器', save: '审阅并保存', observedCopy: '设备对这条链路的观测：来自 networkd、其 DHCP 客户端和无线电。', deleted: '已从期望配置中移除 {{name}}。',
       changeDhcp: '静态 → DHCP', changeStatic: '寻址 → 静态 {{address}}',
       dangerCopy: '删除接口只是从期望配置中移除，不会从设备上移除。删除 {{name}} 前，请先把它从引用它的网桥中移除。',
@@ -130,7 +130,7 @@ export const zhCN: Translation = {
     },
     review: {
       applied: '{{name}} 的更改已接受。',
-      title: '审阅变更', change: '变更', affects: '影响', affectsBridge: '{{name}} · 网桥 {{bridge}}',
+      title: '审阅变更', change: '变更', affects: '影响', affectsBridge: '{{name}} · 网桥 {{bridge}}', ports: '端口', portsCopy: '{{ports}} 将成为该网桥的端口，并失去自己的地址、路由和 DHCP 服务。',
       session: '当前会话', sessionOn: '当前浏览器正是通过 {{name}} 访问设备的，可能会断开',
       sessionOff: '当前浏览器不是通过 {{name}} 访问的',
       recover: '恢复', recoverCopy: '设备响应的其他地址上，内置控制台始终可通过 /_ui/ 访问。',
@@ -141,6 +141,7 @@ export const zhCN: Translation = {
       destination: '目标网段', via: '下一跳', onLink: '直连', metric: '度量值', add: '添加路由',
     },
     dhcpServer: {
+      needsStatic: '该接口配置静态地址后可用：地址池取自接口自己的子网。',
       title: 'DHCP 服务端', copy: '在该接口上分配地址。地址池用「相对本接口子网的偏移 + 数量」表示，这正是设备渲染出的形式。',
       enable: '在该接口上提供 DHCP 服务', poolOffset: '地址池偏移', poolHint: '从子网地址开始计数的第一个可分配地址。',
       poolSize: '地址池大小', dns: '通告的 DNS', dnsHint: '逗号分隔；留空表示不通告。', lease: '租期（秒）',

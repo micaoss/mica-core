@@ -198,6 +198,18 @@ pub fn parse_proc_net_wireless(text: &str) -> BTreeMap<String, i32> {
 
 pub(super) static CLIENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Where the reply sockets are bound, beside the control directory.
+///
+/// The daemon answers by sending to the path this end is bound to, so the
+/// path has to exist in the daemon's view of the filesystem too. The
+/// temporary directory does not: micad's unit has `PrivateTmp=yes`, and a
+/// reply sent to a socket in it never arrives.
+const REPLY_DIR: &str = "mica";
+
+/// The largest reply read. A datagram longer than the buffer is cut, and
+/// `SCAN_RESULTS` in a busy band is longer than one page.
+const MAX_REPLY: usize = 64 * 1024;
+
 /// One request/reply exchange on wpa_supplicant's control socket for
 /// `interface`, blocking, under `timeout`.
 pub(super) fn wpa_query(
@@ -207,7 +219,9 @@ pub(super) fn wpa_query(
     timeout: Duration,
 ) -> std::io::Result<String> {
     use std::os::unix::net::UnixDatagram;
-    let client_path = std::env::temp_dir().join(format!(
+    let reply_dir = control_dir.parent().unwrap_or(control_dir).join(REPLY_DIR);
+    std::fs::create_dir_all(&reply_dir)?;
+    let client_path = reply_dir.join(format!(
         "micad-wpa-{}-{}",
         std::process::id(),
         CLIENT_COUNTER.fetch_add(1, Ordering::Relaxed)
@@ -219,7 +233,7 @@ pub(super) fn wpa_query(
         socket.set_write_timeout(Some(timeout))?;
         socket.connect(control_dir.join(interface))?;
         socket.send(command.as_bytes())?;
-        let mut buffer = vec![0u8; 4096];
+        let mut buffer = vec![0u8; MAX_REPLY];
         let received = socket.recv(&mut buffer)?;
         Ok(String::from_utf8_lossy(&buffer[..received]).into_owned())
     })();

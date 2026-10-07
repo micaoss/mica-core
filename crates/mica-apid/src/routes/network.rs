@@ -90,7 +90,7 @@ pub(crate) async fn api_v1_network_read(
     tag = "resources",
     request_body = std::collections::BTreeMap<String, NetworkInterface>,
     responses(
-        (status = 204, description = "The map was replaced; the reconciler has re-rendered every unit from it"),
+        (status = 202, description = "The map was replaced and the reconcile queued; the body carries the task id", body = TaskAccepted),
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
@@ -137,10 +137,10 @@ pub(crate) async fn api_v1_network_write(
     // No read first, deliberately: this route's whole contract is that the map
     // it sends is the map that ends up stored, so a read-modify-write would be
     // reading something it is about to discard.
-    if let Err(response) = write_network_map(&state, &entries).await {
-        return *response;
+    match write_network_map(&state, &entries).await {
+        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
+        Err(response) => *response,
     }
-    no_content()
 }
 
 // The HTML pane carries stored peers across a save and this route does not,
@@ -162,7 +162,7 @@ pub(crate) async fn api_v1_network_write(
     params(("iface" = String, Path, description = "The interface to declare or replace: `eth0`, or `eth0.100` for a VLAN. Created when it does not exist")),
     request_body = NetworkInterface,
     responses(
-        (status = 204, description = "The entry was written; the reconciler has re-rendered its units"),
+        (status = 202, description = "The entry was written and the reconcile queued; the body carries the task id", body = TaskAccepted),
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
@@ -213,10 +213,10 @@ pub(crate) async fn api_v1_network_iface_write(
         Ok(value) => value,
         Err(response) => return *response,
     };
-    if let Err(err) = state.api.set_settings(&path, &value).await {
-        return bus_api_error(&err, Some(&path));
+    match state.api.set_settings(&path, &value).await {
+        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
+        Err(err) => bus_api_error(&err, Some(&path)),
     }
-    no_content()
 }
 
 // The whole map is rewritten because the dot-path syntax has no delete: the

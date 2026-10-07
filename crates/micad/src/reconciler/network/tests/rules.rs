@@ -126,3 +126,42 @@ pub(super) async fn rejects_a_port_two_bridges_both_claim() {
     );
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
+
+/// `dns` replaces a lease's servers, so it belongs to a DHCP entry only, and
+/// each server is an address.
+#[tokio::test]
+pub(super) async fn rejects_dns_of_its_own_on_an_entry_that_is_not_a_dhcp_client() {
+    for (cfg, reason) in [
+        (
+            IfaceSettings {
+                dns: vec!["1.1.1.1".to_string()],
+                ..static_iface()
+            },
+            "a static entry names them in `static.dns`",
+        ),
+        (
+            IfaceSettings {
+                dns: vec!["1.1.1.1".to_string()],
+                ..IfaceSettings::default()
+            },
+            "a static entry names them in `static.dns`",
+        ),
+        (
+            IfaceSettings {
+                dns: vec!["dns.example".to_string()],
+                ..dhcp_iface()
+            },
+            "is not an IP address",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let (reconciler, calls) = reconciler_in(dir.path());
+        let err = reconciler
+            .apply(&settings_with(&[("eth0", cfg)]))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains(reason), "{err}");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        assert!(calls.lock().unwrap().is_empty());
+    }
+}

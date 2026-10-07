@@ -73,6 +73,9 @@ pub(super) fn render_unit(
         out.push_str(&format!("Bridge={bridge}\n"));
     } else if cfg.dhcp {
         out.push_str("DHCP=yes\n");
+        for dns in &cfg.dns {
+            out.push_str(&format!("DNS={dns}\n"));
+        }
     } else if let Some(static_cfg) = &cfg.static_ {
         out.push_str(&format!("Address={}\n", static_cfg.address));
         if let Some(gateway) = &static_cfg.gateway {
@@ -115,6 +118,11 @@ pub(super) fn render_unit(
                 out.push_str(&format!("DefaultLeaseTimeSec={seconds}\n"));
             }
         }
+    }
+    // The entry's own servers replace the lease's, in every way a lease or a
+    // router advertisement can name one.
+    if master.is_none() && cfg.dhcp && !cfg.dns.is_empty() {
+        out.push_str("\n[DHCPv4]\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n");
     }
     out
 }

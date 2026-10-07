@@ -368,9 +368,8 @@ async fn serve() -> anyhow::Result<()> {
         .with_context(|| format!("connect to {bus_kind} bus"))?;
     // The pairing agent, on the same connection. Served before it is
     // registered, so BlueZ never calls an object that is not there yet, and
-    // registered on a best-effort basis: a board with no radio has no
-    // `org.bluez` to register with, and that is not a reason for micad not to
-    // start.
+    // registered whenever `org.bluez` is there to register with: a board with
+    // no radio never has one, and that is not a reason for micad not to start.
     if !dry_run && let Some(agent) = pairing_agent.take() {
         let state = Arc::clone(&agent);
         if let Err(err) = connection
@@ -379,13 +378,10 @@ async fn serve() -> anyhow::Result<()> {
             .await
         {
             tracing::warn!(error = %err, "serving the Bluetooth pairing agent failed");
-        } else if let Err(err) = bluetooth::register_agent(&connection).await {
-            tracing::info!(error = %err, "no Bluetooth agent registered: bluetoothd did not answer");
         } else {
-            tracing::info!(
-                path = bluetooth::AGENT_PATH,
-                "Bluetooth pairing agent registered"
-            );
+            // Not once: bluetoothd starts when the settings turn Bluetooth on,
+            // and forgets its agents whenever it restarts.
+            tokio::spawn(bluetooth::keep_agent_registered(connection.clone()));
         }
         // The agent answers with whatever the settings say; the reconciler
         // keeps it in step from here on.

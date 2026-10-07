@@ -17,7 +17,8 @@ function render(name: string) {
 
 const configured = {
   eth0: { kind: 'physical', dhcp: true },
-  eth1: { kind: 'physical', dhcp: false, static: { address: '10.0.0.9/24', dns: [] } },
+  // A port of `br0`: declared, with no addressing of its own.
+  eth1: { kind: 'physical', dhcp: false },
   'eth0.100': { kind: 'vlan', dhcp: true, vlan: { parent: 'eth0', id: 100 } },
   // Not a port of anything: routes and a server are offered on a link whose
   // addressing is its own.
@@ -102,21 +103,45 @@ describe('one interface', () => {
     expect(JSON.parse(String((call?.[1] as RequestInit).body)).vlan).toEqual({ parent: 'eth1', id: 100 })
   })
 
-  it('takes bridge ports as a choice of links and writes the set', async () => {
-    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/br0': () => jsonResponse({ taskId: 'task-2' }, 202) })
+  /// A bridge takes only declared interfaces with no addressing, so a port it
+  /// gains is rewritten that way in the same write as the bridge, and the
+  /// review says which interface loses its addressing.
+  it('declares the ports a bridge gains in the same write as the bridge', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network': () => jsonResponse({ taskId: 'task-2' }, 202) })
     render('br0')
 
     const ports = await screen.findByRole('group', { name: 'Bridge ports' })
     await userEvent.click(within(ports).getByRole('checkbox', { name: 'eth0' }))
     await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Apply' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/eth0 become ports of this bridge/)).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Apply' }))
 
     const call = await waitFor(() => {
-      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      const found = fetch.mock.calls.find(([input, init]) => String(input) === '/api/v1/network' && (init as RequestInit | undefined)?.method === 'PUT')
       expect(found).toBeTruthy()
       return found
     })
-    expect(JSON.parse(String((call?.[1] as RequestInit).body)).bridge).toEqual({ ports: ['eth1', 'eth0'] })
+    const body = JSON.parse(String((call?.[1] as RequestInit).body))
+    expect(body.br0.bridge).toEqual({ ports: ['eth1', 'eth0'] })
+    expect(body.eth0).toEqual({ kind: 'physical', dhcp: false })
+    expect(body.eth2).toEqual(configured.eth2)
+  })
+
+  /// A station cannot be bridged and the access point has its own address.
+  it('offers no radio as a bridge port', async () => {
+    stubFetch({
+      ...routes,
+      '/api/v1/network': {
+        ...routes['/api/v1/network'],
+        observed: { available: true, interfaceCount: 2, interfaces: [{ index: 2, name: 'eth0', type: 'ether' }, { index: 4, name: 'wlan0', type: 'wlan' }] },
+      },
+    })
+    render('br0')
+
+    const ports = await screen.findByRole('group', { name: 'Bridge ports' })
+    expect(within(ports).getByRole('checkbox', { name: 'eth0' })).toBeTruthy()
+    expect(within(ports).queryByRole('checkbox', { name: 'wlan0' })).toBeNull()
   })
 
   /// A tunnel has no DHCP client and no gateway. Offering either would offer a
@@ -156,13 +181,46 @@ describe('one interface', () => {
     expect(body.dhcpServer).toEqual({ poolOffset: 100, poolSize: 50, dns: [] })
   })
 
-  /// A link that takes its own address from a server cannot be one.
-  it('offers no DHCP server on a link that is itself a DHCP client', async () => {
+  /// A link that takes its own address from a server cannot be one, and the
+  /// page says what it would take rather than leaving the section out.
+  it('says a DHCP server needs a static address on a link that is a DHCP client', async () => {
     stubFetch(routes)
     render('eth0')
 
-    expect(await screen.findByRole('button', { name: 'Review and save' })).toBeTruthy()
+    expect(await screen.findByText(/Available once this interface has a static address/)).toBeTruthy()
     expect(screen.queryByRole('checkbox', { name: 'Offer a DHCP server on this interface' })).toBeNull()
+  })
+
+  /// The device does not write an empty list, so a server saved with no DNS
+  /// comes back with no `dns` at all. The page that saved it must still open.
+  it('opens an interface whose DHCP server announces no DNS', async () => {
+    stubFetch({
+      ...routes,
+      '/api/v1/network': {
+        ...routes['/api/v1/network'],
+        configured: { ...configured, eth2: { dhcp: false, static: { address: '10.0.0.9/24', dns: [] }, dhcpServer: { poolOffset: 100, poolSize: 50 } } },
+      },
+    })
+    render('eth2')
+
+    expect(await screen.findByRole('checkbox', { name: 'Offer a DHCP server on this interface' })).toHaveProperty('checked', true)
+    expect(screen.getByLabelText('DNS announced')).toHaveProperty('value', '')
+  })
+
+  it('writes the servers a DHCP interface uses instead of its lease\'s', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth0': () => jsonResponse({ taskId: 'task-4' }, 202) })
+    render('eth0')
+
+    await userEvent.type(await screen.findByLabelText('DNS servers'), '1.1.1.1, 9.9.9.9')
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Apply' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ kind: 'physical', dhcp: true, dns: ['1.1.1.1', '9.9.9.9'] })
   })
 
   it('deletes the entry behind a confirmation and returns to the list', async () => {

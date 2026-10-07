@@ -84,3 +84,93 @@ async fn the_pin_is_whatever_the_settings_last_said() {
 
     assert_eq!(agent.pin().await, "4211");
 }
+
+/// A stand-in for bluetoothd's agent manager: it records who registered.
+struct FakeAgentManager {
+    calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[zbus::interface(name = "org.bluez.AgentManager1")]
+impl FakeAgentManager {
+    fn register_agent(&self, agent: zbus::zvariant::ObjectPath<'_>, capability: String) {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("register {agent} {capability}"));
+    }
+
+    fn request_default_agent(&self, agent: zbus::zvariant::ObjectPath<'_>) {
+        self.calls.lock().unwrap().push(format!("default {agent}"));
+    }
+}
+
+/// Bluetooth is off until the settings turn it on, so bluetoothd appears long
+/// after micad started, and it forgets its agents when it restarts. The agent
+/// is registered each time `org.bluez` gains an owner, not once at start.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_agent_registers_each_time_bluetoothd_appears() {
+    use std::io::BufRead;
+    // A private bus: this asserts real name ownership, and must not skip.
+    let mut bus = std::process::Command::new("dbus-daemon")
+        .args(["--session", "--print-address=1", "--nofork"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("dbus-daemon is needed for this test");
+    let mut address = String::new();
+    std::io::BufReader::new(bus.stdout.take().unwrap())
+        .read_line(&mut address)
+        .unwrap();
+    let connect = || async {
+        zbus::connection::Builder::address(address.trim())
+            .unwrap()
+            .build()
+            .await
+            .unwrap()
+    };
+
+    // micad's side, with no bluetoothd on the bus yet.
+    let watcher = tokio::spawn(keep_agent_registered(connect().await));
+
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let wait_for = |count: usize| {
+        let calls = std::sync::Arc::clone(&calls);
+        async move {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while calls.lock().unwrap().len() < count {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("{count} calls, got {:?}", calls.lock().unwrap()));
+        }
+    };
+    for round in 1..=2 {
+        // bluetoothd starts, or starts again.
+        let bluez = connect().await;
+        bluez
+            .object_server()
+            .at(
+                "/org/bluez",
+                FakeAgentManager {
+                    calls: std::sync::Arc::clone(&calls),
+                },
+            )
+            .await
+            .unwrap();
+        bluez.request_name("org.bluez").await.unwrap();
+        wait_for(round * 2).await;
+        bluez.release_name("org.bluez").await.unwrap();
+    }
+
+    let expected = [
+        format!("register {AGENT_PATH} {AGENT_CAPABILITY}"),
+        format!("default {AGENT_PATH}"),
+    ];
+    assert_eq!(
+        *calls.lock().unwrap(),
+        [expected.clone(), expected].concat()
+    );
+    watcher.abort();
+    let _ = bus.kill();
+    let _ = bus.wait();
+}

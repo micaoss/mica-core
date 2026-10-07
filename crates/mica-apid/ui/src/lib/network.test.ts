@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { configuredSummary, networkRows, physicalInterfaces, selectUplink, visibleNetworkRows } from './network'
+import { configuredSummary, networkRows, physicalInterfaces, selectUplink, visibleNetworkRows, listedAddresses } from './network'
 import type { ObservedNetworkInterface, ObservedNetworkState } from './types'
 
 function observed(
@@ -147,5 +147,25 @@ describe('the uplink', () => {
 
     expect(uplink?.name).toBe('wwan0')
     expect(uplink?.address).toBeUndefined()
+  })
+})
+
+describe('the addresses an interface lists', () => {
+  /// networkd reports an address as its bytes. Joined with dots, an IPv6
+  /// address is sixteen numbers nobody can type.
+  it('spells IPv4 and IPv6 from networkd\'s bytes and leaves link-local out', () => {
+    expect(listedAddresses([
+      { Address: [192, 168, 1, 24], PrefixLength: 24 },
+      { Address: [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x02, 0x11, 0x22, 0xff, 0xfe, 0x33, 0x44, 0x55], PrefixLength: 64 },
+      { Address: [0x24, 0x08, 0x82, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01], PrefixLength: 64 },
+      { Address: [169, 254, 3, 4], PrefixLength: 16 },
+    ])).toBe('192.168.1.24/24, 2408:8207::1/64')
+  })
+
+  it('takes addresses already spelled, and says so when there is none to list', () => {
+    expect(listedAddresses(['10.0.0.2/24', 'fe80::1/64'])).toBe('10.0.0.2/24')
+    expect(listedAddresses([{ address: 'fd00::2', prefixLength: 64 }])).toBe('fd00::2/64')
+    expect(listedAddresses([{ Address: [127, 0, 0, 1], PrefixLength: 8 }])).toBe('—')
+    expect(listedAddresses(undefined)).toBe('—')
   })
 })

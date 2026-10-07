@@ -149,3 +149,24 @@ async fn what_only_networkd_does_is_refused_by_name_and_nothing_is_run() {
     }
     assert!(fake.calls().is_empty());
 }
+
+/// Servers of its own on a DHCP interface: the lease is asked for no DNS, and
+/// the servers sit in a resolver file that sorts before the lease's.
+#[test]
+fn a_dhcp_interface_with_its_own_dns_asks_the_lease_for_none() {
+    let network = settings(&[(
+        "eth0",
+        IfaceSettings {
+            dns: vec!["1.1.1.1".to_string(), "9.9.9.9".to_string()],
+            ..dhcp()
+        },
+    )])
+    .network;
+    let text = render(&network, &["eth0".into()]).unwrap();
+    assert_eq!(
+        text,
+        "# Managed by micad from `network`; the device's network. Do not edit.\n\
+auto lo\niface lo inet loopback\n\
+\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    udhcpc_opts -b -S -o -O subnet -O router -O broadcast\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/00-eth0 && { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf\n    down rm -f /run/mica/resolv.d/00-eth0 && { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf\n"
+    );
+}

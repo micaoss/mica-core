@@ -250,3 +250,63 @@ pub async fn register_agent(connection: &zbus::Connection) -> Result<()> {
     proxy.request_default_agent(&path).await?;
     Ok(())
 }
+
+/// The bus name bluetoothd owns.
+const BLUEZ_NAME: &str = "org.bluez";
+
+/// Keep the agent registered for as long as the connection lives: now, when
+/// BlueZ is already running, and again each time `org.bluez` gains an owner.
+///
+/// Once is not enough. Bluetooth is off until the settings turn it on, so
+/// bluetoothd usually starts long after micad does, and it forgets every agent
+/// when it restarts; a device with no agent answers no pairing at all.
+pub async fn keep_agent_registered(connection: zbus::Connection) {
+    use std::future::poll_fn;
+    use std::pin::pin;
+    use zbus::export::futures_core::Stream;
+
+    // Subscribed before the first attempt, so a bluetoothd that starts between
+    // the two is not missed.
+    let stream = async {
+        let rule = zbus::MatchRule::builder()
+            .msg_type(zbus::message::Type::Signal)
+            .sender("org.freedesktop.DBus")?
+            .interface("org.freedesktop.DBus")?
+            .member("NameOwnerChanged")?
+            .arg(0, BLUEZ_NAME)?
+            .build();
+        zbus::MessageStream::for_match_rule(rule, &connection, None).await
+    }
+    .await;
+    register_and_report(&connection).await;
+    let stream = match stream {
+        Ok(stream) => stream,
+        Err(err) => {
+            tracing::warn!(error = %err, "bluetooth: could not watch for bluetoothd; the agent is registered only if it was running");
+            return;
+        }
+    };
+    let mut stream = pin!(stream);
+    while let Some(message) = poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
+        let Ok(message) = message else {
+            continue;
+        };
+        // `sss`, with an empty new owner when the name is given up.
+        let Ok((_name, _old, new_owner)) = message.body().deserialize::<(String, String, String)>()
+        else {
+            continue;
+        };
+        if !new_owner.is_empty() {
+            register_and_report(&connection).await;
+        }
+    }
+}
+
+async fn register_and_report(connection: &zbus::Connection) {
+    match register_agent(connection).await {
+        Ok(()) => tracing::info!(path = AGENT_PATH, "Bluetooth pairing agent registered"),
+        Err(err) => {
+            tracing::info!(error = %err, "no Bluetooth agent registered: bluetoothd did not answer");
+        }
+    }
+}

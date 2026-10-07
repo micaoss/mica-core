@@ -335,7 +335,7 @@ pub(super) async fn an_unreadable_network_entry_stops_every_route_in_the_cluster
         &json!({ "eth0": { "dhcp": true } }).to_string(),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 }
 
 // The four network routes take a bearer **or** a cookie, and answer the

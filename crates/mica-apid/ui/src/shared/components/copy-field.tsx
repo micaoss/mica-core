@@ -23,7 +23,7 @@ export function CopyField({ value, label, className }: { value: string; label: s
 
   return (
     <InputGroup className={cn('h-auto', className)}>
-      <code className="min-w-0 flex-1 px-3 py-2 font-mono text-[0.8125rem] break-all">{value}</code>
+      <code className="min-w-0 flex-1 px-3 py-2 font-mono text-[0.8125rem] break-all whitespace-pre-wrap">{value}</code>
       <InputGroupAddon align="inline-end">
         <InputGroupButton aria-label={label} onClick={() => void copy()}>
           {copied ? <Check /> : <Copy />}

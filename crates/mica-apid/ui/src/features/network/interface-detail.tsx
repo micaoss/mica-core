@@ -24,12 +24,16 @@ import { ObservedInterfaceFacts } from './observed-network-panel'
 import { bridgeMembership, isSessionInterface } from './interface-facts'
 
 interface StaticRoute { destination: string; gateway?: string; metric?: number }
-interface DhcpServer { poolOffset: number; poolSize: number; dns: string[]; leaseSeconds?: number }
+/// `dns` is absent when no server is announced: the device does not write an
+/// empty list.
+interface DhcpServer { poolOffset: number; poolSize: number; dns?: string[]; leaseSeconds?: number }
 
 interface InterfaceConfig {
   kind?: 'physical' | 'vlan' | 'bridge' | 'wireguard'
   dhcp: boolean
-  static?: { address: string; gateway?: string; dns: string[] }
+  static?: { address: string; gateway?: string; dns?: string[] }
+  /// A DHCP entry's own servers, used instead of the lease's.
+  dns?: string[]
   vlan?: { parent: string; id: number }
   bridge?: { ports: string[] }
   wireguard?: { listenPort?: number; peers: unknown[] }
@@ -67,9 +71,13 @@ export function InterfaceDetailPage() {
   const useDhcp = kind === 'wireguard' ? false : dhcp ?? configured?.dhcp ?? true
   const addressValue = address ?? configured?.static?.address ?? ''
   const gatewayValue = gateway ?? configured?.static?.gateway ?? ''
-  const dnsValue = dns ?? configured?.static?.dns.join(', ') ?? ''
+  const dnsValue = dns ?? (useDhcp ? configured?.dns : configured?.static?.dns)?.join(', ') ?? ''
+  const wireless = new Set((network.data?.observed.interfaces ?? []).filter((iface) => iface.type === 'wlan').map((iface) => iface.name))
   const candidates = physicalInterfaces(networkRows(configuredMap, network.data?.observed.interfaces))
     .filter((candidate) => candidate !== name)
+  // A station cannot be bridged and the access point has an address of its
+  // own, so a radio is never offered as a port.
+  const portCandidates = candidates.filter((candidate) => !wireless.has(candidate))
   const parentValue = parent ?? configured?.vlan?.parent ?? candidates[0] ?? ''
   const vlanIdValue = vlanId ?? (configured?.vlan?.id ?? 100).toString()
   const portsValue = ports ?? configured?.bridge?.ports ?? []
@@ -80,12 +88,21 @@ export function InterfaceDetailPage() {
   // has no addressing at all. Both are the device's rules, stated here so the
   // form does not offer what the device would refuse.
   const canServe = !useDhcp && addressValue !== '' && bridge === undefined
+  // The ports this save would have to strip of their addressing, or declare
+  // for the first time, before the device accepts the bridge.
+  const claimedPorts = kind === 'bridge'
+    ? portsValue.filter((port) => configuredMap[port] === undefined || configuredMap[port].dhcp || configuredMap[port].static !== undefined)
+    : []
 
   const save = useMutation({
     mutationFn: () => {
       const value: InterfaceConfig = { ...configured, dhcp: useDhcp }
-      if (useDhcp) delete value.static
-      else {
+      delete value.dns
+      if (useDhcp) {
+        delete value.static
+        // Absent and empty are the same thing to the device.
+        if (splitList(dnsValue).length > 0) value.dns = splitList(dnsValue)
+      } else {
         value.static = {
           address: addressValue,
           // A tunnel declares neither: where its traffic goes is each peer's
@@ -106,6 +123,14 @@ export function InterfaceDetailPage() {
       else delete value.routes
       if (serverRow && canServe) value.dhcpServer = serverRow
       else delete value.dhcpServer
+      // A bridge takes only declared interfaces with no addressing of their
+      // own, so the ports it gains are declared that way in the same write:
+      // two writes would leave a moment where neither map is legal.
+      if (claimedPorts.length > 0) {
+        const map: Record<string, InterfaceConfig> = { ...configuredMap, [name]: value }
+        for (const port of claimedPorts) map[port] = portEntry(configuredMap[port])
+        return api<TaskAccepted>('/api/v1/network', json('PUT', map))
+      }
       return api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(name)}`, json('PUT', value))
     },
     onSuccess: (accepted) => {
@@ -187,7 +212,14 @@ export function InterfaceDetailPage() {
                 )}
               </FormField>
             )}
-            {useDhcp ? <p className="text-sm text-muted-foreground">{t('network.detail.dhcpNote')}</p> : (
+            {useDhcp ? (
+              <>
+                <p className="text-sm text-muted-foreground">{t('network.detail.dhcpNote')}</p>
+                <FormField label={t('network.detail.dns')} hint={t('network.detail.dhcpDnsHint')}>
+                  {(id) => <Input id={id} className="font-mono" value={dnsValue} onChange={(event) => setDns(event.target.value)} placeholder="1.1.1.1, 9.9.9.9" />}
+                </FormField>
+              </>
+            ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField label={t('network.detail.address')}>
                   {(id) => <Input id={id} className="font-mono" value={addressValue} onChange={(event) => setAddress(event.target.value)} placeholder="10.0.0.2/24" required />}
@@ -223,7 +255,7 @@ export function InterfaceDetailPage() {
               <FormField label={t('network.editor.ports')} hint={t('network.editor.portsHint')}>
                 {(id) => (
                   <div id={id} role="group" aria-label={t('network.editor.ports')} className="grid gap-2 sm:grid-cols-2">
-                    {candidates.map((candidate) => (
+                    {portCandidates.map((candidate) => (
                       <label key={candidate} className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
@@ -287,13 +319,18 @@ export function InterfaceDetailPage() {
                       {(id) => <Input id={id} type="number" min={1} value={serverRow.poolSize} onChange={(event) => setServer({ ...serverRow, poolSize: Number(event.target.value) })} required />}
                     </FormField>
                     <FormField label={t('network.dhcpServer.dns')} hint={t('network.dhcpServer.dnsHint')}>
-                      {(id) => <Input id={id} className="font-mono" value={serverRow.dns.join(', ')} onChange={(event) => setServer({ ...serverRow, dns: splitList(event.target.value) })} />}
+                      {(id) => <Input id={id} className="font-mono" value={(serverRow.dns ?? []).join(', ')} onChange={(event) => setServer({ ...serverRow, dns: splitList(event.target.value) })} />}
                     </FormField>
                     <FormField label={t('network.dhcpServer.lease')}>
                       {(id) => <Input id={id} type="number" min={1} value={serverRow.leaseSeconds ?? ''} onChange={(event) => setServer({ ...serverRow, leaseSeconds: event.target.value === '' ? undefined : Number(event.target.value) })} />}
                     </FormField>
                   </div>
                 ) : null}
+              </fieldset>
+            ) : bridge === undefined && kind !== 'wireguard' ? (
+              <fieldset className="grid gap-1">
+                <legend className="text-sm font-medium">{t('network.dhcpServer.title')}</legend>
+                <p className="text-sm text-muted-foreground">{t('network.dhcpServer.needsStatic')}</p>
               </fieldset>
             ) : null}
             <div className="flex justify-end gap-2">
@@ -333,6 +370,7 @@ export function InterfaceDetailPage() {
         <FactList facts={[
           { id: 'change', label: t('network.review.change'), value: t(useDhcp ? 'network.detail.changeDhcp' : 'network.detail.changeStatic', { address: addressValue }), mono: true },
           { id: 'affects', label: t('network.review.affects'), value: bridge ? t('network.review.affectsBridge', { name, bridge }) : name },
+          ...(claimedPorts.length > 0 ? [{ id: 'ports', label: t('network.review.ports'), value: <span className="text-destructive">{t('network.review.portsCopy', { ports: claimedPorts.join(', ') })}</span> }] : []),
           { id: 'session', label: t('network.review.session'), value: (
             <span className={onSession ? 'text-destructive' : 'text-success'}>
               {t(onSession ? 'network.review.sessionOn' : 'network.review.sessionOff', { name })}
@@ -388,6 +426,17 @@ function formatAddress(address: { address?: string; prefixLength?: number }) {
 function kindLabel(configured: InterfaceConfig | undefined, observed: ObservedNetworkInterface | undefined, t: ReturnType<typeof useTranslation>['t']) {
   const kind = configured?.kind ?? observed?.kind ?? observed?.type
   return kind ? t(`network.kinds.${kind}`, { defaultValue: kind }) : t('common.notAvailable')
+}
+
+/// What an interface is once a bridge claims it: declared, with no addressing
+/// of its own. Its kind and its VLAN block stay.
+function portEntry(current: InterfaceConfig | undefined): InterfaceConfig {
+  const entry: InterfaceConfig = { ...current, dhcp: false }
+  delete entry.static
+  delete entry.dns
+  delete entry.dhcpServer
+  delete entry.routes
+  return entry
 }
 
 function splitList(value: string) {

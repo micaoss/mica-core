@@ -143,3 +143,49 @@ fn a_device_running_no_access_point_says_so() {
     assert_eq!(observed["accessPoint"]["available"], json!(false));
     assert!(observed["accessPoint"]["detail"].is_string());
 }
+
+/// The daemon answers by sending to the path the asker is bound to. micad's
+/// unit has a private temporary directory, so a reply socket there is one the
+/// daemon cannot reach: it has to sit under the runtime directory both see.
+/// The fake below answers only such an asker, with more than one page of
+/// results, which a 4096-byte read would cut.
+#[test]
+fn a_scan_is_answered_on_a_socket_the_daemon_can_reach_and_read_whole() {
+    use std::os::unix::net::UnixDatagram;
+    let root = tempfile::tempdir().unwrap();
+    let control = root.path().join(WPA_CONTROL_DIR);
+    std::fs::create_dir_all(&control).unwrap();
+    let daemon = UnixDatagram::bind(control.join("wlan0")).unwrap();
+    let reachable = root.path().join("run/mica");
+    let mut results = String::from("bssid / frequency / signal level / flags / ssid\n");
+    for index in 0..60 {
+        results.push_str(&format!(
+            "aa:bb:cc:dd:ee:{index:02x}\t2412\t-50\t[WPA2-PSK-CCMP][ESS]\tnetwork-with-a-long-name-{index:02}-padding-padding\n"
+        ));
+    }
+    assert!(results.len() > 4096);
+    let reply = results.clone();
+    let server = std::thread::spawn(move || {
+        let mut buffer = [0u8; 256];
+        for _ in 0..2 {
+            let (received, asker) = daemon.recv_from(&mut buffer).unwrap();
+            let path = asker.as_pathname().expect("a bound asker").to_path_buf();
+            assert!(path.starts_with(&reachable), "{}", path.display());
+            let answer = if &buffer[..received] == b"SCAN" {
+                "OK\n"
+            } else {
+                reply.as_str()
+            };
+            daemon.send_to(answer.as_bytes(), &path).unwrap();
+        }
+    });
+
+    let found = scan_networks(root.path(), "wlan0").expect("the daemon answered");
+
+    server.join().unwrap();
+    assert_eq!(found.len(), 60);
+    assert_eq!(
+        found[59].ssid,
+        "network-with-a-long-name-59-padding-padding"
+    );
+}

@@ -97,6 +97,10 @@ pub(crate) struct NetworkInterface {
     /// with no addressing at all, which is what a bridge port must be.
     #[serde(rename = "static", skip_serializing_if = "Option::is_none")]
     pub(super) static_: Option<StaticAddressing>,
+    /// DNS servers a DHCP entry uses instead of the ones its lease gives.
+    /// Only with `dhcp`; a static entry names its servers in `static.dns`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) dns: Vec<String>,
     /// VLAN parameters, for `kind = "vlan"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) vlan: Option<VlanParameters>,
@@ -277,6 +281,19 @@ pub(super) fn routing_refusal(iface: &str, cfg: &IfaceSettings) -> Result<(), Bo
             )));
         }
     }
+    if !cfg.dns.is_empty() {
+        if !cfg.dhcp || cfg.static_.is_some() {
+            return Err(refuse(
+                "`dns` replaces the servers of a DHCP lease, so it needs `dhcp`; a static entry names its servers in `static.dns`"
+                    .to_string(),
+            ));
+        }
+        for dns in &cfg.dns {
+            if dns.parse::<IpAddr>().is_err() {
+                return Err(refuse(format!("the DNS server {dns:?} is not an address")));
+            }
+        }
+    }
     if cfg.dhcp_server.is_some() {
         let addressed = !cfg.dhcp && cfg.static_.is_some();
         if !addressed {
@@ -323,18 +340,20 @@ pub(super) fn address_refusal(iface: &str, cfg: &IfaceSettings) -> Result<(), Bo
     })
 }
 
-/// A candidate map written back whole, at the `network` root.
+/// A candidate map written back whole, at the `network` root. Answers the id
+/// of the task that applies it.
 pub(super) async fn write_network_map(
     state: &AppState,
     entries: &NetworkEntries,
-) -> Result<(), Box<Response>> {
+) -> Result<String, Box<Response>> {
     // Infallible: the map's keys are strings and its values are structs of
     // scalars, strings and vectors.
     let value = encode(entries)?;
-    if let Err(err) = state.api.set_settings(NETWORK_SETTINGS_PATH, &value).await {
-        return Err(Box::new(bus_api_error(&err, Some(NETWORK_SETTINGS_PATH))));
-    }
-    Ok(())
+    state
+        .api
+        .set_settings(NETWORK_SETTINGS_PATH, &value)
+        .await
+        .map_err(|err| Box::new(bus_api_error(&err, Some(NETWORK_SETTINGS_PATH))))
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]

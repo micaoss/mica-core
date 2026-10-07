@@ -146,3 +146,53 @@ export function configuredSummary(
       : labels.noAddressing
   return labels.format(kind, method)
 }
+
+/// An address as networkd prints it: its bytes, four or sixteen of them.
+function addressText(bytes: unknown[]): string | undefined {
+  if (!bytes.every((byte) => typeof byte === 'number')) return undefined
+  const octets = bytes as number[]
+  if (octets.length === 4) return octets.join('.')
+  if (octets.length !== 16) return undefined
+  const groups = Array.from({ length: 8 }, (_, at) => (octets[at * 2] << 8) | octets[at * 2 + 1])
+  // RFC 5952: the longest run of two or more zero groups becomes `::`.
+  let start = -1
+  let length = 0
+  for (let at = 0; at < 8; at++) {
+    let run = 0
+    while (at + run < 8 && groups[at + run] === 0) run++
+    if (run > length) { start = at; length = run }
+    if (run > 0) at += run - 1
+  }
+  const hex = (part: number[]) => part.map((group) => group.toString(16)).join(':')
+  if (length < 2) return hex(groups)
+  return `${hex(groups.slice(0, start))}::${hex(groups.slice(start + length))}`
+}
+
+/// Whether an address is one the device can be reached at from elsewhere:
+/// not loopback and not link-local, in either family.
+function isReachable(text: string): boolean {
+  const lower = text.toLowerCase()
+  if (lower.includes(':')) return lower !== '::1' && !/^fe[89ab]/.test(lower)
+  return !lower.startsWith('127.') && !lower.startsWith('169.254.')
+}
+
+/// The addresses the interface list shows for one interface: every address a
+/// peer could use, spelled the way an operator types it. networkd reports each
+/// as bytes and reports the link-local ones too; neither belongs in a list.
+export function listedAddresses(items: unknown[] | undefined): string {
+  const listed: string[] = []
+  for (const item of items ?? []) {
+    let text: string | undefined
+    let prefix: unknown
+    if (typeof item === 'string') text = item
+    else if (item && typeof item === 'object') {
+      const value = item as Record<string, unknown>
+      const address = value.Address ?? value.address
+      prefix = value.PrefixLength ?? value.prefixLength
+      text = Array.isArray(address) ? addressText(address) : typeof address === 'string' ? address : undefined
+    }
+    if (!text || !isReachable(text)) continue
+    listed.push(prefix === undefined ? text : `${text}/${String(prefix)}`)
+  }
+  return listed.length > 0 ? listed.join(', ') : '—'
+}

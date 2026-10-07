@@ -100,7 +100,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | Subtree | Contents |
 | --- | --- |
 | `hostname` | The hostname |
-| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`) and its block, DHCP or static addressing, routes, a DHCP server |
+| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's) or static addressing, routes, a DHCP server |
 | `access` | SSH (switch, listen addresses, authorized keys), the console, the admin password hash, API tokens, claim state |
 | `wifi` | `client` (known networks) and `ap` (the access point) |
 | `container` | The engine switch and the declared `units` (image, command, environment, ports, volumes under `/mica/`, restart, start at boot, and the limits `pids`, `memory`, `cpu`) |
@@ -130,7 +130,7 @@ live-state tree under its name.
 | Reconciler | systemd | OpenRC |
 | --- | --- | --- |
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
-| `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device and named by file | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP, static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. VLAN, bridge, WireGuard, routes and the DHCP server are refused by name |
+| `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device and named by file | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. VLAN, bridge, WireGuard, routes and the DHCP server are refused by name |
 | `sshd` | `/run/mica/dropbear.env`, the authorized keys of `root` and `mica`, `dropbear.service` | the same files, `mica-dropbear` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
 | `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server | configuration in `/var/lib/mica/hostapd`, `/run/mica/wifi-ap.env`, busybox udhcpd on the same pool (`/run/mica/wifi-ap-udhcpd.conf`), `mica-wifi-ap` |
@@ -138,7 +138,7 @@ live-state tree under its name.
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env`, both MQTT units | the same, both scripts |
 | `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; a running `apid.service` restarted when it changed | the same, `apid` |
-| `bluetooth` | `bluetooth.service`, the adapter's properties, each declared device's trust; a paired device nobody declares is removed | the same through `mica-bluetoothd` |
+| `bluetooth` | `bluetooth.service`, the adapter's properties, each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus | the same through `mica-bluetoothd` |
 
 Services are driven through one trait (`UnitControl`): systemd over D-Bus, with runtime
 enablement; on OpenRC, `rc-service` (`x.service` is `x`, `a@b.service` is `a.b`), with enablement
@@ -165,7 +165,9 @@ A value the tree refuses is `org.freedesktop.DBus.Error.InvalidArgs`.
 Every observer is a trait with an "unavailable" default, so a test never reads its host, and
 absence is reported with its reason rather than as a healthy reading:
 
-- **Network**: networkd `Describe`, wpa_supplicant and hostapd sockets and a resolved probe; on
+- **Network**: networkd `Describe`, wpa_supplicant and hostapd sockets (micad's reply sockets are
+  bound under `/run/mica`: its unit has a private `/tmp`, which neither daemon can answer into)
+  and a resolved probe; on
   OpenRC the same document from sysfs, busybox `ip` and `/run/mica/resolv.d`.
 - **Time**: timesyncd; on OpenRC whether `mica-ntpd` runs and the kernel's synchronized bit.
 - **Storage**: tiers from the signed boot policy, bind namespaces, usage, DATA's project quotas

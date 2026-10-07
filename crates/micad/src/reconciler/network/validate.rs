@@ -48,6 +48,27 @@ pub(super) fn kind_name(kind: IfaceKind) -> &'static str {
     }
 }
 
+/// Refuse DNS servers of its own on an entry that is not a DHCP client, and
+/// servers that are not addresses.
+pub(super) fn validate_dns_override(iface: &str, cfg: &IfaceSettings) -> anyhow::Result<()> {
+    if cfg.dns.is_empty() {
+        return Ok(());
+    }
+    if !cfg.dhcp || cfg.static_.is_some() {
+        return Err(anyhow::anyhow!(
+            "network.{iface} names DNS servers in `dns`, which replaces the servers of a DHCP lease; a static entry names them in `static.dns`"
+        ));
+    }
+    for dns in &cfg.dns {
+        if dns.parse::<std::net::IpAddr>().is_err() {
+            return Err(anyhow::anyhow!(
+                "network.{iface} DNS server {dns:?} is not an IP address"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Refuse an entry whose optional blocks disagree with its `kind`.
 pub(super) fn validate_kind_blocks(iface: &str, cfg: &IfaceSettings) -> anyhow::Result<()> {
     let kind = kind_name(cfg.kind);
@@ -85,6 +106,7 @@ pub(super) fn validate_network(network: &BTreeMap<String, IfaceSettings>) -> any
         if let Some(static_cfg) = &cfg.static_ {
             validate_static(iface, static_cfg)?;
         }
+        validate_dns_override(iface, cfg)?;
         validate_kind_blocks(iface, cfg)?;
         if let Some(wireguard) = &cfg.wireguard {
             micad_settings::validate_peers(iface, &wireguard.peers).map_err(anyhow::Error::msg)?;
