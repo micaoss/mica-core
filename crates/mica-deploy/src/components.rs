@@ -7,10 +7,10 @@ use serde_json::Value;
 
 pub const MAX_DEPLOYMENT_BYTES: usize = 16384;
 const MAX_ENVELOPE_BYTES: usize = 24576;
-const MAX_INTEGER: u64 = 9_007_199_254_740_991;
+pub(crate) const MAX_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[derive(Debug)]
-pub struct ContractError(&'static str);
+pub struct ContractError(pub(crate) &'static str);
 
 impl std::fmt::Display for ContractError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -185,7 +185,7 @@ pub struct CorePaths {
 pub const MAX_CORE_COMPONENTS: usize = 16;
 
 /// A package version as its dotted numbers, for ordering.
-fn version_key(value: &str) -> Result<Vec<u64>> {
+pub(crate) fn version_key(value: &str) -> Result<Vec<u64>> {
     let parts: Vec<u64> = value
         .split('.')
         .map(|part| {
@@ -200,7 +200,7 @@ fn version_key(value: &str) -> Result<Vec<u64>> {
     Ok(parts)
 }
 
-fn require(ok: bool, message: &'static str) -> Result<()> {
+pub(crate) fn require(ok: bool, message: &'static str) -> Result<()> {
     if ok {
         Ok(())
     } else {
@@ -218,7 +218,7 @@ fn hash(value: &str) -> Result<()> {
     )
 }
 
-fn name(value: &str) -> Result<()> {
+pub(crate) fn name(value: &str) -> Result<()> {
     require(
         !value.is_empty()
             && value.len() <= 128
@@ -233,11 +233,11 @@ fn name(value: &str) -> Result<()> {
     )
 }
 
-fn integer(value: u64, maximum: u64) -> Result<()> {
+pub(crate) fn integer(value: u64, maximum: u64) -> Result<()> {
     require(value > 0 && value <= maximum, "invalid integer")
 }
 
-fn sha256(bytes: &[u8]) -> String {
+pub(crate) fn sha256(bytes: &[u8]) -> String {
     hex::encode(digest::digest(&digest::SHA256, bytes))
 }
 
@@ -304,7 +304,7 @@ impl VerityImage {
 }
 
 impl CoreComponent {
-    fn validate(&self, arch: &str, raw: &Value) -> Result<()> {
+    pub(crate) fn validate(&self, arch: &str, raw: &Value) -> Result<()> {
         require(self.schema == "mica/core/v1", "wrong component schema")?;
         require(self.arch == arch, "component target mismatch")?;
         hash(&self.id)?;
@@ -349,8 +349,17 @@ impl CoreComponent {
 impl Deployment {
     fn validate(&self, raw: &Value) -> Result<()> {
         require(
-            self.schema == "mica/deployment/v1" && self.data_policy == "unchanged",
+            matches!(
+                self.schema.as_str(),
+                "mica/deployment/v1" | "mica/deployment/v2"
+            ) && self.data_policy == "unchanged",
             "unsupported deployment schema or DATA policy",
+        )?;
+        // From v2 a deployment is the system alone: its core components come from the
+        // device's core set (`mica/core-set/v1`).
+        require(
+            self.schema == "mica/deployment/v1" || self.core.is_empty(),
+            "a mica/deployment/v2 names no core components",
         )?;
         // Which board, architecture and boot format a device accepts is its
         // signed boot policy's to say ([`admit`]). What a deployment must be on
@@ -413,24 +422,11 @@ impl Deployment {
                 core.runs_on(self.rootfs.level()),
                 "a core component does not run on this root's interface level",
             )?;
-            for need in &core.needs {
-                let found = self
-                    .core
-                    .iter()
-                    .find(|other| other.package == need.package)
-                    .ok_or(ContractError(
-                        "a core component's need is not in the deployment",
-                    ))?;
-                let version = version_key(&found.version)?;
-                require(
-                    version >= version_key(&need.min)?
-                        && match &need.max {
-                            Some(max) => version <= version_key(max)?,
-                            None => true,
-                        },
-                    "a core component's need is outside its version range",
-                )?;
-            }
+            needs_met(
+                core,
+                self.core.iter(),
+                "a core component's need is not in the deployment",
+            )?;
         }
         Ok(())
     }
@@ -476,6 +472,31 @@ impl Deployment {
                 .collect(),
         })
     }
+}
+
+/// Every need of `core` met by one of `others`, at a version in its range; `missing`
+/// names the refusal when a needed package is not among them.
+pub(crate) fn needs_met<'a>(
+    core: &CoreComponent,
+    others: impl Iterator<Item = &'a CoreComponent> + Clone,
+    missing: &'static str,
+) -> Result<()> {
+    for need in &core.needs {
+        let found = others
+            .clone()
+            .find(|other| other.package == need.package)
+            .ok_or(ContractError(missing))?;
+        let version = version_key(&found.version)?;
+        require(
+            version >= version_key(&need.min)?
+                && match &need.max {
+                    Some(max) => version <= version_key(max)?,
+                    None => true,
+                },
+            "a core component's need is outside its version range",
+        )?;
+    }
+    Ok(())
 }
 
 /// Where the running root names the product it was built as.

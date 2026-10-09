@@ -19,8 +19,11 @@ use aws_lc_rs::signature::KeyPair;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use contract_fixtures::{DEPLOYMENT_KEY_LABEL, key};
 use mica_deploy::{
-    catalog::{CatalogRequest, VerifiedCatalog, verify_catalog},
+    catalog::{
+        CatalogRequest, CoreCatalogRequest, VerifiedCatalog, verify_catalog, verify_core_catalog,
+    },
     components::{authenticate_deployment, parse_deployment},
+    core_set,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -57,6 +60,8 @@ fn files(vector: &Value) -> BTreeMap<String, Vec<u8>> {
         ("manifestUrl", "manifest"),
         ("releaseUrl", "release"),
         ("descriptorUrl", "descriptor"),
+        ("coreReleaseUrl", "coreRelease"),
+        ("coreSetUrl", "coreSet"),
     ]
     .into_iter()
     .map(|(url, body)| {
@@ -184,6 +189,83 @@ fn the_vector_selects_nothing_for_another_product_or_a_current_device() {
     }
 }
 
+/// Verify the vector's core line for `channel`, returning the URLs fetched.
+fn run_core(
+    files: &BTreeMap<String, Vec<u8>>,
+    source: &str,
+    arch: &str,
+    channel: &str,
+    highest_generation: u64,
+) -> (
+    anyhow::Result<mica_deploy::catalog::VerifiedCoreCatalog>,
+    Vec<String>,
+) {
+    let mut fetched = Vec::new();
+    let result = verify_core_catalog(
+        &[trust()],
+        &CoreCatalogRequest {
+            source,
+            arch,
+            channel,
+            checkpoint: None,
+            highest_generation,
+        },
+        |url, _| {
+            fetched.push(url.to_string());
+            files
+                .get(url.as_str())
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("404 {url}"))
+        },
+    );
+    (result, fetched)
+}
+
+/// The vector's core line: the same manifest, the core release's document and
+/// the signed set, which is the core set vector's own envelope.
+#[test]
+fn the_core_line_of_the_vector_is_served_and_selected() {
+    let vector = vector();
+    let cases = cases();
+    let source = vector["source"].as_str().unwrap();
+    let arch = cases["valid"]["arch"].as_str().unwrap();
+    let channel = cases["coreSet"]["channel"].as_str().unwrap();
+    let set_vector: Value =
+        serde_json::from_str(include_str!("component-contracts/core-set.json")).unwrap();
+    assert_eq!(vector["coreSet"], set_vector["envelope"]);
+
+    let (verified, fetched) = run_core(&files(&vector), source, arch, channel, 0);
+    let selected = verified
+        .expect("the core line must verify")
+        .selected
+        .expect("a core set for this device");
+    assert_eq!(
+        fetched,
+        ["manifestUrl", "coreReleaseUrl", "coreSetUrl"].map(|url| vector[url].as_str().unwrap())
+    );
+    assert_eq!(selected.core_set_id, set_vector["coreSetId"]);
+    assert_eq!(selected.envelope, vector["coreSet"]);
+    assert_eq!(
+        selected.id,
+        document_of(&vector, "coreRelease")["id"],
+        "the release is named as its line names it"
+    );
+    let base = document_of(&vector, "coreRelease")["baseUrl"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for object in &selected.objects {
+        assert_eq!(object.url, format!("{base}objects/{}", object.sha256));
+    }
+
+    // Current, another channel, another architecture: the manifest alone.
+    for (arch, channel, highest) in [(arch, channel, 1), (arch, "lts", 0), ("arm64", channel, 0)] {
+        let (verified, fetched) = run_core(&files(&vector), source, arch, channel, highest);
+        assert!(verified.unwrap().selected.is_none());
+        assert_eq!(fetched, [vector["manifestUrl"].as_str().unwrap()]);
+    }
+}
+
 /// THE PROTOCOL VOCABULARY. The accepted strings are the ones the shared
 /// fixtures carry; every other spelling is refused, with no aliases.
 /// Neighbouring spellings are listed as refused by name, so a reader that
@@ -236,6 +318,51 @@ fn schema_vocabulary() {
         assert!(
             authenticate_deployment(&envelope(&e), &[trust()]).is_err(),
             "the envelope accepted {spelling}"
+        );
+    }
+
+    // The system-only deployment is the same descriptor under its own name.
+    let mut system_only = descriptor.clone();
+    system_only["schema"] = accepted["deploymentSystemOnly"].clone();
+    parse_deployment(serde_json::to_string(&system_only).unwrap().as_bytes())
+        .expect("the system-only deployment schema parses");
+
+    // The core set and the core release's document.
+    let set_vector: Value =
+        serde_json::from_str(include_str!("component-contracts/core-set.json")).unwrap();
+    let payload: Value = serde_json::from_str(set_vector["payload"].as_str().unwrap()).unwrap();
+    assert_eq!(payload["schema"], accepted["coreSet"]);
+    for spelling in refused["coreSet"].as_array().unwrap() {
+        let mut p = payload.clone();
+        p["schema"] = spelling.clone();
+        assert!(
+            core_set::parse(&serde_json::to_vec(&p).unwrap()).is_err(),
+            "the core set accepted {spelling}"
+        );
+    }
+    assert_eq!(
+        document_of(&vector, "coreRelease")["schema"],
+        accepted["coreRelease"]
+    );
+    for spelling in refused["coreRelease"].as_array().unwrap() {
+        let mut document = document_of(&vector, "coreRelease");
+        document["schema"] = spelling.clone();
+        let mut files = files(&vector);
+        files.insert(
+            vector["coreReleaseUrl"].as_str().unwrap().to_owned(),
+            serde_json::to_vec(&document).unwrap(),
+        );
+        assert!(
+            run_core(
+                &files,
+                vector["source"].as_str().unwrap(),
+                cases["valid"]["arch"].as_str().unwrap(),
+                cases["coreSet"]["channel"].as_str().unwrap(),
+                0
+            )
+            .0
+            .is_err(),
+            "the core release accepted {spelling}"
         );
     }
 

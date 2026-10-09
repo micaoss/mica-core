@@ -129,7 +129,7 @@ fn rules_in_source() -> Vec<String> {
 /// cannot fail, so no input reaches that arm. It is kept because removing it
 /// would silently widen the `?` above it, and it is recorded here rather than
 /// pretended to be covered.
-const ELSEWHERE: [(&str, &str); 40] = [
+const ELSEWHERE: [(&str, &str); 41] = [
     (
         "a core component does not run on this root's interface level",
         "core_components.rs a_core_component_that_does_not_fit_its_root_or_its_neighbours_is_refused",
@@ -145,6 +145,10 @@ const ELSEWHERE: [(&str, &str); 40] = [
     (
         "a core component's need is outside its version range",
         "core_components.rs a_core_component_that_does_not_fit_its_root_or_its_neighbours_is_refused",
+    ),
+    (
+        "a mica/deployment/v2 names no core components",
+        "core_sets.rs a_v2_deployment_names_no_cores_and_v1_still_reads",
     ),
     (
         "core components not unique and sorted by package",

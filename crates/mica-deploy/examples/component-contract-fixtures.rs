@@ -37,5 +37,6 @@ fn main() -> anyhow::Result<()> {
     fs::write(directory.join("cases.json"), generated.cases)?;
     fs::write(directory.join("catalog.json"), generated.catalog)?;
     fs::write(directory.join("chunker.json"), generated.chunker)?;
+    fs::write(directory.join("core-set.json"), generated.core_set)?;
     Ok(())
 }

@@ -316,6 +316,26 @@ level, with every `needs` met inside the deployment. Install, collection and acq
 core component's objects like the root's, and the runkit composes them (6.5).
 Offline archives start with `MICAUPD1` and may carry any subset of a descriptor's objects.
 
+**Core sets.** `mica/core-set/v1`, signed with the release key in the same envelope, is the core
+components of one channel and architecture: `channel` (`general`, or lowercase letters, digits and
+hyphens), `arch`, `generation` (monotonic within its channel and architecture), `version`, and
+`components`, every `mica/core/v1` record of the channel, one per package, sorted, each of that
+architecture, with every `needs` met inside the set. Its id is the SHA-256 of the signed payload.
+It is released once and taken by every product of the architecture on the channel.
+
+- **`mica/deployment/v2`** is `mica/deployment/v1` without `core`: the system alone. v1 stays
+  readable, and a v1 deployment's `core` is the first core set of a device that has none.
+- **Selection.** A device composes the components of its core set with at least one feature among
+  the `FEATURES` of its root's `product.conf`, in package order. The selection is refused when a
+  selected component does not run on the root's `interfaceLevel`, or needs a package that is not
+  selected or is selected at a version outside its range. Selecting nothing is not a refusal. One
+  function (`core_set::select`) is the rule on the device, and `core-set.json` `selections` holds
+  the producer's port of it to the same cases.
+- **Two sets at most.** A device keeps the set it runs and, while one is on trial, the set it is
+  updating to. A set that reaches healthy replaces the old one, whose objects are released; a set
+  that does not is dropped. A core update and a system update are never on trial together.
+- **A core archive** is `MICAUPD1` with the signed core set as its envelope and the set's objects.
+
 The server catalog is **unsigned** and comes in three documents, each fetched only when needed.
 The configured source is an **update root** ending in `/` (http or https, a host, no user info,
 query or fragment, such as `https://res.micaos.dev/update/`). The reader appends the manifest
@@ -337,6 +357,15 @@ signed descriptor, not from an address: a device takes only its own board, arch 
 a generation above the one it runs, and checks every byte against what the descriptor names. The
 manifest revision is checkpointed as a consistency check against a confused mirror, not as a
 security control; there is no expiry, so a withheld catalog reads as "nothing newer".
+
+The manifest's optional `cores` lists, per channel and architecture, the current core release:
+`{channel, arch, latest: {id, generation, path}}`, with `id` the release's name, the same on every
+architecture's line. `path` names a **`mica/core-release/v1`** document
+(`{schema, baseUrl, id, channel, arch, generation, coreSet: {path, sha256, bytes}, objects}`), read
+as a release's document is: it must agree with its line, the signed set with its digest, its
+length and the line's channel, architecture and generation, and `objects` are exactly what the set
+names. A device whose channel has no line, or that holds the line's generation, reads the manifest
+and nothing else.
 
 **Compatibility.** The version is in the path, chosen by the reader, so a device's configuration
 never names a format. Within a major, documents only grow: the reader ignores fields it does not

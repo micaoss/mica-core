@@ -45,7 +45,7 @@ fn other_component_schemas_are_refused_with_correct_ids() {
     let valid: Value = serde_json::from_str(PAYLOAD).unwrap();
     assert!(parse_deployment(&with_ids(valid.clone())).is_ok());
     for (pointer, other) in [
-        ("/schema", "mica/deployment/v2"),
+        ("/schema", "mica/deployment/v3"),
         ("/kernel/schema", "mica/kernel/v2"),
         ("/rootfs/schema", "mica/rootfs/v2"),
     ] {

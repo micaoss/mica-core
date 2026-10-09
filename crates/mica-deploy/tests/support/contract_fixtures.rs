@@ -43,6 +43,18 @@ pub const WIRE_ORDER: &str = "the envelope object is stored sorted for readabili
      schema, keyId, payload, signature, and a reader refuses any other order \
      as `noncanonical envelope`. Rebuild the order before authenticating.";
 
+/// Why the core set vector holds its payload and envelope as strings.
+pub const CORE_SET_WIRE_FORM: &str = "`payload` is the signed bytes: JSON with no whitespace and every \
+     object's keys in sorted order, which a reader re-serializes and compares. `envelope` is the \
+     signed envelope in its wire order, and `coreSetId` the SHA-256 of `payload`";
+
+/// The selection rule, in the vector's own bytes.
+pub const SELECTION_RULE: &str = "A device composes the components with at least one feature among \
+     its product's FEATURES, in package order. The selection is refused when a selected component \
+     does not run on the root's interfaceLevel (root.min <= level <= root.max, an absent max \
+     unbounded), or needs a package that is not selected or is selected at a version outside \
+     min..max (dotted numbers compared numerically). Selecting nothing is not a refusal";
+
 /// Why the catalog vector holds its documents as strings.
 pub const CATALOG_WIRE_FORM: &str = "`manifest`, `release` and `descriptor` are exact wire bytes, \
      each served at the URL beside it. The manifest and the release's document are JSON with no \
@@ -50,7 +62,7 @@ pub const CATALOG_WIRE_FORM: &str = "`manifest`, `release` and `descriptor` are 
      refuses a document that does not come back byte for byte. The descriptor is the signed envelope \
      in its wire order";
 
-/// The five files, as their exact bytes.
+/// The files, as their exact bytes.
 pub struct Fixtures {
     pub deployment: String,
     pub envelope: String,
@@ -58,6 +70,7 @@ pub struct Fixtures {
     pub cases: String,
     pub catalog: String,
     pub chunker: String,
+    pub core_set: String,
 }
 
 /// The chunker vector's input, derived so that a port reproduces it without
@@ -259,6 +272,96 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
         "objects": objects.values().collect::<Vec<_>>(),
     }))
     .expect("canonical release document");
+    // The core set vector: every component of one channel for the golden
+    // architecture, each carrying the golden root's content, signed with the
+    // deployment key, and what the selection rule makes of it for the feature
+    // sets and root levels `cases.json` lists. The selections are an input: the
+    // readers are tested against them, and so is the producer's port of the rule.
+    let core_input = &cases["coreSet"];
+    let components: Vec<Value> = core_input["components"]
+        .as_array()
+        .expect("core components")
+        .iter()
+        .map(|input| {
+            let mut component = json!({
+                "schema": "mica/core/v1",
+                "arch": valid["arch"],
+                "package": input["package"],
+                "version": input["version"],
+                "features": input["features"],
+                "needs": input["needs"],
+                "root": input["root"],
+                "content": valid["rootfs"]["content"],
+            });
+            component["id"] = json!(component_id(&component).expect("core id"));
+            component
+        })
+        .collect();
+    let core_payload = serde_json::to_string(&json!({
+        "schema": "mica/core-set/v1",
+        "channel": core_input["channel"],
+        "arch": valid["arch"],
+        "generation": core_input["generation"],
+        "version": core_input["version"],
+        "components": components,
+    }))
+    .expect("canonical core set");
+    let signed_core_set = sign(&deployment_key, core_payload.as_bytes());
+    let core_set = pretty(&json!({
+        "publicKey": STANDARD.encode(deployment_key.public_key().as_ref()),
+        "wireForm": CORE_SET_WIRE_FORM,
+        "payload": core_payload,
+        "coreSetId": hex::encode(digest::digest(&digest::SHA256, core_payload.as_bytes())),
+        "envelope": signed_core_set,
+        "selectionRule": SELECTION_RULE,
+        "selections": core_input["selections"],
+    }));
+
+    // The catalog's core line for that set: a core release has one directory
+    // per architecture, holding its document, the signed set and its objects.
+    let channel = core_input["channel"].as_str().expect("core channel");
+    let core_stamp = core_input["stamp"].as_str().expect("core stamp");
+    let arch = valid["arch"].as_str().expect("arch");
+    let core_id = format!("core.{channel}.{core_stamp}");
+    let core_dir = format!("mica/core.{channel}/{core_stamp}/{arch}/");
+    let core_base = format!("{downloads}{core_dir}");
+    let content = &valid["rootfs"]["content"];
+    let mut core_objects = std::collections::BTreeMap::new();
+    for part in ["image", "signature"] {
+        let sha = content[part]["sha256"].as_str().expect("sha256").to_owned();
+        core_objects.insert(
+            sha.clone(),
+            json!({"sha256": sha, "bytes": content[part]["bytes"], "path": format!("objects/{sha}")}),
+        );
+    }
+    let core_release = serde_json::to_string(&json!({
+        "schema": "mica/core-release/v1",
+        "baseUrl": core_base,
+        "id": core_id,
+        "channel": channel,
+        "arch": arch,
+        "generation": core_input["generation"],
+        "version": core_input["version"],
+        "coreSet": {
+            "path": "core-set.json",
+            "sha256": hex::encode(digest::digest(&digest::SHA256, signed_core_set.as_bytes())),
+            "bytes": signed_core_set.len(),
+        },
+        "objects": core_objects.values().collect::<Vec<_>>(),
+    }))
+    .expect("canonical core release document");
+    let mut manifest_value: Value = serde_json::from_str(&manifest).expect("manifest");
+    manifest_value["cores"] = json!([{
+        "channel": channel,
+        "arch": arch,
+        "latest": {
+            "id": core_id,
+            "generation": core_input["generation"],
+            "path": format!("{core_dir}index.json"),
+        },
+    }]);
+    let manifest = serde_json::to_string(&manifest_value).expect("canonical manifest");
+
     let catalog = pretty(&json!({
         "publicKey": STANDARD.encode(deployment_key.public_key().as_ref()),
         "source": source,
@@ -269,6 +372,10 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
         "release": release,
         "descriptorUrl": format!("{release_base}deployment.json"),
         "descriptor": signed_deployment,
+        "coreReleaseUrl": format!("{core_base}index.json"),
+        "coreRelease": core_release,
+        "coreSetUrl": format!("{core_base}core-set.json"),
+        "coreSet": signed_core_set,
     }));
 
     // The chunker vector is signed by nothing and depends on no input above:
@@ -331,5 +438,6 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
         cases: pretty(&cases),
         catalog,
         chunker,
+        core_set,
     }
 }

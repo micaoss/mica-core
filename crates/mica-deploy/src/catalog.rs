@@ -28,6 +28,9 @@ use url::Url;
 
 use crate::components::{Deployment, authenticate_deployment, component_id};
 
+mod cores;
+pub use cores::{CoreCatalogRequest, SelectedCoreSet, VerifiedCoreCatalog, verify_core_catalog};
+
 /// The manifest this reader takes, relative to the configured source.
 pub const MANIFEST_PATH: &str = "v2/manifest.json";
 pub const MAX_CATALOG_BYTES: usize = 1024 * 1024;
@@ -54,6 +57,9 @@ struct Manifest {
     revision: u64,
     base_url: String,
     products: Vec<ProductLine>,
+    /// The core lines; absent from a server that publishes no core set.
+    #[serde(default)]
+    cores: Vec<cores::CoreLine>,
 }
 #[derive(Deserialize)]
 struct ProductLine {
@@ -219,23 +225,22 @@ fn canonical<T: serde::de::DeserializeOwned>(bytes: &[u8], what: &str) -> Result
     Ok(serde_json::from_value(raw)?)
 }
 
-/// Verify the catalog for one device, fetching each document through `fetch`
-/// (its URL and the most bytes it may have): the manifest, and only when the
-/// device's line names a newer generation, the release's document and its
-/// signed descriptor.
-pub fn verify_catalog(
-    keys: &[[u8; 32]],
-    request: &CatalogRequest<'_>,
-    mut fetch: impl FnMut(&Url, u64) -> Result<Vec<u8>>,
-) -> Result<VerifiedCatalog> {
-    let source = source_url(request.source)?;
-    let bytes = fetch(&manifest_url(request.source)?, MAX_CATALOG_BYTES as u64)?;
+/// Fetch and check the manifest this reader takes below `source_text`: its
+/// form, its bounds and its revision against the checkpoint of an earlier read.
+fn read_manifest(
+    source_text: &str,
+    previous: Option<&CatalogCheckpoint>,
+    fetch: &mut impl FnMut(&Url, u64) -> Result<Vec<u8>>,
+) -> Result<(Manifest, CatalogCheckpoint, Url, Url)> {
+    let source = source_url(source_text)?;
+    let bytes = fetch(&manifest_url(source_text)?, MAX_CATALOG_BYTES as u64)?;
     let manifest: Manifest = canonical(&bytes, "catalog")?;
     ensure!(
         manifest.schema == "mica/catalog/v2"
             && manifest.revision > 0
             && manifest.revision <= 9_007_199_254_740_991
-            && manifest.products.len() <= MAX_ENTRIES,
+            && manifest.products.len() <= MAX_ENTRIES
+            && manifest.cores.len() <= MAX_ENTRIES,
         "invalid catalog schema or bounds"
     );
     // A consistency check against a confused mirror, not a security control:
@@ -243,17 +248,14 @@ pub fn verify_catalog(
     // rewrite its revision. Rollback protection is the generation comparison
     // below, against what this device already runs.
     let checkpoint = CatalogCheckpoint {
-        source: request.source.to_owned(),
+        source: source_text.to_owned(),
         revision: manifest.revision,
         payload_digest: hex::encode(aws_lc_rs::digest::digest(
             &aws_lc_rs::digest::SHA256,
             &bytes,
         )),
     };
-    if let Some(previous) = request
-        .checkpoint
-        .filter(|previous| previous.source == request.source)
-    {
+    if let Some(previous) = previous.filter(|previous| previous.source == source_text) {
         ensure!(
             checkpoint.revision >= previous.revision,
             "catalog revision rollback"
@@ -265,6 +267,20 @@ pub fn verify_catalog(
         );
     }
     let manifest_base = base_url(&manifest.base_url, &source)?;
+    Ok((manifest, checkpoint, source, manifest_base))
+}
+
+/// Verify the catalog for one device, fetching each document through `fetch`
+/// (its URL and the most bytes it may have): the manifest, and only when the
+/// device's line names a newer generation, the release's document and its
+/// signed descriptor.
+pub fn verify_catalog(
+    keys: &[[u8; 32]],
+    request: &CatalogRequest<'_>,
+    mut fetch: impl FnMut(&Url, u64) -> Result<Vec<u8>>,
+) -> Result<VerifiedCatalog> {
+    let (manifest, checkpoint, source, manifest_base) =
+        read_manifest(request.source, request.checkpoint, &mut fetch)?;
     let mut lines = BTreeSet::new();
     let mut own = None;
     for line in manifest.products {
