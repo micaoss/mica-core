@@ -91,7 +91,8 @@ pub(crate) struct UpdateConfig(pub(super) Value);
 ///
 /// Accepted keys: `policy` (`off`/`check`/`auto`), `checkIntervalMinutes`,
 /// `checkAt` (`HH:MM` UTC, the time of day the check is anchored to),
-/// `rebootPolicy` (`manual`/`window`), `source.url`, `network`,
+/// `rebootPolicy` (`manual`/`window`), `coreChannel` (the core channel to
+/// follow: lowercase letters, digits and hyphens), `source.url`, `network`,
 /// `maintenance` and `rebootGate`. Anything else — including a
 /// trust anchor under any name, at any depth — is **422** naming the key: the
 /// address this device dials is the operator's, what it will accept is baked

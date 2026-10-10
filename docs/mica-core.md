@@ -189,6 +189,13 @@ absence is reported with its reason rather than as a healthy reading:
   policy: the check cadence and its optional time of day, the maintenance window, the
   safe-to-reboot gate and its bounded override, and the failed IDs and generation floor that keep
   a rejected release from coming back.
+  One update at a time, of either kind: a check reads the core line of the channel the device
+  follows (`coreChannel`: the operator's, else the product's, else `general`) and names a newer
+  core set before it reads the product line, so a core set is installed, rebooted into and
+  confirmed before the system update behind it. Fetch, install, the maintenance window and the
+  reboot gate are the same for both; `update.lifecycle` says which kind is on offer and staged,
+  and `update.core` the sets held and the boots a set on trial has left. A `mica-deploy` from
+  before core sets is read as having no core line.
 - **Power, reset and recovery.** Reboot and power-off are recorded with their caller before they
   run. A staged reset applies one tier: `configuration`, `application-data` or `full-factory`
   (which keeps identity). A board-declared physical recovery action at boot maps to a tier. A
@@ -335,6 +342,19 @@ It is released once and taken by every product of the architecture on the channe
   updating to. A set that reaches healthy replaces the old one, whose objects are released; a set
   that does not is dropped. A core update and a system update are never on trial together.
 - **A core archive** is `MICAUPD1` with the signed core set as its envelope and the set's objects.
+- **State.** SYSTEM `core-sets/<id>.json` holds each signed set and `core-sets/state.json` names
+  `current` and at most one `pending`; only the running system writes them. DATA
+  `meta/core-trial.json` counts the pending set's boots (three). The runkit mounts DATA before it
+  composes, spends one boot, then tries the pending set, and passes over one it cannot
+  authenticate or select from; with no `current` it composes the deployment's own `core`. It
+  leaves `/run/mica/core.json` (`coreSetId`, `pending`) for the running system.
+- **Commands.** `mica-deploy core-check --source <root> --channel <c>`, `core-fetch`,
+  `core-install <set> --objects <dir>`, `core-status`. `import` takes either archive and names
+  which (`kind`). `confirm`, which the health gate calls, makes the booted set current or drops
+  a set whose trial is spent; `fail-boot` with a set on trial retires no deployment. A core set
+  is not installed while a deployment is on trial, nor by a runkit from before core sets; a
+  deployment is not installed while a set is pending, nor when the current set does not select
+  on its root, nor as `mica/deployment/v2` on a device with no set.
 
 The server catalog is **unsigned** and comes in three documents, each fetched only when needed.
 The configured source is an **update root** ending in `/` (http or https, a host, no user info,
@@ -377,7 +397,8 @@ the new schema, then publish it.
 
 The operator
 document `/mica/config/updates.json` is `mica/update-config/v1` and the baked defaults are
-`mica/meta/v1` (`update` is `source`, `policy`, `checkIntervalMinutes`).
+`mica/meta/v1` (`update` is `source`, `policy`, `checkIntervalMinutes` and the optional
+`coreChannel`, `general` when absent).
 
 The shared fixtures in `crates/mica-deploy/tests/component-contracts/` (the documents, the
 catalog, the refused schemas and cases, the chunker vector and the broken indexes) are generated

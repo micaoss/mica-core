@@ -10,8 +10,11 @@ use super::*;
 /// The candidate the last `check` selected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Available {
+    /// The deployment's id, or the core set's when `core` is set.
     pub deployment_id: String,
     pub version: String,
+    /// Whether the candidate is a core set rather than a system deployment.
+    pub core: bool,
 }
 
 /// What a finished `check` said.
@@ -49,12 +52,46 @@ pub fn parse_check(output: &ClientOutput) -> Result<CheckOutcome, CodedReason> {
         Some(Available {
             deployment_id: id.to_string(),
             version: version.into(),
+            core: false,
         })
     })();
     parsed.map(CheckOutcome::Selected).ok_or_else(|| {
         CodedReason::new(
             update_codes::CLIENT_OUTPUT_UNPARSEABLE,
             "check did not return a deployment selection",
+        )
+    })
+}
+
+/// Whether the client does not know a core verb at all: one from before core
+/// sets, which this daemon may well be running beside. clap answers an
+/// unknown subcommand with exit status 2.
+pub(super) fn core_unsupported(output: &ClientOutput) -> bool {
+    output.code == Some(2) && output.stderr.contains("unrecognized subcommand")
+}
+
+/// What `core-check` said: the channel's newer set, or none.
+pub fn parse_core_check(output: &ClientOutput) -> Result<CheckOutcome, CodedReason> {
+    let value = client_json("core-check", output)?;
+    if value.get("selected") == Some(&Value::Null) {
+        return Ok(CheckOutcome::NoneCompatible);
+    }
+    let parsed = (|| {
+        let id = value.pointer("/selected/coreSetId")?.as_str()?;
+        let version = value.pointer("/selected/set/version")?.as_str()?;
+        if !crate::deployment::valid_id(id) || version.is_empty() {
+            return None;
+        }
+        Some(Available {
+            deployment_id: id.to_string(),
+            version: version.into(),
+            core: true,
+        })
+    })();
+    parsed.map(CheckOutcome::Selected).ok_or_else(|| {
+        CodedReason::new(
+            update_codes::CLIENT_OUTPUT_UNPARSEABLE,
+            "core-check did not return a core set selection",
         )
     })
 }
@@ -143,8 +180,16 @@ pub fn parse_fetch(
         let id = value.get("id")?.as_str()?;
         let path = Path::new(value.get("path")?.as_str()?);
         let objects = Path::new(value.get("objects")?.as_str()?);
+        // A core set is staged under its own name, `core-<id>.json`: an
+        // import says which it carried, and `core-fetch` only ever stages one.
+        let name = match crate::deployment::staged_id(path) {
+            Some((staged, true)) if staged == id => {
+                format!("{}{id}.json", crate::deployment::CORE_DESCRIPTOR_PREFIX)
+            }
+            _ => format!("{id}.json"),
+        };
         if !crate::deployment::valid_id(id)
-            || path != verified_dir.join(format!("{id}.json"))
+            || path != verified_dir.join(name)
             || objects != verified_dir.join("objects")
         {
             return None;

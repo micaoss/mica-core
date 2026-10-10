@@ -95,6 +95,13 @@ pub fn validate(document: &UpdatesDocument) -> Result<(), String> {
     if let Some(check_at) = document.check_at.as_ref().and_then(Option::as_ref) {
         minutes_of_day(check_at).ok_or_else(|| format!("checkAt `{check_at}` is not HH:MM"))?;
     }
+    if let Some(channel) = document.core_channel.as_ref().and_then(Option::as_ref)
+        && !crate::configuration::is_core_channel(channel)
+    {
+        return Err(format!(
+            "coreChannel `{channel}` is not a channel name: lowercase letters, digits and hyphens"
+        ));
+    }
     // The document-local half of the rule. The half precedence creates -- a
     // baked `auto` under a document that names no policy -- cannot be seen
     // from here, and is [`EffectivePolicy::auto_window_refusal`].
@@ -124,6 +131,9 @@ pub struct UpdatesPatch {
     /// `HH:MM` UTC to anchor the check to; `null` returns it to the interval.
     #[serde(default, deserialize_with = "present")]
     pub check_at: Override<String>,
+    /// The core channel to follow; `null` returns it to the baked channel.
+    #[serde(default, deserialize_with = "present")]
+    pub core_channel: Override<String>,
     /// What the automatic path does after an install. Not an override —
     /// layer 1 bakes no default for it — so it has two states, not three.
     #[serde(default)]
@@ -160,6 +170,9 @@ pub fn apply_patch(mut document: UpdatesDocument, patch: UpdatesPatch) -> Update
     }
     if let Some(check_at) = patch.check_at {
         document.check_at = Some(check_at);
+    }
+    if let Some(core_channel) = patch.core_channel {
+        document.core_channel = Some(core_channel);
     }
     if let Some(reboot_policy) = patch.reboot_policy {
         document.reboot_policy = reboot_policy;

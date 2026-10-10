@@ -88,14 +88,20 @@ export function SystemPage() {
   )
 }
 
+type UpdateKind = 'deployment' | 'coreSet'
+
+interface CoreSetFact { id: string; channel: string; generation: number; version: string; selected?: string[] }
+
 // The update state document `GET /api/v1/update` answers; only the members
 // this read-only panel renders are typed.
 interface UpdateStateDoc {
   lifecycle?: {
     state?: string
     reason?: string
-    available?: { deploymentId: string; version: string }
+    /// `kind` says whether the candidate is a core set or a system deployment.
+    available?: { deploymentId: string; version: string; kind?: UpdateKind }
     deploymentId?: string
+    stagedKind?: UpdateKind | null
     last_check?: string
     client?: { available?: boolean; reason?: string }
     policy_error?: string
@@ -104,6 +110,8 @@ interface UpdateStateDoc {
   boot?: { deploymentId: string; kernelId: string; rootfsId: string; contentVerified: boolean; secureBoot: boolean; backend: 'uefi' | 'uboot-fit'; bootVerified: boolean }
   state?: { current: string | null; candidate: string | null; fallback: string | null; highestGeneration: number; failed: string[] }
   deployments?: { id: string; generation: number; version: string; kernelId: string; kernelRelease: string; rootfsId: string; triesLeft: number | null }[]
+  /// The device's core sets; absent on a device whose update client predates them.
+  core?: { current?: CoreSetFact | null; pending?: CoreSetFact | null; attemptsLeft?: number | null; boot?: { coreSetId?: string; pending?: boolean } }
 }
 
 const activeUpdateStates = new Set(['checking', 'downloading', 'installing', 'discarding'])
@@ -128,6 +136,13 @@ export function UpdatePanel() {
   const deployment = status.data?.state
   const running = status.data?.deployments?.find((entry) => entry.id === boot?.deploymentId)
   const healthy = !status.isPending && !status.isError && lifecycle?.state !== 'failed' && lifecycle?.state !== 'update-unavailable'
+  const core = status.data?.core
+  // A core update is named as one; a system update reads as it always has.
+  const kindOf = (kind?: UpdateKind | null) => kind === 'coreSet' ? `${t('system.update.kinds.coreSet')} · ` : ''
+  const setFact = (set: CoreSetFact) => t('system.update.coreSetValue', { version: set.version, channel: set.channel, generation: set.generation })
+  // Installed and not yet booted: a deployment, or a core set on trial.
+  const awaitsReboot = (deployment?.candidate && deployment.candidate !== boot?.deploymentId)
+    || (core?.pending && core.boot?.coreSetId !== core.pending.id)
   return (
     <Panel title={t('system.update.title')} description={t('system.update.description')} action={<PackageSearch className="size-5 text-muted-foreground" />}>
       <StatusDot state={status.isPending ? 'pending' : healthy ? 'ok' : 'warning'}>
@@ -135,8 +150,10 @@ export function UpdatePanel() {
       </StatusDot>
       {lifecycle?.reason ? <p className="text-sm text-muted-foreground">{lifecycle.reason}</p> : null}
       <FactList facts={[
-        available && { id: 'available', label: t('system.update.available'), value: `${available.version} · ${available.deploymentId}` },
-        lifecycle?.deploymentId && { id: 'staged', label: t('system.update.staged'), value: lifecycle.deploymentId, mono: true },
+        available && { id: 'available', label: t('system.update.available'), value: `${kindOf(available.kind)}${available.version} · ${available.deploymentId}` },
+        lifecycle?.deploymentId && { id: 'staged', label: t('system.update.staged'), value: `${kindOf(lifecycle.stagedKind)}${lifecycle.deploymentId}`, mono: true },
+        core?.current && { id: 'coreSet', label: t('system.update.coreSet'), value: setFact(core.current) },
+        core?.pending && { id: 'corePending', label: t('system.update.corePending'), value: `${setFact(core.pending)} · ${t('system.update.coreAttempts', { count: core.attemptsLeft ?? 0 })}` },
         boot && { id: 'running', label: t('system.update.running'), value: boot.deploymentId, mono: true },
         boot && { id: 'kernel', label: t('system.update.kernel'), value: boot.kernelId, mono: true },
         boot && { id: 'rootfs', label: t('system.update.rootfs'), value: boot.rootfsId, mono: true },
@@ -150,7 +167,7 @@ export function UpdatePanel() {
           ? { id: 'failed', label: t('system.update.failed'), value: deployment.failed.join(', '), mono: true } : undefined,
         lifecycle?.last_check && { id: 'lastCheck', label: t('system.update.lastCheck'), value: lifecycle.last_check },
       ]} />
-      {deployment?.candidate && deployment.candidate !== boot?.deploymentId ? <Callout tone="warning" title={t('system.update.pendingReboot')} /> : null}
+      {awaitsReboot ? <Callout tone="warning" title={t('system.update.pendingReboot')} /> : null}
       {lifecycle?.client && lifecycle.client.available === false ? <Callout tone="warning" title={t('system.update.clientUnavailable', { reason: lifecycle.client.reason ?? '' })} /> : null}
       {lifecycle?.policy_error ? <Callout tone="danger" title={t('system.update.policyError', { reason: lifecycle.policy_error })} /> : null}
       {status.error ? <Callout tone="danger" title={failureDetail(status.error, t('common.requestFailed'))} /> : null}

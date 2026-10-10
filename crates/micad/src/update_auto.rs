@@ -486,9 +486,7 @@ impl AutoDriver {
 /// verified descriptor under its target name and nothing else, so the file name
 /// is what a check's selection is compared against.
 fn descriptor_id(descriptor: &str) -> Option<&str> {
-    Path::new(descriptor)
-        .file_stem()
-        .and_then(|name| name.to_str())
+    crate::deployment::staged_id(Path::new(descriptor)).map(|(id, _)| id)
 }
 
 /// A cadence a test moves by hand, and the reason [`Cadence`] exists.

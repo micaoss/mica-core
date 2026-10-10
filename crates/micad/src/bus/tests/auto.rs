@@ -57,6 +57,15 @@ impl crate::update_lifecycle::UpdateClient for ScriptedClient {
             })
             .cloned()
             .unwrap_or_default();
+        // A client from before core sets: it knows no core verb, and the
+        // product line's call lists stay the product line's.
+        if verb.starts_with("core-") {
+            return Ok(crate::update_lifecycle::ClientOutput {
+                code: Some(2),
+                stdout: String::new(),
+                stderr: format!("error: unrecognized subcommand '{verb}'"),
+            });
+        }
         self.calls.lock().expect("client calls").push(verb.clone());
         let id = self.selected.strip_suffix(".json").unwrap();
         let stdout = match verb.as_str() {

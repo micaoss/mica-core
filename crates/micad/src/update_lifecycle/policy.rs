@@ -15,7 +15,7 @@ impl UpdateLifecycle {
     /// Installing a staged candidate consumes its pending acquisition state.
     pub async fn installed(&self, status: &Status) {
         let mut machine = self.machine.lock().await;
-        if status.state.candidate.is_some() {
+        if status.update_pending() {
             machine.descriptor = None;
             machine.available = None;
         }

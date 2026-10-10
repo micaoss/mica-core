@@ -49,7 +49,8 @@ describe('the automatic update policy', () => {
     stubFetch({ '/api/v1/update': policy, '/api/v1/provisioning/status': bakedOnly })
     renderPanel(<AutomaticUpdatesPanel />)
 
-    expect(await screen.findAllByText('from the image')).toHaveLength(1)
+    // The address and the core channel, each following the image.
+    expect(await screen.findAllByText('from the image')).toHaveLength(2)
     // The form holds the OPERATOR's value, which is empty here. Seeding it
     // from the effective value would let a save pin the image's default into
     // the operator's layer without anyone asking for it.
@@ -71,6 +72,32 @@ describe('the automatic update policy', () => {
     const call = fetch.mock.calls.find(([input]) => String(input) === '/api/v1/update/config')
     expect(call?.[1]?.method).toBe('POST')
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ source: { url: 'https://mirror.site.example/repo' } })
+  })
+
+  /// The core channel is the operator's to change, and clearing it returns
+  /// the device to the channel its image follows.
+  it('writes the core channel the operator names, and null when it is cleared', async () => {
+    const fetch = stubFetch({
+      '/api/v1/update': policy,
+      '/api/v1/provisioning/status': { ...bakedOnly, operator: { update: { coreChannel: 'lts' } } },
+      'POST /api/v1/update/config': () => jsonResponse({ coreChannel: 'beta' }),
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    const field = await screen.findByLabelText(/Core channel/)
+    await waitFor(() => expect((field as HTMLInputElement).value).toBe('lts'))
+    await userEvent.clear(field)
+    await userEvent.type(field, 'beta')
+    await userEvent.click(screen.getByRole('button', { name: 'Save source' }))
+    const body = async (at: number) => {
+      await waitFor(() => expect(fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/update/config')).toHaveLength(at))
+      return JSON.parse(String(fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/update/config')[at - 1]?.[1]?.body))
+    }
+    expect((await body(1)).coreChannel).toBe('beta')
+
+    await userEvent.clear(field)
+    await userEvent.click(screen.getByRole('button', { name: 'Save source' }))
+    expect((await body(2)).coreChannel).toBeNull()
   })
 
   it('writes the mode, the cadence and the reboot policy together', async () => {

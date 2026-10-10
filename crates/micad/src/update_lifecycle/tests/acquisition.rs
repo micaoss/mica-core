@@ -376,6 +376,7 @@ pub(super) fn native_acquisition_json_selects_and_stages_only_a_deployment_descr
         CheckOutcome::Selected(Available {
             deployment_id: id.to_string(),
             version: "1.0".into(),
+            core: false,
         })
     );
     let none = ClientOutput {
@@ -399,4 +400,133 @@ pub(super) fn native_acquisition_json_selects_and_stages_only_a_deployment_descr
         parse_probe(&probe).unwrap(),
         ProbeOutcome::Ready(_)
     ));
+}
+
+/// The core line is read first, on the channel the policy follows. A newer
+/// set is the update; the product's catalog is not read in that pass.
+#[tokio::test]
+pub(super) async fn a_check_names_the_channels_core_set_before_any_deployment() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = policy_file(
+        &dir,
+        r#"{"source":{"url":"https://updates.example/update/"},"coreChannel":"lts"}"#,
+    );
+    let client = MockClient::new(vec![
+        ready_probe(),
+        ("core-check", Ok(core_selection_output())),
+    ]);
+    let calls = Arc::clone(&client.calls);
+    let host = TestHost::new();
+    let (lifecycle, _) = lifecycle(client, policy, Arc::clone(&host));
+    lifecycle.request_check("test").await.unwrap();
+    let recorded = settled(&host).await;
+    assert_eq!(recorded["available"]["kind"], "coreSet");
+    assert_eq!(recorded["available"]["version"], "0.0.6");
+    assert_eq!(recorded["available"]["deploymentId"], "c".repeat(64));
+    assert_eq!(recorded["policy"]["coreChannel"], "lts");
+    assert_eq!(
+        calls.lock().unwrap()[1],
+        [
+            "--max-bytes",
+            "500000000",
+            "core-check",
+            "--source",
+            "https://updates.example/update/",
+            "--channel",
+            "lts"
+        ]
+    );
+}
+
+/// A channel with nothing newer leaves the pass to the product line, on the
+/// general channel when the policy names none.
+#[tokio::test]
+pub(super) async fn a_current_core_set_leaves_the_check_to_the_product_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = policy_file(
+        &dir,
+        r#"{"source":{"url":"https://updates.example/update/"}}"#,
+    );
+    let client = MockClient::new(vec![
+        ready_probe(),
+        ("core-check", Ok(no_selection())),
+        ("check", Ok(selection_output())),
+    ]);
+    let calls = Arc::clone(&client.calls);
+    let host = TestHost::new();
+    let (lifecycle, _) = lifecycle(client, policy, Arc::clone(&host));
+    lifecycle.request_check("test").await.unwrap();
+    let recorded = settled(&host).await;
+    assert_eq!(recorded["available"]["kind"], "deployment");
+    assert_eq!(recorded["policy"]["coreChannel"], "general");
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls[1][2], "core-check");
+    assert_eq!(calls[1][6], "general");
+    assert_eq!(calls[2][2], "check");
+}
+
+/// A core line that fails is the check's failure: the product line is not
+/// read behind a core line nobody could read, because a system update may
+/// need the set that line would have named.
+#[tokio::test]
+pub(super) async fn a_failed_core_check_fails_the_check() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = policy_file(
+        &dir,
+        r#"{"source":{"url":"https://updates.example/update/"}}"#,
+    );
+    let client = MockClient::new(vec![
+        ready_probe(),
+        (
+            "core-check",
+            Ok(output(
+                1,
+                "",
+                "Error: the core set does not match its digest and length",
+            )),
+        ),
+    ]);
+    let host = TestHost::new();
+    let (lifecycle, _) = lifecycle(client, policy, Arc::clone(&host));
+    lifecycle.request_check("test").await.unwrap();
+    let recorded = settled(&host).await;
+    assert_eq!(recorded["state"], "failed");
+    assert!(
+        recorded["reason"]
+            .as_str()
+            .unwrap()
+            .contains("does not match its digest"),
+        "{recorded}"
+    );
+}
+
+/// A fetched core set is staged under its own name and is what `ready` names.
+#[tokio::test]
+pub(super) async fn a_fetch_stages_the_core_set_under_its_own_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = policy_file(
+        &dir,
+        r#"{"source":{"url":"https://updates.example/update/"}}"#,
+    );
+    let client = MockClient::new(vec![ready_probe(), ("core-fetch", Ok(core_fetch_output()))]);
+    let host = TestHost::new();
+    let (lifecycle, _) = lifecycle(client, policy, Arc::clone(&host));
+    lifecycle.request_fetch("test").await.unwrap();
+    let recorded = settled(&host).await;
+    assert_eq!(recorded["state"], "ready");
+    assert_eq!(recorded["deploymentId"], "c".repeat(64));
+    assert_eq!(recorded["stagedKind"], "coreSet");
+    assert_eq!(
+        lifecycle.staged_descriptor().await.as_deref(),
+        Some(core_staged_path().as_str())
+    );
+    // A core set's name on a deployment's path, or the reverse, is not staged.
+    let wrong = output(
+        0,
+        &json!({"id":"c".repeat(64),"path":format!("/mica/updates/verified/core-{}.json", "d".repeat(64)),
+            "objects":"/mica/updates/verified/objects"})
+        .to_string(),
+        "",
+    );
+    assert!(parse_fetch(&wrong, std::path::Path::new("/mica/updates/verified")).is_err());
 }

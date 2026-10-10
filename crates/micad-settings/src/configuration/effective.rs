@@ -11,6 +11,8 @@ pub struct Selection {
     pub url: Option<String>,
     pub mode: UpdateMode,
     pub check_interval_minutes: u64,
+    /// The core channel followed: the operator's, or the product's.
+    pub core_channel: String,
 }
 
 /// The workspace values layer 2 owns outright.
@@ -81,6 +83,10 @@ pub fn resolve(baked: &BakedUpdate, document: UpdatesDocument) -> EffectivePolic
                 .check_interval_minutes
                 .flatten()
                 .unwrap_or(baked.check_interval_minutes),
+            core_channel: document
+                .core_channel
+                .flatten()
+                .unwrap_or_else(|| baked.core_channel.clone()),
         }),
         workspace: Workspace {
             max_bytes: document.source.max_bytes,

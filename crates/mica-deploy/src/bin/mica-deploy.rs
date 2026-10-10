@@ -430,6 +430,15 @@ fn execute() -> Result<()> {
                 );
                 json!(acquisition.import_any(&mut std::fs::File::open(archive)?)?)
             }
+            Action::CoreCheck { .. } | Action::CoreFetch { .. }
+                if Path::new(core_state::BOOT_FILE).symlink_metadata().is_err() =>
+            {
+                // Nothing is offered to a runkit that could not compose it.
+                match cli.command {
+                    Action::CoreCheck { .. } => json!({"revision":null,"selected":null}),
+                    _ => serde_json::Value::Null,
+                }
+            }
             Action::CoreCheck { source, channel } => {
                 let catalog = acquisition.core_check(&source, &channel)?;
                 json!({"revision":catalog.checkpoint.revision,"selected":catalog.selected})
@@ -470,10 +479,11 @@ fn execute() -> Result<()> {
             // After the deployment: the health gate's verdict is on the boot
             // as a whole, and a deployment that could not be confirmed
             // confirms nothing composed over it.
-            let cores = store.settle_core(&booted_core, &keys)?;
-            let mut value = json!(state);
-            value["coreSet"] = json!(cores);
-            Ok(value)
+            // The answer stays the deployment state alone: micad, which may be
+            // older than this binary, reads it strictly. `core-status` reports
+            // the sets.
+            store.settle_core(&booted_core, &keys)?;
+            Ok(json!(state))
         }
         // A boot that failed with a core set on trial is the set's failure,
         // and its trial has already paid for it: the deployment is kept.
@@ -503,18 +513,27 @@ fn execute() -> Result<()> {
         Action::Gc => store
             .collect(&receipt, &keys)
             .map(|count| json!({"removedFiles":count})),
-        Action::CoreInstall { set, objects } => store
-            .install_core(
-                &read_bounded(&set, core_state::MAX_ENVELOPE_BYTES)?,
-                &keys,
-                &CoreTarget {
-                    arch: &policy.identity.arch,
-                    features: &features()?,
-                    root_level: running_root_level(&keys)?,
-                },
-                &objects,
-            )
-            .map(|value| json!(value)),
+        Action::CoreInstall { set, objects } => {
+            // The running kernel's runkit is the one that will boot next. One
+            // from before core sets never tries a pending set, which would
+            // stay pending and hold every later update behind it.
+            ensure!(
+                Path::new(core_state::BOOT_FILE).symlink_metadata().is_ok(),
+                "the running kernel's runkit predates core sets; install a system update first"
+            );
+            store
+                .install_core(
+                    &read_bounded(&set, core_state::MAX_ENVELOPE_BYTES)?,
+                    &keys,
+                    &CoreTarget {
+                        arch: &policy.identity.arch,
+                        features: &features()?,
+                        root_level: running_root_level(&keys)?,
+                    },
+                    &objects,
+                )
+                .map(|value| json!(value))
+        }
         Action::Status
         | Action::CoreStatus
         | Action::Probe

@@ -27,6 +27,9 @@ pub fn provisioning_status_at(
     if let Some(policy) = &document.policy {
         operator_update.insert("policy".into(), json!(policy));
     }
+    if let Some(channel) = &document.core_channel {
+        operator_update.insert("coreChannel".into(), json!(channel));
+    }
     let mut operator = Map::new();
     if !operator_update.is_empty() {
         operator.insert("update".into(), Value::Object(operator_update));
@@ -67,6 +70,7 @@ pub fn provisioning_status_at(
             "update": {
                 "source": selection.url,
                 "policy": selection.mode,
+                "coreChannel": selection.core_channel,
             },
             "fleet": {
                 "url": fleet.url,

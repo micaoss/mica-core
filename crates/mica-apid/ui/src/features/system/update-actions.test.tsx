@@ -52,6 +52,31 @@ it('displays the running, candidate and fallback identities with the running com
   for (const id of ['a', 'b', 'c', 'd', 'e']) expect(await screen.findByText(id.repeat(64))).toBeTruthy()
 })
 
+/// A core set is an update like a deployment, named as what it is: the one on
+/// offer, the one staged, the one composed, and the one on trial with the
+/// boots it has left.
+it('names a core update as one and reports the sets the device holds', async () => {
+  stubFetch({ '/api/v1/update': {
+    boot: { deploymentId: 'a'.repeat(64), kernelId: 'c'.repeat(64), rootfsId: 'd'.repeat(64), contentVerified: true, secureBoot: true, backend: 'uefi', bootVerified: true },
+    state: { current: 'a'.repeat(64), candidate: null, fallback: null, highestGeneration: 3, failed: [] },
+    lifecycle: { state: 'reboot-required', available: { deploymentId: 'f'.repeat(64), version: '0.0.7', kind: 'coreSet' }, deploymentId: 'f'.repeat(64), stagedKind: 'coreSet' },
+    core: {
+      current: { id: '1'.repeat(64), channel: 'general', generation: 4, version: '0.0.6' },
+      pending: { id: '2'.repeat(64), channel: 'general', generation: 5, version: '0.0.7' },
+      attemptsLeft: 3,
+      boot: { coreSetId: '1'.repeat(64), pending: false },
+    },
+  } })
+  renderPanel(<UpdatePanel />)
+
+  expect(await screen.findByText(`core · 0.0.7 · ${'f'.repeat(64)}`)).toBeTruthy()
+  expect(screen.getByText(`core · ${'f'.repeat(64)}`)).toBeTruthy()
+  expect(screen.getByText('0.0.6 · general generation 4')).toBeTruthy()
+  expect(screen.getByText('0.0.7 · general generation 5 · 3 boot(s) left')).toBeTruthy()
+  // Installed and not booted yet, with no deployment candidate at all.
+  expect(screen.getByText('An installed update awaits its first boot.')).toBeTruthy()
+})
+
 describe('the offline import', () => {
   /// The archive is the request body, not a form field: it is measured in
   /// hundreds of megabytes and the device writes it as it arrives.

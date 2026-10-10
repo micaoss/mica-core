@@ -362,6 +362,27 @@ impl UpdateLifecycle {
         policy: &EffectivePolicy,
     ) -> Result<CheckOutcome, Failure> {
         self.probe(&policy.workspace).await?;
+        // The core line first: a core set is the smaller and more frequent
+        // update, and a system update whose root the device's set does not
+        // run on needs the newer set installed before it.
+        let selection = selection_of(policy)?;
+        let args = core_args("core-check", selection, &policy.workspace)?;
+        let output = self
+            .client
+            .run(&args, CHECK_TIMEOUT)
+            .await
+            .map_err(|error| {
+                Failure::Error(CodedReason::new(
+                    update_codes::CLIENT_SPAWN_FAILED,
+                    format!("core-check: {error:#}"),
+                ))
+            })?;
+        if !core_unsupported(&output)
+            && let CheckOutcome::Selected(available) =
+                parse_core_check(&output).map_err(Failure::Error)?
+        {
+            return Ok(CheckOutcome::Selected(available));
+        }
         let args = acquisition_args("check", selection_of(policy)?, &policy.workspace)?;
         let output = self
             .client
@@ -381,6 +402,25 @@ impl UpdateLifecycle {
         policy: &EffectivePolicy,
     ) -> Result<FetchOutcome, Failure> {
         self.probe(&policy.workspace).await?;
+        // In the order a check names them: the channel's core set, then the
+        // product's deployment.
+        let args = core_args("core-fetch", selection_of(policy)?, &policy.workspace)?;
+        let output = self
+            .client
+            .run(&args, FETCH_TIMEOUT)
+            .await
+            .map_err(|error| {
+                Failure::Error(CodedReason::new(
+                    update_codes::CLIENT_SPAWN_FAILED,
+                    format!("core-fetch: {error:#}"),
+                ))
+            })?;
+        if !core_unsupported(&output)
+            && let FetchOutcome::Staged(path) =
+                parse_fetch(&output, &self.verified_dir()).map_err(Failure::Error)?
+        {
+            return Ok(FetchOutcome::Staged(path));
+        }
         let args = acquisition_args("fetch", selection_of(policy)?, &policy.workspace)?;
         let output = self
             .client
@@ -400,6 +440,18 @@ impl UpdateLifecycle {
         self.machine.lock().await.boot_phase = Some(status.phase());
         self.record_snapshot().await;
     }
+}
+
+/// The arguments of a core verb: the source and the channel followed.
+pub(super) fn core_args(
+    verb: &str,
+    selection: &Selection,
+    workspace: &Workspace,
+) -> Result<Vec<String>, Failure> {
+    let mut args = acquisition_args(verb, selection, workspace)?;
+    args.push("--channel".into());
+    args.push(selection.core_channel.clone());
+    Ok(args)
 }
 
 pub(super) fn acquisition_args(

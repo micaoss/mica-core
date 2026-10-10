@@ -263,6 +263,7 @@ fn candidate(name: &str, version: &str) -> Available {
             .expect("descriptor name")
             .to_string(),
         version: version.to_string(),
+        core: false,
     }
 }
 

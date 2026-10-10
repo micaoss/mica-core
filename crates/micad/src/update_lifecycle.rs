@@ -205,16 +205,9 @@ impl UpdateLifecycle {
                 verified.display()
             ));
         }
-        if path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_none_or(|name| {
-                name.strip_suffix(".json")
-                    .is_none_or(|id| !crate::deployment::valid_id(id))
-            })
-        {
+        if crate::deployment::staged_id(path).is_none() {
             return Err(format!(
-                "path `{}` is not a deployment descriptor",
+                "path `{}` is not a deployment descriptor or a core set",
                 path.display()
             ));
         }

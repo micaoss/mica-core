@@ -56,6 +56,92 @@ pub struct Status {
     pub boot: Boot,
     pub state: State,
     pub deployments: Vec<Deployment>,
+    /// The device's core sets, from `mica-deploy core-status`. Not part of
+    /// `status`' own answer, which an older micad reads strictly: asked
+    /// separately, and absent when the client predates core sets.
+    #[serde(skip)]
+    pub core: Option<CoreStatus>,
+}
+
+/// One held core set.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoreSet {
+    pub id: String,
+    pub channel: String,
+    pub generation: u64,
+    pub version: String,
+    /// The packages this device composes from it.
+    #[serde(default)]
+    pub selected: Vec<String>,
+}
+
+/// What the runkit composed this boot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoreBoot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_set_id: Option<String>,
+    #[serde(default)]
+    pub pending: bool,
+}
+
+/// The core sets a device holds. Read leniently: the client that prints it
+/// may be newer than this daemon and say more.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoreStatus {
+    pub current: Option<CoreSet>,
+    pub pending: Option<CoreSet>,
+    /// The boots the pending set has left to reach healthy.
+    pub attempts_left: Option<u8>,
+    #[serde(default)]
+    pub boot: CoreBoot,
+}
+
+impl CoreStatus {
+    pub fn parse(text: &str) -> Result<Self> {
+        ensure!(text.len() <= 65536, "core set status exceeds bound");
+        let status: Self = serde_json::from_str(text)?;
+        for set in [&status.current, &status.pending].into_iter().flatten() {
+            ensure!(valid_id(&set.id), "invalid core set identity");
+        }
+        Ok(status)
+    }
+
+    /// The phase a pending set puts the device in, if one is pending.
+    fn phase(&self) -> Option<(&'static str, String)> {
+        let pending = self.pending.as_ref()?;
+        Some(if self.boot.core_set_id.as_ref() == Some(&pending.id) {
+            (
+                "validating",
+                "The running core set awaits health confirmation".into(),
+            )
+        } else {
+            (
+                "reboot-required",
+                format!(
+                    "Core set {} ({} generation {}) is installed and awaits reboot",
+                    pending.version, pending.channel, pending.generation
+                ),
+            )
+        })
+    }
+}
+
+/// The prefix of a staged core set in `verified/`: `core-<id>.json`.
+pub const CORE_DESCRIPTOR_PREFIX: &str = "core-";
+
+/// The id a staged file in `verified/` carries, and whether it is a core
+/// set's: `<id>.json` for a deployment, `core-<id>.json` for a core set.
+#[must_use]
+pub fn staged_id(path: &Path) -> Option<(&str, bool)> {
+    let stem = path.file_name()?.to_str()?.strip_suffix(".json")?;
+    let (id, core) = match stem.strip_prefix(CORE_DESCRIPTOR_PREFIX) {
+        Some(id) => (id, true),
+        None => (stem, false),
+    };
+    valid_id(id).then_some((id, core))
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -151,7 +237,23 @@ impl Status {
             .find(|deployment| deployment.id == self.boot.deployment_id)
     }
 
+    /// Whether something installed still waits for its reboot or its health
+    /// confirmation: a deployment or a core set.
+    #[must_use]
+    pub fn update_pending(&self) -> bool {
+        self.state.candidate.is_some()
+            || self
+                .core
+                .as_ref()
+                .is_some_and(|core| core.pending.is_some())
+    }
+
     pub fn phase(&self) -> (&'static str, String) {
+        // A core set on trial runs over a confirmed deployment, so its phase
+        // is the device's.
+        if let Some(phase) = self.core.as_ref().and_then(CoreStatus::phase) {
+            return phase;
+        }
         let running = &self.boot.deployment_id;
         if self.state.failed.contains(running) {
             return (
@@ -223,6 +325,10 @@ impl Status {
             entry.insert(key.clone(), value.clone());
         }
         entry.insert("rollback".into(), self.rollback());
+        match &self.core {
+            Some(core) => entry.insert("core".into(), serde_json::to_value(core)?),
+            None => entry.remove("core"),
+        };
         Ok(())
     }
 }
@@ -263,20 +369,34 @@ impl NativeClient {
 #[async_trait::async_trait]
 impl DeploymentClient for NativeClient {
     async fn status(&self) -> Result<Status> {
-        Status::parse(
+        let mut status = Status::parse(
             &self
                 .action(vec!["status".into()], Duration::from_secs(30))
                 .await?,
-        )
+        )?;
+        // A client from before core sets has no such command, and the device
+        // then has no sets to report.
+        status.core = match self
+            .action(vec!["core-status".into()], Duration::from_secs(30))
+            .await
+        {
+            Ok(text) => Some(CoreStatus::parse(&text)?),
+            Err(error) => {
+                tracing::debug!(%error, "core set status unavailable");
+                None
+            }
+        };
+        Ok(status)
     }
     async fn install(&self, descriptor: &Path) -> Result<()> {
         let objects = descriptor
             .parent()
             .context("missing descriptor directory")?
             .join("objects");
+        let core = staged_id(descriptor).is_some_and(|(_, core)| core);
         self.action(
             vec![
-                "install".into(),
+                if core { "core-install" } else { "install" }.into(),
                 descriptor.to_string_lossy().into_owned(),
                 "--objects".into(),
                 objects.to_string_lossy().into_owned(),
@@ -320,6 +440,75 @@ pub(crate) mod tests {
         json!({"boot":{"deploymentId":current,"entry":format!("mica-{current}.conf"),"kernelId":kernel,
             "rootfsId":root,"contentVerified":true,"secureBoot":true,"bootVerified":true,"backend":"uefi"},
             "state":{"highestGeneration":2,"current":current,"fallback":fallback,"candidate":null,"failed":[]},"deployments":deployments})
+    }
+
+    /// A core set on trial is the device's phase, over whatever the confirmed
+    /// deployment under it says, and counts as an update still pending.
+    #[test]
+    fn a_pending_core_set_drives_the_phase_until_it_settles() {
+        let mut status = Status::parse(&fixture().to_string()).unwrap();
+        assert!(!status.update_pending());
+        let set = |id: &str| CoreSet {
+            id: id.repeat(64),
+            channel: "general".into(),
+            generation: 4,
+            version: "0.0.6".into(),
+            selected: vec!["micad".into()],
+        };
+        status.core = Some(CoreStatus {
+            current: Some(set("e")),
+            pending: Some(set("f")),
+            attempts_left: Some(3),
+            boot: CoreBoot {
+                core_set_id: Some("e".repeat(64)),
+                pending: false,
+            },
+        });
+        assert!(status.update_pending());
+        let (phase, reason) = status.phase();
+        assert_eq!(phase, "reboot-required");
+        assert!(reason.contains("0.0.6"), "{reason}");
+        status.core.as_mut().unwrap().boot = CoreBoot {
+            core_set_id: Some("f".repeat(64)),
+            pending: true,
+        };
+        assert_eq!(status.phase().0, "validating");
+        let mut entry = serde_json::Map::new();
+        status.merge_into(&mut entry).unwrap();
+        assert_eq!(entry["core"]["pending"]["generation"], 4);
+        assert_eq!(entry["core"]["attemptsLeft"], 3);
+        status.core.as_mut().unwrap().pending = None;
+        assert_eq!(status.phase().0, "succeeded");
+    }
+
+    /// A staged file says what it is by its name, and by nothing else.
+    #[test]
+    fn a_staged_file_names_a_deployment_or_a_core_set() {
+        let id = "a".repeat(64);
+        let path = |name: String| std::path::PathBuf::from("/mica/updates/verified").join(name);
+        assert_eq!(
+            staged_id(&path(format!("{id}.json"))),
+            Some((id.as_str(), false))
+        );
+        assert_eq!(
+            staged_id(&path(format!("core-{id}.json"))),
+            Some((id.as_str(), true))
+        );
+        for name in [
+            format!("{id}.partial"),
+            "core-.json".into(),
+            format!("core-core-{id}.json"),
+        ] {
+            assert_eq!(staged_id(&path(name.clone())), None, "{name}");
+        }
+        // The client's own answer is read leniently, and its ids are held to the rule.
+        assert!(
+            CoreStatus::parse(
+                r#"{"current":null,"pending":null,"attemptsLeft":null,"boot":{},"later":1}"#
+            )
+            .is_ok()
+        );
+        assert!(CoreStatus::parse(r#"{"current":{"id":"x","channel":"general","generation":1,"version":"1"},"pending":null,"attemptsLeft":null}"#).is_err());
     }
 
     #[test]

@@ -374,10 +374,18 @@ impl MicadService {
         if !deployment::valid_id(deployment_id) {
             return Err(fdo::Error::InvalidArgs("invalid deployment ID".into()));
         }
-        let path = self
-            .update
-            .verified_dir()
-            .join(format!("{deployment_id}.json"));
+        // The id of whatever is staged: a deployment's descriptor, or a core
+        // set under its own name.
+        let verified = self.update.verified_dir();
+        let core = verified.join(format!(
+            "{}{deployment_id}.json",
+            deployment::CORE_DESCRIPTOR_PREFIX
+        ));
+        let path = if core.symlink_metadata().is_ok() {
+            core
+        } else {
+            verified.join(format!("{deployment_id}.json"))
+        };
         self.request_install(sender_of(&header), &path.to_string_lossy())
             .await
     }

@@ -87,6 +87,14 @@ pub struct UpdatesDocument {
         skip_serializing_if = "Option::is_none"
     )]
     pub check_at: Override<String>,
+    /// The core channel this device follows instead of the one its product
+    /// bakes. Absent or `null` follows the baked channel.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub core_channel: Override<String>,
     /// What the automatic path does after an install. Read only under
     /// [`UpdateMode::Auto`], which is the only mode that installs. Not an
     /// override: layer 1 carries no default for it.

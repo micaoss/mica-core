@@ -103,13 +103,16 @@ pub(super) fn render_entry(
             json!({
                 "deploymentId": available.deployment_id,
                 "version": available.version,
+                "kind": if available.core { "coreSet" } else { "deployment" },
             }),
         );
     }
     if let Some(descriptor) = &machine.descriptor {
+        let staged = crate::deployment::staged_id(Path::new(descriptor));
+        entry.insert("deploymentId".into(), json!(staged.map(|(id, _)| id)));
         entry.insert(
-            "deploymentId".into(),
-            json!(Path::new(descriptor).file_stem().and_then(|id| id.to_str())),
+            "stagedKind".into(),
+            json!(staged.map(|(_, core)| if core { "coreSet" } else { "deployment" })),
         );
     }
     if let Some(last_check) = &machine.last_check {
@@ -199,6 +202,7 @@ pub(super) fn render_entry(
             // selection does not, and `null` is "no anchor", not "unknown".
             "checkAt": policy.check_at.clone(),
             "sourceUrl": selection.and_then(|selection| selection.url.clone()),
+            "coreChannel": selection.map(|selection| selection.core_channel.clone()),
             // Layer 2 owns this one outright, so it answers even when the
             // selection does not.
             "rebootPolicy": policy.reboot_policy.as_str(),

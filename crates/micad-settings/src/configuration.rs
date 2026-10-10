@@ -164,6 +164,33 @@ pub struct BakedUpdate {
     pub source: Option<String>,
     pub policy: UpdateMode,
     pub check_interval_minutes: u64,
+    /// The core channel this product follows. Absent in a manifest baked
+    /// before core channels, which is the general channel.
+    #[serde(default = "general_channel")]
+    pub core_channel: String,
+}
+
+/// The channel every product follows unless it says otherwise.
+pub const GENERAL_CHANNEL: &str = "general";
+
+fn general_channel() -> String {
+    GENERAL_CHANNEL.to_owned()
+}
+
+/// Whether `value` names a core channel: lowercase letters, digits and
+/// hyphens, starting with a letter or a digit, at most 64 bytes. The rule
+/// `mica/core-set/v1` holds a set's `channel` to.
+#[must_use]
+pub fn is_core_channel(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -193,6 +220,7 @@ impl BakedUpdate {
             source: None,
             policy: UpdateMode::Check,
             check_interval_minutes: 1440,
+            core_channel: general_channel(),
         }
     }
 }

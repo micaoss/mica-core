@@ -138,6 +138,7 @@ pub(super) async fn the_status_resolves_the_isolated_operator_document_over_its_
             "update": {
                 "source": "https://operator.example/update/",
                     "policy": "off",
+                    "coreChannel": "general",
             },
             "fleet": { "url": null, "enabled": false, "reporting": false },
         })
@@ -176,7 +177,7 @@ pub(super) async fn the_status_resolves_the_isolated_operator_document_over_its_
             .keys()
             .map(String::as_str)
             .collect::<BTreeSet<_>>(),
-        BTreeSet::from(["policy", "source"])
+        BTreeSet::from(["coreChannel", "policy", "source"])
     );
     assert_eq!(
         status["effective"]["fleet"]

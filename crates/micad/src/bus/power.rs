@@ -105,11 +105,10 @@ impl MicadService {
         self.update
             .installable(&descriptor)
             .map_err(fdo::Error::InvalidArgs)?;
-        let id = descriptor
-            .file_stem()
+        let id = deployment::staged_id(&descriptor)
             .ok_or_else(|| fdo::Error::InvalidArgs("the descriptor names no deployment".into()))?
-            .to_string_lossy()
-            .into_owned();
+            .0
+            .to_owned();
         if self
             .installing
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)

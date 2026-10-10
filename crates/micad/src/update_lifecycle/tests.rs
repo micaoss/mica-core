@@ -41,6 +41,47 @@ fn staged_path() -> String {
     format!("/mica/updates/verified/{}.json", "a".repeat(64))
 }
 
+/// What a client from before core sets answers a core verb.
+fn old_client(verb: &str) -> ClientOutput {
+    output(
+        2,
+        "",
+        &format!(
+            "error: unrecognized subcommand '{verb}'\n\nUsage: mica-deploy [OPTIONS] <COMMAND>"
+        ),
+    )
+}
+
+/// `core-check` naming a newer set of the channel.
+fn core_selection_output() -> ClientOutput {
+    output(
+        0,
+        &json!({"revision":1,"selected":{
+            "id":"core.general.20261010-0000","coreSetId":"c".repeat(64),
+            "set":{"channel":"general","generation":4,"version":"0.0.6"}}
+        })
+        .to_string(),
+        "",
+    )
+}
+
+fn core_staged_path() -> String {
+    format!("/mica/updates/verified/core-{}.json", "c".repeat(64))
+}
+
+/// `core-fetch` leaving the set ready.
+fn core_fetch_output() -> ClientOutput {
+    output(
+        0,
+        &json!({"id":"c".repeat(64),"path":core_staged_path(),
+            "objects":"/mica/updates/verified/objects","channel":"general",
+            "version":"0.0.6","generation":4
+        })
+        .to_string(),
+        "",
+    )
+}
+
 fn no_selection() -> ClientOutput {
     output(0, r#"{"revision":1,"selected":null}"#, "")
 }
@@ -92,8 +133,18 @@ impl UpdateClient for MockClient {
     }
 
     async fn run(&self, args: &[String], _timeout: Duration) -> Result<ClientOutput> {
-        self.calls.lock().expect("calls").push(args.to_vec());
+        let verb_at = usize::from(args.first().is_some_and(|arg| arg == "--max-bytes")) * 2;
         let mut script = self.script.lock().expect("script");
+        // A script that does not name a core verb is a client from before core
+        // sets, which answers one as clap answers any unknown subcommand. The
+        // tests of the product line run against that client, and their call
+        // lists stay the product line's.
+        if let Some(verb) = args.get(verb_at).filter(|verb| verb.starts_with("core-"))
+            && script.first().is_none_or(|(next, _)| next != verb)
+        {
+            return Ok(old_client(verb));
+        }
+        self.calls.lock().expect("calls").push(args.to_vec());
         anyhow::ensure!(!script.is_empty(), "unexpected client call: {args:?}");
         let (verb, result) = script.remove(0);
         anyhow::ensure!(

@@ -51,9 +51,9 @@ interface UpdatePolicyDoc {
 /// The three layers of `GET /api/v1/provisioning/status`, for
 /// the source address.
 interface ProvisioningLayers {
-  baked?: { update?: { source?: string | null; policy?: string } }
-  operator?: { update?: { source?: string | null; policy?: string | null } }
-  effective?: { update?: { source?: string | null; policy?: string } }
+  baked?: { update?: { source?: string | null; policy?: string; coreChannel?: string } }
+  operator?: { update?: { source?: string | null; policy?: string | null; coreChannel?: string | null } }
+  effective?: { update?: { source?: string | null; policy?: string; coreChannel?: string } }
 }
 
 /// The patch `POST /api/v1/update/config` takes: only the keys being changed.
@@ -62,6 +62,8 @@ interface UpdateConfigPatch {
   checkIntervalMinutes?: number
   /// `HH:MM` UTC, or `null` to go back to the interval.
   checkAt?: string | null
+  /// The core channel to follow, or `null` to follow the image's.
+  coreChannel?: string | null
   rebootPolicy?: string
   source?: { url?: string | null }
   maintenance?: { windows: { days: string[]; start: string; end: string }[] }
@@ -137,6 +139,8 @@ function SourcePanel({ layers, error }: { layers?: ProvisioningLayers; error: un
   const effective = layers?.effective?.update
   const [url, setUrl] = useState<string>()
   const currentUrl = url ?? operator?.source ?? ''
+  const [channel, setChannel] = useState<string>()
+  const currentChannel = channel ?? operator?.coreChannel ?? ''
   const rows = [
     {
       id: 'source',
@@ -144,6 +148,13 @@ function SourcePanel({ layers, error }: { layers?: ProvisioningLayers; error: un
       effective: effective?.source ?? undefined,
       baked: baked?.source ?? undefined,
       overridden: operator !== undefined && 'source' in operator,
+    },
+    {
+      id: 'coreChannel',
+      label: t('system.update.automatic.coreChannel'),
+      effective: effective?.coreChannel ?? undefined,
+      baked: baked?.coreChannel ?? 'general',
+      overridden: operator !== undefined && 'coreChannel' in operator,
     },
   ]
   return (
@@ -166,13 +177,21 @@ function SourcePanel({ layers, error }: { layers?: ProvisioningLayers; error: un
         className="grid gap-4"
         onSubmit={(event: FormEvent) => {
           event.preventDefault()
-          write.mutate({ source: { url: currentUrl.trim() || null } })
+          write.mutate({
+            source: { url: currentUrl.trim() || null },
+            // Named only when it was touched: an untouched field must not
+            // turn "the operator said nothing" into "the operator said null".
+            ...(channel === undefined ? {} : { coreChannel: currentChannel.trim() || null }),
+          })
         }}
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField label={t('system.update.automatic.urlLabel')} hint={t('system.update.automatic.urlHint')}>
             {/* No invented fallback address: an image that bakes no source has no server. */}
             {(id) => <Input id={id} value={currentUrl} onChange={(event) => setUrl(event.target.value)} placeholder={baked?.source ?? undefined} />}
+          </FormField>
+          <FormField label={t('system.update.automatic.coreChannelLabel')} hint={t('system.update.automatic.coreChannelHint')}>
+            {(id) => <Input id={id} className="font-mono" value={currentChannel} onChange={(event) => setChannel(event.target.value)} placeholder={baked?.coreChannel ?? 'general'} pattern="[a-z0-9][a-z0-9-]*" maxLength={64} />}
           </FormField>
         </div>
         <Button className="justify-self-end" type="submit" disabled={write.isPending}>
