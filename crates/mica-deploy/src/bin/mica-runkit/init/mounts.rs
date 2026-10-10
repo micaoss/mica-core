@@ -57,30 +57,25 @@ pub(super) fn mount(
     Ok(())
 }
 
-/// Mount each core component of `deployment`, verified, at
-/// `/run/mica-core/<package>`, refuse a composition that would shadow a file,
-/// and compose the components' `usr` and `etc` over the root's with read-only
-/// overlays. Runs before anything binds into either tree: an overlay does not
-/// show the submounts of its layers.
+/// Mount each of `cores`, verified, at `/run/mica-core/<package>`, refuse a
+/// composition that would shadow a file, and compose the components' `usr`
+/// and `etc` over the root's with read-only overlays. Runs before anything
+/// binds into either tree: an overlay does not show the submounts of its
+/// layers.
 pub(super) fn compose_core(
     control: &mut BootControl,
-    deployment: &mica_deploy::components::Deployment,
-    paths: &mica_deploy::components::DeploymentPaths,
+    cores: &[&mica_deploy::components::CoreComponent],
 ) -> Result<()> {
-    if deployment.core.is_empty() {
+    if cores.is_empty() {
         return Ok(());
     }
     let mut layers = Vec::new();
-    for (core, path) in deployment.core.iter().zip(&paths.core) {
-        ensure!(
-            core.package == path.package,
-            "core component order mismatch"
-        );
+    for core in cores {
         let target = format!("/run/mica-core/{}", core.package);
         verified_mount(
             control,
-            &format!("/system/{}", path.image),
-            &format!("/system/{}", path.signature),
+            &format!("/system/cores/{}/core.img", core.id),
+            &format!("/system/cores/{}/core.roothash.p7s", core.id),
             &format!("{}{}", mica_deploy::boot::CORE_MAPPING_PREFIX, core.package),
             &target,
             &core.content,

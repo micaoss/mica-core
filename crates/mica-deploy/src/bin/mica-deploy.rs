@@ -8,8 +8,10 @@ use mica_deploy::{
     board::BoardFacts,
     boot::BootKind,
     components::BootIdentity,
+    core_state::{self, CoreBoot},
     deployments::{
-        BootBackend, BootReceipt, DeploymentStore, SharedDataFailure, Target, read_bounded,
+        BootBackend, BootReceipt, CoreTarget, DeploymentStore, SharedDataFailure, Target,
+        read_bounded,
     },
 };
 use serde::Deserialize;
@@ -67,6 +69,14 @@ enum Action {
     },
     Install {
         descriptor: PathBuf,
+        #[arg(long)]
+        objects: PathBuf,
+    },
+    /// The core sets this device holds, and the one it booted.
+    CoreStatus,
+    /// Publish a signed core set beside the current one and start its trial.
+    CoreInstall {
+        set: PathBuf,
         #[arg(long)]
         objects: PathBuf,
     },
@@ -177,6 +187,36 @@ fn product() -> Result<String> {
     Ok(mica_deploy::components::device_product(
         &String::from_utf8(text)?,
     )?)
+}
+
+/// The features of the running root's product file.
+fn features() -> Result<Vec<String>> {
+    let text = read_bounded(Path::new(mica_deploy::components::PRODUCT_FILE), 4096)
+        .with_context(|| format!("read {}", mica_deploy::components::PRODUCT_FILE))?;
+    Ok(mica_deploy::core_set::device_features(&String::from_utf8(
+        text,
+    )?)?)
+}
+
+/// What the runkit composed this boot. A runkit from before core sets leaves
+/// no record: it composed the deployment's own components.
+fn core_boot() -> Result<CoreBoot> {
+    let path = Path::new(core_state::BOOT_FILE);
+    if path.symlink_metadata().is_err() {
+        return Ok(CoreBoot::default());
+    }
+    Ok(serde_json::from_slice(&read_bounded(path, 4096)?)?)
+}
+
+/// The interface level of the running root, from the deployment the runkit
+/// authenticated and left in `/run`.
+fn running_root_level(keys: &[[u8; 32]]) -> Result<u64> {
+    let envelope = read_bounded(Path::new("/run/mica/deployment.json"), 24576)?;
+    Ok(
+        mica_deploy::components::authenticate_deployment(&envelope, keys)?
+            .rootfs
+            .level(),
+    )
 }
 
 fn policy() -> Result<(Policy, Vec<[u8; 32]>)> {
@@ -294,6 +334,20 @@ fn execute() -> Result<()> {
         );
         return Ok(());
     }
+    if matches!(cli.command, Action::CoreStatus) {
+        let features = features()?;
+        let status = store.core_status(
+            &keys,
+            &CoreTarget {
+                arch: &policy.identity.arch,
+                features: &features,
+                root_level: running_root_level(&keys)?,
+            },
+            core_boot()?,
+        )?;
+        println!("{}", serde_json::to_string(&status)?);
+        return Ok(());
+    }
     ensure!(
         receipt.content_verified,
         "running content is not authenticated"
@@ -365,7 +419,13 @@ fn execute() -> Result<()> {
         println!("{result}");
         return Ok(());
     }
-    let install = matches!(cli.command, Action::Install { .. } | Action::Gc);
+    let booted_core = core_boot()?;
+    // Confirming a boot settles the core set on trial, which writes SYSTEM.
+    let install = matches!(
+        cli.command,
+        Action::Install { .. } | Action::Gc | Action::CoreInstall { .. }
+    ) || (matches!(cli.command, Action::Confirm)
+        && store.core_needs_settling(&booted_core)?);
     if install {
         remount("/mnt/system", "rw")?;
     }
@@ -378,7 +438,19 @@ fn execute() -> Result<()> {
         return Err(error);
     }
     let result: Result<_> = (|| match cli.command {
-        Action::Confirm => store.confirm(&receipt).map(|value| json!(value)),
+        Action::Confirm => {
+            let state = store.confirm(&receipt)?;
+            // After the deployment: the health gate's verdict is on the boot
+            // as a whole, and a deployment that could not be confirmed
+            // confirms nothing composed over it.
+            let cores = store.settle_core(&booted_core, &keys)?;
+            let mut value = json!(state);
+            value["coreSet"] = json!(cores);
+            Ok(value)
+        }
+        // A boot that failed with a core set on trial is the set's failure,
+        // and its trial has already paid for it: the deployment is kept.
+        Action::FailBoot if booted_core.pending => Ok(json!({"retired": false, "coreTrial": true})),
         Action::FailBoot => store
             .fail_boot(&receipt)
             .map(|retired| json!({"retired": retired})),
@@ -395,6 +467,7 @@ fn execute() -> Result<()> {
                     board: &policy.identity.board,
                     arch: &policy.identity.arch,
                     product: &product()?,
+                    features: &features()?,
                 },
                 &objects,
                 &receipt,
@@ -403,7 +476,20 @@ fn execute() -> Result<()> {
         Action::Gc => store
             .collect(&receipt, &keys)
             .map(|count| json!({"removedFiles":count})),
+        Action::CoreInstall { set, objects } => store
+            .install_core(
+                &read_bounded(&set, core_state::MAX_ENVELOPE_BYTES)?,
+                &keys,
+                &CoreTarget {
+                    arch: &policy.identity.arch,
+                    features: &features()?,
+                    root_level: running_root_level(&keys)?,
+                },
+                &objects,
+            )
+            .map(|value| json!(value)),
         Action::Status
+        | Action::CoreStatus
         | Action::Probe
         | Action::Discard
         | Action::Booted

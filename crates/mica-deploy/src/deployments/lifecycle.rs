@@ -192,6 +192,8 @@ impl DeploymentStore {
             kernels.insert(deployment.kernel.id.clone());
             cores.extend(deployment.core.iter().map(|core| core.id.clone()));
         }
+        // The device's core sets hold their components as deployments do.
+        cores.extend(self.core_set_components(keys)?);
         let mut files = Vec::new();
         let mut directories = Vec::new();
         for (parent, keep) in [

@@ -8,6 +8,7 @@ pub mod catalog;
 pub mod chunks;
 pub mod components;
 pub mod core_set;
+pub mod core_state;
 pub mod deployments;
 pub mod firmware;
 pub mod fit_env;

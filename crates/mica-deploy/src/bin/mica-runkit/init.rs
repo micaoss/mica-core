@@ -45,6 +45,9 @@ struct BootAttempt {
     id: String,
     system_device: String,
     board: BoardFacts,
+    /// Whether the boot composed a core set on trial. Its failure is the
+    /// set's, whose trial has already paid for it.
+    core_trial: bool,
 }
 
 struct BootControl {
@@ -184,7 +187,16 @@ pub fn main() {
             && let Err(error) = attempt
                 .as_ref()
                 .context("boot selection could not be established")
-                .and_then(|selected| selected.retire_failed_confirmed(&mut control))
+                .and_then(|selected| {
+                    if selected.core_trial {
+                        // The deployment is sound; the next boot spends
+                        // another boot of the set's trial, or leaves it.
+                        return shutdown::diagnostic(
+                            "mica-init: the core set on trial failed; the deployment is kept",
+                        );
+                    }
+                    selected.retire_failed_confirmed(&mut control)
+                })
         {
             let _ = shutdown::diagnostic(&format!("mica-init: recovery required: {error:#}"));
             recovery = true;

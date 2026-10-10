@@ -245,6 +245,7 @@ fn seed(root: &Path, fit: bool, operation: &str) {
                     board: if fit { "cx3576" } else { "uefi-x64" },
                     arch: if fit { "arm64" } else { "amd64" },
                     product: "uefi-x64-dev",
+                    features: &[],
                 },
                 &root.join("objects"),
                 &serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())
@@ -299,6 +300,7 @@ fn run_operation(root: &Path, fit: bool, operation: &str) {
                         board: if fit { "cx3576" } else { "uefi-x64" },
                         arch: if fit { "arm64" } else { "amd64" },
                         product: "uefi-x64-dev",
+                        features: &[],
                     },
                     &root.join("objects"),
                     &serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())

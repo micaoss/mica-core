@@ -13,6 +13,8 @@ use mica_deploy::{
         utf16_variable,
     },
     components::{component_id, verify_deployment},
+    core_set::{self, device_features},
+    core_state::{self, Composition, CoreBoot},
 };
 use std::{
     fs,
@@ -139,6 +141,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         id: id.clone(),
         system_device: device.clone(),
         board: config.board.clone(),
+        core_trial: false,
     });
     eprintln!("mica-init: SYSTEM mounted read-only");
     let envelope = bounded_file(&format!("/system/deployments/{id}.json"), 24576)?;
@@ -172,30 +175,10 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         fs::read_to_string("/support/kernel.release")?.trim() == config.identity.kernel_release,
         "support module release mismatch"
     );
-    compose_core(control, &deployment, &paths)?;
-    for (source, target) in [
-        ("/support/modules", "/newroot/usr/lib/modules"),
-        ("/support/firmware", "/newroot/usr/lib/firmware"),
-    ] {
-        ensure!(
-            fs::symlink_metadata(target)?.is_dir() && fs::read_dir(target)?.next().is_none(),
-            "invalid support mountpoint {target}"
-        );
-        run(
-            control,
-            Startup::Bind {
-                source: source.into(),
-                target: target.into(),
-            },
-        )?;
-        run(
-            control,
-            Startup::Remount {
-                target: target.into(),
-                options: "remount,bind,ro,nodev,nosuid".into(),
-            },
-        )?;
-    }
+    // DATA is mounted before the core components are chosen: the trial of a
+    // pending core set is counted there, and the count is spent before the
+    // set is tried. Nothing is bound into `/usr` or `/etc` yet, which the
+    // composition needs.
     (|| -> Result<()> {
         let data = run(
             control,
@@ -253,6 +236,79 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         if quotas {
             data_projects(Path::new("/newroot/mnt/data"))?;
         }
+        Ok(())
+    })()
+    .context(mica_deploy::deployments::SharedDataFailure)?;
+    // A root whose product file cannot be read selects nothing from a core
+    // set; refusing the boot for it would retire a deployment that is sound.
+    let features = bounded_file("/newroot/usr/lib/mica/product.conf", 4096)
+        .and_then(|bytes| Ok(device_features(&String::from_utf8(bytes)?)?))
+        .unwrap_or_else(|error| {
+            eprintln!("mica-init: product features unreadable: {error:#}");
+            Vec::new()
+        });
+    let composition = core_state::composition(
+        Path::new("/system"),
+        Path::new("/newroot/mnt/data/meta"),
+        &keys,
+        &config.identity.arch,
+        &features,
+        deployment.rootfs.level(),
+        |refusal| eprintln!("mica-init: {refusal}"),
+    )?;
+    let core_boot = match &composition {
+        Composition::Deployment => {
+            compose_core(control, &deployment.core.iter().collect::<Vec<_>>())?;
+            CoreBoot::default()
+        }
+        Composition::Set {
+            id, set, pending, ..
+        } => {
+            // From here a failed boot is this set's: it has spent a boot of
+            // its trial, and the deployment under it is not retired for it.
+            if let Some(attempt) = attempt.as_mut() {
+                attempt.core_trial = *pending;
+            }
+            eprintln!(
+                "mica-init: core set {id} ({} generation {}){}",
+                set.channel,
+                set.generation,
+                if *pending { ", on trial" } else { "" }
+            );
+            compose_core(
+                control,
+                &core_set::select(set, &features, deployment.rootfs.level())?,
+            )?;
+            CoreBoot {
+                core_set_id: Some(id.clone()),
+                pending: *pending,
+            }
+        }
+    };
+    for (source, target) in [
+        ("/support/modules", "/newroot/usr/lib/modules"),
+        ("/support/firmware", "/newroot/usr/lib/firmware"),
+    ] {
+        ensure!(
+            fs::symlink_metadata(target)?.is_dir() && fs::read_dir(target)?.next().is_none(),
+            "invalid support mountpoint {target}"
+        );
+        run(
+            control,
+            Startup::Bind {
+                source: source.into(),
+                target: target.into(),
+            },
+        )?;
+        run(
+            control,
+            Startup::Remount {
+                target: target.into(),
+                options: "remount,bind,ro,nodev,nosuid".into(),
+            },
+        )?;
+    }
+    (|| -> Result<()> {
         persistent_machine_id(Path::new("/newroot/mnt/data/state"), || {
             Ok(fs::read_to_string("/proc/sys/kernel/random/uuid")?
                 .trim()
@@ -290,6 +346,10 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         }))?,
     )?;
     fs::write("/run/mica/deployment.json", &envelope)?;
+    fs::write(core_state::BOOT_FILE, serde_json::to_vec(&core_boot)?)?;
+    if let Composition::Set { envelope, .. } = &composition {
+        fs::write("/run/mica/core-set.json", envelope)?;
+    }
     // systemd execs /run/initramfs/shutdown at the end of its shutdown and
     // the exit ramdisk releases storage; openrc-init reboots by itself, so an
     // OpenRC root gets no handoff and keeps the memory it would hold.

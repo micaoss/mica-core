@@ -198,6 +198,7 @@ pub(super) fn invalid_update_preserves_both_installed_deployments() {
                         board: if fit { "cx3576" } else { "uefi-x64" },
                         arch: if fit { "arm64" } else { "amd64" },
                         product: "uefi-x64-dev",
+                        features: &[],
                     },
                     &root.path().join("objects"),
                     &serde_json::from_slice(
@@ -237,6 +238,7 @@ pub(super) fn install_requires_the_confirmed_running_receipt_and_reconciles_acti
                     board: if fit { "cx3576" } else { "uefi-x64" },
                     arch: if fit { "arm64" } else { "amd64" },
                     product: "uefi-x64-dev",
+                    features: &[],
                 },
                 &root.path().join("objects"),
                 receipt,

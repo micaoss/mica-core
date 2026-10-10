@@ -8,9 +8,11 @@ use std::{
     path::PathBuf,
 };
 
+mod core;
 mod install;
 mod io;
 mod lifecycle;
+pub use core::*;
 pub use install::*;
 pub use io::*;
 pub use mica_fs::{read_bounded, sync_dir};
@@ -94,6 +96,9 @@ pub struct Target<'a> {
     pub board: &'a str,
     pub arch: &'a str,
     pub product: &'a str,
+    /// The features of the running root's product file: what the device
+    /// selects from a core set by.
+    pub features: &'a [String],
 }
 
 impl DeploymentStore {

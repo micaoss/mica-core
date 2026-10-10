@@ -55,6 +55,7 @@ pub(super) fn replacement_capacity_uses_reclaimed_blocks_without_a_third_version
                     board: "cx3576",
                     arch: "arm64",
                     product: "uefi-x64-dev",
+                    features: &[],
                 },
                 &root.path().join("objects"),
                 &receipt,

@@ -182,6 +182,29 @@ impl DeploymentStore {
             "deployment is installed or rejected"
         );
         ensure!(state.candidate.is_none(), "another deployment is pending");
+        // One thing on trial at a time: a boot that does not reach healthy has
+        // one cause and one thing to undo.
+        let cores = crate::core_state::read_state(&self.system)?;
+        ensure!(
+            cores.pending.is_none(),
+            "a core set is on trial; let it settle before a system update"
+        );
+        match &cores.current {
+            // The device's set must select on the new root, or the new
+            // deployment would boot with nothing the runkit may compose.
+            Some(current) => {
+                let (set, _) =
+                    crate::core_state::load_set(&self.system, current, keys, target.arch)?;
+                crate::core_set::select(&set, target.features, deployment.rootfs.level())
+                    .context(
+                        "the current core set does not run on this deployment's root; update the core set first",
+                    )?;
+            }
+            None => ensure!(
+                deployment.schema == "mica/deployment/v1",
+                "this deployment names no core components and the device holds no core set; install a core set first"
+            ),
+        }
         self.validate_receipt(receipt)?;
         ensure!(
             state.current.as_deref() == Some(receipt.deployment_id.as_str())
