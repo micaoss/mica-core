@@ -61,7 +61,7 @@ pub enum CoreSettlement {
 }
 
 impl DeploymentStore {
-    fn core_objects<'a>(&self, set: &'a CoreSet) -> Vec<(PathBuf, &'a Artifact)> {
+    pub(crate) fn core_objects<'a>(&self, set: &'a CoreSet) -> Vec<(PathBuf, &'a Artifact)> {
         let mut paths = Vec::new();
         for core in &set.components {
             let directory = self.system.join(format!("cores/{}", core.id));

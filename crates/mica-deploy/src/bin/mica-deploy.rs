@@ -67,6 +67,20 @@ enum Action {
     Import {
         archive: PathBuf,
     },
+    /// Read the catalog's core line for a channel.
+    CoreCheck {
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        channel: String,
+    },
+    /// Fetch the core set the catalog offers a channel.
+    CoreFetch {
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        channel: String,
+    },
     Install {
         descriptor: PathBuf,
         #[arg(long)]
@@ -377,6 +391,8 @@ fn execute() -> Result<()> {
             | Action::Check { .. }
             | Action::Fetch { .. }
             | Action::Import { .. }
+            | Action::CoreCheck { .. }
+            | Action::CoreFetch { .. }
     ) {
         require_workspace()?;
         let product = product()?;
@@ -412,7 +428,18 @@ fn execute() -> Result<()> {
                     archive.symlink_metadata()?.is_file(),
                     "archive is not a regular file"
                 );
-                json!(acquisition.import(&mut std::fs::File::open(archive)?)?)
+                json!(acquisition.import_any(&mut std::fs::File::open(archive)?)?)
+            }
+            Action::CoreCheck { source, channel } => {
+                let catalog = acquisition.core_check(&source, &channel)?;
+                json!({"revision":catalog.checkpoint.revision,"selected":catalog.selected})
+            }
+            Action::CoreFetch { source, channel } => {
+                let catalog = acquisition.core_check(&source, &channel)?;
+                match catalog.selected {
+                    Some(selected) => json!(acquisition.core_fetch(selected)?),
+                    None => serde_json::Value::Null,
+                }
             }
             _ => unreachable!(),
         };
@@ -496,7 +523,9 @@ fn execute() -> Result<()> {
         | Action::FirmwareReadback { .. }
         | Action::Check { .. }
         | Action::Fetch { .. }
-        | Action::Import { .. } => unreachable!(),
+        | Action::Import { .. }
+        | Action::CoreCheck { .. }
+        | Action::CoreFetch { .. } => unreachable!(),
     })();
     let esp_sync = if backend == BootKind::Uefi {
         remount("/boot", "ro")

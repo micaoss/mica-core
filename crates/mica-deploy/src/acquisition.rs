@@ -16,7 +16,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod cores;
 mod transfer;
+pub use cores::*;
 use transfer::*;
 
 pub struct Acquisition<'a> {
@@ -196,13 +198,13 @@ impl Acquisition<'_> {
         })
     }
 
-    pub fn check(&self, source: &str) -> Result<VerifiedCatalog> {
-        catalog::source_url(source)?;
-        self.prepare()?;
-        self.reserve(catalog::MAX_CATALOG_BYTES as u64)?;
+    /// The staging file documents pass through, and the checkpoint of the
+    /// last manifest read: the product line and the core line read the same
+    /// manifest, so they share it.
+    fn checkpoint(&self) -> Result<(PathBuf, PathBuf, Option<CatalogCheckpoint>)> {
         let path = self.root.join("staging/catalog.partial");
         let checkpoint_path = self.store.meta.join("catalog.json");
-        let previous: Option<CatalogCheckpoint> = if checkpoint_path.symlink_metadata().is_ok() {
+        let previous = if checkpoint_path.symlink_metadata().is_ok() {
             Some(serde_json::from_slice(&read_bounded(
                 &checkpoint_path,
                 4096,
@@ -210,6 +212,14 @@ impl Acquisition<'_> {
         } else {
             None
         };
+        Ok((path, checkpoint_path, previous))
+    }
+
+    pub fn check(&self, source: &str) -> Result<VerifiedCatalog> {
+        catalog::source_url(source)?;
+        self.prepare()?;
+        self.reserve(catalog::MAX_CATALOG_BYTES as u64)?;
+        let (path, checkpoint_path, previous) = self.checkpoint()?;
         // One document at a time through the same staging file: the
         // manifest, then only for a newer release its document and descriptor.
         let result = catalog::verify_catalog(
@@ -358,6 +368,18 @@ impl Acquisition<'_> {
         self.prepare()?;
         let missing = self.missing(&selected.deployment)?;
         self.reserve_missing(&missing)?;
+        self.fetch_objects(missing, &selected.objects)?;
+        self.ready(selected.envelope.as_bytes(), selected.deployment)
+    }
+
+    /// Fetch every object of `missing` from where `objects` says it is, by
+    /// delta where the origin and this device allow, and promote each into the
+    /// verified store.
+    fn fetch_objects(
+        &self,
+        missing: BTreeMap<String, u64>,
+        objects: &[SourceObject],
+    ) -> Result<()> {
         let mut seeds = None;
         // One probe per fetch, not one per object: an origin that did not serve
         // the first index is not expected to serve the next, and being wrong
@@ -365,8 +387,7 @@ impl Acquisition<'_> {
         // the whole object.
         let mut origin_has_indexes = true;
         for (sha, bytes) in missing {
-            let object = selected
-                .objects
+            let object = objects
                 .iter()
                 .find(|object| object.sha256 == sha && object.bytes == bytes)
                 .context("missing acquisition URL")?;
@@ -402,7 +423,7 @@ impl Acquisition<'_> {
             }
             self.promote(&partial, &Artifact { sha256: sha, bytes })?;
         }
-        self.ready(selected.envelope.as_bytes(), selected.deployment)
+        Ok(())
     }
 
     fn promote(&self, partial: &Path, artifact: &Artifact) -> Result<()> {
@@ -437,19 +458,41 @@ impl Acquisition<'_> {
         );
         let mut envelope = vec![0; length];
         input.read_exact(&mut envelope)?;
+        self.import_descriptor(envelope, input)
+    }
+
+    /// The rest of an archive whose envelope is a deployment's descriptor.
+    fn import_descriptor(
+        &self,
+        envelope: Vec<u8>,
+        input: &mut impl Read,
+    ) -> Result<ReadyDeployment> {
         let deployment = authenticate_deployment(&envelope, self.keys)?;
         self.validate(&deployment)?;
-        let mut required = catalog::artifacts(&deployment)?;
+        let required = catalog::artifacts(&deployment)?;
+        self.prepare()?;
+        let missing = self.missing(&deployment)?;
+        self.import_objects(input, required, &missing)?;
+        self.ready(&envelope, deployment)
+    }
+
+    /// The object section of an archive: a count, then each object's digest,
+    /// size and bytes. Every object must be one `required` names, once; the
+    /// ones in `missing` are written and promoted, the rest only checked.
+    fn import_objects(
+        &self,
+        input: &mut impl Read,
+        mut required: BTreeMap<String, u64>,
+        missing: &BTreeMap<String, u64>,
+    ) -> Result<()> {
         let mut count = [0; 4];
         input.read_exact(&mut count)?;
         let count = u32::from_be_bytes(count) as usize;
         ensure!(
             count <= required.len(),
-            "archive carries more objects than the deployment names"
+            "archive carries more objects than its descriptor names"
         );
-        self.prepare()?;
-        let missing = self.missing(&deployment)?;
-        self.reserve_missing(&missing)?;
+        self.reserve_missing(missing)?;
         for _ in 0..count {
             let mut sha = [0; 64];
             input.read_exact(&mut sha)?;
@@ -508,6 +551,6 @@ impl Acquisition<'_> {
             }
         }
         ensure!(input.read(&mut [0; 1])? == 0, "trailing archive bytes");
-        self.ready(&envelope, deployment)
+        Ok(())
     }
 }

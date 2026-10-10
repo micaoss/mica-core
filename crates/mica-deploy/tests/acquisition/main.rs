@@ -13,10 +13,16 @@ use serde_json::{Value, json};
 use std::{fs, io::Cursor};
 use tempfile::TempDir;
 
+mod cores;
 mod delta;
 mod online;
 mod transfer;
 use online::*;
+
+/// The deployment archive, for the modules that import one.
+fn archive_fixture() -> (Vec<u8>, [u8; 32], String) {
+    archive()
+}
 
 fn archive() -> (Vec<u8>, [u8; 32], String) {
     let bytes = vec![42_u8; 12288];
