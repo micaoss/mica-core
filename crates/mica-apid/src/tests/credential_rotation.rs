@@ -93,6 +93,27 @@ impl SettingsApi for PausedAccessRead {
     }
 }
 
+/// Log in, waiting out a backoff window an earlier refused attempt armed.
+async fn login_past_backoff(router: &Router, password: &str) -> String {
+    for _ in 0..50 {
+        let response = json_request(
+            router,
+            "POST",
+            "/api/v1/session",
+            json!({ "password": password }),
+            None,
+            None,
+        )
+        .await;
+        if response.status() != StatusCode::TOO_MANY_REQUESTS {
+            assert_eq!(response.status(), StatusCode::CREATED);
+            return session_cookie_value(&response);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("the login backoff did not end within five seconds");
+}
+
 #[tokio::test]
 async fn old_password_login_cannot_survive_a_completed_password_change() {
     let (tree, token) = with_token(configured_tree("audit-old-password"));
@@ -127,7 +148,11 @@ async fn old_password_login_cannot_survive_a_completed_password_change() {
     paused.release.notify_one();
     let response = pending.await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let new_cookie = login(&router, "audit-new-password").await;
+    // The refused login was charged at admission and armed the first backoff
+    // step, one second. Whether that second has passed by now depends on how
+    // long this machine took to hash the new password, so the new login waits
+    // the window out instead of racing it.
+    let new_cookie = login_past_backoff(&router, "audit-new-password").await;
     assert_eq!(
         get(&router, "/api/v1/settings/hostname", Some(&new_cookie))
             .await
