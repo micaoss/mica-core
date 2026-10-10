@@ -1,6 +1,6 @@
 {
   "package": "micad",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "sourceDateEpoch": 1789430400,
   "features": ["micad"],
   "needs": [],
