@@ -23,9 +23,15 @@ pub const SOCKET_PATH: &str = "/run/mica-containerd/api.sock";
 /// the same name.
 pub const SERVICE_UNIT: &str = "mica-containerd.service";
 
+/// How long a stopping container gets before the daemon kills it: its
+/// `--stop-timeout`, 10 s unless the service sets another.
+const STOP_GRACE: Duration = Duration::from_secs(10);
 /// How long one call may take. A declaration is stored and acted on by the
-/// daemon's own loop, so even a `PUT` of every container returns at once.
-const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// daemon's own loop, but the loop holds every call while it stops a
+/// container, so a call can wait out [`STOP_GRACE`], the kill and podman's
+/// cleanup. The grace and 10 s more outlast that and still answer within a
+/// D-Bus caller's default 25 s.
+const CALL_TIMEOUT: Duration = Duration::from_secs(STOP_GRACE.as_secs() + 10);
 /// The largest answer read.
 const MAX_RESPONSE: usize = 1024 * 1024;
 

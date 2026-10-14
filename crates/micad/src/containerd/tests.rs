@@ -150,3 +150,12 @@ async fn no_daemon_is_unavailable() {
         Err(ContainerdError::Unavailable(_))
     ));
 }
+
+/// A call can wait behind a stop the daemon is running: its grace, the kill
+/// and podman's cleanup. The call outlasts that by a margin, and answers
+/// before a D-Bus caller's default 25 s runs out.
+#[test]
+fn a_call_outlasts_the_stop_grace_and_answers_within_a_bus_call() {
+    assert!(CALL_TIMEOUT >= STOP_GRACE + Duration::from_secs(10));
+    assert!(CALL_TIMEOUT < Duration::from_secs(25));
+}
