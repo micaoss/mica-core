@@ -1,0 +1,34 @@
+# mica-inputs v1
+# What decides the bytes of this producer's core components: the crates its binaries are
+# built from (every crate of their cargo closure; scripts/build/check.sh holds this
+# list to it), the workspace manifest and lock, and the build tooling. Tests,
+# examples and the UI's check-only files build nothing a package carries.
+package micad
+package mica-apid-ui
+path crates/mica-fs
+path crates/lifecycle-sys
+path crates/micad
+path crates/mica-apid
+path crates/micad-settings
+path crates/mica-busname
+path crates/mica-ui-bundle
+path Cargo.toml
+path Cargo.lock
+path .cargo/config.toml
+path pkgs/copyright
+path scripts/build/build-deb.sh
+path scripts/deb/build.sh
+path scripts/deb/core-image.sh
+path :(exclude,glob)crates/*/tests/**
+path :(exclude,glob)crates/*/examples/**
+path :(exclude,glob)crates/*/src/**/tests.rs
+path :(exclude,glob)crates/*/src/**/tests/**
+path :(exclude,glob)crates/mica-apid/ui/e2e/**
+path :(exclude,glob)crates/mica-apid/ui/**/*.test.ts
+path :(exclude,glob)crates/mica-apid/ui/**/*.test.tsx
+path :(exclude,glob)crates/mica-apid/ui/src/shared/testing/**
+path :(exclude,glob)crates/mica-apid/ui/vitest.config.ts
+path :(exclude,glob)crates/mica-apid/ui/playwright.config.ts
+path :(exclude,glob)crates/mica-apid/ui/eslint.config.js
+path :(exclude,glob)crates/mica-apid/ui/verify-ui-policy.sh
+path :(exclude,glob)crates/mica-apid/ui/run.sh

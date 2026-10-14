@@ -1,0 +1,172 @@
+//! The OpenAPI document describing apid's `/api` surface.
+//!
+//! Generated from the handlers rather than written beside them, and committed
+//! as `micad/apid/openapi.json`. `--openapi` prints it and a test asserts the
+//! committed copy is exactly what this module produces, so the spec cannot
+//! describe a route the code does not serve or miss one it does.
+
+use utoipa::OpenApi;
+
+/// The document: its identity, and every route declared under `/api`.
+///
+/// `version` is the API major version in the path segment, not
+/// apid's package version. This document describes the HTTP contract, and the
+/// contract is what `/api/versions` names.
+///
+/// The listed handlers carry their own `utoipa::path` attributes, and the
+/// schemas of the bodies they name are collected from them; there is no second
+/// list here to keep in step with the first.
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "apid",
+        version = "v1",
+        description = "The appliance management API served on the device."
+    ),
+    paths(
+        crate::routes::api_versions,
+        crate::routes::api_v1_session_status,
+        crate::routes::api_v1_session_create,
+        crate::routes::api_v1_session_delete,
+        crate::routes::api_v1_claim,
+        crate::routes::api_v1_ui_status,
+        crate::routes::api_v1_ui_bundles,
+        crate::routes::api_v1_ui_upload,
+        crate::routes::api_v1_ui_activate,
+        crate::routes::api_v1_ui_deactivate,
+        crate::routes::api_v1_ui_delete,
+        crate::routes::api_v1_meta,
+        crate::routes::api_v1_health,
+        crate::routes::api_v1_settings,
+        crate::routes::api_v1_settings_write,
+        crate::routes::api_v1_state,
+        crate::routes::api_v1_time_status,
+        crate::routes::api_v1_storage_status,
+        crate::routes::api_v1_system_info,
+        crate::routes::api_v1_system_telemetry,
+        crate::routes::api_v1_system_log,
+        crate::routes::api_v1_network_status,
+        crate::routes::api_v1_diagnostics_list,
+        crate::routes::api_v1_diagnostics_collect,
+        crate::routes::api_v1_diagnostics_snapshot,
+        crate::routes::api_v1_diagnostics_delete,
+        crate::routes::api_v1_tasks_list,
+        crate::routes::api_v1_task,
+        crate::routes::api_v1_change_password,
+        crate::routes::api_v1_wireguard_rotate,
+        crate::routes::api_v1_tokens_list,
+        crate::routes::api_v1_tokens_mint,
+        crate::routes::api_v1_tokens_revoke,
+        crate::routes::api_v1_ssh_keys_list,
+        crate::routes::api_v1_ssh_keys_add,
+        crate::routes::api_v1_ssh_keys_remove,
+        crate::routes::api_v1_wifi_networks_list,
+        crate::routes::api_v1_wifi_networks_add,
+        crate::routes::api_v1_wifi_networks_replace,
+        crate::routes::api_v1_wifi_networks_remove,
+        crate::routes::api_v1_wifi_client_read,
+        crate::routes::api_v1_wifi_scan,
+        crate::routes::api_v1_bluetooth_read,
+        crate::routes::api_v1_bluetooth_write,
+        crate::routes::api_v1_bluetooth_discovery,
+        crate::routes::api_v1_bluetooth_device_action,
+        crate::routes::api_v1_bluetooth_device_remove,
+        crate::routes::api_v1_wifi_ap_read,
+        crate::routes::api_v1_wifi_ap_write,
+        crate::routes::api_v1_wifi_client_write,
+        crate::routes::api_v1_containers_read,
+        crate::routes::api_v1_container_write,
+        crate::routes::api_v1_container_remove,
+        crate::routes::api_v1_container_action,
+        crate::routes::api_v1_mqtt_read,
+        crate::routes::api_v1_mqtt_write,
+        crate::routes::api_v1_web_read,
+        crate::routes::api_v1_web_write,
+        crate::routes::api_v1_web_certificate_read,
+        crate::routes::api_v1_web_certificate_upload,
+        crate::routes::api_v1_web_certificate_generate,
+        crate::routes::api_v1_network_read,
+        crate::routes::api_v1_network_write,
+        crate::routes::api_v1_network_iface_write,
+        crate::routes::api_v1_network_iface_remove,
+        crate::routes::api_v1_peers_list,
+        crate::routes::api_v1_peers_add,
+        crate::routes::api_v1_peers_remove,
+        crate::routes::api_v1_reboot,
+        crate::routes::api_v1_poweroff,
+        crate::routes::api_v1_transient_root_password,
+        crate::routes::api_v1_setup,
+        crate::routes::api_v1_reset,
+        crate::routes::api_v1_recovery_credential,
+        crate::provisioning_api::api_v1_provisioning_status,
+        crate::update_api::api_v1_update_state,
+        crate::update_api::api_v1_update_check,
+        crate::update_api::api_v1_update_import,
+        crate::update_api::api_v1_update_fetch,
+        crate::update_api::api_v1_update_install,
+        crate::update_api::api_v1_update_confirm,
+        crate::update_api::api_v1_update_reject,
+        crate::update_api::api_v1_update_rollback,
+        crate::update_api::api_v1_update_reboot_override,
+        crate::update_api::api_v1_update_config
+    )
+)]
+struct ApiDoc;
+
+/// The document as the exact bytes `--openapi` prints and `openapi.json`
+/// holds: pretty-printed, with one trailing newline.
+/// The path prefixes each feature's routes live under; a route of a feature the
+/// product does not carry is not served.
+const FEATURE_PATHS: [(&str, &str); 5] = [
+    ("/api/v1/wifi/", "wifi"),
+    ("/api/v1/bluetooth", "bluetooth"),
+    ("/api/v1/ssh/", "ssh"),
+    ("/api/v1/containers", "containers"),
+    ("/api/v1/mqtt", "mqtt"),
+];
+
+/// Say on every operation of a feature's routes that it is served only when the
+/// product carries that feature.
+fn note_features(document: &mut utoipa::openapi::OpenApi) {
+    for (path, item) in &mut document.paths.paths {
+        let Some((_, feature)) = FEATURE_PATHS
+            .iter()
+            .find(|(prefix, _)| path.starts_with(prefix))
+        else {
+            continue;
+        };
+        let note = format!(
+            "Served only when the product carries the `{feature}` feature \
+             (`GET /api/v1/meta` lists `features`); otherwise every method \
+             answers 404 `not_found`."
+        );
+        for operation in [
+            &mut item.get,
+            &mut item.put,
+            &mut item.post,
+            &mut item.delete,
+            &mut item.patch,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            operation.description = Some(match operation.description.take() {
+                Some(description) => format!("{description}\n\n{note}"),
+                None => note.clone(),
+            });
+        }
+    }
+}
+
+pub fn document_json() -> serde_json::Result<String> {
+    let mut document = ApiDoc::openapi();
+    // The crates declare no `license`, so the derive fills the object in from
+    // the empty `CARGO_PKG_LICENSE`. A licence object whose only required
+    // field is the empty string states nothing; there is no licence to name,
+    // so there is no object.
+    document.info.license = None;
+    note_features(&mut document);
+    let mut json = document.to_pretty_json()?;
+    json.push('\n');
+    Ok(json)
+}

@@ -1,0 +1,72 @@
+{
+  "envelope": "{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"e0014346bad118ee7cb443a0feca7488c55f96fb4eb04ea2607fdeafdf444a12\",\"payload\":\"eyJhcmNoIjoiYW1kNjQiLCJjaGFubmVsIjoiZ2VuZXJhbCIsImNvbXBvbmVudHMiOlt7ImFyY2giOiJhbWQ2NCIsImNvbnRlbnQiOnsiaW1hZ2UiOnsiYnl0ZXMiOjEyMjg4LCJzaGEyNTYiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIn0sInJvb3RIYXNoIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInNpZ25hdHVyZSI6eyJieXRlcyI6NDAwLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIn0sInZlcml0eSI6eyJhbGdvcml0aG0iOiJzaGEyNTYiLCJkYXRhQmxvY2tTaXplIjo0MDk2LCJkYXRhQmxvY2tzIjoyLCJoYXNoQmxvY2tTaXplIjo0MDk2LCJoYXNoT2Zmc2V0Ijo4MTkyLCJzYWx0IjoiY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYyIsInZlcnNpb24iOjF9fSwiZmVhdHVyZXMiOlsidWkiXSwiaWQiOiI4ZDcwOGQ1NjNmMThlZjJiMzE2NTllMmE2ZjVjNTFlMGU2Njg3NDI3YzA2MzUxYmZhZWUyNTc2NGM5N2I0NjY0IiwibmVlZHMiOlt7Im1heCI6IjAuMC4xIiwibWluIjoiMC4wLjEiLCJwYWNrYWdlIjoibWljYWQifV0sInBhY2thZ2UiOiJtaWNhLWFwaWQtdWkiLCJyb290Ijp7Im1pbiI6MX0sInNjaGVtYSI6Im1pY2EvY29yZS92MSIsInZlcnNpb24iOiIwLjAuMSJ9LHsiYXJjaCI6ImFtZDY0IiwiY29udGVudCI6eyJpbWFnZSI6eyJieXRlcyI6MTIyODgsInNoYTI1NiI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEifSwicm9vdEhhc2giOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwic2lnbmF0dXJlIjp7ImJ5dGVzIjo0MDAsInNoYTI1NiI6ImJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmIifSwidmVyaXR5Ijp7ImFsZ29yaXRobSI6InNoYTI1NiIsImRhdGFCbG9ja1NpemUiOjQwOTYsImRhdGFCbG9ja3MiOjIsImhhc2hCbG9ja1NpemUiOjQwOTYsImhhc2hPZmZzZXQiOjgxOTIsInNhbHQiOiJjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIiwidmVyc2lvbiI6MX19LCJmZWF0dXJlcyI6WyJtaWNhZCJdLCJpZCI6IjAwY2FmZDZmYzU3NDRhZGU5OGQzODQ5M2U5NDM1NDE0NWVkZDg4MzI5Y2E2OGJlYzUyOGFkNjk2ODk0ODIwOWIiLCJuZWVkcyI6W10sInBhY2thZ2UiOiJtaWNhZCIsInJvb3QiOnsibWF4IjoyLCJtaW4iOjF9LCJzY2hlbWEiOiJtaWNhL2NvcmUvdjEiLCJ2ZXJzaW9uIjoiMC4wLjEifV0sImdlbmVyYXRpb24iOjEsImtpbmQiOiJjb3JlIiwic2NoZW1hIjoibWljYS9zZXQvdjEiLCJ2ZXJzaW9uIjoiMC4wLjEifQ==\",\"signature\":\"bXpN2cchGoAvWjVKk9PJt56+LQerh8aEy0pPRczdCfDCbW5orllymZXa3jYTTBmQ9Vn8e2/xa1FsT+TShBY1DQ==\"}",
+  "payload": "{\"arch\":\"amd64\",\"channel\":\"general\",\"components\":[{\"arch\":\"amd64\",\"content\":{\"image\":{\"bytes\":12288,\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"rootHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"signature\":{\"bytes\":400,\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"verity\":{\"algorithm\":\"sha256\",\"dataBlockSize\":4096,\"dataBlocks\":2,\"hashBlockSize\":4096,\"hashOffset\":8192,\"salt\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"version\":1}},\"features\":[\"ui\"],\"id\":\"8d708d563f18ef2b31659e2a6f5c51e0e6687427c06351bfaee25764c97b4664\",\"needs\":[{\"max\":\"0.0.1\",\"min\":\"0.0.1\",\"package\":\"micad\"}],\"package\":\"mica-apid-ui\",\"root\":{\"min\":1},\"schema\":\"mica/core/v1\",\"version\":\"0.0.1\"},{\"arch\":\"amd64\",\"content\":{\"image\":{\"bytes\":12288,\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"rootHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"signature\":{\"bytes\":400,\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"verity\":{\"algorithm\":\"sha256\",\"dataBlockSize\":4096,\"dataBlocks\":2,\"hashBlockSize\":4096,\"hashOffset\":8192,\"salt\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"version\":1}},\"features\":[\"micad\"],\"id\":\"00cafd6fc5744ade98d38493e94354145edd88329ca68bec528ad6968948209b\",\"needs\":[],\"package\":\"micad\",\"root\":{\"max\":2,\"min\":1},\"schema\":\"mica/core/v1\",\"version\":\"0.0.1\"}],\"generation\":1,\"kind\":\"core\",\"schema\":\"mica/set/v1\",\"version\":\"0.0.1\"}",
+  "publicKey": "ImjnQQz69ZhxwgZsU6/UcR4DOddVZB/EBPC8Bq4w+BA=",
+  "selectionRule": "A device composes the components with at least one feature among its product's FEATURES, in package order. The selection is refused when a selected component does not run on the root's interfaceLevel (root.min <= level <= root.max, an absent max unbounded), or needs a package that is not selected or is selected at a version outside min..max (dotted numbers compared numerically). Selecting nothing is not a refusal",
+  "selections": [
+    {
+      "features": [
+        "micad",
+        "ui",
+        "ssh",
+        "mqtt"
+      ],
+      "name": "console-product",
+      "rootLevel": 1,
+      "selected": [
+        "mica-apid-ui",
+        "micad"
+      ]
+    },
+    {
+      "features": [
+        "micad",
+        "ssh"
+      ],
+      "name": "headless-product",
+      "rootLevel": 1,
+      "selected": [
+        "micad"
+      ]
+    },
+    {
+      "features": [
+        "ssh"
+      ],
+      "name": "no-core-feature",
+      "rootLevel": 1,
+      "selected": []
+    },
+    {
+      "features": [
+        "micad",
+        "ui"
+      ],
+      "name": "newer-root-in-range",
+      "rootLevel": 2,
+      "selected": [
+        "mica-apid-ui",
+        "micad"
+      ]
+    },
+    {
+      "features": [
+        "ui"
+      ],
+      "name": "need-not-selected",
+      "refusal": "a selected core component's need is not selected",
+      "rootLevel": 1
+    },
+    {
+      "features": [
+        "micad",
+        "ui"
+      ],
+      "name": "root-above-range",
+      "refusal": "a selected core component does not run on this root's interface level",
+      "rootLevel": 3
+    }
+  ],
+  "setId": "70a307368e910e201d0d219b0253707231dd717f644ac60f4328a750ab03194d",
+  "wireForm": "`payload` is the signed bytes: JSON with no whitespace and every object's keys in sorted order, which a reader re-serializes and compares. `envelope` is the signed envelope in its wire order, and `setId` the SHA-256 of `payload`"
+}

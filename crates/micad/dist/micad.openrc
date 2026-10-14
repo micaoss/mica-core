@@ -1,0 +1,35 @@
+#!/sbin/openrc-run
+# micad on an OpenRC root: micad.service's counterpart, enabled by the default
+# runlevel link this package owns. micad reads INIT=openrc from
+# /usr/lib/mica/product.conf and drives this init.
+
+description="mica management daemon"
+command=/usr/bin/micad
+supervisor=supervise-daemon
+respawn_delay=2
+output_logger="logger -t micad -p daemon.info"
+error_logger="logger -t micad -p daemon.warn"
+
+# How long micad may take to claim its bus name, systemd's default start timeout.
+: "${micad_ready_timeout:=90}"
+
+depend() {
+    need mica-dbus mica-mounts
+}
+
+# Started means micad owns com.mica.micad, as Type=dbus means under systemd:
+# supervise-daemon reports a service started once the process exists, and
+# micad claims its name only after its first reconcile, so what needs micad
+# (apid, the health gate) would otherwise ask it too early.
+start_post() {
+    waited=0
+    while ! dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus.GetNameOwner string:com.mica.micad >/dev/null 2>&1; do
+        if [ "$waited" -ge "$micad_ready_timeout" ]; then
+            eerror "micad did not claim com.mica.micad within ${micad_ready_timeout}s"
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+}

@@ -1,0 +1,26 @@
+[package]
+name = "micad-settings"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The audit ring stamps every line with an RFC 3339 UTC timestamp; both
+# binaries already link chrono, so the shared writer adds no crate to an image.
+argon2 = { workspace = true }
+chrono = { workspace = true }
+aws-lc-rs = { workspace = true }
+base64 = { workspace = true }
+mica-fs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
