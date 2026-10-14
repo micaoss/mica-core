@@ -35,3 +35,21 @@ pub fn verify_password(hash: &str, password: &str) -> bool {
         .and_then(|parsed| Argon2::default().verify_password(password.as_bytes(), &parsed))
         .is_ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn randomness_comes_from_the_kernel_not_cpu_jitter() {
+        // AWS-LC seeds from CPU jitter unless built without it; on the RK3576's
+        // 24 MHz counter jitter fails its health test most of the time and
+        // AWS-LC aborts the process on the first draw (apid died on every
+        // login). .cargo/config.toml builds it with getrandom only.
+        assert!(
+            aws_lc_rs::try_fips_cpu_jitter_entropy().is_err(),
+            "AWS-LC is seeding from CPU jitter; AWS_LC_SYS_NO_JITTER_ENTROPY is not set"
+        );
+        assert_ne!(random_bytes::<16>(), [0u8; 16]);
+    }
+}
