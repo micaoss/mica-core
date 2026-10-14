@@ -274,7 +274,7 @@ export const en = {
       clientDisabled: 'Wi-Fi client disabled.',
       added: 'Network {{name}} saved.',
       removed: 'Network {{name}} removed.',
-      enabled: 'Wi-Fi client', add: 'Add Wi-Fi network', addCopy: 'Credentials are stored by micad and are redacted on later reads.', security: 'Security', credential: 'Credential', auto: 'Auto-connect', wpa: 'WPA-PSK', saved: 'Saved · not echoed', noCredential: 'None', priorityValue: 'priority {{priority}}', client: 'Wi-Fi client', hidden: 'Hidden SSID', priority: 'Priority', password: 'Password', open: 'Open network', empty: 'No Wi-Fi networks are saved.', radio: 'Station radio', scanTitle: 'Networks on the air', scan: 'Scan', scanning: 'Scanning…', scanned: 'The radio reported what it found.', scanEmpty: 'No scan has been run, or the radio found nothing.', scanUnavailable: 'The radio could not scan.', hiddenNetwork: '(hidden)', signal: 'Signal', connect: 'Connect', edit: 'Edit {{name}}', editCopy: 'The stored key is kept unless a new one is entered.', keepKey: 'Leave empty to keep the stored key.', keepKeyPlaceholder: 'unchanged', remove: 'Remove {{name}}', removeCopy: 'Forget {{name}}? The device will no longer connect to it automatically.',
+      enabled: 'Wi-Fi client', add: 'Add Wi-Fi network', addCopy: 'Credentials are stored by micad and are redacted on later reads.', security: 'Security', credential: 'Credential', auto: 'Auto-connect', wpa: 'WPA-PSK', saved: 'Saved · not echoed', noCredential: 'None', priorityValue: 'priority {{priority}}', client: 'Wi-Fi client', hidden: 'Hidden SSID', priority: 'Priority', password: 'Password', open: 'Open network', empty: 'No Wi-Fi networks are saved.', radio: 'Station radio', scanTitle: 'Networks on the air', scan: 'Scan', scanning: 'Scanning…', scanned: 'The radio reported what it found.', scanEmpty: 'No scan has been run, or the radio found nothing.', scanUnavailable: 'The radio could not scan.', scanApHolds: 'The access point is using {{iface}}. Switch it off to scan.', scanClientOff: 'The Wi-Fi client is switched off. Switch it on to scan.', exclusiveTitle: 'Switch off the access point?', exclusiveCopy: 'The Wi-Fi client and the access point cannot share {{iface}}. Switching the client on switches the access point off.', exclusiveConfirm: 'Switch off the access point', hiddenNetwork: '(hidden)', signal: 'Signal', connect: 'Connect', edit: 'Edit {{name}}', editCopy: 'The stored key is kept unless a new one is entered.', keepKey: 'Leave empty to keep the stored key.', keepKeyPlaceholder: 'unchanged', remove: 'Remove {{name}}', removeCopy: 'Forget {{name}}? The device will no longer connect to it automatically.',
     },
     bluetooth: {
       title: 'Bluetooth',
@@ -339,6 +339,9 @@ export const en = {
       save: 'Save access point',
       saved: 'Access point saved.',
       connected: '{{count}} client(s) connected.',
+      exclusiveTitle: 'Switch off the Wi-Fi client?',
+      exclusiveCopy: 'The access point and the Wi-Fi client cannot share {{iface}}. Starting the access point switches the client off and drops its connection.',
+      exclusiveConfirm: 'Switch off the client and save',
     },
     wireguard: {
       added: 'Peer added.',

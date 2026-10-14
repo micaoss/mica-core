@@ -140,9 +140,14 @@ fn settings_with(ap: WifiApSettings) -> Settings {
             device_id: Some(DEVICE_ID.to_string()),
             ..ProvisioningSettings::default()
         },
+        // The station is switched off: the default turns it on, on the same
+        // radio, which is the conflict `settings_with_station` sets up.
         wifi: WifiSettings {
             ap,
-            ..WifiSettings::default()
+            client: WifiClientSettings {
+                enabled: false,
+                ..WifiClientSettings::default()
+            },
         },
         ..Settings::default()
     }

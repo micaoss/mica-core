@@ -47,8 +47,9 @@ enum Station {
     /// The station was already exactly as configured; nothing was written and
     /// no unit call was made.
     Unchanged,
-    /// `wifi.client.enabled` is true but no network is configured, so there is
-    /// nothing to associate with and the supplicant is kept down.
+    /// `wifi.client.enabled` is true but no network is configured: the
+    /// supplicant runs, so the radio can scan, joins nothing and the link is
+    /// given no DHCP.
     Idle,
     /// `wifi.client.enabled` is false.
     Disabled,
@@ -344,9 +345,11 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiClientReconciler<C, R>
         };
         let config_path = self.config_dir.join(config_file_name(&client.interface));
 
-        // "Enabled with nothing to join" is not a reason to run a supplicant;
-        // see `Station::Idle`.
-        let up = client.enabled && !client.networks.is_empty();
+        // The supplicant runs whenever the station is enabled, networks or
+        // not: a scan is asked of it. The link is addressed only when there is
+        // something to join; see `Station::Idle`.
+        let up = client.enabled;
+        let joins = up && !client.networks.is_empty();
 
         // The configuration is rendered even while the station is kept down, so
         // the file on disk always describes `wifi.client` and adding the first
@@ -367,7 +370,7 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiClientReconciler<C, R>
                 config_changed |= write_config_if_changed(env, &rendered, 0o644)?;
                 (None, false)
             }
-            None => self.apply_networkd(&client.interface, up)?,
+            None => self.apply_networkd(&client.interface, joins)?,
         };
         if networkd_changed {
             self.reloader.reload().await?;

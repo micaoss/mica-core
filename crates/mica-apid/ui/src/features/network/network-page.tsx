@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Cable, ChevronRight, KeyRound, Plus, Radar, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import { configuredSummary, networkRows, physicalInterfaces, visibleNetworkRows, type NetworkRow, listedAddresses } from '@/lib/network'
-import type { NetworkOverview, ObservedNetworkState, TaskAccepted, WifiScan } from '@/lib/types'
+import type { NetworkOverview, ObservedNetworkState, TaskAccepted, WifiAccessPoint, WifiScan } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { CopyField } from '@/shared/components/copy-field'
@@ -269,13 +269,18 @@ function WifiPanel() {
   const [hidden, setHidden] = useState(false)
   const [priority, setPriority] = useState('0')
   const [radio, setRadio] = useState<string>()
+  const [confirmingClient, setConfirmingClient] = useState(false)
   // The station role, as its own resource: one radio, one switch. The list
   // beside it is a separate collection because it carries keys.
   const client = useQuery({ queryKey: ['wifi-client'], queryFn: () => api<WifiClientRole>('/api/v1/wifi/client') })
   const status = useQuery({ queryKey: ['observed-network'], queryFn: () => api<ObservedNetworkState>('/api/v1/network/status'), retry: false })
   const networks = useQuery({ queryKey: ['wifi-networks'], queryFn: () => api<WifiNetwork[]>('/api/v1/wifi/client/networks') })
+  // The access point's role, read here because one radio carries one role
+  // (micad reports the access point in conflict otherwise).
+  const ap = useQuery({ queryKey: ['wifi-ap'], queryFn: () => api<WifiAccessPoint>('/api/v1/wifi/ap') })
   const radios = status.data?.capabilities.wifi.interfaces ?? []
   const currentRadio = radio ?? client.data?.interface ?? radios[0] ?? ''
+  const apHoldsRadio = ap.data !== undefined && ap.data.mode !== 'off' && ap.data.interface === currentRadio
   const writeRole = useMutationFeedback<TaskAccepted, WifiClientRole>({
     mutationFn: (role) => api<TaskAccepted>('/api/v1/wifi/client', json('PUT', role)),
     success: (_data, role) => t(role.enabled ? 'network.wifi.clientEnabled' : 'network.wifi.clientDisabled'),
@@ -284,7 +289,17 @@ function WifiPanel() {
   })
   const toggle = {
     data: writeRole.data,
-    mutate: (enabled: boolean) => writeRole.mutate({ enabled, interface: currentRadio }),
+    mutate: (enabled: boolean) => enabled && apHoldsRadio ? setConfirmingClient(true) : writeRole.mutate({ enabled, interface: currentRadio }),
+  }
+  // The access point goes off first, so the radio is never claimed by both.
+  const enableOverAccessPoint = async () => {
+    if (!ap.data) return
+    const body: Partial<WifiAccessPoint> = { ...ap.data, mode: 'off' }
+    delete body.psk
+    await api<TaskAccepted>('/api/v1/wifi/ap', json('PUT', body))
+    await api<TaskAccepted>('/api/v1/wifi/client', json('PUT', { enabled: true, interface: currentRadio }))
+    await queryClient.invalidateQueries({ queryKey: ['wifi-ap'] })
+    await queryClient.invalidateQueries({ queryKey: ['wifi-client'] })
   }
   const remove = useMutationFeedback<void, string>({
     mutationFn: (name) => api<void>(`/api/v1/wifi/client/networks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
@@ -333,6 +348,11 @@ function WifiPanel() {
   const startEditing = (entry: WifiNetwork) => {
     setEditing(entry); setPsk(''); setHidden(entry.hidden); setPriority(entry.priority.toString())
   }
+  const scanUnavailable = (result: WifiScan) => result.reason === 'access-point'
+    ? t('network.wifi.scanApHolds', { iface: result.interface ?? currentRadio })
+    : result.reason === 'client-off'
+      ? t('network.wifi.scanClientOff')
+      : result.detail ?? t('network.wifi.scanUnavailable')
   const clientState = client.isPending ? 'common.states.pending' : client.isError ? 'common.states.unknown' : client.data?.enabled ? 'common.states.enabled' : 'common.states.disabled'
   const panelError = client.error ?? networks.error
 
@@ -354,6 +374,17 @@ function WifiPanel() {
         </div>
       </div>
       {panelError ? <Callout tone="danger" title={failureDetail(panelError, t('common.requestFailed'))} /> : null}
+      <ConfirmDialog
+        open={confirmingClient}
+        onOpenChange={setConfirmingClient}
+        tone="neutral"
+        title={t('network.wifi.exclusiveTitle')}
+        description={t('network.wifi.exclusiveCopy', { iface: currentRadio })}
+        confirmLabel={t('network.wifi.exclusiveConfirm')}
+        success={t('network.wifi.clientEnabled')}
+        failure={t('network.wifi.client')}
+        onConfirm={enableOverAccessPoint}
+      />
       <CollectionPanel
         title={t('network.wifi.scanTitle')}
         action={(
@@ -362,7 +393,7 @@ function WifiPanel() {
           </Button>
         )}
       >
-        {scan.data && scan.data.available === false ? <Callout tone="warning" title={scan.data.detail ?? t('network.wifi.scanUnavailable')} /> : null}
+        {scan.data && scan.data.available === false ? <Callout tone="warning" title={scanUnavailable(scan.data)} /> : null}
         <DataTable<NonNullable<WifiScan['networks']>[number]>
           rows={scan.data?.networks}
           rowKey={(entry) => entry.bssid}

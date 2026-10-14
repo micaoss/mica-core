@@ -93,6 +93,8 @@ export interface WifiAccessPoint {
 export interface WifiScan {
   available: boolean
   interface?: string
+  /// Why no scan ran, when micad can say it in the operator's terms.
+  reason?: 'access-point' | 'client-off'
   detail?: string
   networks?: { ssid: string; bssid: string; signalDbm?: number; frequencyMhz?: number; flags: string }[]
 }

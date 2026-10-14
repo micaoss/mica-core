@@ -133,7 +133,11 @@ describe('the network page', () => {
   /// The access point is configured from the same tab, and its key is never
   /// shown: the field is empty and an empty field keeps the stored one.
   it('configures the access point without ever showing its key', async () => {
-    const fetch = stubFetch({ ...routes, 'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'task-2' }, 202) })
+    const fetch = stubFetch({
+      ...routes,
+      '/api/v1/wifi/client': { enabled: false, interface: 'wlan0' },
+      'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'task-2' }, 202),
+    })
     renderRoute(<NetworkPage />)
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
@@ -151,6 +155,74 @@ describe('the network page', () => {
     const body = JSON.parse(String((call?.[1] as RequestInit).body))
     expect(body.psk).toBeUndefined()
     expect(body.mode).toBe('provisioning')
+  })
+
+  /// One radio carries one role: starting the access point where the station
+  /// runs asks first, and switches the station off before the access point.
+  it('asks before starting the access point on the station radio', async () => {
+    const fetch = stubFetch({
+      ...routes,
+      'PUT /api/v1/wifi/client': () => jsonResponse({ taskId: 'task-1' }, 202),
+      'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'task-2' }, 202),
+    })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
+    await screen.findByLabelText(/Pre-shared key/)
+    await userEvent.click(screen.getByRole('button', { name: 'Save access point' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Switch off the Wi-Fi client?' })
+    const puts = () => fetch.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      .map(([path, init]) => [String(path), JSON.parse(String((init as RequestInit).body))])
+    expect(puts()).toEqual([])
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Switch off the client and save' }))
+
+    await waitFor(() => expect(puts().map(([path]) => path)).toEqual(['/api/v1/wifi/client', '/api/v1/wifi/ap']))
+    expect(puts()[0][1]).toEqual({ enabled: false, interface: 'wlan0' })
+    expect(puts()[1][1].mode).toBe('provisioning')
+  })
+
+  it('asks before switching the station on where the access point runs', async () => {
+    const fetch = stubFetch({
+      ...routes,
+      '/api/v1/wifi/client': { enabled: false, interface: 'wlan0' },
+      'PUT /api/v1/wifi/client': () => jsonResponse({ taskId: 'task-1' }, 202),
+      'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'task-2' }, 202),
+    })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
+    await screen.findByLabelText(/Pre-shared key/)
+    await userEvent.click(await screen.findByRole('switch', { name: 'Wi-Fi client' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Switch off the access point?' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Switch off the access point' }))
+
+    const puts = () => fetch.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      .map(([path, init]) => [String(path), JSON.parse(String((init as RequestInit).body))])
+    await waitFor(() => expect(puts().map(([path]) => path)).toEqual(['/api/v1/wifi/ap', '/api/v1/wifi/client']))
+    expect(puts()[0][1].mode).toBe('off')
+    expect(puts()[0][1].psk).toBeUndefined()
+    expect(puts()[1][1]).toEqual({ enabled: true, interface: 'wlan0' })
+  })
+
+  it('says the access point holds the radio when a scan cannot run', async () => {
+    stubFetch({
+      ...routes,
+      'POST /api/v1/wifi/client/scan': () => jsonResponse({
+        available: false,
+        interface: 'wlan0',
+        reason: 'access-point',
+        detail: 'the access point is using wlan0; switch it off to scan',
+      }),
+    })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Scan' }))
+
+    expect(await screen.findByText('The access point is using wlan0. Switch it off to scan.')).toBeTruthy()
   })
 
   it('reports the Wi-Fi client switch', async () => {

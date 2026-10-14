@@ -177,3 +177,61 @@ pub(super) async fn the_container_read_names_the_declared_map_and_the_daemon_apa
     assert_eq!(value["engine"]["available"], serde_json::json!(false));
     assert!(value["engine"]["detail"].is_string(), "{value}");
 }
+
+/// A service whose `wifi` tree is `wifi`, nothing else configured.
+fn service_with_wifi(wifi: micad_settings::WifiSettings) -> (MicadService, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let shadow_path = dir.path().join("shadow");
+    std::fs::write(&shadow_path, SHADOW).expect("seed shadow");
+    let settings = micad_settings::Settings {
+        wifi,
+        ..micad_settings::Settings::default()
+    };
+    let service = MicadService::new(
+        store_in(&dir),
+        settings,
+        Vec::new(),
+        Box::new(MockPower {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }),
+        shadow_path,
+        serde_json::json!({}),
+    );
+    (service, dir)
+}
+
+/// A scan that cannot run says why in the operator's terms, before any
+/// socket is looked for: the radio is the access point's, or the station is
+/// switched off.
+#[tokio::test]
+pub(super) async fn a_scan_without_a_station_names_what_holds_the_radio() {
+    let mut wifi = micad_settings::WifiSettings::default();
+    wifi.client.enabled = false;
+    wifi.ap.mode = micad_settings::ApMode::Always;
+    let (service, _dir) = service_with_wifi(wifi.clone());
+    let scan: serde_json::Value =
+        serde_json::from_str(&service.scan_wifi().await.expect("scan")).expect("json");
+    assert_eq!(scan["available"], false);
+    assert_eq!(scan["reason"], "access-point");
+    assert!(
+        scan["detail"]
+            .as_str()
+            .expect("detail")
+            .contains("access point"),
+        "{scan}"
+    );
+
+    wifi.ap.mode = micad_settings::ApMode::Off;
+    let (service, _dir) = service_with_wifi(wifi);
+    let scan: serde_json::Value =
+        serde_json::from_str(&service.scan_wifi().await.expect("scan")).expect("json");
+    assert_eq!(scan["available"], false);
+    assert_eq!(scan["reason"], "client-off");
+    assert!(
+        scan["detail"]
+            .as_str()
+            .expect("detail")
+            .contains("switched off"),
+        "{scan}"
+    );
+}

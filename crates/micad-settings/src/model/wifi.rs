@@ -14,7 +14,8 @@ pub struct WifiSettings {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WifiClientSettings {
-    /// Whether the station role is started.
+    /// Whether the station role is started. On by default: a running
+    /// supplicant with no network joins nothing, and a scan needs one.
     pub enabled: bool,
     /// Interface the station role runs on.
     pub interface: String,
@@ -28,7 +29,7 @@ pub struct WifiClientSettings {
 impl Default for WifiClientSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             interface: "wlan0".to_string(),
             networks: Vec::new(),
         }

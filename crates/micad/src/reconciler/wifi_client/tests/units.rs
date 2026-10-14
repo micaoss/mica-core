@@ -193,9 +193,9 @@ pub(super) async fn changing_the_config_of_a_stopped_supplicant_does_not_start_i
 // ---- enabled with nothing to join -------------------------------------
 
 #[tokio::test]
-pub(super) async fn enabled_with_no_networks_stays_down_and_reports_idle() {
+pub(super) async fn enabled_with_no_networks_runs_the_supplicant_without_an_address() {
     let dir = tempfile::tempdir().unwrap();
-    let (reconciler, paths) = fixture(dir.path(), "active", "enabled");
+    let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
     std::fs::create_dir_all(&paths.network_dir).unwrap();
     std::fs::write(paths.networkd(), GOLDEN_NETWORKD).unwrap();
 
@@ -213,18 +213,44 @@ pub(super) async fn enabled_with_no_networks_stays_down_and_reports_idle() {
     assert_eq!(
         reconciler.control.calls(),
         vec![
-            "stop wpa_supplicant@wlan0.service".to_string(),
-            "disable wpa_supplicant@wlan0.service".to_string(),
+            "enable wpa_supplicant@wlan0.service".to_string(),
+            "start wpa_supplicant@wlan0.service".to_string(),
         ],
-        "a supplicant with no networks would claim the radio without ever associating"
+        "a scan needs a running supplicant, networks or not"
     );
     assert_eq!(
         std::fs::read_to_string(&paths.config).unwrap(),
         GOLDEN_EMPTY,
-        "the configuration is still rendered, so adding the first network \
-         is an ordinary change"
+        "with no network block the supplicant joins nothing"
     );
-    assert!(!paths.networkd().exists());
+    assert!(
+        !paths.networkd().exists(),
+        "a link that joins nothing is given no DHCP"
+    );
+    assert_eq!(state["networkdUnit"], json!(null));
+}
+
+#[tokio::test]
+pub(super) async fn the_first_network_restarts_the_idle_supplicant_and_addresses_the_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, paths) = fixture(dir.path(), "active", "enabled");
+    reconciler
+        .apply(&settings_with(client(true, Vec::new())))
+        .await
+        .unwrap();
+    let idle = reconciler.control.calls().len();
+
+    let state = reconciler
+        .apply(&settings_with(one_psk_network()))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        reconciler.control.calls()[idle..],
+        ["restart wpa_supplicant@wlan0.service".to_string()]
+    );
+    assert_eq!(state["station"], json!("applied"));
+    assert!(paths.networkd().exists());
 }
 
 // ---- secret hygiene ---------------------------------------------------

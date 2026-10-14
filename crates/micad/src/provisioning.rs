@@ -164,7 +164,9 @@ mod tests {
             settings.network
         );
         assert_eq!(settings.wifi, WifiSettings::default());
-        assert!(!settings.wifi.client.enabled);
+        // The station is on, so a scan works before any network is chosen; with
+        // no network it joins nothing. The access point stays off.
+        assert!(settings.wifi.client.enabled);
         assert_eq!(settings.wifi.ap.mode, ApMode::Off);
 
         // The one write really happened, and it holds the same tree.

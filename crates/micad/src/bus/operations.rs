@@ -161,6 +161,33 @@ impl MicadService {
             .map_err(SettingsFault::Fdo)?;
         let settings = self.inner.read().await.settings.clone();
         let interface = settings.wifi.client.interface.clone();
+        // A scan is asked of the station's supplicant, which runs only while
+        // the station is enabled; the access point holds the radio otherwise
+        // (`wifi_ap`'s conflict rule). Said in the operator's terms.
+        if !settings.wifi.client.enabled {
+            let ap = &settings.wifi.ap;
+            let (reason, detail) =
+                if ap.mode != micad_settings::ApMode::Off && ap.interface == interface {
+                    (
+                        "access-point",
+                        format!("the access point is using {interface}; switch it off to scan"),
+                    )
+                } else {
+                    (
+                        "client-off",
+                        format!(
+                            "the Wi-Fi client is switched off on {interface}; switch it on to scan"
+                        ),
+                    )
+                };
+            return Ok(serde_json::json!({
+                "available": false,
+                "interface": interface,
+                "reason": reason,
+                "detail": detail,
+            })
+            .to_string());
+        }
         let root = std::path::PathBuf::from("/");
         let scanned = tokio::task::spawn_blocking(move || {
             crate::network_state::scan_networks(&root, &interface)

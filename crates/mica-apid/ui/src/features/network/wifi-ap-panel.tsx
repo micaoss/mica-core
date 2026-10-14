@@ -5,6 +5,7 @@ import { RadioTower } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import type { ObservedNetworkState, TaskAccepted, WifiAccessPoint } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
+import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { FormField } from '@/shared/components/form-field'
 import { Panel } from '@/shared/components/panel'
 import { Button } from '@/shared/components/ui/button'
@@ -29,6 +30,10 @@ export function WifiApPanel() {
   const status = useQuery({ queryKey: ['observed-network'], queryFn: () => api<ObservedNetworkState>('/api/v1/network/status'), retry: false })
   const [draft, setDraft] = useState<Partial<WifiAccessPoint>>({})
   const [psk, setPsk] = useState('')
+  // A save that would start the access point on the station's radio, held
+  // until the operator agrees to switch the station off.
+  const [pending, setPending] = useState<WifiAccessPoint>()
+  const client = useQuery({ queryKey: ['wifi-client'], queryFn: () => api<{ enabled: boolean; interface: string }>('/api/v1/wifi/client') })
 
   const radios = status.data?.capabilities.wifi.interfaces ?? []
   // Optional through the member itself: a daemon older than the access-point
@@ -55,7 +60,24 @@ export function WifiApPanel() {
     // sentinel, and sending that back is refused. An empty field means keep.
     const body = { ...current }
     delete body.psk
-    save.mutate({ ...body, ...(psk ? { psk } : {}) })
+    const next = { ...body, ...(psk ? { psk } : {}) }
+    // One radio carries one role: micad reports the access point in conflict
+    // while the station is on the same radio.
+    if (next.mode !== 'off' && client.data?.enabled && client.data.interface === next.interface) {
+      setPending(next)
+      return
+    }
+    save.mutate(next)
+  }
+
+  // The station goes off first, so the radio is never claimed by both.
+  const saveOverClient = async () => {
+    if (!pending) return
+    await api<TaskAccepted>('/api/v1/wifi/client', json('PUT', { enabled: false, interface: pending.interface }))
+    await api<TaskAccepted>('/api/v1/wifi/ap', json('PUT', pending))
+    setPsk('')
+    await queryClient.invalidateQueries({ queryKey: ['wifi-client'] })
+    await queryClient.invalidateQueries({ queryKey: ['wifi-ap'] })
   }
 
   return (
@@ -106,6 +128,17 @@ export function WifiApPanel() {
           {save.isPending ? <Spinner /> : null}{t('network.ap.save')}
         </Button>
       </form>
+      <ConfirmDialog
+        open={pending !== undefined}
+        onOpenChange={(open) => { if (!open) setPending(undefined) }}
+        tone="neutral"
+        title={t('network.ap.exclusiveTitle')}
+        description={t('network.ap.exclusiveCopy', { iface: pending?.interface ?? '' })}
+        confirmLabel={t('network.ap.exclusiveConfirm')}
+        success={t('network.ap.saved')}
+        failure={t('network.ap.save')}
+        onConfirm={saveOverClient}
+      />
     </Panel>
   )
 }

@@ -138,6 +138,13 @@ live-state tree under its name.
 | `web` | `access.web` into `/run/mica/apid.json`; a running `apid.service` restarted when it changed | the same, `apid` |
 | `bluetooth` | `bluetooth.service`, the adapter's properties, each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus | the same through `mica-bluetoothd` |
 
+The station and the access point share one radio and take turns. The station is on by default:
+its supplicant runs whenever `wifi.client.enabled` is set, with no network block until one is
+added, so a scan works before any network is chosen and nothing is joined; networkd DHCP is
+rendered only once a network exists. An access point on the station's interface reports
+`conflict` and does not start; the console asks the operator before switching the other role off,
+and a scan without a station answers `reason` `access-point` or `client-off`.
+
 Services are driven through one trait (`UnitControl`): systemd over D-Bus, with runtime
 enablement; on OpenRC, `rc-service` (`x.service` is `x`, `a@b.service` is `a.b`), with enablement
 a no-op because `/etc/runlevels` is read-only and micad starts what it wants on every boot.

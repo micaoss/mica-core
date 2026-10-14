@@ -156,7 +156,7 @@ export const zhCN: Translation = {
       clientDisabled: '已停用 Wi-Fi 客户端。',
       added: '网络 {{name}} 已保存。',
       removed: '网络 {{name}} 已删除。',
-      enabled: 'Wi-Fi 客户端', add: '添加 Wi-Fi 网络', addCopy: '凭据由 micad 保存，后续读取时会隐藏。', security: '安全', credential: '凭据', auto: '自动连接', wpa: 'WPA-PSK', saved: '已保存 · 不回显', noCredential: '无', priorityValue: '优先级 {{priority}}', client: 'Wi-Fi 客户端', hidden: '隐藏 SSID', priority: '优先级', password: '密码', open: '开放网络', empty: '没有保存 Wi-Fi 网络。', radio: '客户端网卡', scanTitle: '附近的网络', scan: '扫描', scanning: '扫描中…', scanned: '已获取扫描结果。', scanEmpty: '尚未扫描，或未发现网络。', scanUnavailable: '无法扫描。', hiddenNetwork: '（隐藏）', signal: '信号', connect: '连接', edit: '编辑 {{name}}', editCopy: '不填写新密码时，保留已存储的密钥。', keepKey: '留空表示保留已存储的密钥。', keepKeyPlaceholder: '保持不变', remove: '移除 {{name}}', removeCopy: '忘记 {{name}}？设备之后将不再自动连接此网络。' },
+      enabled: 'Wi-Fi 客户端', add: '添加 Wi-Fi 网络', addCopy: '凭据由 micad 保存，后续读取时会隐藏。', security: '安全', credential: '凭据', auto: '自动连接', wpa: 'WPA-PSK', saved: '已保存 · 不回显', noCredential: '无', priorityValue: '优先级 {{priority}}', client: 'Wi-Fi 客户端', hidden: '隐藏 SSID', priority: '优先级', password: '密码', open: '开放网络', empty: '没有保存 Wi-Fi 网络。', radio: '客户端网卡', scanTitle: '附近的网络', scan: '扫描', scanning: '扫描中…', scanned: '已获取扫描结果。', scanEmpty: '尚未扫描，或未发现网络。', scanUnavailable: '无法扫描。', scanApHolds: '接入点正在使用 {{iface}}，请先关闭接入点再扫描。', scanClientOff: 'Wi-Fi 客户端已关闭，开启后才能扫描。', exclusiveTitle: '关闭接入点？', exclusiveCopy: 'Wi-Fi 客户端和接入点不能同时使用 {{iface}}。开启客户端会关闭接入点。', exclusiveConfirm: '关闭接入点', hiddenNetwork: '（隐藏）', signal: '信号', connect: '连接', edit: '编辑 {{name}}', editCopy: '不填写新密码时，保留已存储的密钥。', keepKey: '留空表示保留已存储的密钥。', keepKeyPlaceholder: '保持不变', remove: '移除 {{name}}', removeCopy: '忘记 {{name}}？设备之后将不再自动连接此网络。' },
     bluetooth: {
       title: '蓝牙', copy: '适配器，以及本机信任的设备。已配对的设备记录在这里，所以重置会清除它，适配器也会忘掉配对密钥。',
       noAdapter: '该设备没有蓝牙适配器。',
@@ -190,6 +190,7 @@ export const zhCN: Translation = {
       channel: '信道', country: '国家/地区', address: '接入点地址',
       addressHint: '接入点运行时设备响应的地址，同时在该子网上提供 DHCP。',
       save: '保存接入点', saved: '接入点配置已保存。', connected: '已连接 {{count}} 个客户端。',
+      exclusiveTitle: '关闭 Wi-Fi 客户端？', exclusiveCopy: '接入点和 Wi-Fi 客户端不能同时使用 {{iface}}。启动接入点会关闭客户端，并断开它当前的连接。', exclusiveConfirm: '关闭客户端并保存',
     },
     wireguard: {
       added: '对端已添加。',
