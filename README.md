@@ -23,8 +23,8 @@ release reaches devices without a new root.
 
 | Component | Arch | What it is |
 | --- | --- | --- |
-| `micad` | amd64, arm64 | The management daemon (settings, reconcilers, the root-only `com.mica.micad` D-Bus interface) and the API, the same executable under the name `mica-apid`: plain HTTP on 8080 by default, HTTPS on 8443 when enabled |
-| `mica-apid-ui` | amd64, arm64 | The built-in web console, at micad's exact version; without it a device is API-only |
+| `micad` | amd64, arm64 | Feature `micad`. The management daemon (settings, reconcilers, the root-only `com.mica.micad` D-Bus interface) and the API, the same executable under the name `mica-apid`: plain HTTP on 8080 by default, HTTPS on 8443 when enabled |
+| `mica-apid-ui` | amd64, arm64 | Feature `ui`. The built-in web console, at micad's exact version; without it a device is API-only |
 
 The rest are Debian packages built into the root:
 
@@ -37,8 +37,8 @@ Each component and package carries the start-up files of its own services, for s
 OpenRC. micad and apid enable themselves on both. micad also configures and starts the MQTT
 broker and bridge of [mica-pkgs](https://github.com/micaoss/mica-pkgs), by the contract of
 `mica-pkgs:docs/mica-pkgs.md` section 3. The product states its
-init and features in `/usr/lib/mica/product.conf` (`INIT`, `FEATURES`), and micad picks every
-backend from them.
+init and features in `/usr/lib/mica/product.conf` (`INIT`, `FEATURES`): the runkit composes the
+components whose feature is listed, and micad picks every backend from them.
 
 ## Releases
 

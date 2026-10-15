@@ -16,6 +16,9 @@ the repository is built, checked and released.
 | `micaoss/mica-pkgs` | The feature packages: the MQTT broker and bridge, the SFTP server | micad renders the MQTT configuration and starts both MQTT services by name (`mica-pkgs:docs/mica-pkgs.md` section 3) |
 | `micaoss/mica-podman` | The container engine and its supervisor, mica-containerd | micad's container reconciler starts mica-containerd and declares the containers to it |
 | `micaoss/mica-build` | Boards, products and the signed images | Pins a mica-core release, installs its packages into each product's root, and signs its core components into core sets, one of which every image carries |
+| `micaoss/mica-res` | The resource service behind `res.micaos.dev` | Serves the update root mica-deploy reads (6.2) |
+| `micaoss/mica-fleet` | The fleet service | None yet: apid reports the fleet document (6.2), and nothing on the device is a client of it |
+| `micaoss/mica` | The user documentation | Describes what an operator sees of micad, apid and the console |
 
 ## 2. Core components and packages
 
@@ -29,7 +32,7 @@ root hash with the product's key.
 
 | Component | What it holds | systemd | OpenRC | Started |
 | --- | --- | --- | --- | --- |
-| `micad` | The management daemon and its D-Bus policy, and the API: `/usr/bin/mica-apid`, a link to `micad`, with the OpenAPI document | `micad.service`, `apid.service` | `/etc/init.d/micad`, `/etc/init.d/apid` | At boot (the component links both) |
+| `micad` | The management daemon and its D-Bus policy, and the API: `/usr/bin/mica-apid`, a link to `micad`, with the OpenAPI document; feature `micad` | `micad.service`, `apid.service` | `/etc/init.d/micad`, `/etc/init.d/apid` | At boot (the component links both) |
 | `mica-apid-ui` | The web console at `/usr/share/mica-apid/ui`; feature `ui`, at micad's exact version | -- | -- | Served by apid; optional |
 
 The rest are Debian packages built into the root:
@@ -79,15 +82,24 @@ once; the bus name is claimed.
 | `MICAD_PROVISIONING_ROOT` | `/run/mica/provisioning` | Where offline provisioning media are staged |
 | `MICAD_DRY_RUN` | unset | `1`: no provisioning, no reconcilers, no host access (the tests) |
 
+The tests relocate the rest of what micad writes the same way: the reconcilers' output
+(`MICAD_NETWORK_DIR`, `MICAD_WPA_SUPPLICANT_DIR`, `MICAD_HOSTAPD_DIR`, `MICAD_DROPBEAR_ENV`,
+`MICAD_PASSWD_PATH`, `MICAD_MQTT_BROKER_CONFIG`), the DATA pool a reset clears (`MICA_DATA_ROOT`,
+`/mnt/data`), the audit ring (`MICA_AUDIT_RING_DIR`) and the recovery inputs
+(`MICA_RECOVERY_DECLARATION_PATH`, `MICA_RECOVERY_CMDLINE_PATH`, `MICA_PRESENCE_MARKER_PATH`).
+
 ### 3.2 The product
 
 `/usr/lib/mica/product.conf`, written when the root is composed and authenticated with it:
 
 - `PRODUCT` names the product a deployment must be built for.
-- `FEATURES` lists what the product carries: `wifi`, `bluetooth`, `ssh`, `containers`, `mqtt`.
-  The reconciler, the bus members and the API routes of a feature not listed do not exist on
-  the device; a write to its subtree is refused as `feature not in this product`, and its routes
-  answer 404. No file, or no `FEATURES` line, serves every feature.
+- `FEATURES` lists what the product carries. micad serves `wifi`, `bluetooth`, `ssh`,
+  `containers` and `mqtt`: the reconciler, the bus members and the API routes of one not listed
+  do not exist on the device; a write to its subtree is refused as `feature not in this product`,
+  and its routes answer 404. Other words are ignored by micad, and no file, or no `FEATURES` line,
+  serves every feature. The same words select the core components at boot (6.2): `micad` the
+  daemon, `ui` the console. The runkit reads the line exactly once and quoted, and cannot compose
+  the core set of a root without it.
 - `INIT` is `systemd` (the default) or `openrc`, and decides every backend below. An unknown
   init stops micad.
 
@@ -99,8 +111,8 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | --- | --- |
 | `hostname` | The hostname |
 | `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's) or static addressing, routes, a DHCP server |
-| `access` | SSH (switch, listen addresses, authorized keys), the console, the admin password hash, API tokens, claim state |
-| `wifi` | `client` (known networks) and `ap` (the access point) |
+| `access` | SSH (switch, listen addresses, authorized keys), the console, the API's listeners (`web`), the admin password hash, the device credential, API tokens, claim state |
+| `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default) |
 | `container` | The engine switch and the declared `units` (image, command, environment, ports, volumes under `/mica/`, restart, start at boot, and the limits `pids`, `memory`, `cpu`) |
 | `bluetooth` | The switch, discoverability, the name, the pairing code, the trust list |
 | `mqtt` | The switch, the broker listener (default `127.0.0.1:1883`), whether clients authenticate |
@@ -141,7 +153,8 @@ live-state tree under its name.
 The station and the access point share one radio and take turns. The station is on by default:
 its supplicant runs whenever `wifi.client.enabled` is set, with no network block until one is
 added, so a scan works before any network is chosen and nothing is joined; networkd DHCP is
-rendered only once a network exists. An access point on the station's interface reports
+rendered only once a network exists. A device provisioned before the default changed keeps the
+`enabled` it stored. An access point on the station's interface reports
 `conflict` and does not start; the console asks the operator before switching the other role off,
 and a scan without a station answers `reason` `access-point` or `client-off`.
 
@@ -252,6 +265,7 @@ with no restart. A configuration or full-factory reset removes it.
 | `APID_HTTP_ADDR` | unset | Overrides the file: HTTP on this address |
 | `APID_STATE_DIR` | `/var/lib/mica/apid` | TLS identity, session key, login backoff, audit ring |
 | `APID_BUS` | `system` | The bus micad is on |
+| `APID_UI_DIR` | `/usr/share/mica-apid/ui` | The built-in console served at `/_ui/` |
 
 `--version`, `--openapi` (the committed `crates/mica-apid/openapi.json`, which the gate holds to
 the handlers) and `--healthcheck` (for the boot health gate) answer without starting a daemon.
@@ -424,9 +438,15 @@ the new schema, then publish it.
 
 The operator
 document `/mica/config/updates.json` is `mica/update-config/v1` and the baked defaults are
-`mica/meta/v1` (`update` is `source`, `policy`, `checkIntervalMinutes` and the optional
-`channels`, the channel followed for each kind of set as `{"core": "lts"}`; a kind not named
-follows `general`). The operator's document has the same `channels`, over the product's.
+`mica/meta/v1` in the root (`product`; `update` is `source`, `policy`, `checkIntervalMinutes` and
+the optional `channels`, the channel followed for each kind of set as `{"core": "lts"}`, a kind
+not named following `general`; `http.credentialHosts`; `fleet`). The operator's document
+overrides `policy`, `checkIntervalMinutes`, `source.url` and `channels`, and alone carries
+`checkAt`, `source.maxBytes` (the fetch budget, 500 MB by default), `network` (`mode` `online`,
+`metered` or `offline`, and `meteredAllowsFetch`), `maintenance.windows` (UTC), `rebootPolicy` and
+`rebootGate`. `/mica/config/fleet.json` is `mica/fleet-config/v1` (`enabled`, `reporting`, `url`)
+over the baked `fleet`; the provisioning status reports it, and nothing on the device acts on it
+yet.
 
 The shared fixtures in `crates/mica-deploy/tests/component-contracts/` (the documents, the
 catalog, the refused schemas and cases, the chunker vector and the broken indexes) are generated
@@ -435,8 +455,9 @@ by the `component-contract-fixtures` example, signed with test-only keys, and co
 ### 6.3 mica-deploy
 
 `/usr/bin/mica-deploy <command>` prints JSON, exits non-zero on failure and bounds every read by
-the caller's budget (`--max-bytes`): `status`, `check`, `fetch`, `import`, `install`, `booted`,
-`confirm`, `reject`, `rollback`, `fail-boot`, `probe`, `discard`, `gc`, `firmware-readback`.
+the caller's budget (`--max-bytes`, required by all but `discard`): `status`, `check`, `fetch`,
+`import`, `install`, `set-check`, `set-fetch`, `set-install`, `booted`, `confirm`, `reject`,
+`rollback`, `fail-boot`, `probe`, `discard`, `gc`, `firmware-readback`.
 Installation is a durable file transaction, proven by a fault suite that interrupts it before
 and after every observed IO.
 
@@ -537,7 +558,13 @@ make package-gate          # the package rules over both pools
   into `foo/tests.rs`; an integration test that splits becomes `tests/<name>/main.rs`.
 - One implementation per job: `mica-fs` for durable files (atomic replace, directory sync,
   bounded reads), `micad-settings` for the rules apid and micad share, aws-lc-rs as the only
-  crypto library (rustls, digests, HMAC, random, Ed25519, X25519).
+  crypto library (rustls, digests, HMAC, random, Ed25519, X25519). The password hashes are their
+  own crates: argon2id for the admin password and the device credential, bcrypt for the transient root password, the hash
+  `/etc/shadow` and dropbear's `crypt(3)` read.
+- AWS-LC seeds from the kernel's `getrandom` alone: `.cargo/config.toml` builds it with
+  `AWS_LC_SYS_NO_JITTER_ENTROPY=1`, because its default CPU-jitter seed fails its health test on
+  coarse counters (the RK3576's 24 MHz) and AWS-LC then aborts the process on its first draw.
+  `micad-settings` checks it.
 - `Cargo.lock` is committed and every build is `--locked`. Release builds are stripped,
   whole-program LTO in one codegen unit, optimized for size.
 - Shell is bash with `set -euo pipefail`, and never an early-exiting reader on the right of a
@@ -553,7 +580,7 @@ make package-gate          # the package rules over both pools
 | `make boot-shutdown-test` | The boot and shutdown suites and the UAPI proof (`--arm-abi` adds aarch64) |
 | `make file-transaction-faults` | mica-deploy's transactions interrupted at every IO |
 | `make dbus-policy-test` | The micad bus policy against a real bus (root, host `dbus-daemon`) |
-| `make package-gate` | Pool rules (names, architecture, no commit stamp, no path in two packages, copyright, no conffiles, POSIX maintainer scripts); the declared packages and core components at their versions and no other item, each core record an unsigned `mica/core/v1` naming its own image, exact dependency versions, enablement links, nothing outside `/usr` and `/etc` in a component, component hash trees that verify, and a byte-identical rebuild (of the core components on amd64) |
+| `make package-gate` | Pool rules (names, architecture, no commit stamp, no path in two packages, copyright, no conffiles, POSIX maintainer scripts); the declared packages and core components at their versions and no other item, each core record an unsigned `mica/core/v1` naming its own image, exact dependency versions, enablement links, nothing outside `/usr` and `/etc` in a component, component hash trees that verify, and one producer per pool rebuilt on an empty-cache builder to the same bytes (the core components' on the first pool) |
 
 ### 7.3 Producers and versions
 
@@ -571,10 +598,11 @@ root interface range); `pkgs/copyright` is shared.
 | `deploy` | `mica-deploy` | `mica-deploy` |
 | `lifecycle` | `mica-runkit` (static) | `mica-lifecycle` |
 
-`scripts/deb/build.sh` compiles a producer's binaries in the rust image of the host architecture
-(native on an arm64 runner, cross-compiled otherwise), into a target directory of its own, and
-packs them with `mica-tools deb pack` in the base image of the target architecture, so
-`${shlibs:Depends}` is resolved against the target's libraries. A core component is staged and
+`scripts/deb/build.sh` builds one producer for one architecture: its `prepare.sh` compiles the
+binaries with `scripts/build/build-deb.sh` in the rust image of the host architecture (native on
+an arm64 runner, cross-compiled otherwise, never emulated), into a target directory of its own,
+and its `Dockerfile` packs them with `mica-tools deb pack` in the base image of the target
+architecture, so `${shlibs:Depends}` is resolved against the target's libraries. A core component is staged and
 packed by `scripts/deb/core-image.sh` in the pinned alpine image on the build platform: squashfs
 (zstd, one processor, root ownership, no xattrs) and its dm-verity hash tree, salted with the
 squashfs's own sha256, and the canonical record. Every mtime is `SOURCE_DATE_EPOCH` and no field
@@ -591,9 +619,10 @@ half is the CI's to judge.
 
 ### 7.4 CI and releases
 
-`ci.yml` runs on every push to `main` and every pull request: `make deps` and `make check`, then
-a native amd64 and arm64 build, pack and package gate, then both pools gated together with the
-guard. It publishes nothing.
+`ci.yml` runs on every push to `main` and every pull request: `make deps`, `make check` and
+`make dbus-policy-test`, then a native amd64 and arm64 build, pack and package gate with its
+rebuild, then both pools gated together without a rebuild and every archive put to
+`mica-tools pool guard`. It publishes nothing.
 
 A release is named by its UTC minute, `YYYYMMDD-HHMM`, and cut on a commit of `main` with
 `gh release create <YYYYMMDD-HHMM> --target <commit>`. `release.yml` builds and gates the tag,

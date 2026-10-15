@@ -28,8 +28,26 @@ pub(super) fn check_output_parses_native_json_and_reports_failure_codes() {
         );
     }
     assert_eq!(
-        parse_check(&output_signalled("")).unwrap_err().code,
+        parse_check(&output_signalled(9, "")).unwrap_err().code,
         update_codes::CLIENT_SPAWN_FAILED
+    );
+}
+
+#[test]
+pub(super) fn a_signalled_client_is_reported_with_its_signal() {
+    assert_eq!(
+        parse_check(&output_signalled(6, "")).unwrap_err().text,
+        "check was killed by signal 6 (SIGABRT)"
+    );
+    assert_eq!(
+        parse_check(&output_signalled(9, "out of memory\n"))
+            .unwrap_err()
+            .text,
+        "check was killed by signal 9 (SIGKILL): out of memory"
+    );
+    assert_eq!(
+        parse_check(&output_signalled(40, "")).unwrap_err().text,
+        "check was killed by signal 40"
     );
 }
 

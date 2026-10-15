@@ -62,6 +62,7 @@ impl crate::update_lifecycle::UpdateClient for ScriptedClient {
         if verb.starts_with("set-") {
             return Ok(crate::update_lifecycle::ClientOutput {
                 code: Some(0),
+                signal: None,
                 stdout: if verb == "set-fetch" {
                     "null".into()
                 } else {
@@ -81,6 +82,7 @@ impl crate::update_lifecycle::UpdateClient for ScriptedClient {
         };
         Ok(crate::update_lifecycle::ClientOutput {
             code: Some(0),
+            signal: None,
             stdout,
             stderr: String::new(),
         })

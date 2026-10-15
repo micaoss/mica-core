@@ -1,4 +1,4 @@
-# mica-core: micad and what ships beside it, packed as Debian packages.
+# mica-core: micad and what ships beside it, packed as core components and Debian packages.
 # The scripts do the work; this file only routes. `make` alone is `make help`.
 
 MICA_ARCH ?= arm64
@@ -10,7 +10,7 @@ help:
 	@echo "  deps-check          check locks/ offline"
 	@echo "  lint                shell hygiene (mica-tools shell-lint)"
 	@echo "  apid-ui-build-contract-test  the web UI builds in the base image as ignored output"
-	@echo "  rust-gate           fmt, clippy -D warnings, nextest, doctests, cargo-deny, OpenAPI, in the mica-build-env rust image"
+	@echo "  rust-gate           fmt, clippy (warnings denied by [workspace.lints]), nextest, doctests, cargo-deny, OpenAPI, in the mica-build-env rust image"
 	@echo "  boot-shutdown-test  the shutdown suite and the lifecycle UAPI unit (BOOT_SHUTDOWN_ARM_ABI=1 adds aarch64)"
 	@echo "  file-transaction-faults  mica-deploy transactions interrupted at every IO boundary"
 	@echo "  dbus-policy-test    the micad D-Bus policy against a real dbus-daemon (root, host dbus-daemon)"

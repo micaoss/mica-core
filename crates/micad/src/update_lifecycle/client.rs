@@ -10,6 +10,8 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 pub struct ClientOutput {
     /// Process exit code; `None` when killed by a signal.
     pub code: Option<i32>,
+    /// The signal that killed the process, when one did.
+    pub signal: Option<i32>,
     pub stdout: String,
     pub stderr: String,
 }
@@ -126,6 +128,7 @@ impl UpdateClient for SubprocessClient {
         group.0 = None;
         Ok(ClientOutput {
             code: status.code(),
+            signal: std::os::unix::process::ExitStatusExt::signal(&status),
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
             stderr: String::from_utf8_lossy(&stderr).into_owned(),
         })

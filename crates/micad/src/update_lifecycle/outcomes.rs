@@ -27,7 +27,12 @@ pub enum CheckOutcome {
 
 pub(super) fn client_json(operation: &str, output: &ClientOutput) -> Result<Value, CodedReason> {
     if output.code != Some(0) {
-        return Err(exit_reason(operation, output.code, &output.stderr));
+        return Err(exit_reason(
+            operation,
+            output.code,
+            output.signal,
+            &output.stderr,
+        ));
     }
     serde_json::from_str(&output.stdout).map_err(|error| {
         CodedReason::new(
@@ -211,10 +216,23 @@ pub(super) enum Failure {
 ///
 /// The two codes are not the same fault and a fleet must be able to tell them
 /// apart: an exit status is the client having run and judged something, while
-/// a signal is the bound in this module (or the OOM killer) having stopped it
-/// before it judged anything.
-pub(super) fn exit_reason(verb: &str, code: Option<i32>, stderr: &str) -> CodedReason {
+/// a signal is the bound in this module, the OOM killer, or the client's own
+/// abort having stopped it before it judged anything. The signal is named, so
+/// an abort (SIGABRT) reads differently from a kill (SIGKILL).
+pub(super) fn exit_reason(
+    verb: &str,
+    code: Option<i32>,
+    signal: Option<i32>,
+    stderr: &str,
+) -> CodedReason {
     let reason = stderr.lines().last().unwrap_or("").trim();
+    let killed = match signal {
+        Some(signal) => match signal_name(signal) {
+            Some(name) => format!("{verb} was killed by signal {signal} ({name})"),
+            None => format!("{verb} was killed by signal {signal}"),
+        },
+        None => format!("{verb} was killed by a signal"),
+    };
     match code {
         Some(code) if !reason.is_empty() => CodedReason::new(
             update_codes::CLIENT_EXIT_FAILURE,
@@ -226,11 +244,28 @@ pub(super) fn exit_reason(verb: &str, code: Option<i32>, stderr: &str) -> CodedR
         ),
         None if !reason.is_empty() => CodedReason::new(
             update_codes::CLIENT_SPAWN_FAILED,
-            format!("{verb} was killed by a signal: {reason}"),
+            format!("{killed}: {reason}"),
         ),
-        None => CodedReason::new(
-            update_codes::CLIENT_SPAWN_FAILED,
-            format!("{verb} was killed by a signal"),
-        ),
+        None => CodedReason::new(update_codes::CLIENT_SPAWN_FAILED, killed),
     }
+}
+
+/// The Linux name of the signals a client is plausibly stopped by.
+fn signal_name(signal: i32) -> Option<&'static str> {
+    Some(match signal {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        4 => "SIGILL",
+        5 => "SIGTRAP",
+        6 => "SIGABRT",
+        7 => "SIGBUS",
+        8 => "SIGFPE",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        15 => "SIGTERM",
+        31 => "SIGSYS",
+        _ => return None,
+    })
 }

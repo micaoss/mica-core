@@ -10,6 +10,7 @@ mod policy;
 fn output(code: i32, stdout: &str, stderr: &str) -> ClientOutput {
     ClientOutput {
         code: Some(code),
+        signal: None,
         stdout: stdout.to_string(),
         stderr: stderr.to_string(),
     }
@@ -85,10 +86,11 @@ fn no_selection() -> ClientOutput {
     output(0, r#"{"revision":1,"selected":null}"#, "")
 }
 
-/// A client killed by a signal: no exit code at all.
-fn output_signalled(stderr: &str) -> ClientOutput {
+/// A client killed by `signal`: no exit code at all.
+fn output_signalled(signal: i32, stderr: &str) -> ClientOutput {
     ClientOutput {
         code: None,
+        signal: Some(signal),
         stdout: String::new(),
         stderr: stderr.to_string(),
     }

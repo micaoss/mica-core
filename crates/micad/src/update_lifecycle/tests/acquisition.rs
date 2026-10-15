@@ -365,6 +365,7 @@ pub(super) fn native_acquisition_json_selects_and_stages_only_a_deployment_descr
     let id = "a".repeat(64);
     let checked = ClientOutput {
         code: Some(0),
+        signal: None,
         stderr: String::new(),
         stdout: json!({
             "revision":1,"selected":{"deploymentId":id,"deployment":{"version":"1.0"}}
@@ -381,11 +382,12 @@ pub(super) fn native_acquisition_json_selects_and_stages_only_a_deployment_descr
     );
     let none = ClientOutput {
         code: Some(0),
+        signal: None,
         stderr: String::new(),
         stdout: "{\"revision\":2,\"selected\":null}".into(),
     };
     assert_eq!(parse_check(&none).unwrap(), CheckOutcome::NoneCompatible);
-    let ready = ClientOutput { code:Some(0),stderr:String::new(),stdout:json!({"id":id,
+    let ready = ClientOutput { code:Some(0),signal:None,stderr:String::new(),stdout:json!({"id":id,
         "path":format!("/mica/updates/verified/{id}.json"),"objects":"/mica/updates/verified/objects","version":"1.0","generation":3}).to_string() };
     assert_eq!(
         parse_fetch(&ready, Path::new("/mica/updates/verified")).unwrap(),
@@ -393,6 +395,7 @@ pub(super) fn native_acquisition_json_selects_and_stages_only_a_deployment_descr
     );
     let probe = ClientOutput {
         code: Some(0),
+        signal: None,
         stderr: String::new(),
         stdout: "{\"status\":\"ready\",\"freeBytes\":200000000}".into(),
     };
