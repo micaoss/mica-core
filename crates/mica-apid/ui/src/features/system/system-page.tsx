@@ -64,9 +64,9 @@ export function SystemPage() {
         <TabsContent value="time" className="grid gap-6 pt-4"><TimePanel /></TabsContent>
         <TabsContent value="update" className="grid gap-6 pt-4">
           <PageSection title={t('system.update.title')} description={t('system.update.description')}>
-            <UpdatePanel />
+            <UpdateOverview />
             <UpdateChecks />
-            <UpdateActions />
+            <UpdatePanel />
           </PageSection>
           <PageSection title={t('system.update.automaticTitle')} description={t('system.update.automaticDescription')}><AutomaticUpdatesPanel /></PageSection>
           <PageSection title={t('system.update.manualTitle')} description={t('system.update.manualDescription')}><ManualUpdate /></PageSection>
@@ -108,7 +108,9 @@ interface UpdateStateDoc {
     client?: { available?: boolean; reason?: string }
     policy_error?: string
     reboot_gate?: { safe?: boolean; reasons?: string[] }
+    last_refusal?: string
   }
+  install?: { status?: string; error?: string }
   boot?: { deploymentId: string; kernelId: string; rootfsId: string; contentVerified: boolean; secureBoot: boolean; backend: 'uefi' | 'uboot-fit'; bootVerified: boolean }
   state?: { current: string | null; candidate: string | null; fallback: string | null; highestGeneration: number; failed: string[] }
   deployments?: { id: string; generation: number; version: string; kernelId: string; kernelRelease: string; rootfsId: string; triesLeft: number | null }[]
@@ -121,12 +123,22 @@ const activeUpdateStates = new Set(['checking', 'downloading', 'installing', 'di
 /// One query key, one `queryFn`, shared by every pane: two declarations of the
 /// same key with different result types would be a cache entry whose shape
 /// depends on which pane mounted first.
-function useUpdateState() {
+///
+/// `follow` keeps reading between the steps of one request, when nothing runs
+/// for a moment and the request has not ended.
+function useUpdateState(follow = false) {
   return useQuery({
     queryKey: ['update-state'],
     queryFn: () => api<UpdateStateDoc>('/api/v1/update'),
-    refetchInterval: (query) => activeUpdateStates.has(query.state.data?.lifecycle?.state ?? '') ? 1000 : false,
+    refetchInterval: (query) => follow || activeUpdateStates.has(query.state.data?.lifecycle?.state ?? '') ? 1000 : false,
   })
+}
+
+/// Installed and not yet booted: a deployment, or a core set on trial.
+function awaitsReboot(doc?: UpdateStateDoc) {
+  const core = doc?.sets?.core
+  return Boolean((doc?.state?.candidate && doc.state.candidate !== doc.boot?.deploymentId)
+    || (core?.pending && core.boot?.coreSetId !== core.pending.id))
 }
 
 export function UpdatePanel() {
@@ -142,11 +154,8 @@ export function UpdatePanel() {
   // A core update is named as one; a system update reads as it always has.
   const kindOf = (kind?: UpdateKind | null, setKind?: string | null) => kind !== 'set' ? '' : `${setKind === 'core' ? t('system.update.kinds.coreSet') : (setKind ?? '')} · `
   const setFact = (set: CoreSetFact) => t('system.update.coreSetValue', { version: set.version, channel: set.channel, generation: set.generation })
-  // Installed and not yet booted: a deployment, or a core set on trial.
-  const awaitsReboot = (deployment?.candidate && deployment.candidate !== boot?.deploymentId)
-    || (core?.pending && core.boot?.coreSetId !== core.pending.id)
   return (
-    <Panel title={t('system.update.title')} description={t('system.update.description')} action={<PackageSearch className="size-5 text-muted-foreground" />}>
+    <Panel title={t('system.update.detailsTitle')} description={t('system.update.detailsDescription')} action={<PackageSearch className="size-5 text-muted-foreground" />}>
       <StatusDot state={status.isPending ? 'pending' : healthy ? 'ok' : 'warning'}>
         {status.isPending ? t('system.update.checking') : (lifecycle?.state ?? t('common.states.unknown'))}
       </StatusDot>
@@ -169,7 +178,7 @@ export function UpdatePanel() {
           ? { id: 'failed', label: t('system.update.failed'), value: deployment.failed.join(', '), mono: true } : undefined,
         lifecycle?.last_check && { id: 'lastCheck', label: t('system.update.lastCheck'), value: lifecycle.last_check },
       ]} />
-      {awaitsReboot ? <Callout tone="warning" title={t('system.update.pendingReboot')} /> : null}
+      {awaitsReboot(status.data) ? <Callout tone="warning" title={t('system.update.pendingReboot')} /> : null}
       {lifecycle?.client && lifecycle.client.available === false ? <Callout tone="warning" title={t('system.update.clientUnavailable', { reason: lifecycle.client.reason ?? '' })} /> : null}
       {lifecycle?.policy_error ? <Callout tone="danger" title={t('system.update.policyError', { reason: lifecycle.policy_error })} /> : null}
       {status.error ? <Callout tone="danger" title={failureDetail(status.error, t('common.requestFailed'))} /> : null}
@@ -177,23 +186,92 @@ export function UpdatePanel() {
   )
 }
 
-export function UpdateActions() {
+/// The update as an operator meets it: what runs, whether something newer is
+/// on offer, and the one next step. Installing is one request: the device
+/// checks, downloads and installs, and says when a reboot is owed.
+export function UpdateOverview() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const status = useUpdateState()
-  const action = useMutationFeedback<unknown, 'check' | 'fetch' | 'install'>({
-    mutationFn: (name) => api<unknown>(`/api/v1/update/${name}`, json('POST', name === 'install' ? { deploymentId: status.data?.lifecycle?.deploymentId } : undefined)),
-    success: (_data, name) => t(`system.update.accepted.${name}`),
-    failure: t('system.update.actionsTitle'),
+  // The refusal on record when this page asked, so only a new one ends it.
+  const [following, setFollowing] = useState<{ refusal?: string }>()
+  const status = useUpdateState(following !== undefined)
+  const doc = status.data
+  const lifecycle = doc?.lifecycle
+  const state = lifecycle?.state ?? ''
+  const active = activeUpdateStates.has(state)
+  const available = lifecycle?.available
+  const reboot = awaitsReboot(doc)
+  const failed = state === 'failed' || state === 'update-unavailable'
+  const refused = following !== undefined && lifecycle?.last_refusal !== undefined && lifecycle.last_refusal !== following.refusal
+  if (following !== undefined && !active && (reboot || failed || refused || !available || doc?.install?.status === 'failed')) setFollowing(undefined)
+
+  const check = useMutationFeedback({
+    mutationFn: () => api<unknown>('/api/v1/update/check', json('POST')),
+    success: t('system.update.accepted.check'),
+    failure: t('system.update.checkNow'),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['update-state'] }),
   })
-  const busy = action.isPending || status.isPending || status.isError || activeUpdateStates.has(status.data?.lifecycle?.state ?? '')
+  // The dialog reports the outcome of these two itself.
+  const installLatest = async () => {
+    await api<unknown>('/api/v1/update/install-latest', json('POST'))
+    setFollowing({ refusal: lifecycle?.last_refusal })
+    await queryClient.invalidateQueries({ queryKey: ['update-state'] })
+  }
+  const restart = useMutation({ mutationFn: () => api<void>('/api/v1/actions/reboot', { method: 'POST' }) })
+  const busy = check.isPending || status.isPending || status.isError || active || following !== undefined
+
+  const running = doc?.deployments?.find((entry) => entry.id === doc.boot?.deploymentId)
+  const core = doc?.sets?.core?.current
+  const offered = available && t('system.update.overview.offered', {
+    kind: available.kind === 'set' ? (available.setKind === 'core' ? t('system.update.kinds.coreSet') : (available.setKind ?? '')) : t('system.update.overview.system'),
+    version: available.version,
+  })
+  const headline = active
+    ? t(`system.update.overview.steps.${state}`, { defaultValue: state })
+    : following !== undefined ? t('system.update.overview.steps.checking')
+    : reboot ? t('system.update.overview.rebootNeeded')
+    : failed ? t('system.update.overview.failed')
+    : offered ? t('system.update.overview.available', { what: offered })
+    : t('system.update.overview.upToDate')
   return (
-    <Panel title={t('system.update.actionsTitle')} description={t('system.update.actionsDescription')}>
+    <Panel title={t('system.update.title')} description={t('system.update.description')}>
+      <StatusDot state={status.isPending || active || following !== undefined ? 'pending' : failed ? 'warning' : 'ok'}>
+        {status.isPending ? t('system.update.checking') : headline}
+      </StatusDot>
+      <p className="text-sm text-muted-foreground">
+        {[
+          running && t('system.update.overview.runningSystem', { version: running.version }),
+          core && t('system.update.overview.runningCore', { version: core.version, channel: core.channel }),
+          lifecycle?.last_check && t('system.update.overview.lastCheck', { at: lifecycle.last_check }),
+        ].filter(Boolean).join(' · ')}
+      </p>
+      {failed && lifecycle?.reason ? <Callout tone="danger" title={lifecycle.reason} /> : null}
+      {doc?.install?.status === 'failed' && doc.install.error ? <Callout tone="danger" title={doc.install.error} /> : null}
+      {lifecycle?.last_refusal ? <Callout tone="warning" title={lifecycle.last_refusal} /> : null}
+      {status.error ? <Callout tone="danger" title={failureDetail(status.error, t('common.requestFailed'))} /> : null}
       <div className="flex flex-wrap gap-3">
-        <Button variant="secondary" onClick={() => action.mutate('check')} disabled={busy}>{t('system.update.checkNow')}</Button>
-        <Button variant="secondary" onClick={() => action.mutate('fetch')} disabled={busy}>{t('system.update.download')}</Button>
-        <Button onClick={() => action.mutate('install')} disabled={busy || !status.data?.lifecycle?.deploymentId}>{t('system.update.install')}</Button>
+        {reboot ? (
+          <ConfirmDialog
+            trigger={<Button disabled={restart.isPending}><RefreshCcw />{t('system.update.overview.reboot')}</Button>}
+            title={t('system.update.overview.reboot')}
+            description={t('system.power.confirmReboot')}
+            confirmLabel={t('system.update.overview.reboot')}
+            success={t('system.power.accepted')}
+            failure={t('system.update.overview.reboot')}
+            onConfirm={() => restart.mutateAsync()}
+          />
+        ) : offered ? (
+          <ConfirmDialog
+            trigger={<Button disabled={busy}>{t('system.update.overview.install')}</Button>}
+            title={t('system.update.overview.install')}
+            description={t('system.update.overview.confirmInstall', { what: offered })}
+            confirmLabel={t('system.update.overview.install')}
+            success={t('system.update.accepted.latest')}
+            failure={t('system.update.overview.install')}
+            onConfirm={installLatest}
+          />
+        ) : null}
+        <Button variant="secondary" onClick={() => check.mutate()} disabled={busy}>{t('system.update.checkNow')}</Button>
       </div>
     </Panel>
   )

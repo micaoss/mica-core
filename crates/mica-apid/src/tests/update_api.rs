@@ -10,6 +10,7 @@ use super::*;
 const UPDATE_PATH: &str = "/api/v1/update";
 const CHECK_PATH: &str = "/api/v1/update/check";
 const FETCH_PATH: &str = "/api/v1/update/fetch";
+const INSTALL_LATEST_PATH: &str = "/api/v1/update/install-latest";
 const INSTALL_PATH: &str = "/api/v1/update/install";
 const CONFIRM_PATH: &str = "/api/v1/update/confirm";
 const REJECT_PATH: &str = "/api/v1/update/reject";
@@ -51,10 +52,14 @@ async fn the_state_read_answers_micad_verbatim_and_requires_a_credential() {
 }
 
 #[tokio::test]
-async fn check_and_fetch_are_post_only_202_admissions() {
+async fn check_fetch_and_install_latest_are_post_only_202_admissions() {
     let (router, fake, token) = update_app(json!({}));
 
-    for (path, call) in [(CHECK_PATH, "check"), (FETCH_PATH, "fetch")] {
+    for (path, call) in [
+        (CHECK_PATH, "check"),
+        (FETCH_PATH, "fetch"),
+        (INSTALL_LATEST_PATH, "install-latest"),
+    ] {
         let anonymous = json_request(&router, "POST", path, json!({}), None, None).await;
         assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED, "{path}");
 
@@ -83,17 +88,19 @@ async fn a_policy_refusal_is_answered_409_with_micads_reason() {
         "network mode is offline: updates arrive by import only",
     );
 
-    let response = bearer(&router, "POST", FETCH_PATH, &token).await;
-    assert_eq!(response.status(), StatusCode::CONFLICT);
-    let body = body_json(response).await;
-    assert_eq!(body["error"]["code"], "policy_refused");
-    assert_eq!(body["error"]["source"], "micad");
-    assert!(
-        body["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("offline")),
-        "the refusing rule must reach the caller: {body}"
-    );
+    for path in [FETCH_PATH, INSTALL_LATEST_PATH] {
+        let response = bearer(&router, "POST", path, &token).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT, "{path}");
+        let body = body_json(response).await;
+        assert_eq!(body["error"]["code"], "policy_refused");
+        assert_eq!(body["error"]["source"], "micad");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("offline")),
+            "the refusing rule must reach the caller: {body}"
+        );
+    }
 }
 
 #[tokio::test]

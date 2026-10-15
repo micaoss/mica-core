@@ -35,6 +35,23 @@ impl UpdateLifecycle {
         Ok(self.settle_check(result).await)
     }
 
+    /// Admit a check now and answer the check itself, to be awaited by a
+    /// caller that has more to do once it settles.
+    ///
+    /// The admission is the caller's to answer an operator with; the run is
+    /// the background work after it.
+    pub async fn start_check(
+        self: &Arc<Self>,
+        sender: &str,
+    ) -> Result<impl Future<Output = Settled<Available>> + Send + 'static, Refusal> {
+        let policy = self.admit_check(sender).await?;
+        let this = Arc::clone(self);
+        Ok(async move {
+            let result = this.run_check(&policy).await;
+            this.settle_check(result).await
+        })
+    }
+
     /// Admit a check: the policy refusal, the client, the busy slot. The
     /// policy it answers is the one the run must use, loaded once so the
     /// decision and the subprocess cannot read two different files.

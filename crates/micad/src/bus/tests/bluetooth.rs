@@ -132,6 +132,65 @@ pub(super) async fn removing_a_device_drops_the_declaration_and_the_keys() {
     assert!(format!("{error}").contains("no device named"), "{error}");
 }
 
+/// A pairing the peer started is declared once the operator accepts it: the
+/// reconciler removes a paired device nobody declares, so an accepted pairing
+/// left undeclared would be undone by the next pass.
+#[tokio::test]
+pub(super) async fn an_accepted_peer_pairing_is_declared_trusted() {
+    let (service, _adapter, _dir) = service_with_bluetooth(true, true);
+    let agent = Arc::clone(&service.agent);
+    let waiting = tokio::spawn(async move {
+        agent
+            .confirm("AA:BB:CC:DD:EE:01".to_string(), 123_456)
+            .await
+    });
+    while service.agent.pending().await.is_none() {
+        tokio::task::yield_now().await;
+    }
+
+    service
+        .confirm_bluetooth_pairing("AA:BB:CC:DD:EE:01", true)
+        .await
+        .expect("answered");
+
+    assert!(waiting.await.expect("agent"), "BlueZ is told yes");
+    let declared = &service.inner.read().await.settings.bluetooth.devices;
+    assert!(declared["AA:BB:CC:DD:EE:01"].trusted);
+    assert_eq!(declared["AA:BB:CC:DD:EE:01"].name, "phone");
+}
+
+/// A refused one declares nothing.
+#[tokio::test]
+pub(super) async fn a_refused_peer_pairing_declares_nothing() {
+    let (service, _adapter, _dir) = service_with_bluetooth(true, true);
+    let agent = Arc::clone(&service.agent);
+    let waiting = tokio::spawn(async move {
+        agent
+            .confirm("AA:BB:CC:DD:EE:01".to_string(), 123_456)
+            .await
+    });
+    while service.agent.pending().await.is_none() {
+        tokio::task::yield_now().await;
+    }
+
+    service
+        .confirm_bluetooth_pairing("AA:BB:CC:DD:EE:01", false)
+        .await
+        .expect("answered");
+
+    assert!(!waiting.await.expect("agent"), "BlueZ is told no");
+    assert!(
+        service
+            .inner
+            .read()
+            .await
+            .settings
+            .bluetooth
+            .devices
+            .is_empty()
+    );
+}
+
 /// A confirmation with nothing waiting is refused rather than silently
 /// accepted: the console would otherwise report a pairing that never
 /// happened.

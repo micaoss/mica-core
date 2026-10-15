@@ -138,6 +138,10 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
             post(crate::update_api::api_v1_update_install),
         )
         .route(
+            crate::update_api::V1_UPDATE_INSTALL_LATEST_PATH,
+            post(crate::update_api::api_v1_update_install_latest),
+        )
+        .route(
             crate::update_api::V1_UPDATE_CONFIRM_PATH,
             post(crate::update_api::api_v1_update_confirm),
         )

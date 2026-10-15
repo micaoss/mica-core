@@ -93,6 +93,7 @@ trait Micad {
     fn get_update_state(&self) -> zbus::Result<String>;
     fn check_update(&self) -> zbus::Result<()>;
     fn fetch_update(&self) -> zbus::Result<()>;
+    fn install_latest_update(&self) -> zbus::Result<()>;
     fn install_update(&self, deployment_id: &str) -> zbus::Result<()>;
     fn confirm_deployment(&self, deployment_id: &str) -> zbus::Result<()>;
     fn reject_deployment(&self, deployment_id: &str) -> zbus::Result<()>;
@@ -514,6 +515,12 @@ impl SettingsApi for BusSettings {
     async fn fetch_update(&self) -> anyhow::Result<()> {
         let proxy = self.proxy().await?;
         self.call("FetchUpdate", proxy.fetch_update()).await
+    }
+
+    async fn install_latest_update(&self) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call("InstallLatestUpdate", proxy.install_latest_update())
+            .await
     }
 
     async fn install_update(&self, bundle: &str) -> anyhow::Result<()> {

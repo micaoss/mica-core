@@ -504,6 +504,10 @@ impl SettingsApi for FakeSettings {
         self.update_call("fetch")
     }
 
+    async fn install_latest_update(&self) -> anyhow::Result<()> {
+        self.update_call("install-latest")
+    }
+
     async fn get_bluetooth(&self) -> anyhow::Result<Value> {
         // The shape micad answers, so a route test drives the document the
         // console actually reads.

@@ -2,6 +2,7 @@
 
 use crate::time_status::ClockTrust;
 use crate::update_auto::{self, AutoRoutes, UpdateFacts};
+use crate::update_codes::{self, CodedReason};
 use crate::update_lifecycle::{Available, Refusal, Settled, UpdateLifecycle};
 use crate::update_policy::LoadedPolicy;
 use micad_settings::{ACTOR_POLICY, REQUESTED, append_audit_line, audit_line, audit_ring_dir};
@@ -146,6 +147,49 @@ impl<S: ServedDaemon + 'static> AutoRoutes for BusRoutes<S> {
     async fn resume(&self, only: Option<&str>) {
         self.lifecycle.resume(only).await;
     }
+}
+
+/// Check, fetch and install the newest release, for an operator who asked
+/// for exactly that.
+///
+/// Everything that can refuse it before anything runs answers now: the
+/// maintenance window, a metered link, the check's own admission. The rest
+/// runs on a background task through the routes and gates a manual check,
+/// fetch and install take, and lands in the state document as theirs do. Up
+/// to date ends after the check; nothing reboots.
+pub(crate) async fn install_latest<S: ServedDaemon + 'static>(
+    lifecycle: Arc<UpdateLifecycle>,
+    service: S,
+    sender: String,
+) -> Result<(), Refusal> {
+    if let Some(refusal) = lifecycle.install_refusal() {
+        return Err(Refusal::Policy(refusal));
+    }
+    if let Some(refusal) = crate::update_policy::fetch_refusal(&lifecycle.policy().load()) {
+        lifecycle.record_refusal("fetch", &refusal).await;
+        return Err(Refusal::Policy(refusal.text));
+    }
+    let check = lifecycle.start_check(&sender).await?;
+    tracing::info!(sender, "install of the newest release requested");
+    tokio::spawn(async move {
+        if !matches!(check.await, Settled::Done(_)) {
+            return;
+        }
+        let descriptor = match lifecycle.fetch_now(&sender).await {
+            Ok(Settled::Done(descriptor)) => descriptor,
+            Ok(_) => return,
+            Err(refusal) => {
+                let reason = CodedReason::new(update_codes::DEFER_FETCH_REFUSED, refusal.message());
+                lifecycle.record_refusal("fetch", &reason).await;
+                return;
+            }
+        };
+        if let Err(error) = service.install(&sender, &descriptor).await {
+            let reason = CodedReason::new(update_codes::DEFER_INSTALL_REFUSED, error.to_string());
+            lifecycle.record_refusal("install", &reason).await;
+        }
+    });
+    Ok(())
 }
 
 /// One audit line for an action the update policy took on its own.

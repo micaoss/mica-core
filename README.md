@@ -23,7 +23,7 @@ release reaches devices without a new root.
 
 | Component | Arch | What it is |
 | --- | --- | --- |
-| `micad` | amd64, arm64 | Feature `micad`. The management daemon (settings, reconcilers, the root-only `com.mica.micad` D-Bus interface) and the API, the same executable under the name `mica-apid`: plain HTTP on 8080 by default, HTTPS on 8443 when enabled |
+| `micad` | amd64, arm64 | Feature `micad`. The management daemon (settings, reconcilers, the root-only `com.mica.micad` D-Bus interface) and the API, the same executable as `micad api`: plain HTTP on 8080 by default, HTTPS on 8443 when enabled |
 | `mica-apid-ui` | amd64, arm64 | Feature `ui`. The built-in web console, at micad's exact version; without it a device is API-only |
 
 The rest are Debian packages built into the root:

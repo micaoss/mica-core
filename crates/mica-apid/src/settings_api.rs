@@ -160,6 +160,11 @@ pub trait SettingsApi: Send + Sync {
     async fn check_update(&self) -> anyhow::Result<()>;
     /// Ask micad to download the selected deployment objects on a background task.
     async fn fetch_update(&self) -> anyhow::Result<()>;
+    /// Ask micad to check for, download and install the newest release on a
+    /// background task (`InstallLatestUpdate`).
+    async fn install_latest_update(&self) -> anyhow::Result<()> {
+        anyhow::bail!("this build installs no updates")
+    }
     /// Ask micad to import an offline archive already written to the device
     /// (`ImportUpdate`). The path is the file apid streamed the upload into;
     /// micad refuses one outside its own upload directory.

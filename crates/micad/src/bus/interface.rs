@@ -238,13 +238,17 @@ impl MicadService {
         accept: bool,
     ) -> fdo::Result<()> {
         self.require_feature(micad_settings::Feature::Bluetooth)?;
-        if self.agent.answer(address, accept).await {
-            Ok(())
-        } else {
-            Err(fdo::Error::Failed(format!(
+        if !self.agent.answer(address, accept).await {
+            return Err(fdo::Error::Failed(format!(
                 "no pairing confirmation is waiting for {address}"
-            )))
+            )));
         }
+        // A pairing the peer started reaches no `PairBluetoothDevice`, so the
+        // yes is where it is declared.
+        if accept {
+            self.declare_paired_device(address).await?;
+        }
+        Ok(())
     }
 
     /// Drop a device: out of the trust list, and out of the adapter.
@@ -443,6 +447,28 @@ impl MicadService {
             .request_fetch(sender_of(&header))
             .await
             .map_err(refusal_to_fdo)
+    }
+
+    /// Check for, fetch and install the newest release on a background task.
+    ///
+    /// Answers the refusals that hold before anything runs; the progress and
+    /// the outcome land in `update` as a manual check, fetch and install do.
+    pub(super) async fn install_latest_update(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(object_server)] server: &zbus::ObjectServer,
+    ) -> fdo::Result<()> {
+        let service = server
+            .interface::<_, MicadService>(super::OBJECT_PATH)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("the served object: {err}")))?;
+        super::install_latest(
+            Arc::clone(&self.update),
+            service,
+            sender_of(&header).to_string(),
+        )
+        .await
+        .map_err(refusal_to_fdo)
     }
 
     /// Import an offline `MICAUPD1` archive somebody uploaded.

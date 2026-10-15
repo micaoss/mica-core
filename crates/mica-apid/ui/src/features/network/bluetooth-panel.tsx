@@ -27,12 +27,14 @@ import { bluetoothRows, type BluetoothRow } from './bluetooth'
 export function BluetoothPanel() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  // While a pairing is waiting for a decision the page polls faster: the
-  // dialog is the one thing here that has to appear without a refresh.
+  // While a pairing can arrive the page polls faster: the dialog is the one
+  // thing here that has to appear without a refresh, and a phone that starts
+  // a pairing waits for it only about half a minute. A discoverable adapter is
+  // one a phone can start a pairing with.
   const bluetooth = useQuery({
     queryKey: ['bluetooth'],
     queryFn: () => api<BluetoothOverview>('/api/v1/bluetooth'),
-    refetchInterval: (query) => query.state.data?.adapter.discovering || query.state.data?.pending ? 2_000 : 15_000,
+    refetchInterval: (query) => query.state.data?.adapter.discovering || query.state.data?.adapter.discoverable || query.state.data?.pending ? 2_000 : 15_000,
   })
   const [draft, setDraft] = useState<{ alias?: string; pin?: string }>({})
 

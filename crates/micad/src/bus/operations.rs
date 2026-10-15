@@ -121,7 +121,16 @@ impl MicadService {
             .pair(address)
             .await
             .map_err(|err| fdo::Error::Failed(format!("pair {address}: {err:#}")))?;
+        self.declare_paired_device(address).await
+    }
 
+    /// Record a device the operator said yes to in the trust list, trusted,
+    /// and bring the adapter to it.
+    ///
+    /// Both pairing directions end here: the reconciler removes a paired
+    /// device nobody declares, so a pairing left undeclared is undone by its
+    /// next pass.
+    pub(super) async fn declare_paired_device(&self, address: &str) -> fdo::Result<()> {
         // Under the apply lock, like every settings write: a pair landing
         // during a reconcile must not be lost to the tree that reconcile wrote.
         let _apply = self.apply_lock.lock().await;

@@ -32,7 +32,7 @@ root hash with the product's key.
 
 | Component | What it holds | systemd | OpenRC | Started |
 | --- | --- | --- | --- | --- |
-| `micad` | The management daemon and its D-Bus policy, and the API: `/usr/bin/mica-apid`, a link to `micad`, with the OpenAPI document; feature `micad` | `micad.service`, `apid.service` | `/etc/init.d/micad`, `/etc/init.d/apid` | At boot (the component links both) |
+| `micad` | The management daemon and its D-Bus policy, and the API, `micad api`, with the OpenAPI document; the update command `micad update`; feature `micad` | `micad.service`, `apid.service` | `/etc/init.d/micad`, `/etc/init.d/apid` | At boot (the component links both) |
 | `mica-apid-ui` | The web console at `/usr/share/mica-apid/ui`; feature `ui`, at micad's exact version | -- | -- | Served by apid; optional |
 
 The rest are Debian packages built into the root:
@@ -51,7 +51,7 @@ micad starts them after writing their configuration.
 On OpenRC the scripts run under `supervise-daemon` with their output in syslog, and
 `/etc/init.d/micad` reports micad started only once it owns `com.mica.micad` on the system bus
 (waiting up to `micad_ready_timeout`, 90 s), which is what `Type=dbus` does under systemd, and
-`/etc/init.d/apid` only once `mica-apid --healthcheck` answers (up to `apid_ready_timeout`, 90 s),
+`/etc/init.d/apid` only once `micad api --healthcheck` answers (up to `apid_ready_timeout`, 90 s),
 so the health gate that runs after every service never asks an apid still making its first TLS
 identity.
 
@@ -173,7 +173,7 @@ directions, because `SettingsChanged` carries setting values.
 | Settings and state | `GetSettings`, `SetSettings`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
 | Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetContainers`, `ScanWifi`, `GetBluetooth` |
 | Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey` |
-| Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
+| Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | Containers and Bluetooth | `StartContainer`, `StopContainer`, `RestartContainer`, `SetBluetoothDiscovery`, `PairBluetoothDevice`, `ConfirmBluetoothPairing`, `RemoveBluetoothDevice` |
 
 A value the tree refuses is `org.freedesktop.DBus.Error.InvalidArgs`.
@@ -216,6 +216,12 @@ absence is reported with its reason rather than as a healthy reading:
   boots a set on trial has left. micad comes from the
   core set and `mica-deploy` from the root, so micad reads the client's `status` leniently: the
   client may be the newer of the two.
+  `InstallLatestUpdate` is the operator's one request for the newest release: the maintenance
+  window, a metered link and the check's admission refuse it at once, and the check, fetch and
+  install then run in the background through the same gates; it never reboots.
+  `micad update` is that request on the device's command line: `status`,
+  `check`, `install` and `rollback`, the last two rebooting only with `--reboot`. Nothing
+  installs without `install`.
 - **Power, reset and recovery.** Reboot and power-off are recorded with their caller before they
   run. A staged reset applies one tier: `configuration`, `application-data` or `full-factory`
   (which keeps identity). A board-declared physical recovery action at boot maps to a tier. A
@@ -241,7 +247,7 @@ Failed services are read with mica-openrc's `/usr/lib/mica/mica-init failed`, th
 
 ## 4. mica-apid
 
-The same executable as micad under the name `mica-apid`: the API and the console. It holds
+The same executable as micad, run as `micad api`: the API and the console. It holds
 no configuration of its own; every read and change goes through micad.
 
 It listens where `access.web` says (`GET`/`PUT /api/v1/web`, the console's access page), read at
@@ -249,7 +255,7 @@ start from `/run/mica/apid.json`: by default plain HTTP on 8080 and no HTTPS, so
 80 nor 443 from another service. With `httpsEnabled` it serves HTTPS on `httpsPort` (default 8443)
 with its self-signed identity and the HTTP port only redirects there; the session cookie is
 `Secure` exactly then. A port another enabled listener (SSH, MQTT) holds is refused. A change
-restarts apid on the new listeners; `mica-apid --healthcheck` probes the same listener.
+restarts apid on the new listeners; `micad api --healthcheck` probes the same listener.
 
 The HTTPS identity is `identity.pem` in the state directory, the chain and its key in one 0600
 file, generated self-signed (`mica`, `localhost`, `127.0.0.1`) the first time HTTPS serves.
@@ -278,7 +284,7 @@ the active custom console bundle or a redirect to `/_ui/`.
 network, Wi-Fi, containers, Bluetooth, MQTT and SSH keys; observation (time, storage, system
 information, telemetry, service logs at `/system/logs/{source}`, network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
-fetch, import of an uploaded `.micaupd`, install, confirm, reject, rollback, reboot override,
+fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,
 policy); provisioning status and claim; credential recovery and reset; diagnostic snapshots;
 console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
 

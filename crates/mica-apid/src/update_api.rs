@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use serde_json::Value;
 
-use micad_settings::{REQUESTED, UPDATE_CHECK_EVENT, UPDATE_FETCH_EVENT};
+use micad_settings::{REQUESTED, UPDATE_CHECK_EVENT, UPDATE_FETCH_EVENT, UPDATE_INSTALL_EVENT};
 
 use crate::audit::Source;
 use crate::routes::{API, ApiCredential, ApiError, AppState, api_response, bus_api_error};
@@ -22,6 +22,7 @@ pub(crate) const V1_UPDATE_PATH: &str = "/v1/update";
 pub(crate) const V1_UPDATE_CHECK_PATH: &str = "/v1/update/check";
 pub(crate) const V1_UPDATE_FETCH_PATH: &str = "/v1/update/fetch";
 pub(crate) const V1_UPDATE_INSTALL_PATH: &str = "/v1/update/install";
+pub(crate) const V1_UPDATE_INSTALL_LATEST_PATH: &str = "/v1/update/install-latest";
 pub(crate) const V1_UPDATE_CONFIRM_PATH: &str = "/v1/update/confirm";
 pub(crate) const V1_UPDATE_REJECT_PATH: &str = "/v1/update/reject";
 pub(crate) const V1_UPDATE_ROLLBACK_PATH: &str = "/v1/update/rollback";
@@ -184,6 +185,42 @@ pub(crate) async fn api_v1_update_fetch(
     match state.api.fetch_update().await {
         Ok(()) => {
             state.audit.record(UPDATE_FETCH_EVENT, REQUESTED, &source);
+            accepted()
+        }
+        Err(err) => update_bus_error(&err),
+    }
+}
+
+/// Check for, download and install the newest release.
+///
+/// Answers **202**: micad answers the refusals that hold before anything runs
+/// (a closed maintenance window, a metered link, the check's admission), then
+/// checks, fetches and installs on a background task. Up to date ends after
+/// the check. The device is not rebooted.
+#[utoipa::path(
+    post,
+    path = V1_UPDATE_INSTALL_LATEST_PATH,
+    context_path = API,
+    tag = "update",
+    responses(
+        (status = 202, description = "Admitted and running; poll `GET /api/v1/update`"),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 409, description = "The update policy refused it: offline mode, a metered link without `meteredAllowsFetch`, no configured source, outside every maintenance window, or an unreadable policy file (`policy_refused`)", body = ApiError),
+        (status = 500, description = "The update client is absent or another operation is running (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_update_install_latest(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Source(source): Source,
+) -> Response {
+    match state.api.install_latest_update().await {
+        Ok(()) => {
+            state.audit.record(UPDATE_INSTALL_EVENT, REQUESTED, &source);
             accepted()
         }
         Err(err) => update_bus_error(&err),

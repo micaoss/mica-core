@@ -186,7 +186,7 @@ impl UpdateLifecycle {
 
     /// Record a refused action without disturbing the machine: the refusal is
     /// the newest fact an operator polling the state needs to see.
-    pub(super) async fn record_refusal(&self, action: &str, refusal: &CodedReason) {
+    pub(crate) async fn record_refusal(&self, action: &str, refusal: &CodedReason) {
         tracing::warn!(
             action,
             code = refusal.code,

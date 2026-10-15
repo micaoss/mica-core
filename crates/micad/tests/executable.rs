@@ -1,17 +1,18 @@
-//! `micad` is one executable for two daemons: started as `mica-apid` it is the
-//! HTTPS API daemon, under any other name the settings and reconciliation
-//! daemon. `/usr/bin/mica-apid` is a symlink to it; the units, not the files,
-//! keep the two apart.
+//! `micad` is one executable for two daemons and a command: `micad` is the
+//! settings and reconciliation daemon, `micad api` the HTTPS API daemon and
+//! `micad update` the operator's update command. The units, not the files,
+//! keep the two daemons apart.
 // Tests and fixtures answer a broken expectation by panicking.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::{os::unix::fs::symlink, process::Command};
+use std::process::Command;
 
-fn run(name: &str, args: &[&str]) -> (bool, String) {
-    let dir = tempfile::tempdir().unwrap();
-    let link = dir.path().join(name);
-    symlink(env!("CARGO_BIN_EXE_micad"), &link).unwrap();
-    let output = Command::new(&link).args(args).env_clear().output().unwrap();
+fn run(args: &[&str]) -> (bool, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_micad"))
+        .args(args)
+        .env_clear()
+        .output()
+        .unwrap();
     (
         output.status.success(),
         String::from_utf8(output.stdout).unwrap(),
@@ -20,32 +21,41 @@ fn run(name: &str, args: &[&str]) -> (bool, String) {
 
 #[test]
 fn micad_answers_as_micad() {
-    let (success, stdout) = run("micad", &["--version"]);
+    let (success, stdout) = run(&["--version"]);
     assert!(success);
     assert!(stdout.starts_with("micad "), "{stdout}");
 }
 
 #[test]
-fn under_the_name_mica_apid_it_is_the_api_daemon() {
-    let (success, stdout) = run("mica-apid", &["--version"]);
+fn micad_api_is_the_api_daemon() {
+    let (success, stdout) = run(&["api", "--version"]);
     assert!(success);
     assert!(stdout.starts_with("mica-apid "), "{stdout}");
 
-    // The OpenAPI document answers through the link as it did from apid's own
-    // executable: the committed document is regenerated this way.
-    let (success, stdout) = run("mica-apid", &["--openapi"]);
+    // The OpenAPI document answers through the subcommand as it does from
+    // apid's own executable: the committed document is regenerated that way.
+    let (success, stdout) = run(&["api", "--openapi"]);
     assert!(success);
     let document: serde_json::Value = serde_json::from_str(&stdout).expect("the document is JSON");
     assert!(document["openapi"].is_string(), "{document}");
 }
 
-/// Only the exact name selects the API daemon: a near miss is micad, which is
-/// the answer that cannot open a listener by accident.
 #[test]
-fn any_other_name_is_micad() {
-    for name in ["apid", "mica-apid.old", "micad-apid"] {
-        let (success, stdout) = run(name, &["--version"]);
-        assert!(success, "{name}");
-        assert!(stdout.starts_with("micad "), "{name}: {stdout}");
+fn micad_update_is_the_update_command() {
+    let (success, stdout) = run(&["update", "--help"]);
+    assert!(success);
+    assert!(stdout.contains("micad update install"), "{stdout}");
+    // A misused command line is refused before the bus is dialled.
+    let (success, _) = run(&["update", "upgrade"]);
+    assert!(!success);
+}
+
+/// A mistyped subcommand is refused rather than started as a second daemon.
+#[test]
+fn an_unknown_command_starts_nothing() {
+    for command in ["apid", "install", "serve"] {
+        let (success, stdout) = run(&[command]);
+        assert!(!success, "{command}");
+        assert!(stdout.is_empty(), "{command}: {stdout}");
     }
 }

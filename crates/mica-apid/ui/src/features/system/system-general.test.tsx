@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderPanel, renderRoute, stubFetch } from '@/shared/testing/panel'
 import { SimulationProvider } from '@/shared/simulation/simulation-provider'
-import { SystemPage, UiPanel, UpdateActions } from './system-page'
+import { SystemPage, UiPanel, UpdateOverview } from './system-page'
 
 afterEach(() => {
   cleanup()
@@ -17,9 +17,9 @@ const updateReady = {
 describe('update actions', () => {
   it('reports each dispatched action', async () => {
     stubFetch({ ...updateReady, 'POST /api/v1/update/check': () => new Response(null, { status: 202 }) })
-    renderPanel(<UpdateActions />)
+    renderPanel(<UpdateOverview />)
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Check now' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Check for updates' }))
 
     expect((await screen.findAllByText('Update check started.')).length).toBeGreaterThan(0)
   })
@@ -27,11 +27,11 @@ describe('update actions', () => {
   it('names the device refusal rather than a generic failure line', async () => {
     stubFetch({
       ...updateReady,
-      'POST /api/v1/update/fetch': () => jsonResponse({ error: { code: 'no_source', message: 'this device has no update source' } }, 409),
+      'POST /api/v1/update/check': () => jsonResponse({ error: { code: 'no_source', message: 'this device has no update source' } }, 409),
     })
-    renderPanel(<UpdateActions />)
+    renderPanel(<UpdateOverview />)
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Download' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Check for updates' }))
 
     expect((await screen.findAllByText('this device has no update source')).length).toBeGreaterThan(0)
   })

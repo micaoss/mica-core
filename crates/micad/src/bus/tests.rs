@@ -8,6 +8,7 @@ mod auto;
 mod bluetooth;
 mod features;
 mod install;
+mod latest;
 mod observers;
 mod power;
 mod refusals;

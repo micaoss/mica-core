@@ -2,7 +2,7 @@ import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderPanel, stubFetch } from '@/shared/testing/panel'
-import { ManualUpdate, UpdateActions, UpdatePanel } from './system-page'
+import { ManualUpdate, UpdateOverview, UpdatePanel } from './system-page'
 
 afterEach(() => {
   cleanup()
@@ -10,35 +10,65 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('update actions', () => {
-  it('installs the exact acquired signed deployment identity', async () => {
+describe('the update overview', () => {
+  it('installs the newest release in one confirmed request', async () => {
     const fetch = stubFetch({
-      '/api/v1/update': { lifecycle: { state: 'ready', deploymentId: 'a'.repeat(64) } },
-      'POST /api/v1/update/install': () => jsonResponse({}, 202),
+      '/api/v1/update': { lifecycle: { state: 'idle', available: { deploymentId: 'a'.repeat(64), version: '0.0.6', kind: 'set', setKind: 'core' } } },
+      'POST /api/v1/update/install-latest': () => new Response(null, { status: 202 }),
     })
-    renderPanel(<UpdateActions />)
-    await userEvent.click(await screen.findByRole('button', { name: 'Install update' }))
-    await waitFor(() => expect(fetch.mock.calls.some(([path]) => path === '/api/v1/update/install')).toBe(true))
-    const request = fetch.mock.calls.find(([path]) => path === '/api/v1/update/install')?.[1]
-    expect(JSON.parse(String(request?.body))).toEqual({ deploymentId: 'a'.repeat(64) })
-    expect(new Headers(request?.headers).get('content-type')).toBe('application/json')
+    renderPanel(<UpdateOverview />)
+    expect(await screen.findByText('Update available: core 0.0.6')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Update now' }))
+    await userEvent.click(screen.getAllByRole('button', { name: 'Update now' }).at(-1)!)
+    await waitFor(() => expect(fetch.mock.calls.some(([path]) => path === '/api/v1/update/install-latest')).toBe(true))
+    const request = fetch.mock.calls.find(([path]) => path === '/api/v1/update/install-latest')?.[1]
+    expect(request?.method).toBe('POST')
+    expect(request?.body).toBeUndefined()
   })
 
-  it('follows an active operation to completion and then stops polling', async () => {
+  it('offers no install while the device is up to date', async () => {
+    stubFetch({ '/api/v1/update': { lifecycle: { state: 'idle', last_check: '2026-10-15T20:00:00Z' } } })
+    renderPanel(<UpdateOverview />)
+    expect(await screen.findByText('This device is up to date.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Check for updates' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('follows an install through the gap between its steps to the reboot it owes', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ lifecycle: { state: 'checking' } }))
-      .mockImplementation(() => Promise.resolve(jsonResponse({ lifecycle: { state: 'ready', deploymentId: 'a'.repeat(64), reason: 'check finished' } })))
+    const offered = { deploymentId: 'a'.repeat(64), version: '0.0.6', kind: 'set', setKind: 'core' }
+    const states = [
+      { lifecycle: { state: 'idle', available: offered } },
+      // The check settled and the download has not started.
+      { lifecycle: { state: 'idle', available: offered } },
+      { lifecycle: { state: 'downloading', available: offered } },
+      { lifecycle: { state: 'reboot-required', available: offered },
+        sets: { core: { pending: { id: '2'.repeat(64), channel: 'general', generation: 5, version: '0.0.6' }, boot: { coreSetId: '1'.repeat(64) } } } },
+    ]
+    let read = 0
+    const fetch = vi.fn((path: string) => path === '/api/v1/update/install-latest'
+      ? Promise.resolve(new Response(null, { status: 202 }))
+      : Promise.resolve(jsonResponse(states[Math.min(read++, states.length - 1)])))
     vi.stubGlobal('fetch', fetch)
-    renderPanel(<><UpdatePanel /><UpdateActions /></>)
-    await screen.findByText('checking')
-    expect(screen.getByRole('button', { name: 'Install update' }).hasAttribute('disabled')).toBe(true)
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
-    await screen.findByText('check finished')
-    expect(screen.getByRole('button', { name: 'Install update' }).hasAttribute('disabled')).toBe(false)
+    renderPanel(<UpdateOverview />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Update now' }))
+    await userEvent.click(screen.getAllByRole('button', { name: 'Update now' }).at(-1)!)
+    await screen.findByText('Checking for updates')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    await screen.findByText('Downloading the update')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    await screen.findByText('The update is installed. Reboot to start it.')
+    expect(screen.getByRole('button', { name: 'Reboot now' })).toBeTruthy()
     const calls = fetch.mock.calls.length
     await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
     expect(fetch).toHaveBeenCalledTimes(calls)
+  })
+
+  it('names why the last update did not complete', async () => {
+    stubFetch({ '/api/v1/update': { lifecycle: { state: 'failed', reason: 'set-check was killed by signal 6 (SIGABRT)' } } })
+    renderPanel(<UpdateOverview />)
+    expect(await screen.findByText('The last update did not complete.')).toBeTruthy()
+    expect(screen.getByText('set-check was killed by signal 6 (SIGABRT)')).toBeTruthy()
   })
 })
 
