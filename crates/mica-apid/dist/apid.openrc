@@ -2,8 +2,7 @@
 # mica-apid on an OpenRC root: apid.service's counterpart.
 
 description="mica API daemon (serves the web dashboard)"
-command=/usr/bin/micad
-command_args=api
+command=/usr/bin/mica-apid
 supervisor=supervise-daemon
 respawn_delay=2
 output_logger="logger -t mica-apid -p daemon.info"
@@ -28,7 +27,7 @@ start_pre() {
 # service, so a first boot would otherwise be refused before apid listens.
 start_post() {
     waited=0
-    while ! /usr/bin/micad api --healthcheck >/dev/null 2>&1; do
+    while ! /usr/bin/mica-apid --healthcheck >/dev/null 2>&1; do
         if [ "$waited" -ge "$apid_ready_timeout" ]; then
             eerror "apid did not answer /healthz within ${apid_ready_timeout}s"
             return 1

@@ -11,7 +11,7 @@ RequiresMountsFor=/var/lib/mica /mica
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/micad api
+ExecStart=/usr/bin/mica-apid
 Restart=on-failure
 StateDirectory=mica/apid
 # 0700, not the systemd default 0755: the directory holds the TLS private

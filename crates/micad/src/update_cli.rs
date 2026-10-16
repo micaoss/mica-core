@@ -1,4 +1,5 @@
-//! `micad update`, the operator's update command: micad over the system bus.
+//! `mica-update` (or `micad update`), the operator's update command: micad
+//! over the system bus.
 //!
 //! It asks micad what `mica-deploy` would otherwise be asked by hand, so the
 //! source, channel and workspace budget are the device's own and the gates
@@ -10,10 +11,11 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 const USAGE: &str = "\
-usage: micad update [status]
-       micad update check
-       micad update install [--reboot]
-       micad update rollback [--reboot]
+usage: mica-update [status]
+       mica-update check
+       mica-update install [--reboot]
+       mica-update rollback [--reboot]
+       (micad update ... is the same command)
 
   status    show the running versions and the update state
   check     look for a newer release
@@ -68,21 +70,23 @@ fn parse(args: &[String]) -> Result<Command, String> {
     }
 }
 
-/// `micad update`'s entry point: exit 0 done, 1 failed, 2 misused.
-pub fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(2).collect();
+/// `mica-update`'s entry point: exit 0 done, 1 failed, 2 misused.
+///
+/// `args` are the words after the command: after `mica-update`, or after
+/// `micad update`.
+pub fn main(args: &[String]) -> Result<()> {
     if mica_apid::wants_version(args.iter().cloned()) {
         println!("{}", mica_apid::version_line("micad"));
         return Ok(());
     }
-    let command = match parse(&args) {
+    let command = match parse(args) {
         Ok(Command::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
         Ok(command) => command,
         Err(error) => {
-            eprintln!("micad update: {error}\n{USAGE}");
+            eprintln!("mica-update: {error}\n{USAGE}");
             std::process::exit(2);
         }
     };
@@ -90,7 +94,7 @@ pub fn main() -> Result<()> {
         .enable_all()
         .build()?;
     if let Err(error) = runtime.block_on(run(command)) {
-        eprintln!("micad update: {error:#}");
+        eprintln!("mica-update: {error:#}");
         std::process::exit(1);
     }
     Ok(())
@@ -198,7 +202,7 @@ async fn follow(micad: &MicadProxy<'_>, me: &str, before: &Value, watch: Watch) 
                 stalled += 1;
                 if stalled >= STALLED_POLLS {
                     let at = text(&doc, "/lifecycle/state").unwrap_or_default();
-                    bail!("stopped at {at}; see `micad update status`");
+                    bail!("stopped at {at}; see `mica-update status`");
                 }
             }
             Progress::Finished(outcome) => return outcome.map_err(anyhow::Error::msg),

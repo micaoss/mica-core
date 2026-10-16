@@ -2,8 +2,9 @@
 # Two core components, each two pool items (mica-build-tools:docs/spec/release-lock.md
 # 1.2.7), composed over
 # the root at boot:
-#   micad         the one management executable (`micad api` is apid and
-#                 `micad update` the update command), their units (enabled by links in the tree),
+#   micad         the one management executable, also apid and the update
+#                 command (`micad apid`, `micad update`, and the mica-apid and
+#                 mica-update symlinks), their units (enabled by links in the tree),
 #                 their OpenRC scripts and runlevel links, the D-Bus policy and
 #                 the OpenAPI document;
 #   mica-apid-ui  the web console apid serves when it is present.
@@ -25,6 +26,8 @@ ARG SOURCE_DATE_EPOCH
 RUN set -eu; \
     t=/stage/micad; \
     install -D -m 0755 /in/bin/micad                ${t}/usr/bin/micad; \
+    ln -s micad                                     ${t}/usr/bin/mica-apid; \
+    ln -s micad                                     ${t}/usr/bin/mica-update; \
     install -D -m 0644 /in/dist/micad.service       ${t}/usr/lib/systemd/system/micad.service; \
     install -D -m 0644 /in/dist/apid.service        ${t}/usr/lib/systemd/system/apid.service; \
     install -D -m 0755 /in/dist/micad.openrc        ${t}/etc/init.d/micad; \
