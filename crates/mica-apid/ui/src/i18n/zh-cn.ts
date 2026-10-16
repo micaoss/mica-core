@@ -34,6 +34,13 @@ export const zhCN: Translation = {
     description: '{{scope}} 中尚未实现的功能使用临时示例状态。相关操作不会改变此设备，并会在页面重新加载后复位。',
   },
   shell: {
+    bluetoothPin: {
+      title: '请保存蓝牙配对码',
+      copy: '设备已生成专属的 6 位蓝牙配对码，之后手机或平板配对时需要输入。请妥善保存；也可以在 网络 → 蓝牙 中查看。',
+      saved: '我已保存',
+      later: '稍后提醒',
+      recorded: '已记录配对码已保存。',
+    },
     documentTitle: 'mica 控制台',
     homeLabel: 'mica 控制台首页',
     product: 'mica',
@@ -163,7 +170,8 @@ export const zhCN: Translation = {
       enabled: '蓝牙', enabledCopy: '启动 bluetoothd 并给适配器上电。',
       discoverable: '可被发现', discoverableCopy: '开启期间附近任何人都能看到本机。配对时开启，完成后关闭。',
       alias: '广播名称', aliasHint: '留空则广播主机名。',
-      pin: '配对码', pinHint: '会显示出来，不是机密：对方设备要求输入时就是它。留空则按本机标识派生，而不是全设备共用一个码。',
+      pin: '配对码', pinHint: '6 位数字。会显示出来，不是机密：对方设备要求输入时就是它。留空则保留当前配对码。',
+      pinDefault: '配对码仍是默认的 000000，所有未设置的设备都用这个码，请修改。',
       save: '保存适配器', saved: '适配器配置已保存。',
       devices: '设备', empty: '没有已配对设备，也没有扫描到设备。',
       name: '名称', unnamed: '（无名称）', address: '地址', state: '状态', signal: '信号',

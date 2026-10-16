@@ -9,10 +9,13 @@ use std::collections::BTreeMap;
 /// range, which are connected -- is observed and lives nowhere in this tree:
 /// a paired phone that is switched off is still a declared device, and a phone
 /// in range that nobody paired is not one.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BluetoothSettings {
     /// Whether `bluetooth.service` runs and the adapter is powered.
+    ///
+    /// On by default: a powered adapter that is not discoverable is seen by
+    /// nobody, and a phone can pair as soon as the operator starts a pairing.
     pub enabled: bool,
     /// Whether the adapter answers a scan.
     ///
@@ -26,16 +29,26 @@ pub struct BluetoothSettings {
     ///
     /// **Displayed, not hidden.** A legacy peer asks the device for a code and
     /// somebody has to type it on the peer's keypad, so this value is shown in
-    /// the console by design and is not a secret. Absent derives one from the
-    /// device identity: fixed for this device, stable across boots, and not
-    /// the same code as every other device in the fleet -- the rule
-    /// [`WifiApSettings::psk`] states, applied to the one value here that has
-    /// to be readable.
+    /// the console by design and is not a secret. Absent is
+    /// [`DEFAULT_PAIRING_PIN`]: the code every unclaimed device offers, so a
+    /// phone can set one up over Bluetooth before it has an administrator.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pin: Option<String>,
     /// The devices this device has paired with, by address.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, PairedDevice>,
+}
+
+impl Default for BluetoothSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            discoverable: false,
+            alias: None,
+            pin: None,
+            devices: BTreeMap::new(),
+        }
+    }
 }
 
 /// One paired device, as the settings tree holds it.
@@ -50,34 +63,22 @@ pub struct PairedDevice {
     pub blocked: bool,
 }
 
-/// The digits a pairing code may carry, and how many.
+/// How many digits a pairing code carries.
 ///
-/// Bluetooth's legacy PIN is 1 to 16 characters; every keypad that will be
-/// asked to enter one has digits and nothing else, so the code is digits.
-pub(super) const MIN_PIN_LEN: usize = 4;
-pub(super) const MAX_PIN_LEN: usize = 16;
+/// Every keypad that will be asked to enter one has digits and nothing else,
+/// and six is what a passkey holds.
+pub(super) const PIN_LEN: usize = 6;
 
-/// The pairing code this device offers when none is declared.
-///
-/// Derived from the device identifier: the first [`MIN_PIN_LEN`] digits of its
-/// hexadecimal, with each hex digit folded into a decimal one. Deterministic,
-/// so the console and the agent always show and answer the same code without
-/// storing it; per device, so a fleet does not share one PIN; and derived from
-/// the identity rather than from a credential, because it is displayed.
-#[must_use]
-pub fn derived_pairing_pin(device_id: &str) -> String {
-    let digits: String = device_id
-        .bytes()
-        .filter_map(|byte| (byte as char).to_digit(16))
-        .map(|value| char::from_digit(value % 10, 10).unwrap_or('0'))
-        .take(MIN_PIN_LEN)
-        .collect();
-    if digits.len() == MIN_PIN_LEN {
-        digits
-    } else {
-        // A device with no identifier yet: the reconciler has nothing to
-        // derive from, and a code that is shown has to be something.
-        "0".repeat(MIN_PIN_LEN)
+/// The pairing code of a device that declares none: the one a phone setting
+/// up an unclaimed device knows without being told.
+pub const DEFAULT_PAIRING_PIN: &str = "000000";
+
+impl BluetoothSettings {
+    /// The pairing code this device offers: the declared one, or
+    /// [`DEFAULT_PAIRING_PIN`].
+    #[must_use]
+    pub fn pairing_pin(&self) -> &str {
+        self.pin.as_deref().unwrap_or(DEFAULT_PAIRING_PIN)
     }
 }
 
@@ -87,13 +88,8 @@ pub fn derived_pairing_pin(device_id: &str) -> String {
 ///
 /// Returns the sentence the refusal carries.
 pub fn validate_pairing_pin(pin: &str) -> Result<(), String> {
-    if pin.len() < MIN_PIN_LEN || pin.len() > MAX_PIN_LEN {
-        return Err(format!(
-            "a pairing code is {MIN_PIN_LEN} to {MAX_PIN_LEN} digits"
-        ));
-    }
-    if !pin.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err("a pairing code is digits: every keypad that will be asked to enter one has those and nothing else".to_string());
+    if pin.len() != PIN_LEN || !pin.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("a pairing code is {PIN_LEN} digits"));
     }
     Ok(())
 }

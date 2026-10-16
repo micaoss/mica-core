@@ -38,7 +38,7 @@ fn the_two_sides_are_named_apart_and_never_merged() {
             rssi: Some(-60),
             ..Device::default()
         }]),
-        "4211",
+        "421137",
     );
 
     // Declared and in range are different lists: the phone is declared and
@@ -53,7 +53,7 @@ fn the_two_sides_are_named_apart_and_never_merged() {
     );
     assert_eq!(value["devices"]["entries"][0]["rssi"], json!(-60));
     assert_eq!(value["adapter"]["discovering"], json!(true));
-    assert_eq!(value["pin"], json!("4211"));
+    assert_eq!(value["pin"], json!("421137"));
 }
 
 #[test]

@@ -4,7 +4,7 @@ import { bluetoothRows } from './bluetooth'
 const overview = {
   enabled: true,
   discoverable: false,
-  pin: '4211',
+  pin: '421137',
   declared: {
     'AA:BB:CC:DD:EE:01': { name: 'phone', trusted: true, blocked: false },
     'AA:BB:CC:DD:EE:02': { name: 'headset', trusted: true, blocked: false },

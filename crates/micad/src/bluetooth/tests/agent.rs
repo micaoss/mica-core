@@ -5,7 +5,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn a_confirmed_request_is_accepted_and_a_refused_one_is_not() {
     for accept in [true, false] {
-        let agent = Arc::new(Agent::with_pin("4211".to_string()));
+        let agent = Arc::new(Agent::with_pin("421137".to_string()));
         let waiting = Arc::clone(&agent);
         let pairing = tokio::spawn(async move {
             waiting
@@ -33,7 +33,7 @@ async fn a_confirmed_request_is_accepted_and_a_refused_one_is_not() {
 /// dialogs cannot be told apart, so the address has to match.
 #[tokio::test]
 async fn an_answer_for_another_device_is_ignored() {
-    let agent = Arc::new(Agent::with_pin("4211".to_string()));
+    let agent = Arc::new(Agent::with_pin("421137".to_string()));
     let waiting = Arc::clone(&agent);
     let pairing =
         tokio::spawn(async move { waiting.confirm("AA:BB:CC:DD:EE:01".to_string(), 1).await });
@@ -51,7 +51,7 @@ async fn an_answer_for_another_device_is_ignored() {
 /// A second request while one is pending is refused rather than queued.
 #[tokio::test]
 async fn a_second_request_is_refused_while_one_is_pending() {
-    let agent = Arc::new(Agent::with_pin("4211".to_string()));
+    let agent = Arc::new(Agent::with_pin("421137".to_string()));
     let waiting = Arc::clone(&agent);
     let first =
         tokio::spawn(async move { waiting.confirm("AA:BB:CC:DD:EE:01".to_string(), 1).await });
@@ -80,9 +80,9 @@ async fn the_pin_is_whatever_the_settings_last_said() {
     let agent = Agent::with_pin("0000".to_string());
     assert_eq!(agent.pin().await, "0000");
 
-    agent.set_pin("4211".to_string()).await;
+    agent.set_pin("421137".to_string()).await;
 
-    assert_eq!(agent.pin().await, "4211");
+    assert_eq!(agent.pin().await, "421137");
 }
 
 /// A stand-in for bluetoothd's agent manager: it records who registered.

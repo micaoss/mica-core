@@ -514,7 +514,7 @@ impl SettingsApi for FakeSettings {
         Ok(serde_json::json!({
             "enabled": true,
             "discoverable": false,
-            "pin": "4211",
+            "pin": "421137",
             "declared": { "AA:BB:CC:DD:EE:01": { "name": "phone", "trusted": true, "blocked": false } },
             "adapter": { "available": true, "address": "11:22:33:44:55:66", "alias": "edge-42", "powered": true, "discoverable": false, "discovering": false },
             "devices": { "available": true, "entries": [

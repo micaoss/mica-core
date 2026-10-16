@@ -67,6 +67,13 @@ export const en = {
     description: '{{scope}} uses temporary sample state for functions that are not implemented yet. This simulation does not change this device and resets when the page reloads.',
   },
   shell: {
+    bluetoothPin: {
+      title: 'Save the Bluetooth pairing code',
+      copy: 'This device now has its own six-digit pairing code. A phone or tablet that pairs with it later is asked for it. Keep it somewhere safe; it is also shown under Network → Bluetooth.',
+      saved: 'I have saved it',
+      later: 'Remind me later',
+      recorded: 'The pairing code is noted as saved.',
+    },
     documentTitle: 'mica console',
     homeLabel: 'mica console home',
     product: 'mica',
@@ -287,7 +294,8 @@ export const en = {
       alias: 'Advertised name',
       aliasHint: 'Empty advertises the hostname.',
       pin: 'Pairing code',
-      pinHint: 'Shown, not secret: it is what you type on the other device when it asks. Empty derives one from this device identity rather than sharing a code with every other device.',
+      pinHint: 'Six digits. Shown, not secret: it is what you type on the other device when it asks. Empty keeps the current code.',
+      pinDefault: 'The pairing code is still the default 000000, which every unset device offers. Change it.',
       save: 'Save adapter',
       saved: 'Adapter saved.',
       devices: 'Devices',

@@ -283,20 +283,10 @@ impl MicadService {
 
     /// The pairing code this device answers a legacy peer with.
     ///
-    /// The declared one, or the value derived from the device identity. Read
-    /// here rather than stored, so the console and the agent cannot disagree
-    /// about what a peer will be told.
+    /// Read here rather than stored, so the console and the agent cannot
+    /// disagree about what a peer will be told.
     fn pairing_pin(&self, settings: &micad_settings::Settings) -> String {
-        match &settings.bluetooth.pin {
-            Some(pin) => pin.clone(),
-            None => micad_settings::derived_pairing_pin(
-                settings
-                    .provisioning
-                    .device_id
-                    .as_deref()
-                    .unwrap_or_default(),
-            ),
-        }
+        settings.bluetooth.pairing_pin().to_string()
     }
 
     /// Refuse a Bluetooth action on a device that has no adapter or has it

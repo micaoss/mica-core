@@ -272,10 +272,8 @@ async fn serve() -> anyhow::Result<()> {
     state.insert("meta".to_string(), meta.to_json());
 
     // Read before the tree is handed to the service: the agent answers a
-    // legacy peer with the declared code, or with the one derived from this
-    // device's own identity.
-    let settings_pin = settings.bluetooth.pin.clone();
-    let device_id_for_pin = settings.provisioning.device_id.clone().unwrap_or_default();
+    // legacy peer with the declared code, or with the default one.
+    let settings_pin = settings.bluetooth.pairing_pin().to_string();
     let mut pairing_agent: Option<Arc<bluetooth::Agent>> = None;
 
     let mut service = bus::MicadService::new(
@@ -386,13 +384,7 @@ async fn serve() -> anyhow::Result<()> {
         }
         // The agent answers with whatever the settings say; the reconciler
         // keeps it in step from here on.
-        agent
-            .set_pin(
-                settings_pin
-                    .clone()
-                    .unwrap_or_else(|| micad_settings::derived_pairing_pin(&device_id_for_pin)),
-            )
-            .await;
+        agent.set_pin(settings_pin).await;
     }
     // The service scan, started before the well-known name is claimed so that
     // its NameOwnerChanged subscription is in place before anything can react

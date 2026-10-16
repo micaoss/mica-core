@@ -34,7 +34,7 @@ pub(super) async fn the_bluetooth_read_answers_micads_document() {
         json!(true)
     );
     assert_eq!(body["devices"]["entries"][0]["rssi"], json!(-55));
-    assert_eq!(body["pin"], json!("4211"));
+    assert_eq!(body["pin"], json!("421137"));
 }
 
 // The adapter write keeps the trust list: devices arrive by pairing, and a
@@ -49,7 +49,7 @@ pub(super) async fn the_adapter_write_keeps_the_trust_list() {
         &router,
         "PUT",
         BLUETOOTH_API,
-        json!({ "enabled": true, "discoverable": true, "alias": "edge-42", "pin": "4211" }),
+        json!({ "enabled": true, "discoverable": true, "alias": "edge-42", "pin": "421137" }),
         Some(&cookie),
         Some(&csrf),
     )
@@ -59,7 +59,7 @@ pub(super) async fn the_adapter_write_keeps_the_trust_list() {
     let stored = fake.get_settings("bluetooth").await.unwrap();
     assert_eq!(stored["discoverable"], json!(true));
     assert_eq!(stored["alias"], json!("edge-42"));
-    assert_eq!(stored["pin"], json!("4211"));
+    assert_eq!(stored["pin"], json!("421137"));
     assert_eq!(
         stored["devices"]["AA:BB:CC:DD:EE:01"]["name"],
         json!("phone"),
@@ -67,10 +67,11 @@ pub(super) async fn the_adapter_write_keeps_the_trust_list() {
     );
 }
 
-// An absent alias or PIN takes the key out rather than writing an empty
-// string: absent means "derive it", which is a different thing.
+// An absent alias takes the key out rather than writing an empty string:
+// absent means "the hostname". An absent code keeps the stored one, so a
+// write that only flips a switch does not return the device to `000000`.
 #[tokio::test]
-pub(super) async fn an_absent_alias_or_code_is_removed_rather_than_emptied() {
+pub(super) async fn an_absent_alias_is_removed_and_an_absent_code_is_kept() {
     let (router, fake) = test_app(bluetooth_tree());
     let (cookie, csrf) = mqtt_session(&router).await;
 
@@ -78,7 +79,7 @@ pub(super) async fn an_absent_alias_or_code_is_removed_rather_than_emptied() {
         &router,
         "PUT",
         BLUETOOTH_API,
-        json!({ "enabled": true, "discoverable": false, "alias": "edge-42", "pin": "4211" }),
+        json!({ "enabled": true, "discoverable": false, "alias": "edge-42", "pin": "421137" }),
         Some(&cookie),
         Some(&csrf),
     )
@@ -87,7 +88,7 @@ pub(super) async fn an_absent_alias_or_code_is_removed_rather_than_emptied() {
         &router,
         "PUT",
         BLUETOOTH_API,
-        json!({ "enabled": true, "discoverable": false }),
+        json!({ "enabled": true, "discoverable": true }),
         Some(&cookie),
         Some(&csrf),
     )
@@ -95,15 +96,19 @@ pub(super) async fn an_absent_alias_or_code_is_removed_rather_than_emptied() {
 
     let stored = fake.get_settings("bluetooth").await.unwrap();
     assert!(stored.get("alias").is_none(), "{stored}");
-    assert!(stored.get("pin").is_none(), "{stored}");
+    assert_eq!(stored["pin"], json!("421137"), "{stored}");
 }
 
-// A pairing code no keypad could enter, and an alias no adapter could carry.
+// A pairing code no keypad could enter, the default code a device only
+// returns to by a reset, and an alias no adapter could carry.
 #[tokio::test]
 pub(super) async fn an_adapter_setting_the_device_would_refuse_is_refused_here() {
     for body in [
         json!({ "enabled": true, "discoverable": false, "pin": "12" }),
-        json!({ "enabled": true, "discoverable": false, "pin": "abcd" }),
+        json!({ "enabled": true, "discoverable": false, "pin": "abcdef" }),
+        json!({ "enabled": true, "discoverable": false, "pin": "4211" }),
+        json!({ "enabled": true, "discoverable": false, "pin": "1234567" }),
+        json!({ "enabled": true, "discoverable": false, "pin": "000000" }),
         json!({ "enabled": true, "discoverable": false, "alias": "" }),
     ] {
         let (router, fake) = test_app(bluetooth_tree());

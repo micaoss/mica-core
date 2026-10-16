@@ -16,7 +16,7 @@ import { Spinner } from '@/shared/components/ui/spinner'
 import { Switch } from '@/shared/components/ui/switch'
 import { failureDetail } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
-import { bluetoothRows, type BluetoothRow } from './bluetooth'
+import { DEFAULT_PIN, bluetoothRows, type BluetoothRow } from './bluetooth'
 
 /// The adapter, what it can see, and what it trusts.
 ///
@@ -79,7 +79,7 @@ export function BluetoothPanel() {
     save.mutate({
       enabled: overview.enabled,
       discoverable: overview.discoverable,
-      // Empty means "derive it", which is what an absent key says to the
+      // Empty keeps what is stored, which is what an absent key says to the
       // device; sending an empty string would store one.
       ...(draft.alias?.trim() ? { alias: draft.alias.trim() } : {}),
       ...(draft.pin?.trim() ? { pin: draft.pin.trim() } : {}),
@@ -94,6 +94,7 @@ export function BluetoothPanel() {
     <div className="grid gap-3">
       {bluetooth.error ? <Callout tone="danger" title={failureDetail(bluetooth.error, t('common.requestFailed'))} /> : null}
       {overview?.adapter.available === false ? <Callout tone="warning" title={overview.adapter.detail ?? t('network.bluetooth.noAdapter')} /> : null}
+      {overview?.pin === DEFAULT_PIN ? <Callout tone="warning" title={t('network.bluetooth.pinDefault')} /> : null}
 
       {overview?.pending ? (
         <Panel className="border-primary" title={t('network.bluetooth.pendingTitle')} description={t('network.bluetooth.pendingCopy', { address: overview.pending.address })}>

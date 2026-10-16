@@ -20,9 +20,9 @@ pub(crate) struct BluetoothAdapterSettings {
     /// The name it advertises; absent advertises the hostname.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) alias: Option<String>,
-    /// The pairing code offered to a peer that asks for one. Absent derives
-    /// one from the device identity. **Not a secret**: it is displayed,
-    /// because somebody has to type it on the other device.
+    /// The pairing code offered to a peer that asks for one: six digits, not
+    /// the default `000000`. Absent keeps the stored one. **Not a secret**: it
+    /// is displayed, because somebody has to type it on the other device.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) pin: Option<String>,
 }
@@ -84,7 +84,7 @@ pub(crate) async fn api_v1_bluetooth_read(
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
-        (status = 422, description = "The body is not this shape, the alias is empty or longer than 64 characters, or the pairing code is not 4 to 16 digits (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, the alias is empty or longer than 64 characters, or the pairing code is not six digits or is the default `000000` (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "The stored subtree could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -100,8 +100,18 @@ pub(crate) async fn api_v1_bluetooth_write(
         Ok(requested) => requested,
         Err(response) => return *response,
     };
+    // The default code is what a reset returns to, and what every unclaimed
+    // device offers: a device somebody set up does not go back to it.
     if let Some(pin) = &requested.pin
-        && let Err(message) = micad_settings::validate_pairing_pin(pin)
+        && let Err(message) = micad_settings::validate_pairing_pin(pin).and_then(|()| {
+            if pin == micad_settings::DEFAULT_PAIRING_PIN {
+                Err(format!(
+                    "{pin} is the default pairing code, which only a reset returns to"
+                ))
+            } else {
+                Ok(())
+            }
+        })
     {
         return api_response(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -136,7 +146,11 @@ pub(crate) async fn api_v1_bluetooth_write(
         Value::Bool(requested.discoverable),
     );
     set_or_remove(&mut subtree, "alias", requested.alias);
-    set_or_remove(&mut subtree, "pin", requested.pin);
+    // An absent code keeps the stored one: a write that only flips a switch
+    // must not return a claimed device to the default code.
+    if let Some(pin) = requested.pin {
+        subtree.insert("pin".to_string(), Value::String(pin));
+    }
     match state
         .api
         .set_settings(BLUETOOTH_SETTINGS_PATH, &Value::Object(subtree))

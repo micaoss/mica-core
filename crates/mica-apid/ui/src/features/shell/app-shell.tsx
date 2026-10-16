@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/shared/components/ui/sheet'
 import type { Health, SystemInformation } from '@/lib/types'
 import { RotationNotice } from '@/features/onboarding/rotation-notice'
+import { BluetoothPinNotice } from '@/features/onboarding/bluetooth-pin-notice'
 import { connectionState, freshnessLabel } from './connection'
 import { BrandMark } from '@/shared/components/brand-mark'
 
@@ -128,7 +129,7 @@ export function AppShell() {
           </div>
         </div>
       )}
-      <main className="min-w-0 flex-1"><RotationNotice /><Outlet /></main>
+      <main className="min-w-0 flex-1"><RotationNotice /><BluetoothPinNotice /><Outlet /></main>
       <footer className="sticky bottom-0 z-20 mt-auto border-t bg-background">
         <div className="mx-auto flex w-full max-w-[1280px] min-h-11 flex-wrap items-center gap-3 px-4 py-1.5 text-sm text-muted-foreground sm:px-6 lg:px-8">
           <ConnectionState state={state} freshness={freshness} detail={t(`shell.${state}Detail`)} />

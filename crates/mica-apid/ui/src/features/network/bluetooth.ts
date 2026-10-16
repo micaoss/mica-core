@@ -1,5 +1,9 @@
 import type { BluetoothOverview } from '@/lib/types'
 
+/// The code a device offers until somebody sets one; the panel asks for a
+/// new one while it is this.
+export const DEFAULT_PIN = '000000'
+
 export interface BluetoothRow {
   address: string
   name: string

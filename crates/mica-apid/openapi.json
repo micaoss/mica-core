@@ -626,7 +626,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, the alias is empty or longer than 64 characters, or the pairing code is not 4 to 16 digits (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "The body is not this shape, the alias is empty or longer than 64 characters, or the pairing code is not six digits or is the default `000000` (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -7896,7 +7896,7 @@
               "string",
               "null"
             ],
-            "description": "The pairing code offered to a peer that asks for one. Absent derives\none from the device identity. **Not a secret**: it is displayed,\nbecause somebody has to type it on the other device."
+            "description": "The pairing code offered to a peer that asks for one: six digits, not\nthe default `000000`. Absent keeps the stored one. **Not a secret**: it\nis displayed, because somebody has to type it on the other device."
           }
         },
         "additionalProperties": false

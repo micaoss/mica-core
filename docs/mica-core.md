@@ -114,7 +114,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `access` | SSH (switch, listen addresses, authorized keys), the console, the API's listeners (`web`), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default) |
 | `container` | The engine switch and the declared `units` (image, command, environment, ports, volumes under `/mica/`, restart, start at boot, and the limits `pids`, `memory`, `cpu`) |
-| `bluetooth` | The switch, discoverability, the name, the pairing code, the trust list |
+| `bluetooth` | The switch (on by default), discoverability (off by default), the name, the pairing code (six digits; `000000` until the device is claimed with Bluetooth on, then six random digits unless one is declared; a write keeps the stored code when it carries none, and apid refuses `000000`, which only a reset returns to), the trust list |
 | `mqtt` | The switch, the broker listener (default `127.0.0.1:1883`), whether clients authenticate |
 | `time` | NTP servers and the presentation timezone |
 | `provisioning`, `reset` | Provisioning status; a staged reset |

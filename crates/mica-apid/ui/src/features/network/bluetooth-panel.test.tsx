@@ -12,7 +12,7 @@ afterEach(() => {
 const overview = {
   enabled: true,
   discoverable: false,
-  pin: '4211',
+  pin: '421137',
   declared: { 'AA:BB:CC:DD:EE:01': { name: 'phone', trusted: true, blocked: false } },
   adapter: { available: true, address: '11:22:33:44:55:66', alias: 'edge-42', powered: true, discoverable: false, discovering: false },
   devices: {
@@ -31,8 +31,15 @@ describe('the bluetooth panel', () => {
 
     // The field is seeded from the device's answer, so the wait is for the
     // value rather than for the field.
-    const pin = await screen.findByDisplayValue('4211') as HTMLInputElement
+    const pin = await screen.findByDisplayValue('421137') as HTMLInputElement
     expect(pin.getAttribute('type')).not.toBe('password')
+  })
+
+  it('asks for a new code while the code is the default one', async () => {
+    stubFetch({ '/api/v1/bluetooth': { ...overview, pin: '000000' } })
+    renderPanel(<BluetoothPanel />)
+
+    expect(await screen.findByText(/still the default 000000/)).toBeTruthy()
   })
 
   it('says the device has no adapter rather than showing an empty list', async () => {

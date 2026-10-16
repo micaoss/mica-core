@@ -168,6 +168,11 @@ mod tests {
         // no network it joins nothing. The access point stays off.
         assert!(settings.wifi.client.enabled);
         assert_eq!(settings.wifi.ap.mode, ApMode::Off);
+        // Bluetooth is on and not discoverable: a phone can pair once the
+        // operator starts a pairing, and nobody in range sees the device
+        // before that.
+        assert!(settings.bluetooth.enabled);
+        assert!(!settings.bluetooth.discoverable);
 
         // The one write really happened, and it holds the same tree.
         let on_disk = store.load().expect("load seeded settings");
