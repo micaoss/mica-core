@@ -88,6 +88,8 @@ pub struct DeploymentStore {
     /// What installation keeps free on SYSTEM and the ESP, and a download on
     /// DATA: the signed boot policy's, or the defaults.
     pub reserves: crate::board::Reserves,
+    /// What the board's loader proves of a FIT: whether a FIT boot is verified.
+    pub boot_trust: crate::board::BootTrust,
 }
 
 /// The device a deployment must name: the board and architecture of the signed
@@ -108,6 +110,7 @@ impl DeploymentStore {
             boot,
             meta,
             reserves: crate::board::Reserves::default(),
+            boot_trust: crate::board::BootTrust::default(),
         }
     }
 
@@ -115,6 +118,13 @@ impl DeploymentStore {
     #[must_use]
     pub fn with_reserves(mut self, reserves: crate::board::Reserves) -> Self {
         self.reserves = reserves;
+        self
+    }
+
+    /// Keep the boot trust the board declares.
+    #[must_use]
+    pub fn with_boot_trust(mut self, trust: crate::board::BootTrust) -> Self {
+        self.boot_trust = trust;
         self
     }
 
@@ -316,7 +326,8 @@ impl DeploymentStore {
                 ensure!(
                     receipt.backend == crate::boot::BootKind::UbootFit
                         && !receipt.secure_boot
-                        && receipt.boot_verified,
+                        && receipt.boot_verified
+                            == (self.boot_trust == crate::board::BootTrust::Fit),
                     "boot receipt backend mismatch"
                 );
                 ensure!(

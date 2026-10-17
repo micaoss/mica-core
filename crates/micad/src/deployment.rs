@@ -210,8 +210,11 @@ impl Status {
                     status.boot.entry == format!("fit:{}", status.boot.deployment_id),
                     "running FIT entry identity mismatch"
                 );
+                // Whether a FIT boot is verified is the board's boot trust,
+                // which mica-deploy holds the receipt to; a FIT never claims
+                // Secure Boot.
                 ensure!(
-                    status.boot.boot_verified && !status.boot.secure_boot,
+                    !status.boot.secure_boot,
                     "inconsistent FIT verification evidence"
                 );
             }
@@ -554,7 +557,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fit_status_distinguishes_required_fit_verification_from_uefi_secure_boot() {
+    fn fit_status_never_claims_secure_boot_and_may_be_unverified() {
         let mut value = fixture();
         value["boot"]["backend"] = json!("uboot-fit");
         value["boot"]["entry"] = json!(format!("fit:{}", "a".repeat(64)));
@@ -566,8 +569,14 @@ pub(crate) mod tests {
         value["boot"]["secureBoot"] = json!(true);
         assert!(Status::parse(&value.to_string()).is_err());
         value["boot"]["secureBoot"] = json!(false);
+        // A board whose loader checks only the FIT's hashes boots unverified.
         value["boot"]["bootVerified"] = json!(false);
-        assert!(Status::parse(&value.to_string()).is_err());
+        assert!(
+            !Status::parse(&value.to_string())
+                .unwrap()
+                .boot
+                .boot_verified
+        );
         value["boot"]["backend"] = json!("unknown");
         assert!(Status::parse(&value.to_string()).is_err());
     }

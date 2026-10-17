@@ -1,8 +1,8 @@
 //! What the device is, as its signed boot policy states it.
 //!
 //! The kernel component's initramfs carries `/etc/mica/boot.json`, and its
-//! `board` section is the one place the device learns its boot backend, its
-//! kernel format, the GPT numbers of the partitions it binds, the firmware it
+//! `board` section is the one place the device learns its boot backend and
+//! what it proves, its kernel format, the GPT numbers of the partitions it binds, the firmware it
 //! may write, where the FIT boot records live and the free space it keeps. Nothing here is keyed on a
 //! board's name: a new board is a new policy, not a new build of this crate.
 //!
@@ -34,6 +34,24 @@ impl KernelFormat {
             Self::Uki => "uki",
             Self::Fit => "fit",
         }
+    }
+}
+
+/// What the boot path proves of the FIT it loads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BootTrust {
+    /// The loader verifies the FIT's signature.
+    #[default]
+    Fit,
+    /// The loader checks only the FIT's hashes: the board has no verified boot.
+    None,
+}
+
+impl BootTrust {
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn is_fit(&self) -> bool {
+        *self == Self::Fit
     }
 }
 
@@ -148,6 +166,10 @@ pub struct BoardFacts {
     /// carry limits. On unless the board turns it off; only `false` is written.
     #[serde(default = "enabled", skip_serializing_if = "is_enabled")]
     pub data_quotas: bool,
+    /// `fit` unless the board's loader checks only hashes; only `none` is
+    /// written.
+    #[serde(default, skip_serializing_if = "BootTrust::is_fit")]
+    pub boot_trust: BootTrust,
 }
 
 fn enabled() -> bool {
@@ -164,8 +186,8 @@ impl BoardFacts {
     ///
     /// # Errors
     ///
-    /// Names the first disagreement: backend and kernel format, backend and
-    /// firmware format, records on the wrong backend, partition numbers, a
+    /// Names the first disagreement: backend and kernel format, a boot trust
+    /// of `none` off FIT, backend and firmware format, records on the wrong backend, partition numbers, a
     /// firmware range that leaves its partition or reaches the records, or a
     /// reserve outside 1 MiB to 1 GiB or for an ESP the board does not have.
     pub fn validate(&self, arch: &str) -> Result<()> {
@@ -189,6 +211,10 @@ impl BoardFacts {
                 && p.boot != p.data
                 && p.system != p.data,
             "invalid partition numbers"
+        );
+        ensure!(
+            self.boot_trust.is_fit() || self.boot == BootKind::UbootFit,
+            "boot trust none on a board without FIT"
         );
         match (self.boot, &self.records) {
             (BootKind::UbootFit, None) => bail!("FIT boot records absent from the boot policy"),

@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use mica_deploy::{
+    board::BootTrust,
     boot::{
         BootKind, copy_exitrd, data_projects, exitrd_tmpfs_bytes, fit_selected, openrc_root,
         persistent_machine_id, selected_entry, shutdown,
@@ -338,7 +339,8 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         serde_json::to_vec(&serde_json::json!({
             "deploymentId": id, "entry": selected, "kernelId": deployment.kernel.id,
             "rootfsId": deployment.rootfs.id, "contentVerified": true, "secureBoot": secure_boot,
-            "backend": backend, "bootVerified": secure_boot || backend == BootKind::UbootFit,
+            "backend": backend, "bootVerified": secure_boot
+                || (backend == BootKind::UbootFit && config.board.boot_trust == BootTrust::Fit),
         }))?,
     )?;
     fs::write("/run/mica/deployment.json", &envelope)?;

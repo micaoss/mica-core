@@ -299,7 +299,8 @@ fn execute() -> Result<()> {
         },
     };
     let store = DeploymentStore::new("/mnt/system".into(), boot, "/mnt/data/meta".into())
-        .with_reserves(policy.board.reserves);
+        .with_reserves(policy.board.reserves)
+        .with_boot_trust(policy.board.boot_trust);
     let data_check = (|| -> Result<()> {
         let data = require_mount("/mnt/data", "ext4", true, partitions.data)?;
         ensure!(

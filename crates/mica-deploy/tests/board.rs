@@ -464,3 +464,41 @@ fn data_quotas_are_on_unless_the_board_turns_them_off() {
     s["dataQuotas"] = json!("no");
     assert!(read(&s, "arm64").is_err(), "the switch is a boolean");
 }
+
+/// A FIT board's loader verifies the FIT's signature unless the board says it
+/// only checks hashes; only `none` is written back, and only a FIT board may
+/// say it.
+#[test]
+fn boot_trust_is_fit_unless_a_fit_board_says_none() {
+    use mica_deploy::board::BootTrust;
+    let facts = read(&section("cx3576"), "arm64").unwrap();
+    assert_eq!(facts.boot_trust, BootTrust::Fit);
+    assert!(
+        !serde_json::to_value(&facts)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("bootTrust")
+    );
+
+    let mut s = section("cx3576");
+    s["bootTrust"] = json!("none");
+    let facts = read(&s, "arm64").unwrap();
+    assert_eq!(facts.boot_trust, BootTrust::None);
+    assert_eq!(
+        serde_json::to_value(&facts).unwrap()["bootTrust"],
+        json!("none")
+    );
+    s["bootTrust"] = json!("fit");
+    assert_eq!(read(&s, "arm64").unwrap().boot_trust, BootTrust::Fit);
+    s["bootTrust"] = json!("hashes");
+    assert!(read(&s, "arm64").is_err(), "an unknown trust is refused");
+
+    let mut s = section("uefi-x64");
+    s["bootTrust"] = json!("none");
+    let error = format!("{:#}", read(&s, "amd64").expect_err("UEFI with trust none"));
+    assert!(
+        error.contains("boot trust none on a board without FIT"),
+        "{error}"
+    );
+}

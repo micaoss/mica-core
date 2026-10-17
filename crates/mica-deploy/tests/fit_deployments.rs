@@ -156,3 +156,30 @@ fn fit_confirmation_reconciles_data_failure_without_refilling_attempts() {
         Some(receipt.deployment_id)
     );
 }
+
+/// A FIT boot is verified exactly when the board's loader checks the FIT's
+/// signature: a receipt that says otherwise is refused either way.
+#[test]
+fn fit_receipts_are_held_to_the_board_s_boot_trust() {
+    use mica_deploy::board::BootTrust;
+    let (dir, store, mut receipt, _firmware) = fixture();
+    receipt.boot_verified = false;
+    assert!(
+        store.confirm(&receipt).is_err(),
+        "a FIT board claims a verified boot"
+    );
+
+    let store =
+        DeploymentStore::new(store.system, store.boot, store.meta).with_boot_trust(BootTrust::None);
+    receipt.boot_verified = true;
+    assert!(
+        store.confirm(&receipt).is_err(),
+        "an unsigned FIT cannot be verified"
+    );
+    receipt.boot_verified = false;
+    assert_eq!(
+        store.confirm(&receipt).unwrap().current,
+        Some(receipt.deployment_id)
+    );
+    drop(dir);
+}
