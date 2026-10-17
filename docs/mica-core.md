@@ -360,7 +360,9 @@ under the transaction lock.
 ### 6.2 Signed metadata
 
 Strict JSON verified with Ed25519 against keys embedded in the signed kernel; unknown fields are
-refused and field order is part of the wire form. `mica/deployment/v1` (a deployment: its
+refused and field order is part of the wire form. An `arch` is `amd64`, `arm64` or `armhf` in
+every document that carries one (the deployment and its components, a set and its core records,
+firmware, the boot policy's identity). `mica/deployment/v1` (a deployment: its
 product, its kernel and its root, the system alone), `mica/kernel/v1` and `mica/rootfs/v1`
 (components and their verity parameters; a root states its `interfaceLevel`, 1 or more),
 `mica/update-envelope/v1` and `mica/firmware/v1` (firmware, never carried by a deployment). A
@@ -505,6 +507,19 @@ boot partition, SYSTEM and DATA), `firmware` (the target a firmware receipt carr
 `dataQuotas` (`false` mounts DATA without project quotas). The section is validated before use,
 and the disk is held to the stated geometry before anything is written.
 
+`bootTrust` says what the boot path proves: `fit` (the default, and never written) when the loader
+verifies the FIT's signature, `none` when it only checks the FIT's hashes. `none` is valid only
+with `uboot-fit`. The runkit reports the boot as verified (`bootVerified` in `/run/mica/boot.json`)
+on UEFI with Secure Boot and on a FIT board whose trust is `fit`, and as unverified on a FIT board
+whose trust is `none`; mica-deploy holds every receipt to that rule. Nothing else changes with
+it: the runkit still requires signed dm-verity root hashes, and every deployment, set and
+firmware manifest is authenticated against the policy's keys before anything is written. What
+`none` gives up is the chain from the loader: someone who can write the flash can replace the
+kernel, its initramfs and the keys in it together. Such a board has no verified boot.
+
+`storage` is `gpt` (the default, and never written), the block layout above, or `ubi`, raw NAND
+(6.6).
+
 ### 6.5 mica-runkit and lifecycle-sys
 
 `mica-runkit` is one static executable selected by the name it runs as:
@@ -556,6 +571,85 @@ watchdog, loop devices, device-mapper, ext4 project ids and quotas (`FS_IOC_FSSE
 `quotactl_fd`) and the clock's synchronized bit. The boot/shutdown gate proves every structure
 and request number against the kernel headers for x86-64 and aarch64
 (`scripts/gate/boot-shutdown/uapi.c`).
+
+### 6.6 NAND boards: the UBI object store
+
+A board whose policy says `storage: "ubi"` keeps its deployments on raw NAND under UBI. The store
+is the one of 6.1 and 6.2 (content-addressed, at most two deployments and two core sets, objects
+shared between them, the same transactions, records, trials and delta transfer); only where the
+large objects live changes, from files on SYSTEM to static UBI volumes. Bad blocks and wear are
+UBI's. mica-deploy and the runkit read the policy with unknown fields refused, so the ones that
+do not know `storage` refuse a `ubi` policy rather than misread it.
+
+**The policy.** On `ubi`, `board` carries `ubi: { "mtd": <name> }`, the MTD partition that holds
+the UBI device (1 to 63 of `A-Z a-z 0-9 . _ -`), and neither `partitions` nor `records`; the
+policy carries no `systemPartUuid` or `dataPartUuid`. `boot` is `uboot-fit`, `dataQuotas` is
+`false` (UBIFS has no project quotas), and the board declares its `reserves` (the defaults are
+sized for disks). Its `firmware` target is `mtd-loader`:
+
+```json
+{ "format": "mtd-loader", "partition": "<MTD partition name>", "maxBytes": <1 to 64 MiB> }
+```
+
+mica-deploy admits a firmware receipt for it and reads it back from the start of the partition,
+passing over bad erase blocks, and never writes it: a loader on NAND is replaced by the recovery
+package. Every other MTD region the board's first-stage loader fixes is the image producer's;
+the device knows only the UBI partition.
+
+**Volumes.** The names are fixed; an id is the lowercase hexadecimal SHA-256 id of its signed
+document (6.2).
+
+| Volume | Kind | Holds |
+| --- | --- | --- |
+| `system` | dynamic, UBIFS | SYSTEM's small files: `deployments/<id>.json`, `roots/<rootId>/rootfs.roothash{,.p7s}`, `kernels/<kernelId>/support.roothash{,.p7s}`, `sets/core/` (the signed sets, `state.json`, `objects/<componentId>/core.roothash{,.p7s}`) |
+| `data` | dynamic, UBIFS | DATA |
+| `records-a`, `records-b` | dynamic, one LEB each | The two boot record copies |
+| `k-<kernelId>` | static | The kernel's `boot.itb` |
+| `s-<kernelId>` | static | The kernel's `support.img` |
+| `r-<rootId>` | static | The root's `rootfs.img` |
+| `c-<componentId>` | static | A core component's `core.img` |
+| `p.<name>` | static | The object `<name>` while it is written |
+
+A static volume's data size is exactly the signed length of its object. An object is written
+under the transaction lock as a file is (6.3): a leftover `p.<name>` is removed, `p.<name>` is
+created static at that size, filled through the volume update (`UBI_IOCVOLUP`), read back whole
+through its character device and checked against the signed digest, then renamed to `<name>` in
+one volume-table update. An existing `<name>` is reused only when it is static, neither corrupted
+nor marked mid-update, of the signed size and of the signed digest. Collection and `gc` remove
+volumes (`UBI_IOCRMVOL`) as they remove files, after the records stop naming them: every `p.*`,
+and every `k-`, `s-`, `r-` or `c-` volume no retained deployment or set names. No other volume is
+touched. An object costs its size rounded up to whole LEBs; installation keeps `reserves.system`
+free in the UBI device's available LEBs, and a download keeps `reserves.data` on DATA. Delta
+transfer reads its seeds from the object volumes' character devices.
+
+**Records.** The format is the FIT one, unchanged: a copy is 65536 bytes, the CRC-32 of bytes 5
+onward in bytes 0 to 3, a flag in byte 4, then `mica_entries=v1|...` and zeros, and the active
+copy is chosen by U-Boot's redundant-environment rule. Copy A is the first 65536 bytes of
+`records-a`, copy B of `records-b`. mica-deploy writes the inactive copy with the atomic LEB
+change (`UBI_IOCEBCH`, LEB 0, 65536 bytes), so an interrupted write leaves the old copy or the
+new one, and reads it back before it counts.
+
+**Boot.** The kernel attaches the UBI partition from its command line (`ubi.mtd=<name>`). The
+runkit takes the UBI device whose MTD partition is the policy's, mounts `ubiN:system` read-only
+and `ubiN:data` read-write without quotas, and opens the root, the support image and each
+selected core component as a `ubiblock` of its static volume (checked static, sound and of its
+signed size) under a signed dm-verity mapping, as it opens a loop device on a disk board. SYSTEM
+is remounted writable only inside an operation, as on a disk.
+
+**micaboot over UBI.** The loader arms the watchdog; attaches the UBI partition; reads
+`records-a` and `records-b` (`ubi read`), chooses the active copy and the next deployment by the
+same rules as on a disk board; when the chosen record is on trial, decrements its attempts and
+writes the result to the inactive copy before launching anything, launching nothing if that write
+fails; reads `k-<kernelId>` whole (`ubi read`, at most its FIT limit); checks the FIT's hashes
+(`verify=yes`) and, with `bootTrust` `fit`, its signature; sets `/chosen/mica,deployment-id` to
+the deployment's id; and boots it with `ubi.mtd=<name>` on the command line. A confirmed
+deployment that fails to launch is retired in the records as on a disk board.
+
+**Kernel options.** A UBI board's kernel carries MTD with its SPI-NAND (or NAND) controller and
+`MTD_SPI_NAND`, `MTD_UBI`, `MTD_UBI_BLOCK`, `UBIFS_FS`, `SQUASHFS` with the compressors of the
+images it opens, `BLK_DEV_DM`, `DM_VERITY` with `DM_VERITY_VERIFY_ROOTHASH_SIG` and the
+system trusted keyring holding the root-hash signing key, and a watchdog driver; all built in,
+since nothing is loaded before the root.
 
 ## 7. Building, checking and releasing
 
