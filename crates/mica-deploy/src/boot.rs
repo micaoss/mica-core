@@ -319,11 +319,7 @@ fn materialize_exitrd(
         capacity += metadata.len().div_ceil(65536) * 65536;
         members.push((name, file, metadata));
     }
-    let machine = if cfg!(target_arch = "x86_64") {
-        62
-    } else {
-        183
-    };
+    let machine = exitrd_machine(std::env::consts::ARCH)?;
     ensure!(
         names.len() == 1,
         "exitrd requires a single shutdown executable"
@@ -376,6 +372,22 @@ fn materialize_exitrd(
     release.write_all(b"ID=mica-exitrd\n")?;
     release.set_permissions(fs::Permissions::from_mode(0o644))?;
     Ok(capacity)
+}
+
+/// The ELF machine of the exit ramdisk's shutdown executable on `arch` (Rust's
+/// `std::env::consts::ARCH`). The exit ramdisk exists on x86-64 and aarch64
+/// only: its reader is ELF64, and a 32-bit board runs an OpenRC root, which
+/// gets no exit ramdisk.
+///
+/// # Errors
+///
+/// Any other architecture.
+pub fn exitrd_machine(arch: &str) -> anyhow::Result<u16> {
+    match arch {
+        "x86_64" => Ok(62),
+        "aarch64" => Ok(183),
+        _ => anyhow::bail!("no exit ramdisk on this architecture"),
+    }
 }
 
 fn exitrd_elf(file: &mut fs::File, machine: u16) -> anyhow::Result<Vec<String>> {

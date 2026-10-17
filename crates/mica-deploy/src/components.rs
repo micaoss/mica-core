@@ -347,7 +347,7 @@ impl Deployment {
         // with every component agreeing with it.
         name(&self.board)?;
         require(
-            matches!(self.arch.as_str(), "amd64" | "arm64"),
+            matches!(self.arch.as_str(), "amd64" | "arm64" | "armhf"),
             "unsupported architecture",
         )?;
         integer(self.generation, MAX_INTEGER)?;

@@ -277,7 +277,8 @@ pub fn switch_root() -> Result<()> {
     ensure!(std::process::id() == 1, "switch-root requires PID1");
     super::validate_new_root(Path::new("/newroot"))?;
     let root = File::open("/")?;
-    let kind = rustix::fs::fstatfs(&root)?.f_type;
+    // `f_type` is a C long: a magic above `i32::MAX` reads negative on 32 bits.
+    let kind = rustix::fs::fstatfs(&root)?.f_type as u32;
     ensure!(
         kind == 0x858458f6 || kind == 0x01021994,
         "old root is not ramfs or tmpfs"

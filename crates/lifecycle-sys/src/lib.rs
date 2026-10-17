@@ -22,9 +22,9 @@ pub use startup::{
 
 #[cfg(not(all(
     target_os = "linux",
-    any(target_arch = "x86_64", target_arch = "aarch64")
+    any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "arm")
 )))]
-compile_error!("lifecycle UAPI is validated only for Linux x64 and aa64");
+compile_error!("lifecycle UAPI is validated only for Linux x64, aa64 and arm32");
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]

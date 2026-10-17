@@ -1,7 +1,7 @@
 // Tests and fixtures answer a broken expectation by panicking.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use mica_deploy::boot::copy_exitrd;
+use mica_deploy::boot::{copy_exitrd, exitrd_machine};
 use std::{
     fs,
     os::unix::fs::{PermissionsExt, symlink},
@@ -190,6 +190,10 @@ fn rejects_generated_nodes_and_file_directory_conflicts_before_writes() {
 }
 
 #[test]
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    ignore = "no exit ramdisk on a 32-bit architecture"
+)]
 fn preserves_data_modes_and_materializes_runtime_directories() {
     let source = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
@@ -300,6 +304,10 @@ fn rejects_missing_loader_library_foreign_elf_and_unneeded_files() {
 }
 
 #[test]
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    ignore = "no exit ramdisk on a 32-bit architecture"
+)]
 fn static_refinement_requires_exactly_one_static_shutdown() {
     let source = tempfile::tempdir().unwrap();
     member(source.path(), "shutdown", 0o755);
@@ -314,4 +322,12 @@ fn static_refinement_requires_exactly_one_static_shutdown() {
     );
     fs::write(source.path().join("shutdown"), elf(Some("libc.so.6"))).unwrap();
     refuses(source.path(), "shutdown\n", "static");
+}
+
+#[test]
+fn the_exit_ramdisk_exists_on_64_bit_architectures_only() {
+    assert_eq!(exitrd_machine("x86_64").unwrap(), 62);
+    assert_eq!(exitrd_machine("aarch64").unwrap(), 183);
+    let error = exitrd_machine("arm").unwrap_err().to_string();
+    assert!(error.contains("no exit ramdisk"), "{error}");
 }

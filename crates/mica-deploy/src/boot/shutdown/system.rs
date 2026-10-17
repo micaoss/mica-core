@@ -49,7 +49,8 @@ impl LifecycleIo for SystemIo<'_> {
     }
 }
 
-pub(super) fn api(name: &str, magic: i64) -> Result<PathBuf> {
+/// `magic` is a `statfs` `f_type`, a C long.
+pub(super) fn api(name: &str, magic: std::ffi::c_long) -> Result<PathBuf> {
     for base in [Path::new("/"), Path::new("/newroot")] {
         let path = base.join(name);
         if fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir())

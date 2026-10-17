@@ -170,7 +170,7 @@ impl BoardFacts {
     /// reserve outside 1 MiB to 1 GiB or for an ESP the board does not have.
     pub fn validate(&self, arch: &str) -> Result<()> {
         ensure!(
-            matches!(arch, "amd64" | "arm64"),
+            matches!(arch, "amd64" | "arm64" | "armhf"),
             "unsupported architecture"
         );
         ensure!(

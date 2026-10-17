@@ -535,7 +535,8 @@ kernel, its initramfs and the keys in it together. Such a board has no verified 
   write (the dirty count read after folding every CPU's vm statistics, `stat_refresh`). A boot
   the runkit refuses takes the same path.
   An OpenRC root gets no exit ramdisk: `openrc-init` reboots by itself once the shutdown runlevel
-  has left DATA read-only.
+  has left DATA read-only. The exit ramdisk exists on x86-64 and aarch64 only, so a 32-bit
+  board runs an OpenRC root.
 
 **Core components at boot.** Each component the device selects from its core set is opened like
 the root, a

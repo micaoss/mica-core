@@ -33,6 +33,10 @@ fn reads_efi_attributes_and_strict_utf16_termination() {
 }
 
 #[test]
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    ignore = "no exit ramdisk on a 32-bit architecture"
+)]
 fn preserves_only_the_bounded_exitrd_closure() {
     use mica_deploy::boot::copy_exitrd;
     use std::{

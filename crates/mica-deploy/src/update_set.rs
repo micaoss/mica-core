@@ -97,7 +97,7 @@ impl UpdateSet {
         require(self.schema == "mica/set/v1", "wrong set schema")?;
         channel(&self.channel)?;
         require(
-            matches!(self.arch.as_str(), "amd64" | "arm64"),
+            matches!(self.arch.as_str(), "amd64" | "arm64" | "armhf"),
             "unsupported architecture",
         )?;
         integer(self.generation, MAX_INTEGER)?;

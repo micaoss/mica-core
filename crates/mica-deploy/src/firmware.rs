@@ -157,7 +157,7 @@ pub fn parse_firmware(payload: &[u8]) -> Result<Firmware> {
         "invalid firmware board"
     );
     ensure!(
-        matches!(firmware.arch.as_str(), "amd64" | "arm64"),
+        matches!(firmware.arch.as_str(), "amd64" | "arm64" | "armhf"),
         "firmware architecture mismatch"
     );
     ensure!(
