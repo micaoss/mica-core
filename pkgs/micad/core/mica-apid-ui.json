@@ -1,8 +1,8 @@
 {
   "package": "mica-apid-ui",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "sourceDateEpoch": 1789430400,
   "features": ["ui"],
-  "needs": [{ "package": "micad", "min": "0.0.8", "max": "0.0.8" }],
+  "needs": [{ "package": "micad", "min": "0.0.9", "max": "0.0.9" }],
   "root": { "min": 1 }
 }

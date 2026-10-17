@@ -1274,7 +1274,7 @@ version = "0.0.1"
 
 [[package]]
 name = "mica-deploy"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "anyhow",
  "aws-lc-rs",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "micad"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "anyhow",
  "async-trait",
