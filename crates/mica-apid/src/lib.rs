@@ -133,6 +133,43 @@ pub fn version_line(binary: &str) -> String {
     )
 }
 
+/// Bind the local socket at `path`, replacing the one a previous apid left:
+/// root's and `group`'s to connect to (`0660`), or root's alone (`0600`) on a
+/// root without the group. What a caller may do is its uid's scope
+/// (`routes::local`).
+fn bind_local_socket(
+    path: &std::path::Path,
+    group: Option<u32>,
+) -> Option<tokio::net::UnixListener> {
+    use std::os::unix::fs::PermissionsExt;
+    let bound = (|| {
+        match std::fs::remove_file(path) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err),
+            _ => {}
+        }
+        let listener = tokio::net::UnixListener::bind(path)?;
+        let mode = match group {
+            Some(gid) => {
+                std::os::unix::fs::chown(path, None, Some(gid))?;
+                0o660
+            }
+            None => 0o600,
+        };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
+        Ok(listener)
+    })();
+    match bound {
+        Ok(listener) => {
+            tracing::info!(path = %path.display(), "apid serving the local socket");
+            Some(listener)
+        }
+        Err(err) => {
+            tracing::warn!(path = %path.display(), error = %err, "the local socket could not be bound");
+            None
+        }
+    }
+}
+
 #[tokio::main]
 async fn serve() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -228,6 +265,25 @@ async fn serve() -> anyhow::Result<()> {
     // apid from listening, so `discover` has no error variant to propagate.
     let bundle_state = startup::discover(state.bundles().clone(), state.audit().clone()).await;
     tracing::info!(bundle = %bundle_state, "custom UI state at start-up");
+
+    // Not `?`: the local socket is for services on this device, and failing to
+    // bind it must not take the console down with it.
+    let users = routes::LocalUsers::from_files(
+        &std::fs::read_to_string("/etc/passwd").unwrap_or_default(),
+        &std::fs::read_to_string("/etc/group").unwrap_or_default(),
+    );
+    if let Some(listener) = bind_local_socket(&config.local_socket, users.bled_group) {
+        let local = axum::serve(
+            listener,
+            routes::local_app(state.clone(), users)
+                .into_make_service_with_connect_info::<routes::LocalPeer>(),
+        );
+        tokio::spawn(async move {
+            if let Err(err) = local.await {
+                tracing::error!(error = %err, "local socket server failed");
+            }
+        });
+    }
 
     // `with_connect_info` installs the peer address the audit trail reads
     // (`audit::Source`); without it every audit line would say `unknown`.

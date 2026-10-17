@@ -27,6 +27,8 @@ use super::*;
 pub(crate) enum ApiCredential {
     Bearer,
     Session(String),
+    /// A service on apid's local socket, let through by its scope.
+    Local,
 }
 
 impl FromRequestParts<AppState> for ApiCredential {
@@ -40,7 +42,9 @@ impl FromRequestParts<AppState> for ApiCredential {
             parts.method,
             Method::POST | Method::PUT | Method::PATCH | Method::DELETE
         );
-        let credential = if bearer_is_stored(state, &parts.headers).await {
+        let credential = if parts.extensions.get::<LocalCredential>().is_some() {
+            Self::Local
+        } else if bearer_is_stored(state, &parts.headers).await {
             Self::Bearer
         } else if let Some(cookie) = session::cookie_from_headers(&parts.headers)
             && state.sessions.verify(&cookie)

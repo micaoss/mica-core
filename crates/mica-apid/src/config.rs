@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use micad_settings::{APID_LISTENERS_PATH, WebSettings};
+use micad_settings::{APID_LISTENERS_PATH, APID_LOCAL_SOCKET_PATH, WebSettings};
 
 /// Where apid keeps its TLS identity, session key, login backoff and audit ring.
 pub const DEFAULT_STATE_DIR: &str = "/var/lib/mica/apid";
@@ -28,6 +28,9 @@ pub struct Config {
     /// Where the built-in console is installed (`APID_UI_DIR`); absent is an
     /// API-only device.
     pub ui_dir: PathBuf,
+    /// The socket services on this device call the API on
+    /// (`APID_LOCAL_SOCKET`).
+    pub local_socket: PathBuf,
 }
 
 impl Config {
@@ -50,11 +53,16 @@ impl Config {
             std::env::var("APID_UI_DIR")
                 .unwrap_or_else(|_| crate::assets::builtin::DEFAULT_DIR.to_string()),
         );
+        let local_socket = PathBuf::from(
+            std::env::var("APID_LOCAL_SOCKET")
+                .unwrap_or_else(|_| APID_LOCAL_SOCKET_PATH.to_string()),
+        );
         Ok(Self {
             listeners,
             state_dir,
             bus,
             ui_dir,
+            local_socket,
         })
     }
 }

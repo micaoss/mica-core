@@ -103,15 +103,7 @@ pub(crate) async fn api_v1_bluetooth_write(
     // The default code is what a reset returns to, and what every unclaimed
     // device offers: a device somebody set up does not go back to it.
     if let Some(pin) = &requested.pin
-        && let Err(message) = micad_settings::validate_pairing_pin(pin).and_then(|()| {
-            if pin == micad_settings::DEFAULT_PAIRING_PIN {
-                Err(format!(
-                    "{pin} is the default pairing code, which only a reset returns to"
-                ))
-            } else {
-                Ok(())
-            }
-        })
+        && let Err(message) = check_scalar(ScalarShape::PairingPin, &Value::String(pin.clone()))
     {
         return api_response(
             StatusCode::UNPROCESSABLE_ENTITY,

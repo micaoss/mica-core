@@ -78,7 +78,8 @@ impl Audit {
 /// The requesting peer's address as text, for audit lines.
 ///
 /// Read from the [`ConnectInfo`] extension that
-/// `into_make_service_with_connect_info` installs (`main.rs`). `unknown`
+/// `into_make_service_with_connect_info` installs (`main.rs`); on the local
+/// socket, the caller's uid. `unknown`
 /// rather than a rejection when it is absent — router-level tests drive the
 /// service with `oneshot` and no connection — so wiring the audit trail can
 /// never be what makes a login fail.
@@ -88,6 +89,15 @@ impl<S: Send + Sync> FromRequestParts<S> for Source {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        if let Some(ConnectInfo(peer)) = parts
+            .extensions
+            .get::<ConnectInfo<crate::routes::LocalPeer>>()
+        {
+            return Ok(Self(peer.uid.map_or_else(
+                || "local".to_string(),
+                |uid| format!("local uid {uid}"),
+            )));
+        }
         Ok(Self(
             parts
                 .extensions

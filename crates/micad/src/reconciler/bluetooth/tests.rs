@@ -230,3 +230,152 @@ async fn the_declaration_is_the_trust_list() {
         "a device that was only seen was touched: {calls:?}"
     );
 }
+
+const DEVICE_ID: &str = "0123456789abcdef0123456789abcdef";
+
+/// A reconciler whose root carries `mica-bled` (or not), with its environment
+/// inside `dir`.
+fn with_bled(
+    control: MockUnitControl,
+    adapter: &Arc<MockAdapter>,
+    dir: &tempfile::TempDir,
+    installed: bool,
+) -> BluetoothReconciler<MockUnitControl> {
+    let binary = dir.path().join("mica-bled");
+    if installed {
+        std::fs::write(&binary, b"").expect("binary");
+    }
+    BluetoothReconciler::new(control, Arc::clone(adapter) as Arc<dyn BluetoothControl>)
+        .with_bled(binary, dir.path().join("bled.env"))
+}
+
+fn provisioned(enabled: bool) -> Settings {
+    let mut settings = settings(enabled);
+    settings.provisioning.device_id = Some(DEVICE_ID.to_string());
+    settings
+}
+
+/// Bluetooth on and an adapter there: mica-bled is started with the device id
+/// and apid's local socket, and a converged one is left running.
+#[tokio::test]
+async fn bluetooth_on_starts_mica_bled_with_its_environment() {
+    let dir = tempfile::tempdir().expect("dir");
+    let adapter = MockAdapter::with_adapter(powered_adapter(), Vec::new());
+    let control = MockUnitControl::new("inactive", "enabled");
+    control.set_active_state(BLUETOOTH_UNIT, "active");
+    let reconciler = with_bled(control, &adapter, &dir, true);
+
+    let state = reconciler.apply(&provisioned(true)).await.expect("apply");
+
+    assert_eq!(state["bled"]["outcome"], serde_json::json!("running"));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("bled.env")).expect("env"),
+        format!("MICA_BLED_DEVICE_ID={DEVICE_ID}\nMICA_BLED_APID=/run/mica/apid.sock\n")
+    );
+    assert_eq!(reconciler.control.calls(), vec!["start mica-bled.service"]);
+
+    reconciler.apply(&provisioned(true)).await.expect("apply");
+    assert_eq!(reconciler.control.calls(), vec!["start mica-bled.service"]);
+}
+
+/// A running mica-bled whose environment changed is restarted onto it.
+#[tokio::test]
+async fn a_changed_environment_restarts_mica_bled() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::write(dir.path().join("bled.env"), "MICA_BLED_DEVICE_ID=old\n").expect("env");
+    let adapter = MockAdapter::with_adapter(powered_adapter(), Vec::new());
+    let reconciler = with_bled(
+        MockUnitControl::new("active", "enabled"),
+        &adapter,
+        &dir,
+        true,
+    );
+
+    reconciler.apply(&provisioned(true)).await.expect("apply");
+
+    assert_eq!(
+        reconciler.control.calls(),
+        vec!["restart mica-bled.service"]
+    );
+}
+
+/// Bluetooth off stops mica-bled before bluetoothd, and takes its environment
+/// away so nothing starts it against the switch.
+#[tokio::test]
+async fn bluetooth_off_stops_mica_bled_first_and_removes_its_environment() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::write(dir.path().join("bled.env"), "x").expect("env");
+    let adapter = MockAdapter::with_adapter(powered_adapter(), Vec::new());
+    let reconciler = with_bled(
+        MockUnitControl::new("active", "enabled"),
+        &adapter,
+        &dir,
+        true,
+    );
+
+    let state = reconciler.apply(&provisioned(false)).await.expect("apply");
+
+    assert_eq!(state["bled"]["outcome"], serde_json::json!("stopped"));
+    assert_eq!(
+        reconciler.control.calls(),
+        vec!["stop mica-bled.service", "stop bluetooth.service"]
+    );
+    assert!(!dir.path().join("bled.env").exists());
+}
+
+/// A board with no radio runs no mica-bled either.
+#[tokio::test]
+async fn no_adapter_runs_no_mica_bled() {
+    let dir = tempfile::tempdir().expect("dir");
+    let adapter: Arc<MockAdapter> = Arc::new(MockAdapter::default());
+    let control = MockUnitControl::new("inactive", "enabled");
+    control.set_active_state(BLUETOOTH_UNIT, "active");
+    let reconciler = with_bled(control, &adapter, &dir, true);
+
+    let state = reconciler.apply(&provisioned(true)).await.expect("apply");
+
+    assert_eq!(state["outcome"], serde_json::json!("unsupported"));
+    assert_eq!(state["bled"]["outcome"], serde_json::json!("stopped"));
+    assert!(reconciler.control.calls().is_empty());
+}
+
+/// A root without the package is not an error, and nothing is asked of a
+/// unit it does not have.
+#[tokio::test]
+async fn a_root_without_mica_bled_is_not_an_error() {
+    let dir = tempfile::tempdir().expect("dir");
+    let adapter = MockAdapter::with_adapter(powered_adapter(), Vec::new());
+    let reconciler = with_bled(
+        MockUnitControl::new("inactive", "enabled"),
+        &adapter,
+        &dir,
+        false,
+    );
+
+    let state = reconciler.apply(&provisioned(true)).await.expect("apply");
+
+    assert_eq!(state["outcome"], serde_json::json!("applied"));
+    assert_eq!(state["bled"]["outcome"], serde_json::json!("absent"));
+    assert_eq!(reconciler.control.calls(), vec!["start bluetooth.service"]);
+    assert!(!dir.path().join("bled.env").exists());
+}
+
+/// Without a device id there is nobody to authenticate a phone as: mica-bled
+/// is not started, and the adapter is applied anyway.
+#[tokio::test]
+async fn an_unprovisioned_device_starts_no_mica_bled() {
+    let dir = tempfile::tempdir().expect("dir");
+    let adapter = MockAdapter::with_adapter(powered_adapter(), Vec::new());
+    let reconciler = with_bled(
+        MockUnitControl::new("active", "enabled"),
+        &adapter,
+        &dir,
+        true,
+    );
+
+    let state = reconciler.apply(&settings(true)).await.expect("apply");
+
+    assert_eq!(state["outcome"], serde_json::json!("applied"));
+    assert_eq!(state["bled"]["outcome"], serde_json::json!("failed"));
+    assert!(reconciler.control.calls().is_empty());
+}

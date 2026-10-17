@@ -91,6 +91,9 @@ pub(super) enum ScalarShape {
     /// A JSON array of strings [`micad_settings::validate_ntp_servers`]
     /// accepts, written whole — the dot-path syntax has no array indexing.
     NtpServers,
+    /// A JSON string [`micad_settings::validate_pairing_pin`] accepts, other
+    /// than the default code, which only a reset returns to.
+    PairingPin,
 }
 
 /// The dot-paths `PUT /api/v1/settings/{path}` writes, and the shape each
@@ -107,7 +110,7 @@ pub(super) enum ScalarShape {
 /// undeclared `wg9` writes a physical-kind `network.wg9` carrying a WireGuard
 /// block. Every path this list does not carry is refused by
 /// [`settings_write_refusal`] before any bus call is made.
-pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 7] = [
+pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 8] = [
     ("hostname", ScalarShape::Hostname),
     ("access.ssh.enabled", ScalarShape::Flag),
     ("container.enabled", ScalarShape::Flag),
@@ -115,6 +118,7 @@ pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 7] = [
     ("wifi.client.enabled", ScalarShape::Flag),
     ("time.ntp.servers", ScalarShape::NtpServers),
     ("time.timezone", ScalarShape::Timezone),
+    ("bluetooth.pin", ScalarShape::PairingPin),
 ];
 
 /// The resource the write route's not-found envelope names, being the settings
@@ -124,7 +128,7 @@ pub(super) const SETTINGS_COLLECTION: &str = "settings";
 /// The sentence a refusal carries when nothing more specific is true of the
 /// path: it is a real part of the tree, and this route is not how it is
 /// written.
-pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers` and `time.timezone` and no other dot-path; every other subtree is written through its own resource route";
+pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone` and `bluetooth.pin` and no other dot-path; every other subtree is written through its own resource route";
 
 /// The shape `path` is written with, when this route writes it at all.
 pub(super) fn writable_shape(path: &str) -> Option<ScalarShape> {
@@ -171,6 +175,18 @@ pub(super) fn check_scalar(shape: ScalarShape, value: &Value) -> Result<(), Stri
                     "this setting is a list: the body is a JSON array of server strings".to_string()
                 })?;
             micad_settings::validate_ntp_servers(&servers)
+        }
+        ScalarShape::PairingPin => {
+            let pin = value
+                .as_str()
+                .ok_or_else(|| "this setting is text: the body is a JSON string".to_string())?;
+            micad_settings::validate_pairing_pin(pin)?;
+            if pin == micad_settings::DEFAULT_PAIRING_PIN {
+                return Err(format!(
+                    "{pin} is the default pairing code, which only a reset returns to"
+                ));
+            }
+            Ok(())
         }
     }
 }
@@ -251,9 +267,10 @@ pub(super) fn settings_write_refusal(path: &str) -> Response {
 /// A bare JSON value, the same shape `GET` answers.
 ///
 /// The schema is wide because the dot-path decides what is acceptable. What
-/// is actually accepted is narrow: a JSON string for `hostname` and
-/// `time.timezone`, `true` or `false` for the four switches, and a JSON
-/// array of server strings for `time.ntp.servers`. Anything else is **422**.
+/// is actually accepted is narrow: a JSON string for `hostname`,
+/// `time.timezone` and `bluetooth.pin`, `true` or `false` for the four
+/// switches, and a JSON array of server strings for `time.ntp.servers`.
+/// Anything else is **422**.
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub(crate) struct SettingsWrite(pub(super) Value);
@@ -262,9 +279,10 @@ pub(crate) struct SettingsWrite(pub(super) Value);
 // which would invite a client to trust the echo over its own GET.
 /// Write one scalar setting by dot-path.
 ///
-/// Accepts seven paths and no others: `hostname`, `access.ssh.enabled`,
-/// `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers` and
-/// `time.timezone`. Any other path is refused.
+/// Accepts eight paths and no others: `hostname`, `access.ssh.enabled`,
+/// `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`,
+/// `time.timezone` and `bluetooth.pin` (six digits, not `000000`). Any other
+/// path is refused.
 ///
 /// Answers **202** with the queued task id on success. Takes a bearer token.
 #[utoipa::path(
@@ -272,7 +290,7 @@ pub(crate) struct SettingsWrite(pub(super) Value);
     path = V1_SETTINGS_DOC,
     context_path = API,
     tag = "resources",
-    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers` or `time.timezone`")),
+    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone` or `bluetooth.pin`")),
     request_body = SettingsWrite,
     responses(
         (status = 202, description = "The value was persisted and its scoped reconciliation was queued", body = TaskAccepted),

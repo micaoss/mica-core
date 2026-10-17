@@ -20,7 +20,7 @@ pub(super) fn writable_tree(password: &str) -> serde_json::Value {
     tree
 }
 
-// The seven dot-paths admitted, each written and
+// The eight dot-paths admitted, each written and
 // each read back through the route that answers for it.
 //
 // 202 and a task id: persistence has completed, while reconciliation is a
@@ -39,6 +39,7 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
         ("wifi.client.enabled", "false"),
         ("time.ntp.servers", r#"["0.pool.ntp.org","192.0.2.7"]"#),
         ("time.timezone", r#""Europe/Berlin""#),
+        ("bluetooth.pin", r#""421137""#),
     ] {
         let url = format!("/api/v1/settings/{path}");
         let response = bearer_json(&router, "PUT", &url, &token, body).await;
@@ -73,14 +74,15 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
             "wifi.client.enabled",
             "wifi.client.enabled",
             "time.ntp.servers",
-            "time.timezone"
+            "time.timezone",
+            "bluetooth.pin"
         ],
         "one bus write per request, at the dot-path the URL named"
     );
 
     let tasks = bearer(&router, "GET", "/api/v1/tasks", &token).await;
     assert_eq!(tasks.status(), StatusCode::OK);
-    assert_eq!(body_json(tasks).await.as_array().unwrap().len(), 8);
+    assert_eq!(body_json(tasks).await.as_array().unwrap().len(), 9);
 
     let missing = bearer(&router, "GET", "/api/v1/tasks/not-retained", &token).await;
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
@@ -407,6 +409,10 @@ pub(super) async fn a_body_of_the_wrong_shape_is_refused_and_not_written() {
         ("time.ntp.servers", "[7]", "list"),
         ("time.ntp.servers", r#"["bad server"]"#, "host name"),
         ("time.ntp.servers", r#"["a.example","a.example"]"#, "twice"),
+        ("bluetooth.pin", "421137", "text"),
+        ("bluetooth.pin", r#""4211""#, "6 digits"),
+        ("bluetooth.pin", r#""42113a""#, "6 digits"),
+        ("bluetooth.pin", r#""000000""#, "default"),
     ] {
         let response = bearer_json(
             &router,

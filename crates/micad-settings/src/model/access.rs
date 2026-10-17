@@ -155,6 +155,10 @@ pub struct WebSettings {
 /// starts.
 pub const APID_LISTENERS_PATH: &str = "/run/mica/apid.json";
 
+/// The Unix socket apid serves the API on for services on this device, which
+/// it tells apart by their uid rather than by a credential they carry.
+pub const APID_LOCAL_SOCKET_PATH: &str = "/run/mica/apid.sock";
+
 impl Default for WebSettings {
     fn default() -> Self {
         Self {

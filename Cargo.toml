@@ -78,7 +78,7 @@ tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-no-provider", "cookies"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 rustix = { version = "1", features = ["fs"] }
-zip = { version = "=6.0.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 # Every shipped executable is stripped: nothing on a device reads a symbol
 # table. A backtrace from a device is resolved against an unstripped build of

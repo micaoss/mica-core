@@ -37,6 +37,7 @@ mod containers;
 mod errors;
 mod health;
 mod keys;
+mod local;
 mod logs;
 mod meta;
 mod mqtt;

@@ -49,18 +49,19 @@ pub use documents::{
 pub use error::SettingsError;
 pub use features::{Feature, Features, Init, PRODUCT_FILE};
 pub use model::{
-    APID_LISTENERS_PATH, AccessSettings, ApMode, ApiToken, AuthorizedKey, BluetoothSettings,
-    BridgeConfig, CONTAINER_VOLUME_ROOT, ClaimChannel, ClaimSettings, ConsoleSettings,
-    ContainerSettings, ContainerUnit, DEFAULT_PAIRING_PIN, DEVICE_ID_LEN, DeviceCredentialSettings,
-    DhcpServerConfig, IfaceKind, IfaceSettings, MAX_NTP_SERVERS, MAX_PASSPHRASE_LEN,
-    MIN_ADMIN_PASSWORD_LEN, MIN_PASSPHRASE_LEN, MqttAuthSettings, MqttListenSettings, MqttSettings,
-    NtpSettings, PairedDevice, PortProtocol, ProvisioningDocumentSettings, ProvisioningImport,
-    ProvisioningSettings, ProvisioningState, PublishedPort, RAW_PMK_LEN, ResetSettings, ResetTier,
-    RestartPolicy, RouteConfig, Settings, SshSettings, StaticConfig, TimeSettings, VlanConfig,
-    VolumeMount, WebAdminSettings, WebSettings, WifiApSettings, WifiClientSettings, WifiNetwork,
-    WifiSettings, WireguardConfig, WireguardPeer, is_bluetooth_address, is_wpa_quotable,
-    validate_bluetooth, validate_container_units, validate_device_id, validate_ntp_servers,
-    validate_pairing_pin, validate_timezone_name, validate_wifi_psk,
+    APID_LISTENERS_PATH, APID_LOCAL_SOCKET_PATH, AccessSettings, ApMode, ApiToken, AuthorizedKey,
+    BluetoothSettings, BridgeConfig, CONTAINER_VOLUME_ROOT, ClaimChannel, ClaimSettings,
+    ConsoleSettings, ContainerSettings, ContainerUnit, DEFAULT_PAIRING_PIN, DEVICE_ID_LEN,
+    DeviceCredentialSettings, DhcpServerConfig, IfaceKind, IfaceSettings, MAX_NTP_SERVERS,
+    MAX_PASSPHRASE_LEN, MIN_ADMIN_PASSWORD_LEN, MIN_PASSPHRASE_LEN, MqttAuthSettings,
+    MqttListenSettings, MqttSettings, NtpSettings, PairedDevice, PortProtocol,
+    ProvisioningDocumentSettings, ProvisioningImport, ProvisioningSettings, ProvisioningState,
+    PublishedPort, RAW_PMK_LEN, ResetSettings, ResetTier, RestartPolicy, RouteConfig, Settings,
+    SshSettings, StaticConfig, TimeSettings, VlanConfig, VolumeMount, WebAdminSettings,
+    WebSettings, WifiApSettings, WifiClientSettings, WifiNetwork, WifiSettings, WireguardConfig,
+    WireguardPeer, is_bluetooth_address, is_wpa_quotable, validate_bluetooth,
+    validate_container_units, validate_device_id, validate_ntp_servers, validate_pairing_pin,
+    validate_timezone_name, validate_wifi_psk,
 };
 pub use network_rules::{
     MAX_IFACE_LEN, check_iface_name, is_host_port, is_ip_or_cidr, is_wireguard_key, validate_peers,

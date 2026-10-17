@@ -148,7 +148,7 @@ live-state tree under its name.
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
 | `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; a running `apid.service` restarted when it changed | the same, `apid` |
-| `bluetooth` | `bluetooth.service`, the adapter's properties, each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus | the same through `mica-bluetoothd` |
+| `bluetooth` | `bluetooth.service`, the adapter's properties, each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus. When the root carries `/usr/bin/mica-bled` (mica-pkgs), `/run/mica/bled.env` (the device id, apid's local socket) and `mica-bled.service` while Bluetooth is on and the adapter is there; otherwise the service is stopped and the file removed | the same through `mica-bluetoothd`, and `mica-bled` |
 
 The station and the access point share one radio and take turns. The station is on by default:
 its supplicant runs whenever `wifi.client.enabled` is set, with no network block until one is
@@ -272,6 +272,7 @@ with no restart. A configuration or full-factory reset removes it.
 | `APID_STATE_DIR` | `/var/lib/mica/apid` | TLS identity, session key, login backoff, audit ring |
 | `APID_BUS` | `system` | The bus micad is on |
 | `APID_UI_DIR` | `/usr/share/mica-apid/ui` | The built-in console served at `/_ui/` |
+| `APID_LOCAL_SOCKET` | `/run/mica/apid.sock` | The API for services on the device |
 
 `--version`, `--openapi` (the committed `crates/mica-apid/openapi.json`, which the gate holds to
 the handlers) and `--healthcheck` (for the boot health gate) answer without starting a daemon.
@@ -292,6 +293,20 @@ console bundles. `GET /meta` lists the product's features, and the console hides
 password for an HMAC-signed, HttpOnly session cookie and send the session's CSRF token on every
 mutation; automation uses bearer tokens `mica_<id>_<secret>`, stored as digests. Passwords are
 argon2id, failed logins back off persistently, and security-relevant actions go to an audit ring.
+
+**The local socket.** apid also serves the API on `/run/mica/apid.sock`, whatever `access.web`
+says, for the device itself. A caller there carries no credential: the kernel's peer credentials
+name its uid, the uid names a scope, and the scope names the routes it may call; anything else,
+and any uid without a scope, is 403 `not_allowed`. Two scopes:
+
+- root may call the whole API, which is how a command line on the device configures it;
+- `mica-bled` (the user of that name in `/etc/passwd`) may call the routes
+  `mica-app:docs/protocol.md` section 7.1 tunnels, `GET /api/v1/bluetooth` and
+  `PUT /api/v1/settings/bluetooth.pin`.
+
+Both work before the device is claimed. The socket is `0660` with the `mica-bled` group, or
+`0600` on a root without one, so nobody else can connect. The forced rotation of a bootstrap claim
+binds a local caller like any other.
 
 **What leaves the device.** Settings and state pass a structural redactor, so secrets such as
 password hashes are never served. A diagnostic snapshot is bounded, redacted and stored in
