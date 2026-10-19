@@ -149,6 +149,41 @@ describe('the network page', () => {
     expect((within(dialog).getByLabelText('SSID') as HTMLInputElement).value).toBe('lab-5g')
   })
 
+  /// A mesh answers with one SSID from many access points: the list shows the
+  /// network once, at its strongest, and opens to each access point.
+  it('shows a network once with its access points behind it', async () => {
+    stubFetch({
+      ...routes,
+      'POST /api/v1/wifi/client/scan': () => jsonResponse({
+        available: true,
+        interface: 'wlan0',
+        networks: [
+          { ssid: 'mesh', bssid: 'aa:00:00:00:00:01', signalDbm: -71, frequencyMhz: 2437, flags: '[WPA2-PSK-CCMP][ESS]' },
+          { ssid: 'cafe', bssid: 'bb:00:00:00:00:01', signalDbm: -50, frequencyMhz: 2412, flags: '[ESS]' },
+          { ssid: 'mesh', bssid: 'aa:00:00:00:00:02', signalDbm: -44, frequencyMhz: 5180, flags: '[WPA2-PSK-CCMP][ESS]' },
+        ],
+      }),
+    })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Scan' }))
+    const mesh = await screen.findByRole('button', { name: /^mesh/ })
+    expect(mesh.textContent).toBe('mesh · 2 access points')
+    const row = mesh.closest('tr')!
+    expect(within(row).getByText('-44 dBm')).toBeTruthy()
+    expect(within(row).getByText('5 GHz, 2.4 GHz')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Connect' })).toHaveLength(2)
+    expect(mesh.getAttribute('aria-expanded')).toBe('false')
+
+    await userEvent.click(mesh)
+    const list = within(row).getByRole('list', { name: 'Access points of mesh' })
+    expect(within(list).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'aa:00:00:00:00:02 · 5 GHz · -44 dBm',
+      'aa:00:00:00:00:01 · 2.4 GHz · -71 dBm',
+    ])
+  })
+
   /// The access point is configured from the same tab, and its key is never
   /// shown: the field is empty and an empty field keeps the stored one.
   it('configures the access point without ever showing its key', async () => {

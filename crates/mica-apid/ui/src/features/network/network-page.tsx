@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { Cable, ChevronRight, KeyRound, Plus, Radar, Trash2 } from 'lucide-react'
+import { Cable, ChevronDown, ChevronRight, KeyRound, Plus, Radar, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import { configuredSummary, networkRows, physicalInterfaces, visibleNetworkRows, type NetworkRow, listedAddresses } from '@/lib/network'
+import { band, groupScan, type ScannedBss, type ScannedNetwork } from '@/lib/wifi-scan'
 import type { NetworkOverview, ObservedNetworkState, TaskAccepted, WifiAccessPoint, WifiScan } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
@@ -370,7 +371,14 @@ function WifiPanel() {
     failure: t('network.wifi.scan'),
   })
 
-  const connect = (network: NonNullable<WifiScan['networks']>[number]) => {
+  const [openNetworks, setOpenNetworks] = useState<string[]>([])
+  const toggleNetwork = (key: string) => setOpenNetworks((open) => open.includes(key) ? open.filter((each) => each !== key) : [...open, key])
+  const signal = (bss: ScannedBss) => bss.signalDbm === undefined ? '—' : `${bss.signalDbm} dBm`
+  const bandLabel = (bss: ScannedBss) => {
+    const which = band(bss.frequencyMhz)
+    return which ? t('network.wifi.band', { band: which }) : '—'
+  }
+  const connect = (network: ScannedBss) => {
     setSsid(network.ssid)
     setPsk('')
     setHidden(network.ssid === '')
@@ -442,17 +450,43 @@ function WifiPanel() {
         )}
       >
         {scan.data && scan.data.available === false ? <Callout tone="warning" title={scanUnavailable(scan.data)} /> : null}
-        <DataTable<NonNullable<WifiScan['networks']>[number]>
-          rows={scan.data?.networks}
-          rowKey={(entry) => entry.bssid}
+        <DataTable<ScannedNetwork>
+          rows={scan.data?.networks === undefined ? undefined : groupScan(scan.data.networks)}
+          rowKey={(network) => network.best.bssid}
           isPending={scan.isPending}
           empty={t('network.wifi.scanEmpty')}
           columns={[
-            { id: 'ssid', header: 'SSID', cell: (entry) => <span className="font-mono">{entry.ssid || t('network.wifi.hiddenNetwork')}</span> },
-            { id: 'signal', header: t('network.wifi.signal'), cell: (entry) => entry.signalDbm === undefined ? '—' : `${entry.signalDbm} dBm` },
-            { id: 'security', header: t('network.wifi.security'), cell: (entry) => entry.flags.includes('PSK') ? t('network.wifi.wpa') : t('network.wifi.open') },
-            { id: 'actions', header: '', align: 'end', cell: (entry) => (
-              <Button type="button" size="sm" variant="outline" onClick={() => connect(entry)}>{t('network.wifi.connect')}</Button>
+            { id: 'ssid', header: 'SSID', cell: (network) => {
+              const name = network.ssid || t('network.wifi.hiddenNetwork')
+              if (network.accessPoints.length === 1) return <span className="font-mono">{name}</span>
+              const open = openNetworks.includes(network.best.bssid)
+              return (
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-left font-mono"
+                    aria-expanded={open}
+                    onClick={() => toggleNetwork(network.best.bssid)}
+                  >
+                    {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                    {name}
+                    <span className="font-sans text-muted-foreground"> · {t('network.wifi.accessPoints', { count: network.accessPoints.length })}</span>
+                  </button>
+                  {open ? (
+                    <ul className="grid gap-1 ps-5 text-[0.8125rem] text-muted-foreground" aria-label={t('network.wifi.accessPointsOf', { name })}>
+                      {network.accessPoints.map((bss) => (
+                        <li key={bss.bssid} className="font-mono">{bss.bssid} · {bandLabel(bss)} · {signal(bss)}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              )
+            } },
+            { id: 'signal', header: t('network.wifi.signal'), cell: (network) => signal(network.best) },
+            { id: 'band', header: t('network.wifi.bandHeader'), cell: (network) => [...new Set(network.accessPoints.map(bandLabel))].join(', ') },
+            { id: 'security', header: t('network.wifi.security'), cell: (network) => network.best.flags.includes('PSK') ? t('network.wifi.wpa') : t('network.wifi.open') },
+            { id: 'actions', header: '', align: 'end', cell: (network) => (
+              <Button type="button" size="sm" variant="outline" onClick={() => connect(network.best)}>{t('network.wifi.connect')}</Button>
             ) },
           ]}
         />
