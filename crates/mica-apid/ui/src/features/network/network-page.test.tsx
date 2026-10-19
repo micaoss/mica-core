@@ -276,6 +276,7 @@ describe('the add-interface dialog', () => {
     ['VLAN', ['Parent interface', 'VLAN ID']],
     ['Bridge', ['Bridge ports']],
     ['WireGuard', ['Listen port']],
+    ['CAN', ['Bit rate (bit/s)', 'Restart after bus-off (ms)']],
   ])('asks only for what a %s interface needs', async (kind, fields) => {
     stubFetch(routes)
     renderRoute(<NetworkPage />)
@@ -302,5 +303,28 @@ describe('the add-interface dialog', () => {
     expect((await screen.findAllByText('Interface eth1 saved.')).length).toBeGreaterThan(0)
     const put = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')!
     expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ dhcp: true })
+  })
+
+  /// A CAN controller is declared with its bit timing alone: no DHCP switch,
+  /// no addressing, and FD off unless switched on.
+  it('declares a CAN controller with its bit timing alone', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/can0': () => jsonResponse({ taskId: 'task-2' }, 202) })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText('Interface name'), 'can0')
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Interface kind' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'CAN' }))
+    expect(within(dialog).queryByRole('switch')).toBeNull()
+    expect(within(dialog).queryByLabelText('Data bit rate (bit/s)')).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+
+    expect((await screen.findAllByText('Interface can0 saved.')).length).toBeGreaterThan(0)
+    const put = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')!
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({
+      kind: 'can',
+      can: { bitrate: 250000, restartMs: 100, fd: false },
+    })
   })
 })

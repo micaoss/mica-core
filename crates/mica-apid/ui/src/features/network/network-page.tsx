@@ -26,6 +26,7 @@ import { useFeatures } from '@/shared/lib/features'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
 import { ObservedNetworkPanel } from '@/features/network/observed-network-panel'
+import { SegmentedControl } from '@/shared/components/segmented-control'
 import { WifiApPanel } from '@/features/network/wifi-ap-panel'
 import { BluetoothPanel } from '@/features/network/bluetooth-panel'
 import { formatAge, formatKnownState } from '@/i18n/format'
@@ -35,12 +36,13 @@ interface WifiClientRole { enabled: boolean; interface: string }
 interface WireguardPeer { publicKey: string; allowedIps: string[]; endpoint?: string; persistentKeepalive?: number }
 interface WireguardRotation { publicKey: string }
 interface InterfaceConfig {
-  kind?: 'physical' | 'vlan' | 'bridge' | 'wireguard'
-  dhcp: boolean
+  kind?: 'physical' | 'vlan' | 'bridge' | 'wireguard' | 'can'
+  dhcp?: boolean
   static?: { address: string; gateway?: string; dns: string[] }
   vlan?: { parent: string; id: number }
   bridge?: { ports: string[] }
   wireguard?: { listenPort?: number; peers: WireguardPeer[] }
+  can?: { bitrate: number; restartMs?: number; fd: boolean; dataBitrate?: number }
 }
 
 export function NetworkPage() {
@@ -139,6 +141,10 @@ function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; 
   const [vlanId, setVlanId] = useState('100')
   const [ports, setPorts] = useState<string[]>([])
   const [listenPort, setListenPort] = useState('51820')
+  const [bitrate, setBitrate] = useState('250000')
+  const [restartMs, setRestartMs] = useState('100')
+  const [fd, setFd] = useState<'on' | 'off'>('off')
+  const [dataBitrate, setDataBitrate] = useState('2000000')
   // The first link the device actually has, rather than a name typed into the
   // code: an appliance whose NIC is `enp1s0` had `eth0` pre-filled here, and a
   // VLAN on an undeclared parent is refused by micad.
@@ -150,9 +156,21 @@ function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; 
   const addressing = kind === 'wireguard' ? 'static' : dhcp ? 'dhcp' : 'static'
 
   const save = () => {
-    const value: InterfaceConfig = { dhcp: addressing === 'dhcp' }
+    // A CAN controller is its bit timing alone: the device refuses any
+    // addressing on it.
+    const value: InterfaceConfig = kind === 'can'
+      ? {
+          kind,
+          can: {
+            bitrate: Number(bitrate),
+            ...(restartMs !== '' ? { restartMs: Number(restartMs) } : {}),
+            fd: fd === 'on',
+            ...(fd === 'on' ? { dataBitrate: Number(dataBitrate) } : {}),
+          },
+        }
+      : { dhcp: addressing === 'dhcp' }
     if (kind !== 'physical') value.kind = kind
-    if (addressing === 'static') {
+    if (kind !== 'can' && addressing === 'static') {
       value.static = {
         address,
         ...(gateway && kind !== 'wireguard' ? { gateway } : {}),
@@ -184,11 +202,41 @@ function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; 
         {(id) => (
           <Select value={kind} onValueChange={(value) => setKind(value as typeof kind)}>
             <SelectTrigger id={id}><SelectValue /></SelectTrigger>
-            <SelectContent>{(['physical', 'vlan', 'bridge', 'wireguard'] as const).map((option) => <SelectItem value={option} key={option}>{t(`network.kinds.${option}`)}</SelectItem>)}</SelectContent>
+            <SelectContent>{(['physical', 'vlan', 'bridge', 'wireguard', 'can'] as const).map((option) => <SelectItem value={option} key={option}>{t(`network.kinds.${option}`)}</SelectItem>)}</SelectContent>
           </Select>
         )}
       </FormField>
-      {kind === 'wireguard' ? (
+      {kind === 'can' ? (
+        <>
+          <p className="text-sm text-muted-foreground">{t('network.can.copy')}</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label={t('network.can.bitrate')} hint={t('network.can.bitrateHint')}>
+              {(id) => <Input id={id} type="number" min={1} max={1000000} value={bitrate} onChange={(event) => setBitrate(event.target.value)} required />}
+            </FormField>
+            <FormField label={t('network.can.restart')} hint={t('network.can.restartHint')}>
+              {(id) => <Input id={id} type="number" min={0} max={60000} value={restartMs} onChange={(event) => setRestartMs(event.target.value)} />}
+            </FormField>
+          </div>
+          <FormField label={t('network.can.fd')}>
+            {() => (
+              <SegmentedControl<'on' | 'off'>
+                label={t('network.can.fd')}
+                value={fd}
+                onValueChange={setFd}
+                segments={[
+                  { value: 'on', label: t('network.can.fdOn') },
+                  { value: 'off', label: t('network.can.fdOff') },
+                ]}
+              />
+            )}
+          </FormField>
+          {fd === 'on' ? (
+            <FormField label={t('network.can.dataBitrate')} hint={t('network.can.dataBitrateHint')}>
+              {(id) => <Input id={id} type="number" min={1} max={8000000} value={dataBitrate} onChange={(event) => setDataBitrate(event.target.value)} required />}
+            </FormField>
+          ) : null}
+        </>
+      ) : kind === 'wireguard' ? (
         <p className="text-sm text-muted-foreground">{t('network.editor.tunnelAddressing')}</p>
       ) : (
         <ToggleField
@@ -197,7 +245,7 @@ function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; 
           control={<Switch checked={dhcp} onCheckedChange={setDhcp} aria-label={t('network.editor.dhcp')} />}
         />
       )}
-      {addressing === 'static' ? (
+      {kind !== 'can' && addressing === 'static' ? (
         <>
           <FormField label={t('network.editor.address')}>
             {(id) => <Input id={id} className="font-mono" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="192.168.1.20/24" required />}
