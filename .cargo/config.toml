@@ -1,0 +1,12 @@
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+[target.armv7-unknown-linux-gnueabihf]
+linker = "arm-linux-gnueabihf-gcc"
+
+# AWS-LC seeds from getrandom alone. Its default root seed, CPU jitter, fails
+# its health test most of the time on the RK3576's 24 MHz counter, and AWS-LC
+# then aborts the process on its first draw. Checked by micad-settings'
+# randomness_comes_from_the_kernel_not_cpu_jitter.
+[env]
+AWS_LC_SYS_NO_JITTER_ENTROPY = "1"

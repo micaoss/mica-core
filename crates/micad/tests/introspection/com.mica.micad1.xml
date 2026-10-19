@@ -1,0 +1,345 @@
+<interface name="com.mica.micad1">
+<!--
+JSON-encoded settings value at dot-path `path` (`""` = whole tree).
+-->
+<method name="GetSettings">
+<arg name="path" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Parse `value_json`, persist it atomically, enqueue the overlapping
+reconcile, and return its task id.
+-->
+<method name="SetSettings">
+<arg name="path" type="s" direction="in"/>
+<arg name="value_json" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON-encoded task record for `id`.
+-->
+<method name="GetTask">
+<arg name="id" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON-encoded live-state subtree at dot-path `path` (`""` = whole tree).
+-->
+<method name="GetState">
+<arg name="path" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON time-synchronization status, observed from timesyncd at call
+time and classified by [`crate::time_status::classify`].
+-->
+<method name="GetTimeStatus">
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON storage status: the fixed tiers, the physical media and the
+low-space policy, observed at call time.
+-->
+<method name="GetStorageStatus">
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON snapshot returned by systemd-networkd's live `Describe` method.
+-->
+<method name="GetNetworkState">
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON observed network state: link/carrier, addresses, DHCP
+lease, default routes, DNS reachability, Wi-Fi association and the
+radio/modem capabilities, observed at call time and DISTINCT from the
+desired `network` settings, which this method never reads.
+-->
+<method name="GetObservedNetwork">
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON system information: machine id, board, kernel,
+release, the image version with its git stamp and build date, the
+installed packages, the running deployment and the uptime — every one read
+at call time from the seam that already carries it, none restated.
+-->
+<method name="GetSystemInfo">
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON board telemetry: temperature, watchdog and the reset
+reason the kernel's generic sources support, observed at call time.
+Absence is explicit; nothing here reads a vendor register.
+The projects this device declares, beside what mica-containerd says
+of their containers (phase, health, restarts, exit code) -- each side
+named, never merged.
+A declared project the engine has not taken and a project it still
+holds that nobody declares are both real states, and a merged answer
+could not tell them apart.
+-->
+<method name="GetContainers">
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON: `text` checked as project `project`'s Compose file, as a write
+of it would be, in the project's stored directory: `{"ok": true,
+"containers"}`, or `{"ok": false, "detail", "problems"}`. Needs no
+daemon.
+-->
+<method name="CheckContainerProject">
+<arg name="project" type="s" direction="in"/>
+<arg name="text" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON: `text` checked as project `project`'s Compose file with its
+relative host paths in `project_dir`, an absolute path, as a write
+declaring that directory would check it.
+-->
+<method name="CheckContainerProjectIn">
+<arg name="project" type="s" direction="in"/>
+<arg name="text" type="s" direction="in"/>
+<arg name="project_dir" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+The last `tail` lines (1 to 1000) of one declared service's log,
+`<project>/<service>`.
+-->
+<method name="GetContainerLog">
+<arg name="name" type="s" direction="in"/>
+<arg name="tail" type="u" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Scan for WiFi networks on the station's radio and answer what it found.
+The interface is the one `wifi.client` declares -- a scan is a thing
+the station role does, not an arbitrary radio operation, so there is no
+interface argument to point somewhere else.
+-->
+<method name="ScanWifi">
+<arg type="s" direction="out"/>
+</method>
+<!--
+The declared Bluetooth trust list, what BlueZ reports, the pairing code
+and whatever is waiting to be confirmed.
+-->
+<method name="GetBluetooth">
+<arg type="s" direction="out"/>
+</method>
+<!--
+Start or stop a scan.
+A scan is bounded by BlueZ's own discovery and by the console stopping
+it; what this refuses is starting one on a device whose adapter is
+switched off, where it would fail with a bus error about an object that
+does not exist.
+-->
+<method name="SetBluetoothDiscovery">
+<arg name="on" type="b" direction="in"/>
+</method>
+<!--
+Pair with a device, then record it in the trust list.
+The record is the point: BlueZ remembers the keys, and the settings
+tree remembers that this device is one this appliance trusts. A reset
+clears the second, and the reconciler then clears the first.
+-->
+<method name="PairBluetoothDevice">
+<arg name="address" type="s" direction="in"/>
+</method>
+<!--
+Answer the passkey the agent is holding.
+-->
+<method name="ConfirmBluetoothPairing">
+<arg name="address" type="s" direction="in"/>
+<arg name="accept" type="b" direction="in"/>
+</method>
+<!--
+Drop a device: out of the trust list, and out of the adapter.
+-->
+<method name="RemoveBluetoothDevice">
+<arg name="address" type="s" direction="in"/>
+</method>
+<!--
+Start a declared container, through mica-containerd:
+`<project>/<service>`, or `<project>` for every container of it.
+-->
+<method name="StartContainer">
+<arg name="name" type="s" direction="in"/>
+</method>
+<!--
+Stop it.
+-->
+<method name="StopContainer">
+<arg name="name" type="s" direction="in"/>
+</method>
+<!--
+Restart it, which is what a changed image tag needs.
+-->
+<method name="RestartContainer">
+<arg name="name" type="s" direction="in"/>
+</method>
+<method name="GetTelemetry">
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON: the newest lines of one allowlisted service's log, bounded, or
+the reason they could not be read ([`crate::logs`]). A source that is
+not on the list, or belongs to a feature the product leaves out, is
+refused; the scrubbing is apid's, before a line leaves the device.
+-->
+<method name="GetLog">
+<arg name="source" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON failure evidence for the diagnostic snapshot: the
+units systemd holds failed and a bounded excerpt of this boot's
+journal at warning and worse. Bounded in size and time by
+[`crate::diagnostics`]; the redaction is apid's, at the snapshot.
+-->
+<method name="GetFailureEvidence">
+<arg type="s" direction="out"/>
+</method>
+<!--
+Record a component health report in the live-state tree under
+`health.<component>` as `{"status": ..., "detail": ...}`.
+Used by the boot health gate (`mica-health`) to surface non-fatal
+pressure — a full `/var`, for example — without failing the gate.
+-->
+<method name="ReportHealth">
+<arg name="component" type="s" direction="in"/>
+<arg name="status" type="s" direction="in"/>
+<arg name="detail" type="s" direction="in"/>
+</method>
+<!--
+Drop a DISCONNECTED service from the registry (`crate::scan`).
+Exported as `ForgetService`. Refuses a service that is still connected,
+and a name the registry does not carry, with
+[`InvalidArgs`](fdo::Error::InvalidArgs).
+-->
+<method name="ForgetService">
+<arg name="bus_name" type="s" direction="in"/>
+</method>
+<!--
+Reboot the appliance through systemd.
+The request is logged and recorded in the live-state tree before the
+call is made.
+-->
+<method name="Reboot">
+</method>
+<!--
+Power the appliance off through systemd.
+The request is logged and recorded in the live-state tree before the
+call is made.
+-->
+<method name="PowerOff">
+</method>
+<!--
+Install a signed deployment already verified in the acquisition workspace.
+-->
+<method name="InstallUpdate">
+<arg name="deployment_id" type="s" direction="in"/>
+</method>
+<!--
+Refresh native boot, deployment and rollback evidence, retaining the
+installation, action and acquisition lifecycle records.
+-->
+<method name="GetUpdateState">
+<arg type="s" direction="out"/>
+</method>
+<method name="ConfirmDeployment">
+<arg name="deployment_id" type="s" direction="in"/>
+</method>
+<method name="RejectDeployment">
+<arg name="deployment_id" type="s" direction="in"/>
+</method>
+<method name="RollbackDeployment">
+<arg name="deployment_id" type="s" direction="in"/>
+</method>
+<!--
+Run an update metadata check (`mica-deploy sync` + `check`) on a
+background task.
+-->
+<method name="CheckUpdate">
+</method>
+<!--
+Download the selected descriptor (`mica-deploy fetch`) on a background
+task; on success the verified descriptor path is recorded and the
+lifecycle state becomes `ready`.
+Exported as `FetchUpdate`. The same admission and refusal shape as
+`CheckUpdate`, plus the metered-mode download refusal.
+-->
+<method name="FetchUpdate">
+</method>
+<!--
+Check for, fetch and install the newest release on a background task.
+Answers the refusals that hold before anything runs; the progress and
+the outcome land in `update` as a manual check, fetch and install do.
+-->
+<method name="InstallLatestUpdate">
+</method>
+<!--
+Import an offline `MICAUPD1` archive somebody uploaded.
+The path is bounded to the acquisition workspace's own upload
+directory. The method takes a path because the archive is measured in
+hundreds of megabytes and the bus is not how those travel; apid streams
+it to disk and names it here. Bounding the path is what keeps the
+method from being a way to hand `mica-deploy` an arbitrary file.
+-->
+<method name="ImportUpdate">
+<arg name="path" type="s" direction="in"/>
+</method>
+<!--
+Arm the bounded administrative override of the safe-to-reboot gate
+for `seconds`; answers the recorded override as JSON.
+Exported as `SetRebootOverride`. The override lifts health-report
+blocks only — never an install in flight — and expires on its own;
+there is deliberately no member that disarms the gate permanently.
+-->
+<method name="SetRebootOverride">
+<arg name="seconds" type="u" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Write the operator's update configuration document; answers the
+document as saved, as JSON.
+-->
+<method name="SetUpdateConfig">
+<arg name="patch_json" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Set a TRANSIENT root password, then re-apply the SSH subtree.
+Exported as `SetTransientRootPassword`. The password lives until the
+next boot, when `mica-shadow-reconcile` clears the root hash it wrote;
+persistent access is by SSH public key.
+-->
+<method name="SetTransientRootPassword">
+<arg name="password" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Draw a new private key for the WireGuard interface `iface` and return
+its new public key.
+-->
+<method name="RotateWireguardKey">
+<arg name="iface" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Emitted after a successful `SetSettings` with the changed dot-path and
+its new JSON-encoded value.
+-->
+<signal name="SettingsChanged">
+<arg name="path" type="s"/>
+<arg name="value_json" type="s"/>
+</signal>
+<!--
+Emitted whenever an apply task is queued, starts or finishes. The body
+is one JSON-encoded [`TaskRecord`].
+-->
+<signal name="TaskChanged">
+<arg name="task_json" type="s"/>
+</signal>
+</interface>

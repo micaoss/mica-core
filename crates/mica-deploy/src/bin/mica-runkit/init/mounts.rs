@@ -1,0 +1,285 @@
+//! Mounting the running system's storage, verified.
+
+use anyhow::{Context, Result, ensure};
+use mica_deploy::{
+    boot::{
+        shutdown::Device,
+        startup::{
+            self,
+            native::{self, Operation as Startup},
+        },
+    },
+    components::VerityImage,
+    ubi::SysUbi,
+};
+use std::{fs, os::unix::fs::MetadataExt};
+
+use super::*;
+
+pub(super) fn bounded_file(path: &str, limit: u64) -> Result<Vec<u8>> {
+    Ok(mica_fs::read_bounded(Path::new(path), limit)?)
+}
+
+pub(super) fn run(control: &mut BootControl, operation: Startup) -> Result<String> {
+    control.supervisor.run_startup(native::command(operation)?)
+}
+
+pub(super) fn mount(
+    control: &mut BootControl,
+    source: &str,
+    target: &str,
+    kind: &str,
+    options: &str,
+) -> Result<()> {
+    fs::create_dir_all(target)?;
+    if kind == "ext4" {
+        control.backing(source)?;
+    }
+    let mounted = run(
+        control,
+        Startup::Mount {
+            source: source.into(),
+            target: target.into(),
+            kind: kind.into(),
+            options: options.into(),
+        },
+    );
+    if target == "/run/initramfs" {
+        let live = control.observe()?;
+        if let Some(mount) = live
+            .mounts
+            .into_iter()
+            .find(|m| m.path == target && m.kind == "tmpfs" && m.root == "/")
+        {
+            control.storage.mounts.push(mount);
+        }
+    }
+    mounted.with_context(|| format!("mount {source} at {target}"))?;
+    // A UBIFS volume has no block device to own it by: its mount is owned
+    // by identity, as the exit ramdisk's tmpfs is.
+    if kind == "ubifs" {
+        let live = control.observe()?;
+        let mount = live
+            .mounts
+            .into_iter()
+            .find(|m| m.path == target && m.kind == "ubifs" && m.root == "/")
+            .context("UBIFS mount disappeared")?;
+        control.storage.mounts.push(mount);
+    }
+    Ok(())
+}
+
+/// The core sets' objects, where the runkit has SYSTEM mounted
+/// (`set_state::objects_dir`).
+const CORE_OBJECTS: &str = "/system/sets/core/objects";
+
+/// Mount each of `cores`, verified, from the sets' objects on SYSTEM at
+/// `/run/mica-core/<package>`, refuse a
+/// composition that would shadow a file, and compose the components' `usr`
+/// and `etc` over the root's with read-only overlays. Runs before anything
+/// binds into either tree: an overlay does not show the submounts of its
+/// layers.
+pub(super) fn compose_core(
+    control: &mut BootControl,
+    ubi: Option<&SysUbi>,
+    cores: &[&mica_deploy::components::CoreComponent],
+) -> Result<()> {
+    if cores.is_empty() {
+        return Ok(());
+    }
+    let mut layers = Vec::new();
+    for core in cores {
+        let target = format!("/run/mica-core/{}", core.package);
+        verified_mount(
+            control,
+            ubi,
+            &match ubi {
+                Some(_) => format!("c-{}", core.id),
+                None => format!("{CORE_OBJECTS}/{}/core.img", core.id),
+            },
+            &format!("{CORE_OBJECTS}/{}/core.roothash.p7s", core.id),
+            &format!("{}{}", mica_deploy::boot::CORE_MAPPING_PREFIX, core.package),
+            &target,
+            &core.content,
+        )?;
+        layers.push(std::path::PathBuf::from(target));
+    }
+    mica_deploy::boot::check_composition(Path::new("/newroot"), &layers)?;
+    for tree in ["usr", "etc"] {
+        let mut lower: Vec<String> = layers
+            .iter()
+            .map(|layer| layer.join(tree))
+            .filter(|layer| layer.is_dir())
+            .map(|layer| layer.display().to_string())
+            .collect();
+        if lower.is_empty() {
+            continue;
+        }
+        let target = format!("/newroot/{tree}");
+        lower.push(target.clone());
+        run(control, Startup::Overlay { target, lower })?;
+    }
+    eprintln!(
+        "mica-init: composed {} core component(s) over the root",
+        layers.len()
+    );
+    Ok(())
+}
+
+/// Open `image` under a signed dm-verity mapping `name` and mount it at
+/// `target`: from the file `object` through a loop device, or on a `ubi`
+/// board from the static volume named `object` through its `ubiblock`.
+pub(super) fn verified_mount(
+    control: &mut BootControl,
+    ubi: Option<&SysUbi>,
+    object: &str,
+    signature: &str,
+    name: &str,
+    target: &str,
+    image: &VerityImage,
+) -> Result<()> {
+    let Some(ubi) = ubi else {
+        return verified_file_mount(control, object, signature, name, target, image);
+    };
+    let volume = mica_deploy::ubi::find(ubi, object)?
+        .with_context(|| format!("UBI volume {object} is absent"))?;
+    ensure!(
+        volume.kind == mica_deploy::ubi::VolumeKind::Static
+            && volume.sound()
+            && volume.data_bytes == image.image.bytes,
+        "image type or length mismatch: UBI volume {object}"
+    );
+    image.signature.verify(&bounded_file(signature, 65536)?)?;
+    let block = run(
+        control,
+        Startup::UbiBlock {
+            volume: mica_deploy::ubi::UbiDevice::path(ubi, volume.id)
+                .display()
+                .to_string(),
+        },
+    )?;
+    let provider = Device::from_raw(fs::metadata(&block)?.rdev());
+    verity_mount(control, &block, provider, signature, name, target, image)
+}
+
+fn verified_file_mount(
+    control: &mut BootControl,
+    path: &str,
+    signature: &str,
+    name: &str,
+    target: &str,
+    image: &VerityImage,
+) -> Result<()> {
+    let meta = fs::symlink_metadata(path).with_context(|| format!("stat {path}"))?;
+    ensure!(
+        meta.is_file() && meta.len() == image.image.bytes,
+        "image type or length mismatch: {path}"
+    );
+    image.signature.verify(&bounded_file(signature, 65536)?)?;
+    let loop_device = run(control, Startup::Loop { image: path.into() })?;
+    let live = control.observe()?;
+    let loop_id = Device::from_raw(fs::metadata(&loop_device)?.rdev());
+    let association = live
+        .blocks
+        .iter()
+        .find(|b| b.device == loop_id)
+        .and_then(|b| b.association.as_ref())
+        .context("new loop association disappeared")?
+        .clone();
+    ensure!(
+        association.backing == Device::from_raw(meta.dev())
+            && association.inode == meta.ino()
+            && association.flags & 1 == 1
+            && association.offset == 0
+            && association.size_limit == 0,
+        "native loop identity disagrees with verified startup association"
+    );
+    control.storage.loops.push(association);
+    verity_mount(
+        control,
+        &loop_device,
+        loop_id,
+        signature,
+        name,
+        target,
+        image,
+    )
+}
+
+/// Map `provider` (the block device at `device`) under the signed verity
+/// table of `image` and mount the mapping read-only at `target`.
+fn verity_mount(
+    control: &mut BootControl,
+    device: &str,
+    provider: Device,
+    signature: &str,
+    name: &str,
+    target: &str,
+    image: &VerityImage,
+) -> Result<()> {
+    let live = control.observe()?;
+    ensure!(
+        !live
+            .blocks
+            .iter()
+            .any(|b| b.mapping.as_ref().is_some_and(|m| m.name == name)),
+        "MICA mapping already exists before creation"
+    );
+    let creation = run(
+        control,
+        Startup::Verity {
+            device: device.into(),
+            name: name.into(),
+            signature: signature.into(),
+            image: serde_json::from_value(serde_json::to_value(image)?)?,
+        },
+    );
+    // A worker can create the mapping and then fail. Adopt only the live
+    // expected verity table and the already verified owned loop, never a name.
+    let live = control.observe()?;
+    if let Some(block) = live
+        .blocks
+        .iter()
+        .find(|b| b.mapping.as_ref().is_some_and(|m| m.name == name))
+    {
+        let mapping = block.mapping.as_ref().context("mapping disappeared")?;
+        ensure!(
+            block.slaves == std::collections::BTreeSet::from([provider])
+                && mapping.table.split_whitespace().nth(2) == Some("verity")
+                && mapping
+                    .table
+                    .split_whitespace()
+                    .any(|s| s == image.root_hash)
+                && !mapping.uuid.is_empty(),
+            "created mapping ownership cannot be established"
+        );
+        control.storage.mappings.push(mapping.clone());
+    }
+    creation?;
+    let mapping = control
+        .storage
+        .mappings
+        .last()
+        .context("created mapping is absent")?;
+    let expected = startup::verity::table(
+        provider.major,
+        provider.minor,
+        &format!("cryptsetup:{name}"),
+        image,
+    )?;
+    ensure!(
+        mapping.table
+            == format!(
+                "{} {} {} {}",
+                expected.sector, expected.length, expected.kind, expected.parameters
+            ),
+        "kernel mapping differs from signed verity table"
+    );
+    mount(
+        control,
+        &format!("/dev/mapper/{name}"),
+        target,
+        "squashfs",
+        "ro,nodev",
+    )
+}

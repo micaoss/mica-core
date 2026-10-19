@@ -1,0 +1,66 @@
+<interface name="org.bluez.Agent1">
+<!--
+BlueZ dropped the agent.
+-->
+<method name="Release">
+</method>
+<!--
+A legacy peer asked for a code to type.
+Answered with the device's own PIN, which is a setting and is displayed
+in the console: a headless appliance has no keypad to enter a
+peer-chosen code on, so the alternative is refusing every legacy peer.
+-->
+<method name="RequestPinCode">
+<arg name="device" type="o" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+The same, as a number.
+-->
+<method name="RequestPasskey">
+<arg name="device" type="o" direction="in"/>
+<arg type="u" direction="out"/>
+</method>
+<!--
+The peer is showing a code; nothing to decide.
+-->
+<method name="DisplayPinCode">
+<arg name="device" type="o" direction="in"/>
+<arg name="pincode" type="s" direction="in"/>
+</method>
+<!--
+The same for a passkey.
+-->
+<method name="DisplayPasskey">
+<arg name="device" type="o" direction="in"/>
+<arg name="passkey" type="u" direction="in"/>
+<arg name="entered" type="q" direction="in"/>
+</method>
+<!--
+The decision this agent exists for.
+-->
+<method name="RequestConfirmation">
+<arg name="device" type="o" direction="in"/>
+<arg name="passkey" type="u" direction="in"/>
+</method>
+<!--
+A peer with no display asking to be let in. Same decision, no passkey
+to show, so it is presented as one with none.
+-->
+<method name="RequestAuthorization">
+<arg name="device" type="o" direction="in"/>
+</method>
+<!--
+A paired device asking to use a profile. Allowed: it is already paired,
+and refusing here would pair devices that then cannot do anything.
+-->
+<method name="AuthorizeService">
+<arg name="device" type="o" direction="in"/>
+<arg name="uuid" type="s" direction="in"/>
+</method>
+<!--
+BlueZ gave up on the request.
+-->
+<method name="Cancel">
+</method>
+</interface>

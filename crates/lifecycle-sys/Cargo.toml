@@ -1,0 +1,26 @@
+[package]
+name = "lifecycle-sys"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# quotactl_fd(2) and adjtimex(2), which rustix does not wrap.
+libc = "0.2"
+rustix = { version = "1", default-features = false, features = ["fs", "std", "stdio", "system", "process", "mount"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+# The sole isolated UAPI boundary; see the dated lifecycle ioctl decision.
+[lints.rust]
+warnings = { level = "deny", priority = -2 }
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

@@ -1,0 +1,122 @@
+{
+  "envelope": "{\"schema\":\"mica/update-envelope/v1\",\"keyId\":\"e0014346bad118ee7cb443a0feca7488c55f96fb4eb04ea2607fdeafdf444a12\",\"payload\":\"eyJhcmNoIjoiYW1kNjQiLCJjaGFubmVsIjoiZ2VuZXJhbCIsImNvbXBvbmVudHMiOlt7ImFyY2giOiJhbWQ2NCIsImNvbnRlbnQiOnsiaW1hZ2UiOnsiYnl0ZXMiOjEyMjg4LCJzaGEyNTYiOiIxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIn0sInJvb3RIYXNoIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInNpZ25hdHVyZSI6eyJieXRlcyI6NDAwLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIn0sInZlcml0eSI6eyJhbGdvcml0aG0iOiJzaGEyNTYiLCJkYXRhQmxvY2tTaXplIjo0MDk2LCJkYXRhQmxvY2tzIjoyLCJoYXNoQmxvY2tTaXplIjo0MDk2LCJoYXNoT2Zmc2V0Ijo4MTkyLCJzYWx0IjoiY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYyIsInZlcnNpb24iOjF9fSwiZmVhdHVyZXMiOlsidWkiXSwiaWQiOiI4ZDcwOGQ1NjNmMThlZjJiMzE2NTllMmE2ZjVjNTFlMGU2Njg3NDI3YzA2MzUxYmZhZWUyNTc2NGM5N2I0NjY0IiwibmVlZHMiOlt7Im1heCI6IjAuMC4xIiwibWluIjoiMC4wLjEiLCJwYWNrYWdlIjoibWljYWQifV0sInBhY2thZ2UiOiJtaWNhLWFwaWQtdWkiLCJyb290Ijp7Im1pbiI6MX0sInNjaGVtYSI6Im1pY2EvY29yZS92MSIsInZlcnNpb24iOiIwLjAuMSJ9LHsiYXJjaCI6ImFtZDY0IiwiY29udGVudCI6eyJpbWFnZSI6eyJieXRlcyI6MTIyODgsInNoYTI1NiI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEifSwicm9vdEhhc2giOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwic2lnbmF0dXJlIjp7ImJ5dGVzIjo0MDAsInNoYTI1NiI6ImJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmIifSwidmVyaXR5Ijp7ImFsZ29yaXRobSI6InNoYTI1NiIsImRhdGFCbG9ja1NpemUiOjQwOTYsImRhdGFCbG9ja3MiOjIsImhhc2hCbG9ja1NpemUiOjQwOTYsImhhc2hPZmZzZXQiOjgxOTIsInNhbHQiOiJjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIiwidmVyc2lvbiI6MX19LCJmZWF0dXJlcyI6WyJtaWNhZCJdLCJpZCI6IjhkYTZlMGU5ZGVmMDAzMzNjYjY5NzQxODA5MmQxNjNkZjk1M2RjMWRkYzBmYWQ5MDk3YzRhODY3NGM1OGZjNTkiLCJuZWVkcyI6W10sInBhY2thZ2UiOiJtaWNhZCIsInJlcXVpcmVzIjpbeyJtaW4iOiI2LjEuNC03IiwicGFja2FnZSI6Im1pY2EtcG9kbWFuIn1dLCJyb290Ijp7Im1heCI6MiwibWluIjoxfSwic2NoZW1hIjoibWljYS9jb3JlL3YxIiwidmVyc2lvbiI6IjAuMC4xIn1dLCJnZW5lcmF0aW9uIjoxLCJraW5kIjoiY29yZSIsInNjaGVtYSI6Im1pY2Evc2V0L3YxIiwidmVyc2lvbiI6IjAuMC4xIn0=\",\"signature\":\"T6gu5eeF7LZ+HRjGBLuINWjTMUsXd8N7YChTTIo1rYSbTp3RwvzwrASlPpqsZC13MzZue63xQdC2qUqwVjiVDQ==\"}",
+  "payload": "{\"arch\":\"amd64\",\"channel\":\"general\",\"components\":[{\"arch\":\"amd64\",\"content\":{\"image\":{\"bytes\":12288,\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"rootHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"signature\":{\"bytes\":400,\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"verity\":{\"algorithm\":\"sha256\",\"dataBlockSize\":4096,\"dataBlocks\":2,\"hashBlockSize\":4096,\"hashOffset\":8192,\"salt\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"version\":1}},\"features\":[\"ui\"],\"id\":\"8d708d563f18ef2b31659e2a6f5c51e0e6687427c06351bfaee25764c97b4664\",\"needs\":[{\"max\":\"0.0.1\",\"min\":\"0.0.1\",\"package\":\"micad\"}],\"package\":\"mica-apid-ui\",\"root\":{\"min\":1},\"schema\":\"mica/core/v1\",\"version\":\"0.0.1\"},{\"arch\":\"amd64\",\"content\":{\"image\":{\"bytes\":12288,\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"rootHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"signature\":{\"bytes\":400,\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"verity\":{\"algorithm\":\"sha256\",\"dataBlockSize\":4096,\"dataBlocks\":2,\"hashBlockSize\":4096,\"hashOffset\":8192,\"salt\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"version\":1}},\"features\":[\"micad\"],\"id\":\"8da6e0e9def00333cb697418092d163df953dc1ddc0fad9097c4a8674c58fc59\",\"needs\":[],\"package\":\"micad\",\"requires\":[{\"min\":\"6.1.4-7\",\"package\":\"mica-podman\"}],\"root\":{\"max\":2,\"min\":1},\"schema\":\"mica/core/v1\",\"version\":\"0.0.1\"}],\"generation\":1,\"kind\":\"core\",\"schema\":\"mica/set/v1\",\"version\":\"0.0.1\"}",
+  "publicKey": "ImjnQQz69ZhxwgZsU6/UcR4DOddVZB/EBPC8Bq4w+BA=",
+  "selectionRule": "A device composes the components with at least one feature among its product's FEATURES, in package order. The selection is refused when a selected component does not run on the root's interfaceLevel (root.min <= level <= root.max, an absent max unbounded), or needs a package that is not selected or is selected at a version outside min..max (dotted numbers compared numerically), or requires a root package the root provides at a version outside min..max (Debian versions, rootProvides; a package the root does not provide holds). Selecting nothing is not a refusal",
+  "selections": [
+    {
+      "features": [
+        "micad",
+        "ui",
+        "ssh",
+        "mqtt"
+      ],
+      "name": "console-product",
+      "rootLevel": 1,
+      "selected": [
+        "mica-apid-ui",
+        "micad"
+      ]
+    },
+    {
+      "features": [
+        "micad",
+        "ssh"
+      ],
+      "name": "headless-product",
+      "rootLevel": 1,
+      "selected": [
+        "micad"
+      ]
+    },
+    {
+      "features": [
+        "ssh"
+      ],
+      "name": "no-core-feature",
+      "rootLevel": 1,
+      "selected": []
+    },
+    {
+      "features": [
+        "micad",
+        "ui"
+      ],
+      "name": "newer-root-in-range",
+      "rootLevel": 2,
+      "selected": [
+        "mica-apid-ui",
+        "micad"
+      ]
+    },
+    {
+      "features": [
+        "ui"
+      ],
+      "name": "need-not-selected",
+      "refusal": "a selected core component's need is not selected",
+      "rootLevel": 1
+    },
+    {
+      "features": [
+        "micad",
+        "ui"
+      ],
+      "name": "root-above-range",
+      "refusal": "a selected core component does not run on this root's interface level",
+      "rootLevel": 3
+    },
+    {
+      "features": [
+        "micad"
+      ],
+      "name": "required-package-not-provided",
+      "rootLevel": 1,
+      "rootProvides": {
+        "mica-deploy": "0.0.17-1"
+      },
+      "selected": [
+        "micad"
+      ]
+    },
+    {
+      "features": [
+        "micad"
+      ],
+      "name": "required-package-in-range",
+      "rootLevel": 1,
+      "rootProvides": {
+        "mica-podman": "6.1.4-7"
+      },
+      "selected": [
+        "micad"
+      ]
+    },
+    {
+      "features": [
+        "micad"
+      ],
+      "name": "required-package-below-range",
+      "refusal": "a selected core component's root requirement does not hold",
+      "rootLevel": 1,
+      "rootProvides": {
+        "mica-podman": "6.1.4-5"
+      }
+    },
+    {
+      "features": [
+        "micad"
+      ],
+      "name": "required-package-debian-order",
+      "rootLevel": 1,
+      "rootProvides": {
+        "mica-podman": "6.1.10-1"
+      },
+      "selected": [
+        "micad"
+      ]
+    }
+  ],
+  "setId": "4ea9525e4d74df703d2112d346bbc1a8287012327f5516c64ae74c9068a364d6",
+  "wireForm": "`payload` is the signed bytes: JSON with no whitespace and every object's keys in sorted order, which a reader re-serializes and compares. `envelope` is the signed envelope in its wire order, and `setId` the SHA-256 of `payload`"
+}

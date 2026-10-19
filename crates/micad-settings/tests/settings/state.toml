@@ -1,0 +1,39 @@
+schema_version = 1
+
+[provisioning]
+state = "complete"
+deviceId = "0123456789abcdef0123456789abcdef"
+seededGeneration = 3
+
+[provisioning.document]
+appliedVersion = 1
+appliedDigest = "5d41402abc4b2a76b9719d911017c5925d41402abc4b2a76b9719d911017c592"
+
+[provisioning.document.lastImport]
+source = "media"
+outcome = "rejected"
+reason = "wifi.networks[0].psk: not a WPA2 passphrase"
+at = 1792310400
+
+[access.webAdmin]
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$D6IR8Aq6fn1gG+HkYUPmOA$YM6lgHyab1IFa8QjnX1i1NTov+TDZtowvNQ3qoSc7nU"
+
+[access.claim]
+via = "provisioning-document"
+at = 1792310400
+rotationRequired = true
+
+[access.device]
+passwordHash = "$argon2id$v=19$m=19456,t=2,p=1$D6IR8Aq6fn1gG+HkYUPmOA$YM6lgHyab1IFa8QjnX1i1NTov+TDZtowvNQ3qoSc7nU"
+generation = 2
+
+[[access.apiTokens]]
+id = "00112233445566778899aabbccddeeff"
+name = 'fleet "north" sync'
+hash = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+created = 1792310400
+
+[reset]
+tier = "full-factory"
+requested = 1792310401
+presence = "button"

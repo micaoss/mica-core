@@ -1,0 +1,295 @@
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { jsonResponse, renderParamRoute, stubFetch } from '@/shared/testing/panel'
+import { InterfaceDetailPage } from './interface-detail'
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+const ROUTE = '/network_/$name'
+
+function render(name: string) {
+  return renderParamRoute(<InterfaceDetailPage />, ROUTE, `/network_/${name}`)
+}
+
+const configured = {
+  eth0: { kind: 'physical', dhcp: true },
+  // A port of `br0`: declared, with no addressing of its own.
+  eth1: { kind: 'physical', dhcp: false },
+  'eth0.100': { kind: 'vlan', dhcp: true, vlan: { parent: 'eth0', id: 100 } },
+  // Not a port of anything: routes and a server are offered on a link whose
+  // addressing is its own.
+  eth2: { kind: 'physical', dhcp: false, static: { address: '10.0.0.9/24', dns: [] } },
+  br0: { kind: 'bridge', dhcp: true, bridge: { ports: ['eth1'] } },
+  wg0: { kind: 'wireguard', dhcp: false, static: { address: '10.7.0.2/32', dns: [] }, wireguard: { listenPort: 51820, peers: [] } },
+  can0: { kind: 'can', dhcp: false, can: { bitrate: 250000, restartMs: 100, fd: false } },
+}
+
+const routes = {
+  '/api/v1/network': {
+    configured,
+    configuredCount: 5,
+    observed: {
+      available: true,
+      interfaceCount: 3,
+      interfaces: [
+        { index: 1, name: 'lo', type: 'loopback' },
+        { index: 2, name: 'eth0', type: 'ether' },
+        { index: 3, name: 'eth1', type: 'ether' },
+      ],
+    },
+  },
+  '/api/v1/network/status': {
+    interfaces: {
+      available: true,
+      count: 1,
+      entries: [{
+        name: 'eth0',
+        type: 'ether',
+        driver: 'rk_gmac-dwmac',
+        mtu: 1500,
+        link: { operationalState: 'routable', carrierState: 'carrier', carrier: true },
+        hardwareAddress: 'aa:bb:cc:dd:ee:ff',
+        addresses: [{ family: 'ipv4', address: '192.168.1.20', prefixLength: 24, scope: 'global', configSource: 'DHCPv4' }],
+        dhcp: { available: true, state: 'bound', lease: { server: '192.168.1.1' } },
+        dns: ['192.168.1.1'],
+      }],
+    },
+    defaultRoutes: { available: true, count: 0, entries: [] },
+    dns: { available: false },
+    wifi: { available: false },
+    capabilities: {
+      wifi: { supported: false, interfaces: [] },
+      bluetooth: { supported: false, adapters: [] },
+      cellular: { supported: false, interfaces: [] },
+    },
+  },
+  '/api/v1/health': { apid: 'ok', micad: 'ok', checkedAt: 1 },
+}
+
+describe('one interface', () => {
+  it('shows what the device observes about this link and nothing about the others', async () => {
+    stubFetch(routes)
+    render('eth0')
+
+    expect(await screen.findByText('192.168.1.20/24 · DHCPv4')).toBeTruthy()
+    expect(screen.getByText('bound · server 192.168.1.1')).toBeTruthy()
+    expect(screen.queryByText('eth1')).toBeNull()
+  })
+
+  it('says so rather than showing an empty reading when the link is not observed', async () => {
+    stubFetch(routes)
+    render('br0')
+
+    expect(await screen.findAllByText('not observed')).not.toHaveLength(0)
+  })
+
+  /// The parent is a choice among the links the kernel has, not free text: an
+  /// undeclared parent is a VLAN micad refuses and networkd would never build.
+  it('edits a VLAN against the interfaces the device actually has', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth0.100': () => jsonResponse({ taskId: 'task-1' }, 202) })
+    render('eth0.100')
+
+    const parent = await screen.findByRole('combobox', { name: 'Parent interface' })
+    await userEvent.click(parent)
+    await userEvent.click(await screen.findByRole('option', { name: 'eth1' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
+    const call = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+    expect(JSON.parse(String((call?.[1] as RequestInit).body)).vlan).toEqual({ parent: 'eth1', id: 100 })
+  })
+
+  /// A bridge takes only declared interfaces with no addressing, so a port it
+  /// gains is rewritten that way in the same write as the bridge, and the
+  /// review says which interface loses its addressing.
+  it('declares the ports a bridge gains in the same write as the bridge', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network': () => jsonResponse({ taskId: 'task-2' }, 202) })
+    render('br0')
+
+    const ports = await screen.findByRole('group', { name: 'Bridge ports' })
+    await userEvent.click(within(ports).getByRole('checkbox', { name: 'eth0' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/eth0 become ports of this bridge/)).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Apply' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([input, init]) => String(input) === '/api/v1/network' && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    const body = JSON.parse(String((call?.[1] as RequestInit).body))
+    expect(body.br0.bridge).toEqual({ ports: ['eth1', 'eth0'] })
+    expect(body.eth0).toEqual({ kind: 'physical', dhcp: false })
+    expect(body.eth2).toEqual(configured.eth2)
+  })
+
+  /// A station cannot be bridged and the access point has its own address.
+  it('offers no radio as a bridge port', async () => {
+    stubFetch({
+      ...routes,
+      '/api/v1/network': {
+        ...routes['/api/v1/network'],
+        observed: { available: true, interfaceCount: 2, interfaces: [{ index: 2, name: 'eth0', type: 'ether' }, { index: 4, name: 'wlan0', type: 'wlan' }] },
+      },
+    })
+    render('br0')
+
+    const ports = await screen.findByRole('group', { name: 'Bridge ports' })
+    expect(within(ports).getByRole('checkbox', { name: 'eth0' })).toBeTruthy()
+    expect(within(ports).queryByRole('checkbox', { name: 'wlan0' })).toBeNull()
+  })
+
+  /// A tunnel has no DHCP client and no gateway. Offering either would offer a
+  /// configuration the device refuses.
+  it('offers a tunnel its listen port and neither DHCP nor a gateway', async () => {
+    stubFetch(routes)
+    render('wg0')
+
+    expect(await screen.findByLabelText('Listen port')).toBeTruthy()
+    expect(screen.queryByLabelText('Gateway')).toBeNull()
+    expect(screen.queryByRole('radio', { name: 'DHCP' })).toBeNull()
+  })
+
+  /// Routes and a server are edited with the addressing they depend on and
+  /// written in the same save: three writes would leave a device addressed for
+  /// a subnet it is not yet serving.
+  it('writes static routes and a DHCP server with the addressing they belong to', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth2': () => jsonResponse({ taskId: 'task-3' }, 202) })
+    render('eth2')
+
+    // The fixture's `eth1` is a port of `br0`; a port's addressing is the
+    // bridge's, so the fieldsets below are deliberately not offered there.
+    await userEvent.click(await screen.findByRole('button', { name: 'Add route' }))
+    await userEvent.type(screen.getByLabelText('Destination'), '10.20.0.0/16')
+    await userEvent.type(screen.getByLabelText('Via'), '10.0.0.1')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Offer a DHCP server on this interface' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Apply' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    const body = JSON.parse(String((call?.[1] as RequestInit).body))
+    expect(body.routes).toEqual([{ destination: '10.20.0.0/16', gateway: '10.0.0.1' }])
+    expect(body.dhcpServer).toEqual({ poolOffset: 100, poolSize: 50, dns: [] })
+  })
+
+  /// A link that takes its own address from a server cannot be one, and the
+  /// page says what it would take rather than leaving the section out.
+  it('says a DHCP server needs a static address on a link that is a DHCP client', async () => {
+    stubFetch(routes)
+    render('eth0')
+
+    expect(await screen.findByText(/Available once this interface has a static address/)).toBeTruthy()
+    expect(screen.queryByRole('checkbox', { name: 'Offer a DHCP server on this interface' })).toBeNull()
+  })
+
+  /// The device does not write an empty list, so a server saved with no DNS
+  /// comes back with no `dns` at all. The page that saved it must still open.
+  it('opens an interface whose DHCP server announces no DNS', async () => {
+    stubFetch({
+      ...routes,
+      '/api/v1/network': {
+        ...routes['/api/v1/network'],
+        configured: { ...configured, eth2: { dhcp: false, static: { address: '10.0.0.9/24', dns: [] }, dhcpServer: { poolOffset: 100, poolSize: 50 } } },
+      },
+    })
+    render('eth2')
+
+    expect(await screen.findByRole('checkbox', { name: 'Offer a DHCP server on this interface' })).toHaveProperty('checked', true)
+    expect(screen.getByLabelText('DNS announced')).toHaveProperty('value', '')
+  })
+
+  it('writes the servers a DHCP interface uses instead of its lease\'s', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth0': () => jsonResponse({ taskId: 'task-4' }, 202) })
+    render('eth0')
+
+    await userEvent.type(await screen.findByLabelText('DNS servers'), '1.1.1.1, 9.9.9.9')
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Apply' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ kind: 'physical', dhcp: true, dns: ['1.1.1.1', '9.9.9.9'] })
+  })
+
+  it('deletes the entry behind a confirmation and returns to the list', async () => {
+    const fetch = stubFetch({ ...routes, 'DELETE /api/v1/network/eth1': () => jsonResponse(null, 204) })
+    render('eth1')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete interface' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete interface' }))
+
+    await waitFor(() => expect(fetch.mock.calls.some(([input, init]) =>
+      String(input) === '/api/v1/network/eth1' && (init as RequestInit | undefined)?.method === 'DELETE')).toBe(true))
+  })
+
+  /// A CAN interface is its bit timing, with no addressing; FD on asks for
+  /// the data bit rate and the write carries the can block alone.
+  it('edits a CAN interface\'s bit timing and writes its can block alone', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/can0': () => jsonResponse({ taskId: 'task-5' }, 202) })
+    render('can0')
+
+    const bitrate = await screen.findByLabelText('Bit rate (bit/s)')
+    expect(bitrate).toHaveProperty('value', '250000')
+    expect(screen.getByLabelText('Restart after bus-off (ms)')).toHaveProperty('value', '100')
+    expect(screen.queryByLabelText('DNS servers')).toBeNull()
+    expect(screen.queryByLabelText('Data bit rate (bit/s)')).toBeNull()
+    await userEvent.clear(bitrate)
+    await userEvent.type(bitrate, '500000')
+    await userEvent.click(screen.getByRole('button', { name: 'On' }))
+    expect(screen.getByLabelText('Data bit rate (bit/s)')).toHaveProperty('value', '2000000')
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('CAN at 500000 bit/s')).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Apply' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({
+      kind: 'can',
+      can: { bitrate: 500000, restartMs: 100, fd: true, dataBitrate: 2000000 },
+    })
+  })
+
+  /// A controller the device observes and nobody declared is offered as CAN,
+  /// and the controller's own FD mode is left alone unless chosen.
+  it('declares an observed CAN controller with the controller\'s own FD mode', async () => {
+    const observedCan = {
+      ...routes,
+      '/api/v1/network/status': {
+        ...routes['/api/v1/network/status'],
+        interfaces: { available: true, count: 1, entries: [{ name: 'can1', type: 'can', link: { operationalState: 'off', carrier: false }, addresses: [], dhcp: { available: false }, dns: [] }] },
+      },
+      'PUT /api/v1/network/can1': () => jsonResponse({ taskId: 'task-6' }, 202),
+    }
+    const fetch = stubFetch(observedCan)
+    render('can1')
+
+    expect(await screen.findByLabelText('Bit rate (bit/s)')).toHaveProperty('value', '250000')
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Apply' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ kind: 'can', can: { bitrate: 250000 } })
+  })
+})
