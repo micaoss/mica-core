@@ -1,0 +1,7 @@
+# The Bluetooth agent test talks to a private dbus-daemon and answers in
+# milliseconds; a hang there is ended rather than holding the gate. Every other
+# test keeps nextest's default of no limit, as some legitimately take half a
+# minute on a slow runner.
+[[profile.default.overrides]]
+filter = 'package(micad) and test(=bluetooth::tests::agent::the_agent_serves_the_recorded_interface)'
+slow-timeout = { period = "30s", terminate-after = 2 }

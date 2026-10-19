@@ -174,6 +174,16 @@ async fn the_agent_registers_each_time_bluetoothd_appears() {
     let _ = bus.wait();
 }
 
+/// How long one call to the private bus may take: it answers in milliseconds.
+const BUS_CALL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// `call`, or a failure naming `what` once [`BUS_CALL`] has passed.
+async fn bounded<T>(what: &str, call: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(BUS_CALL, call)
+        .await
+        .unwrap_or_else(|_| panic!("{what} took more than {BUS_CALL:?} on the private bus"))
+}
+
 /// What BlueZ calls is the recorded `org.bluez.Agent1`, read back from the
 /// agent served on a private bus.
 #[tokio::test(flavor = "multi_thread")]
@@ -188,27 +198,33 @@ async fn the_agent_serves_the_recorded_interface() {
     std::io::BufReader::new(bus.stdout.take().unwrap())
         .read_line(&mut address)
         .unwrap();
-    let connection = zbus::connection::Builder::address(address.trim())
-        .build()
-        .await
-        .unwrap();
-    connection
-        .object_server()
-        .at(
+    let connection = bounded(
+        "connecting",
+        zbus::connection::Builder::address(address.trim()).build(),
+    )
+    .await
+    .unwrap();
+    bounded(
+        "serving the agent",
+        connection.object_server().at(
             AGENT_PATH,
             PairingAgent {
                 state: Arc::new(Agent::with_pin("0000".to_string())),
             },
-        )
-        .await
-        .unwrap();
-    let xml = zbus::fdo::IntrospectableProxy::builder(&connection)
-        .destination(connection.unique_name().unwrap().to_owned())
-        .path(AGENT_PATH)
-        .build()
-        .await
-        .unwrap()
-        .introspect()
+        ),
+    )
+    .await
+    .unwrap();
+    let proxy = bounded(
+        "building the proxy",
+        zbus::fdo::IntrospectableProxy::builder(&connection)
+            .destination(connection.unique_name().unwrap().to_owned())
+            .path(AGENT_PATH)
+            .build(),
+    )
+    .await
+    .unwrap();
+    let xml = bounded("introspecting the agent", proxy.introspect())
         .await
         .unwrap();
 
