@@ -181,6 +181,12 @@ code { border-radius: 3px; background: var(--muted); padding: 1px 4px; font: 500
 .auth-plate .corner.bl { bottom: -6px; left: -6px; }
 .auth-plate .corner.br { bottom: -6px; right: -6px; }
 
+/* Base UI's select and scroll area hide their own scrollbar with this class;
+   the console turns off the <style> element they would add for it (providers.tsx),
+   which apid's style-src 'self' refuses. */
+.base-ui-disable-scrollbar { scrollbar-width: none; }
+.base-ui-disable-scrollbar::-webkit-scrollbar { display: none; }
+
 /* iOS zooms a focused input below 16px. Applied to the document rather than to
    the input primitive so regenerating that primitive cannot drop it. */
 @media (max-width: 580px) {

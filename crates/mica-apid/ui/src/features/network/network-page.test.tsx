@@ -67,6 +67,25 @@ describe('the network page', () => {
     expect(within(row).getAllByRole('link')).toHaveLength(1)
   })
 
+  /// A controller the kernel has and the settings do not name is listed with
+  /// a link to its page, where it is declared (`interface-detail`).
+  it('lists an undeclared CAN controller with the page that declares it', async () => {
+    stubFetch({
+      ...routes,
+      '/api/v1/network': {
+        ...routes['/api/v1/network'],
+        observed: { available: true, interfaceCount: 2, interfaces: [
+          { index: 2, name: 'eth0', kind: 'ether', operationalState: 'routable', addresses: ['192.168.1.24/24'] },
+          { index: 3, name: 'can0', type: 'can', operationalState: 'off', addresses: [] },
+        ] },
+      },
+    })
+    renderRoute(<NetworkPage />)
+
+    const link = await screen.findByRole('link', { name: /can0/ })
+    expect(link.getAttribute('href')).toContain('/network/can0')
+  })
+
   it('closes the Wi-Fi removal confirmation and names the network', async () => {
     stubFetch({ ...routes, 'DELETE /api/v1/wifi/client/networks/workshop': () => new Response(null, { status: 204 }) })
     renderRoute(<NetworkPage />)
