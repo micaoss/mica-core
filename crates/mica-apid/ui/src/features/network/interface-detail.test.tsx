@@ -268,8 +268,8 @@ describe('one interface', () => {
   })
 
   /// A controller the device observes and nobody declared is offered as CAN,
-  /// and the controller's own FD mode is left alone unless chosen.
-  it('declares an observed CAN controller with the controller\'s own FD mode', async () => {
+  /// with FD off unless switched on.
+  it('declares an observed CAN controller with FD off', async () => {
     const observedCan = {
       ...routes,
       '/api/v1/network/status': {
@@ -290,6 +290,6 @@ describe('one interface', () => {
       expect(found).toBeTruthy()
       return found
     })
-    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ kind: 'can', can: { bitrate: 250000 } })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ kind: 'can', can: { bitrate: 250000, fd: false } })
   })
 })

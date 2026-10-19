@@ -8317,7 +8317,7 @@
               "boolean",
               "null"
             ],
-            "description": "CAN FD on or off; absent leaves the controller's own mode."
+            "description": "CAN FD on or off; absent is off."
           },
           "restartMs": {
             "type": [

@@ -279,7 +279,6 @@ export const en = {
       restart: 'Restart after bus-off (ms)',
       restartHint: 'Empty or 0 leaves the controller stopped after bus-off.',
       fd: 'CAN FD',
-      fdDefault: 'Controller default',
       fdOn: 'On',
       fdOff: 'Off',
       dataBitrate: 'Data bit rate (bit/s)',

@@ -185,7 +185,8 @@ fn can(fd: Option<bool>, data_bitrate: Option<u32>, restart_ms: Option<u32>) -> 
 }
 
 /// A CAN controller is an unaddressed stanza whose `pre-up` sets its
-/// parameters with iproute2's `ip`, the fields it declares and no others.
+/// parameters with iproute2's `ip`: the fields it declares, and CAN FD off
+/// unless it switches it on, so an FD-capable controller comes up.
 #[test]
 fn a_can_interface_is_set_by_iproute2_before_it_comes_up() {
     let network = settings(&[
@@ -206,7 +207,7 @@ fn a_can_interface_is_set_by_iproute2_before_it_comes_up() {
             "# Managed by micad from `network`; the device's network. Do not edit.\nauto lo\niface lo inet loopback\n{}{}{}",
             stanza("can0", " restart-ms 100 fd off"),
             stanza("can1", " fd on dbitrate 2000000"),
-            stanza("can2", ""),
+            stanza("can2", " fd off"),
         )
     );
 }

@@ -230,8 +230,7 @@ fn can_stanza(out: &mut String, iface: &str, can: &CanConfig, ip: &Path) {
         (Some(true), Some(rate)) => {
             let _ = write!(set, " fd on dbitrate {rate}");
         }
-        (Some(false), _) => set.push_str(" fd off"),
-        _ => {}
+        _ => set.push_str(" fd off"),
     }
     let _ = write!(
         out,

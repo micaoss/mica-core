@@ -55,15 +55,15 @@ pub(super) fn render_netdev(iface: &str, cfg: &IfaceSettings, keys: &Keystore) -
 }
 
 /// Render a CAN controller's `.network`: `[Match]` and `[CAN]` alone, with the
-/// fields it declares. networkd sets the parameters and brings the link up.
+/// fields it declares and CAN FD off unless it switches it on. networkd sets
+/// the parameters and brings the link up.
 pub(super) fn render_can_unit(iface: &str, can: &CanConfig) -> String {
     let mut out = format!("[Match]\nName={iface}\n\n[CAN]\nBitRate={}\n", can.bitrate);
     if let Some(ms) = can.restart_ms {
         out.push_str(&format!("RestartSec={ms}ms\n"));
     }
-    if let Some(fd) = can.fd {
-        out.push_str(&format!("FDMode={}\n", if fd { "yes" } else { "no" }));
-    }
+    let fd = can.fd == Some(true);
+    out.push_str(&format!("FDMode={}\n", if fd { "yes" } else { "no" }));
     if let Some(rate) = can.data_bitrate {
         out.push_str(&format!("DataBitRate={rate}\n"));
     }

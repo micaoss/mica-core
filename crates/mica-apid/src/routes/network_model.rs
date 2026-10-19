@@ -71,7 +71,7 @@ pub(crate) struct CanParameters {
     /// ms; 0 or absent never restarts it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) restart_ms: Option<u32>,
-    /// CAN FD on or off; absent leaves the controller's own mode.
+    /// CAN FD on or off; absent is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) fd: Option<bool>,
     /// The CAN FD data-phase bit rate, 1 to 8 000 000 bit/s: required with

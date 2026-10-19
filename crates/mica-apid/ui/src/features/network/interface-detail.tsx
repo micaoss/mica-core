@@ -28,7 +28,7 @@ interface StaticRoute { destination: string; gateway?: string; metric?: number }
 /// empty list.
 interface DhcpServer { poolOffset: number; poolSize: number; dns?: string[]; leaseSeconds?: number }
 
-/// A CAN controller's parameters; absent fields are left to the controller.
+/// A CAN controller's parameters; no restart delay restarts nothing, and no FD is FD off.
 interface CanConfig { bitrate: number; restartMs?: number; fd?: boolean; dataBitrate?: number }
 
 interface InterfaceConfig {
@@ -69,7 +69,7 @@ export function InterfaceDetailPage() {
   const [server, setServer] = useState<DhcpServer | undefined>()
   const [bitrate, setBitrate] = useState<string | undefined>()
   const [restartMs, setRestartMs] = useState<string | undefined>()
-  const [fd, setFd] = useState<'default' | 'on' | 'off' | undefined>()
+  const [fd, setFd] = useState<'on' | 'off' | undefined>()
   const [dataBitrate, setDataBitrate] = useState<string | undefined>()
   const [review, setReview] = useState(false)
   const [taskId, setTaskId] = useState<string>()
@@ -79,7 +79,7 @@ export function InterfaceDetailPage() {
   const kind = configured?.kind ?? (configured === undefined && observed?.type === 'can' ? 'can' : 'physical')
   const bitrateValue = bitrate ?? (configured?.can?.bitrate ?? 250000).toString()
   const restartValue = restartMs ?? configured?.can?.restartMs?.toString() ?? ''
-  const fdValue = fd ?? (configured?.can?.fd === undefined ? 'default' : configured.can.fd ? 'on' : 'off')
+  const fdValue = fd ?? (configured?.can?.fd ? 'on' : 'off')
   const dataBitrateValue = dataBitrate ?? (configured?.can?.dataBitrate ?? 2000000).toString()
   // A tunnel has no DHCP client: its addressing is the address on the link.
   const useDhcp = kind === 'wireguard' ? false : dhcp ?? configured?.dhcp ?? true
@@ -114,7 +114,7 @@ export function InterfaceDetailPage() {
         // Its block alone: the device refuses any addressing on a CAN entry.
         const can: CanConfig = { bitrate: Number(bitrateValue) }
         if (restartValue !== '') can.restartMs = Number(restartValue)
-        if (fdValue !== 'default') can.fd = fdValue === 'on'
+        can.fd = fdValue === 'on'
         if (fdValue === 'on') can.dataBitrate = Number(dataBitrateValue)
         return api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(name)}`, json('PUT', { kind: 'can', can }))
       }
@@ -229,12 +229,11 @@ export function InterfaceDetailPage() {
               </div>
               <FormField label={t('network.can.fd')}>
                 {() => (
-                  <SegmentedControl<'default' | 'on' | 'off'>
+                  <SegmentedControl<'on' | 'off'>
                     label={t('network.can.fd')}
                     value={fdValue}
                     onValueChange={setFd}
                     segments={[
-                      { value: 'default', label: t('network.can.fdDefault') },
                       { value: 'on', label: t('network.can.fdOn') },
                       { value: 'off', label: t('network.can.fdOff') },
                     ]}

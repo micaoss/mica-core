@@ -173,8 +173,9 @@ fn can_iface(
     }
 }
 
-/// A CAN controller is `[Match]` and `[CAN]` alone, with only the fields it
-/// declares: no `[Network]`, and no netdev.
+/// A CAN controller is `[Match]` and `[CAN]` alone, with the fields it
+/// declares and CAN FD off unless it switches it on, so an FD-capable
+/// controller comes up: no `[Network]`, and no netdev.
 #[tokio::test]
 pub(super) async fn renders_a_can_interface_as_its_can_section_alone() {
     let dir = tempfile::tempdir().unwrap();
@@ -198,7 +199,7 @@ pub(super) async fn renders_a_can_interface_as_its_can_section_alone() {
     );
     assert_eq!(
         read("50-mica-can2.network"),
-        "[Match]\nName=can2\n\n[CAN]\nBitRate=250000\n"
+        "[Match]\nName=can2\n\n[CAN]\nBitRate=250000\nFDMode=no\n"
     );
     assert!(!dir.path().join("50-mica-can0.netdev").exists());
     assert_eq!(state["can0"]["kind"], "can");

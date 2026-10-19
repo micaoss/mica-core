@@ -162,7 +162,6 @@ export const zhCN: Translation = {
       restart: '总线关闭后重启（毫秒）',
       restartHint: '留空或 0 表示总线关闭后控制器保持停止。',
       fd: 'CAN FD',
-      fdDefault: '控制器默认',
       fdOn: '开启',
       fdOff: '关闭',
       dataBitrate: '数据段波特率（bit/s）',

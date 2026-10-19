@@ -141,8 +141,9 @@ pub struct CanConfig {
     /// never restarts it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restart_ms: Option<u32>,
-    /// CAN FD on or off; absent leaves the controller's own mode, so a
-    /// controller without CAN FD is never asked.
+    /// CAN FD on or off; absent is off. An FD-capable controller (the
+    /// RK3576's) does not come up with a classic bit rate alone, and switching
+    /// FD off is accepted by a controller without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fd: Option<bool>,
     /// The CAN FD data-phase bit rate, in bit/s, with `fd: true`.
