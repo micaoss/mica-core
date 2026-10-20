@@ -44,6 +44,7 @@ pub mod update_cli;
 mod update_codes;
 mod update_lifecycle;
 mod update_policy;
+mod user_units;
 mod wgkeys;
 
 use std::path::{Path, PathBuf};
@@ -331,6 +332,7 @@ async fn serve() -> anyhow::Result<()> {
                 .with_failure_evidence(Arc::new(diagnostics::HostFailureEvidence::production()));
         }
         service = service.with_logs(Arc::new(logs::HostLogs::production(init)));
+        service = service.with_user_units(Arc::new(user_units::UserUnits::production(init)));
         service = service.with_storage_status(Arc::new(storage_status::HostStorage::production()));
         // The diagnostic observers, on the same rule: each reads the host
         // (sysfs, /etc, the journal), so a dry-run daemon is never given one.

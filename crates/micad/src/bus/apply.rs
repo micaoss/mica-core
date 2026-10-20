@@ -51,6 +51,12 @@ impl MicadService {
             let mut inner = self.inner.write().await;
             let mut candidate = inner.settings.clone();
             candidate.set(path, value)?;
+            self.user_units
+                .check_written(&inner.settings.services, &candidate.services)
+                .map_err(|message| SettingsError::Validation {
+                    path: path.to_string(),
+                    message,
+                })?;
             if changed_projects(&inner.settings, &candidate).any(|(name, written)| {
                 checked.get(name).map(|(text, dir)| (text, dir.as_deref())) != Some(written)
             }) {
@@ -279,13 +285,14 @@ impl MicadService {
 /// MQTT units need micad itself, mica-ntpd needs the network. Their startup
 /// apply runs after micad claims its bus name, so micad's readiness waits on
 /// none of them; the ones that run before it only render files and bus calls.
-pub(super) const DEFERRED: [&str; 7] = [
+pub(super) const DEFERRED: [&str; 8] = [
     "sshd",
     "wifiClient",
     "wifiAp",
     "container",
     "mqtt",
     "time",
+    "services",
     "bluetooth",
 ];
 /// Pause between two attempts of a failed deferred apply.

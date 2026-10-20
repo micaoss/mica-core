@@ -13,6 +13,7 @@ mod mqtt;
 /// rotation the bus surfaces ([`network::WireguardRotate`]) is this
 /// reconciler's mechanism reached from outside a reconcile.
 pub mod network;
+mod services;
 mod sshd;
 /// Visible to the daemon for the same reason: the container actions are
 /// systemd verbs, and the bus needs the trait they are spoken through.
@@ -87,6 +88,9 @@ fn openrc_reconcilers(engine: micad_settings::ContainerEngine) -> Vec<Box<dyn Re
         )),
         Box::new(time::TimeReconciler::openrc()),
         Box::new(web::WebReconciler::production(OpenrcUnits::production())),
+        Box::new(services::ServicesReconciler::production(
+            micad_settings::Init::Openrc,
+        )),
         Box::new(bluetooth::BluetoothReconciler::openrc(
             OpenrcUnits::production(),
             std::sync::Arc::new(crate::bluetooth::BlueZ),
@@ -110,6 +114,9 @@ fn systemd_reconcilers(engine: micad_settings::ContainerEngine) -> Vec<Box<dyn R
         Box::new(mqtt::MqttReconciler::production(systemd::Systemd::new())),
         Box::new(time::TimeReconciler::production()),
         Box::new(web::WebReconciler::production(systemd::Systemd::new())),
+        Box::new(services::ServicesReconciler::production(
+            micad_settings::Init::Systemd,
+        )),
         // Last, and the only one whose subject is optional hardware: a board
         // with no radio reports `unsupported` rather than failing.
         Box::new(bluetooth::BluetoothReconciler::new(
@@ -139,7 +146,7 @@ mod feature_tests {
         };
         let all = subtrees(&Features::all());
         let minimal = subtrees(&Features::only(&[]));
-        for always in ["hostname", "network", "time", "access.web"] {
+        for always in ["hostname", "network", "time", "access.web", "services"] {
             assert!(minimal.contains(&always), "{always}: {minimal:?}");
         }
         for gated in [
@@ -181,6 +188,7 @@ mod feature_tests {
                 "container",
                 "time",
                 "access.web",
+                "services",
                 "bluetooth"
             ]
         );

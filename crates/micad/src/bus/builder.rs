@@ -173,6 +173,14 @@ impl MicadService {
         self
     }
 
+    /// Attach the user's services (`GetUnits`, the unit verbs and the
+    /// `services.units` write check).
+    #[must_use]
+    pub fn with_user_units(mut self, user_units: Arc<crate::user_units::UserUnits>) -> Self {
+        self.user_units = user_units;
+        self
+    }
+
     /// Attach the failure-evidence source (`GetFailureEvidence`).
     #[must_use]
     pub fn with_failure_evidence(

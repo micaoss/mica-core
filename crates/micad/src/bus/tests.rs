@@ -13,6 +13,7 @@ mod observers;
 mod power;
 mod refusals;
 mod state;
+mod units;
 mod update_config;
 mod wireguard;
 use observers::*;

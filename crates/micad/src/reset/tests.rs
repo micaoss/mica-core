@@ -338,6 +338,33 @@ fn the_application_tier_clears_declared_containers_with_their_data() {
     assert_eq!(settings.hostname, hostname);
 }
 
+/// The user's services are their applications too: the tier clears their
+/// directories, and the declarations go with them, or the reconciler would
+/// install them again.
+#[test]
+fn the_application_tier_clears_the_users_services() {
+    let (dir, roots) = populated_roots();
+    let store = store_at(&dir, &roots);
+    let mut settings = fielded_settings();
+    settings.services.units.insert(
+        "tailscaled.service".to_string(),
+        micad_settings::UserUnit {
+            kind: micad_settings::Init::Systemd,
+            text: "[Service]\nExecStart=/srv/tailscaled\n".to_string(),
+            conf: None,
+            enabled: false,
+        },
+    );
+    stage(&mut settings, ResetTier::ApplicationData);
+
+    assert_eq!(
+        apply_pending(&store, &mut settings, &roots).unwrap(),
+        Outcome::Applied(ResetTier::ApplicationData)
+    );
+
+    assert!(settings.services.units.is_empty());
+}
+
 #[test]
 fn application_and_factory_reset_clear_the_independent_container_namespace() {
     for tier in [ResetTier::ApplicationData, ResetTier::FullFactory] {

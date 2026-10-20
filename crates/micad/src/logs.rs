@@ -26,15 +26,15 @@ const LOG_TIMEOUT: Duration = Duration::from_secs(5);
 /// systemd unit (a glob where the service is a template) and the syslog tag
 /// its process logs under on OpenRC.
 #[derive(Debug)]
-pub struct LogSource {
-    pub name: &'static str,
+pub struct LogSource<'a> {
+    pub name: &'a str,
     pub feature: Option<Feature>,
-    pub unit: &'static str,
-    pub tag: &'static str,
+    pub unit: &'a str,
+    pub tag: &'a str,
 }
 
 /// Every log the console may read.
-pub const LOG_SOURCES: [LogSource; 9] = [
+pub const LOG_SOURCES: [LogSource<'static>; 9] = [
     LogSource {
         name: "micad",
         feature: None,
@@ -96,7 +96,10 @@ pub const LOG_SOURCES: [LogSource; 9] = [
 /// # Errors
 ///
 /// A name the allowlist does not carry, or a feature the product leaves out.
-pub fn source<'a>(name: &str, features: &micad_settings::Features) -> Result<&'a LogSource> {
+pub fn source(
+    name: &str,
+    features: &micad_settings::Features,
+) -> Result<&'static LogSource<'static>> {
     let Some(source) = LOG_SOURCES.iter().find(|source| source.name == name) else {
         bail!(
             "no log named {name:?}; the readable logs are {}",
@@ -118,7 +121,7 @@ fn names() -> Vec<&'static str> {
 /// Reads one source's newest lines, raw.
 #[async_trait::async_trait]
 pub trait LogReader: Send + Sync {
-    async fn read(&self, source: &LogSource, max_lines: usize) -> Result<Vec<u8>>;
+    async fn read(&self, source: &LogSource<'_>, max_lines: usize) -> Result<Vec<u8>>;
 }
 
 /// The reader a daemon without host access has: none.
@@ -126,7 +129,7 @@ pub struct NoLogs;
 
 #[async_trait::async_trait]
 impl LogReader for NoLogs {
-    async fn read(&self, _source: &LogSource, _max_lines: usize) -> Result<Vec<u8>> {
+    async fn read(&self, _source: &LogSource<'_>, _max_lines: usize) -> Result<Vec<u8>> {
         bail!("this daemon reads no logs")
     }
 }
@@ -159,7 +162,7 @@ fn tagged_line(line: &str, tag: &str) -> Option<String> {
 
 #[async_trait::async_trait]
 impl LogReader for HostLogs {
-    async fn read(&self, source: &LogSource, max_lines: usize) -> Result<Vec<u8>> {
+    async fn read(&self, source: &LogSource<'_>, max_lines: usize) -> Result<Vec<u8>> {
         match self.init {
             Init::Systemd => {
                 let lines = max_lines.to_string();
@@ -207,7 +210,7 @@ impl LogReader for HostLogs {
 
 /// The `GetLog` answer for `source`: its newest lines, bounded, or the reason
 /// they could not be read.
-pub async fn log_json(reader: &dyn LogReader, source: &LogSource) -> Value {
+pub async fn log_json(reader: &dyn LogReader, source: &LogSource<'_>) -> Value {
     let read = tokio::time::timeout(LOG_TIMEOUT, reader.read(source, LOG_MAX_LINES)).await;
     let base = json!({ "source": source.name });
     let mut value = match read {

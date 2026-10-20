@@ -229,6 +229,47 @@ impl MicadService {
         self.container_log(name, tail).await
     }
 
+    /// JSON: the user's services, every one declared or in `mica-unit`'s
+    /// directory, with whether micad manages it, whether it is enabled and
+    /// what the init says of it: `{init, available, units}`.
+    pub(super) async fn get_units(&self) -> fdo::Result<String> {
+        let services = self.inner.read().await.settings.services.clone();
+        self.user_units
+            .live(&services)
+            .await
+            .map(|live| live.to_string())
+            .map_err(|err| fdo::Error::Failed(format!("{err:#}")))
+    }
+
+    /// Start an installed user service, managed or put there by hand.
+    pub(super) async fn start_unit(&self, name: &str) -> fdo::Result<()> {
+        self.unit_action(name, crate::user_units::Verb::Start).await
+    }
+
+    /// Stop it.
+    pub(super) async fn stop_unit(&self, name: &str) -> fdo::Result<()> {
+        self.unit_action(name, crate::user_units::Verb::Stop).await
+    }
+
+    /// Restart it.
+    pub(super) async fn restart_unit(&self, name: &str) -> fdo::Result<()> {
+        self.unit_action(name, crate::user_units::Verb::Restart)
+            .await
+    }
+
+    /// JSON: an installed user service's newest log lines, as `GetLog`
+    /// answers one of the device's.
+    pub(super) async fn get_unit_log(&self, name: &str) -> fdo::Result<String> {
+        self.user_units
+            .require_installed(name)
+            .await
+            .map_err(|err| fdo::Error::InvalidArgs(format!("{err:#}")))?;
+        let source = self.user_units.log_source(name);
+        Ok(crate::logs::log_json(self.logs.as_ref(), &source)
+            .await
+            .to_string())
+    }
+
     /// Scan for WiFi networks on the station's radio and answer what it found.
     ///
     /// The interface is the one `wifi.client` declares -- a scan is a thing

@@ -71,8 +71,9 @@ const BOARD_DEFAULTS_RECORD: &str = "mica/seeded-defaults.json";
 ///
 /// `containerd` is mica-containerd's store of declarations: cleared with the
 /// settings that declared them, or the daemon would bring the old containers
-/// back at boot before micad declares none. `openrc-local` holds the user's
-/// OpenRC services, bound to `/usr/local/etc` on an OpenRC root.
+/// back at boot before micad declares none. `systemd-units` and `openrc-local`
+/// hold the user's services (`services.units`), bound to
+/// `/usr/local/lib/systemd/system` and `/usr/local/etc`.
 const STATE_APPLICATION_DIRS: &[&str] = &["containerd", "systemd-units", "openrc-local"];
 /// dockerd's pid file, written while it runs.
 const DOCKER_PID_FILE: &str = "/run/docker.pid";
@@ -285,6 +286,8 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
                 devices: std::collections::BTreeMap::new(),
                 ..settings.bluetooth.clone()
             },
+            // The user's services, whose directories the tier clears.
+            services: micad_settings::ServicesSettings::default(),
             ..settings.clone()
         },
     };

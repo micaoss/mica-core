@@ -195,6 +195,10 @@ pub struct MicadService {
     failure_evidence: Arc<dyn FailureEvidenceSource>,
     /// One service's log for the console (`GetLog`). Same default.
     logs: Arc<dyn crate::logs::LogReader>,
+    /// The user's own services: `GetUnits`, the unit verbs and logs, and the
+    /// check a write of `services.units` is held to. The default has no
+    /// `mica-unit`, so nothing is installed and every write is refused.
+    user_units: Arc<crate::user_units::UserUnits>,
     /// The update lifecycle (check/fetch machine, policy, reboot gate).
     /// Constructed with [`NoClient`] and a fileless policy store, so a
     /// dry-run daemon can neither spawn the update client nor read a host
@@ -302,6 +306,7 @@ impl MicadService {
             telemetry: Arc::new(UnavailableTelemetry),
             failure_evidence: Arc::new(UnavailableFailureEvidence),
             logs: Arc::new(crate::logs::NoLogs),
+            user_units: Arc::new(crate::user_units::UserUnits::unavailable()),
             engine: Arc::new(crate::containers::NoEngine),
             bluetooth: Arc::new(crate::bluetooth::NoAdapter),
             agent: Arc::new(BluetoothAgent::default()),
@@ -441,6 +446,20 @@ impl MicadService {
                 .map_err(|err| fdo::Error::Failed(format!("{action:?} {container}: {err}")))?;
             tracing::info!(container, ?action, "container action");
         }
+        Ok(())
+    }
+
+    /// One verb on an installed user service.
+    async fn unit_action(&self, name: &str, verb: crate::user_units::Verb) -> fdo::Result<()> {
+        self.user_units
+            .require_installed(name)
+            .await
+            .map_err(|err| fdo::Error::InvalidArgs(format!("{err:#}")))?;
+        self.user_units
+            .act(name, verb)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("{verb:?} {name}: {err:#}")))?;
+        tracing::info!(unit = name, ?verb, "unit action");
         Ok(())
     }
 
