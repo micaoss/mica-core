@@ -285,9 +285,11 @@ async fn a_unit_that_fails_is_named_and_the_others_still_apply() {
 
     assert!(err.to_string().contains("bad.service"), "{err}");
     assert_eq!(rig.control.calls(), ["start good.service"]);
+    // The one that failed is recorded as not yet enabled: it was installed,
+    // so undeclaring it removes it, and the next apply starts it.
     assert_eq!(
         rig.recorded(),
-        BTreeMap::from([("good.service".into(), true)])
+        BTreeMap::from([("bad.service".into(), false), ("good.service".into(), true)])
     );
 }
 

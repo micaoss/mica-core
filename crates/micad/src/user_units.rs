@@ -286,9 +286,10 @@ impl UserUnits {
                     units.insert((*name).clone(), json!({ "enabled": unit.enabled }));
                 }
                 Err(err) => {
-                    if let Some(was) = was {
-                        applied.insert((*name).clone(), was);
-                    }
+                    // Recorded either way: what was installed is micad's to
+                    // remove, and a first apply that failed starts it next
+                    // time.
+                    applied.insert((*name).clone(), was.unwrap_or(false));
                     units.insert(
                         (*name).clone(),
                         json!({ "enabled": unit.enabled, "error": format!("{err:#}") }),
