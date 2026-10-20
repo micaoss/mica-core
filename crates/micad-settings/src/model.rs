@@ -15,6 +15,7 @@ mod containers;
 mod mqtt;
 mod network;
 mod provisioning;
+mod services;
 mod time;
 mod wifi;
 pub use access::*;
@@ -23,6 +24,7 @@ pub use containers::*;
 pub use mqtt::*;
 pub use network::*;
 pub use provisioning::*;
+pub use services::*;
 pub use time::*;
 pub use wifi::*;
 
@@ -55,6 +57,9 @@ pub struct Settings {
     /// NTP server and presentation-timezone settings.
     #[serde(default)]
     pub time: TimeSettings,
+    /// The user's own services.
+    #[serde(default)]
+    pub services: ServicesSettings,
     /// A staged reset intent (schema v12); absent unless one is waiting to be
     /// applied — see [`ResetSettings`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,6 +78,7 @@ impl Default for Settings {
             bluetooth: BluetoothSettings::default(),
             mqtt: MqttSettings::default(),
             time: TimeSettings::default(),
+            services: ServicesSettings::default(),
             reset: None,
         }
     }
@@ -172,6 +178,14 @@ impl Settings {
         // CHANGES the `time` subtree has to satisfy its predicates.
         if candidate.time != self.time {
             validate_time_settings(&candidate.time).map_err(|message| {
+                SettingsError::Validation {
+                    path: path.to_string(),
+                    message,
+                }
+            })?;
+        }
+        if candidate.services != self.services {
+            validate_services(&candidate.services).map_err(|message| {
                 SettingsError::Validation {
                     path: path.to_string(),
                     message,

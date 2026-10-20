@@ -303,3 +303,34 @@ fn sample_token() -> ApiToken {
         created: 1_700_000_000,
     }
 }
+
+/// A unit is addressed by its file name, quoted for its dots, and a write
+/// that changes the services is held to their rules.
+#[test]
+fn a_service_is_written_by_its_quoted_name_and_checked() {
+    let mut settings = Settings::default();
+    let unit = serde_json::json!({
+        "kind": "systemd",
+        "text": "[Service]\nExecStart=/srv/x\n[Install]\nWantedBy=multi-user.target\n",
+        "enabled": true,
+    });
+    settings.set("services.units.\"x.service\"", unit).unwrap();
+    assert!(settings.services.units["x.service"].enabled);
+    assert_eq!(
+        settings.get("services.units.\"x.service\".kind").unwrap(),
+        "systemd"
+    );
+
+    let err = settings
+        .set(
+            "services.units.\"x.service\".text",
+            Value::from("[Service]\nExecStart=/srv/x\n"),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("nothing would start it"), "{err}");
+    assert!(
+        settings.services.units["x.service"]
+            .text
+            .contains("[Install]")
+    );
+}

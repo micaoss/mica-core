@@ -67,6 +67,15 @@ pub(super) fn configured() -> Settings {
     settings.time.timezone = "Europe/Berlin".to_string();
     settings.container.enabled = !settings.container.enabled;
     settings.bluetooth.enabled = !settings.bluetooth.enabled;
+    settings.services.units.insert(
+        "tailscaled".to_string(),
+        micad_settings::UserUnit {
+            kind: micad_settings::Init::Openrc,
+            text: "#!/sbin/openrc-run\ncommand=/srv/tailscaled/tailscaled\n".to_string(),
+            conf: None,
+            enabled: true,
+        },
+    );
     settings
 }
 

@@ -350,9 +350,9 @@ pub(super) async fn an_absent_root_is_404_and_a_malformed_path_is_422() {
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
 }
 
-// The nine top-level keys the write route's not-found rule is derived from.
+// The ten top-level keys the write route's not-found rule is derived from.
 #[test]
-pub(super) fn the_settings_schema_has_the_nine_roots_the_write_route_knows() {
+pub(super) fn the_settings_schema_has_the_ten_roots_the_write_route_knows() {
     let tree = serde_json::to_value(micad_settings::Settings::default()).unwrap();
     let mut keys: Vec<&str> = tree
         .as_object()
@@ -371,6 +371,7 @@ pub(super) fn the_settings_schema_has_the_nine_roots_the_write_route_knows() {
             "mqtt",
             "network",
             "provisioning",
+            "services",
             "time",
             "wifi",
         ]

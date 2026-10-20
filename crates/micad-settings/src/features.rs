@@ -20,7 +20,8 @@ use std::path::Path;
 pub const PRODUCT_FILE: &str = "/usr/lib/mica/product.conf";
 
 /// The init system a product runs, from its `INIT=` line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Init {
     /// systemd, and the default when the line is absent.
     #[default]
