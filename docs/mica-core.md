@@ -125,10 +125,11 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `bluetooth` | The switch (on by default), discoverability (off by default), the name, the pairing code (six digits; `000000` until the device is claimed with Bluetooth on, then six random digits unless one is declared; a write keeps the stored code when it carries none, and apid refuses `000000`, which only a reset returns to), the trust list |
 | `mqtt` | The switch, the broker listener (default `127.0.0.1:1883`), whether clients authenticate |
 | `time` | NTP servers and the presentation timezone |
+| `services` | The user's own services (`units`, section 3.10) |
 | `provisioning`, `reset` | Provisioning status; a staged reset |
 
 What an integrator sets lives on DATA, one JSON document per concern in `/mica/config/`
-(`system`, `network`, `wifi`, `ssh`, `mqtt`, `time`, `container`, `bluetooth`, directory `0700`,
+(`system`, `network`, `wifi`, `ssh`, `mqtt`, `time`, `container`, `bluetooth`, `services`, directory `0700`,
 documents `0600`), beside `updates.json`; what the device mints (identity, credentials,
 provisioning state, a staged reset) is `settings.toml` on STATE. Each document has its own
 schema version, and an unknown key or version is refused, never converted. A document that does
@@ -177,6 +178,7 @@ live-state tree under its name.
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
 | `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; a running `apid.service` restarted when it changed | the same, `apid` |
+| `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
 | `bluetooth` | `bluetooth.service`, the adapter's properties, each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus. When the root carries `/usr/bin/mica-bled` (mica-pkgs), `/run/mica/bled.env` (the device id, apid's local socket) and `mica-bled.service` while Bluetooth is on and the adapter is there; otherwise the service is stopped and the file removed | the same through `mica-bluetoothd`, and `mica-bled` |
 
 The station and the access point share one radio and take turns. The station is on by default:
@@ -203,6 +205,7 @@ directions, because `SettingsChanged` carries setting values.
 | Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `GetBluetooth` |
 | Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey` |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
+| The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
 | Containers and Bluetooth | `CheckContainerProject`, `CheckContainerProjectIn`, `StartContainer`, `StopContainer`, `RestartContainer`, `SetBluetoothDiscovery`, `PairBluetoothDevice`, `ConfirmBluetoothPairing`, `RemoveBluetoothDevice` |
 
 A value the tree refuses is `org.freedesktop.DBus.Error.InvalidArgs`.
@@ -258,9 +261,9 @@ absence is reported with its reason rather than as a healthy reading:
 - **Power, reset and recovery.** Reboot and power-off are recorded with their caller before they
   run. A staged reset applies one tier: `configuration`, `application-data` or `full-factory`
   (which keeps identity). `application-data` and `full-factory` also clear DATA/state
-  `containerd`, `systemd-units`, `openrc-local` (the user's OpenRC services, bound to
-  `/usr/local/etc`), and refuse to run while `/run/docker.pid` names a live dockerd, whose storage
-  they would clear under it. A board-declared physical recovery action at boot maps to a tier. A
+  `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10), and
+  refuse to run while `/run/docker.pid` names a live dockerd, whose storage they would clear
+  under it. A board-declared physical recovery action at boot maps to a tier. A
   transient root password lives in `/etc/shadow` until the next boot and in no setting.
 - **Service registry.** Other `com.mica.*` names are recorded as they appear and vanish; the name
   rule is `crates/mica-busname`, the rule of `mica-pkgs:docs/mica-pkgs.md` section 3.5.
@@ -401,6 +404,79 @@ and health are dockerd's, from each container's restart policy and health check.
 **A reset** of application data empties `projects` and `projectDirs` and clears `/mica/volumes/`
 and `/mica/containers/` but its `networks` and `tmp`, which on docker is dockerd's storage.
 
+### 3.10 The user's services
+
+A user's own service -- a systemd unit or an OpenRC script, with its binaries on DATA (in
+`/srv`, say) -- is declared in `services.units` and kept on DATA state by Base's `mica-unit`
+(`mica-system-base:docs/floor-and-options.md`, *The user's own services*), which micad runs for
+every change: one implementation of where it lives, how `[Install]` links it and how the init is
+told. `mica-unit` stays on the device for a service micad does not manage.
+
+**Settings.** `services.units.<name>` is `{"kind", "text", "conf"?, "enabled"}`, in
+`/mica/config/services.json`. The name is the unit file's under systemd (`x.service`, `x.socket`,
+`x.timer`, `x.path`, `x.target`, `x.mount`, a template `x@.service`; addressed quoted,
+`services.units."x.service"`) and the script's under OpenRC (`[A-Za-z0-9._-]`, at most 64, no
+leading `.`). `kind` is the init it is for, `systemd` or `openrc`; `text` the unit file or the
+openrc-run script (its first line `#!/sbin/openrc-run`); `conf` the script's `conf.d` file
+(OpenRC only); `enabled` whether it starts at boot. At most 32 services, each text at most 64
+KiB, a conf at most 16 KiB, together at most 256 KiB. An enabled systemd unit needs `WantedBy=`,
+`RequiredBy=` or `Alias=` in `[Install]`; a template is not enabled. A write that adds or changes
+a service is refused when its `kind` is not the product's init, when the root ships its name or
+one of its `Alias=` names (`/etc/systemd/system`, `/usr/lib/systemd/system`,
+`/lib/systemd/system`; `/etc/init.d`), or when the root has no `/usr/sbin/mica-unit`.
+
+**The reconciler** (after micad claims its bus name, as every reconciler that starts a service):
+
+- A service whose text differs from the installed file is installed (`mica-unit install`, and
+  `install --conf` for a changed conf), from a fresh `0700` directory under `/run/mica`.
+- Its links follow `enabled` (`mica-unit enable` and `disable`); a changed unit file of an
+  enabled systemd service is linked again, for its `[Install]` may name other targets.
+- It is started when it becomes enabled and stopped when it stops being so, against the record of
+  what micad applied, `/var/lib/mica/services-applied.json`; an enabled service whose text or
+  conf changed is restarted. A reconcile that changes nothing about a service does nothing to it:
+  the init starts what is enabled at boot (systemd after the bind of
+  `/usr/local/lib/systemd/system`, OpenRC through `mica-local`), a oneshot is not run again by an
+  unrelated write, and a service a timer runs is not stopped.
+- A service the record names and the settings no longer declare is stopped and removed
+  (`mica-unit remove`). Only those: a service put there with `mica-unit` by hand stays. Declaring
+  the name of one takes it over.
+- A service declared for the other init (a restored or pushed document) is stored and not applied,
+  and reported in `refused`.
+- One that fails is named in the reconcile's error, and the others still apply.
+
+The applied state is `available`, each applied service's `enabled` (and `error`), and `refused`.
+
+**Bus.** `GetUnits` answers `init`, `available` (the root has `mica-unit`) and `units`: each
+service declared or in `mica-unit`'s directory, with `declared`, `managed` (declared for this
+init), `installed`, `enabled` (linked), the init's `active` state and, for one of the other init,
+`refused`. `StartUnit`, `StopUnit` and `RestartUnit` take an installed service, managed or not,
+through systemd's manager or `rc-service`; what they do lasts until the next boot or the next
+change of `enabled`. `GetUnitLog` answers its newest lines as `GetLog` answers a service's: the
+journal of the unit under systemd, and under OpenRC the RAM log's lines tagged with the script's
+name, which is what the script sends to syslog. A name that is not installed is `InvalidArgs`.
+
+**On the device: `micad unit`.** Root's, over the bus to micad, like `micad ctr`:
+
+| Command | Does |
+| --- | --- |
+| `install <file\|-> [--name <name>] [--conf <file>] [--enable]` | Stores the file as a service named after it (`-` reads stdin and needs `--name`), with a conf on OpenRC; `--enable` enables it, and one already enabled stays so |
+| `enable`, `disable <name>` | Enables it, which starts it; disables it, which stops it |
+| `remove <name>` | Stops it and deletes it |
+| `start`, `stop`, `restart <name>` | The verb, now, on any installed service |
+| `list` | Every service: whether it is enabled, the init's state, and whether micad or a hand manages it |
+| `logs <name> [--tail N]` | Its newest lines (200 unless asked) |
+
+Under systemd a name without a unit type is a `.service`. The writes wait for the reconcile and
+report it; exit 0 done, 1 failed, 2 misused.
+
+**API.** `GET /api/v1/units` is `GetUnits`. `PUT /api/v1/units/{name}`
+(`{"kind", "text", "conf"?, "enabled"}`) declares or replaces a service, `DELETE` removes one;
+`POST /api/v1/units/{name}/{action}` (`start`, `stop`, `restart`) is a verb, and
+`GET /api/v1/units/{name}/logs` the log, each line scrubbed of secrets.
+
+**A reset** of application data empties `services.units` and clears the directories
+`mica-unit` keeps them in, DATA/state `systemd-units` and `openrc-local`.
+
 ## 4. mica-apid
 
 The same executable as micad, run as `mica-apid` or `micad apid`: the API and the console. It holds
@@ -438,7 +514,8 @@ liveness; `/_ui/` is the built-in console from `mica-apid-ui` (404 without the p
 the active custom console bundle or a redirect to `/_ui/`.
 
 **The API**, by group: session, setup and password; API tokens; settings, state and tasks;
-network, Wi-Fi, containers, Bluetooth, MQTT and SSH keys; observation (time, storage, system
+network, Wi-Fi, containers, the user's services (`/units`, section 3.10), Bluetooth, MQTT and
+SSH keys; observation (time, storage, system
 information, telemetry, service logs at `/system/logs/{source}`, network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
 fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,
