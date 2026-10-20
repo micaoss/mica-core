@@ -1,6 +1,7 @@
 //! `micad`, the settings and reconciliation daemon; `micad apid`, the HTTPS
 //! API daemon; `micad update`, the operator's update command; `micad ctr`, the
-//! operator's containers command.
+//! operator's containers command; `micad unit`, the operator's command for
+//! their own services.
 //!
 //! One executable because the two daemons already are one version --
 //! `mica-apid` depends on `micad` at exactly its version, since both speak
@@ -12,7 +13,7 @@
 
 #![forbid(unsafe_code)]
 
-const USAGE: &str = "usage: micad [--version]\n       micad apid\n       micad update [status|check|install|rollback] [--reboot]\n       micad ctr <command> (micad ctr help)";
+const USAGE: &str = "usage: micad [--version]\n       micad apid\n       micad update [status|check|install|rollback] [--reboot]\n       micad ctr <command> (micad ctr help)\n       micad unit <command> (micad unit help)";
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -31,6 +32,7 @@ fn main() -> anyhow::Result<()> {
         Some("apid" | "api") => mica_apid::main(),
         Some("update") => micad::update_cli::main(&args[2..]),
         Some("ctr") => micad::ctr_cli::main(&args[2..]),
+        Some("unit") => micad::unit_cli::main(&args[2..]),
         // Only the bare name or a version question starts down the daemon's
         // path: a mistyped subcommand must not start a second micad.
         None | Some("--version" | "-V") => micad::main(),

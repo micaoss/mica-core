@@ -39,6 +39,7 @@ mod system_info;
 mod telemetry;
 mod time_status;
 mod transient;
+pub mod unit_cli;
 mod update_auto;
 pub mod update_cli;
 mod update_codes;
