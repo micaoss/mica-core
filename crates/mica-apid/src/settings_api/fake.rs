@@ -308,7 +308,7 @@ impl FakeSettings {
     }
 
     /// Dot-paths passed to `set_settings`, in call order.
-    /// The container verbs and log reads received, in order.
+    /// The container and unit verbs and log reads received, in order.
     pub fn container_calls(&self) -> Vec<String> {
         self.container_calls.lock().unwrap().clone()
     }
@@ -399,6 +399,31 @@ impl SettingsApi for FakeSettings {
         } else {
             serde_json::json!({ "ok": true, "containers": [{ "name": format!("{project}-web-1") }] })
         })
+    }
+
+    async fn get_units(&self) -> anyhow::Result<Value> {
+        Ok(serde_json::json!({
+            "init": "systemd",
+            "available": true,
+            "units": [{ "name": "x.service", "declared": true, "managed": true, "installed": true, "enabled": true, "active": "active" }],
+        }))
+    }
+
+    async fn unit_action(&self, name: &str, action: &str) -> anyhow::Result<()> {
+        self.container_calls
+            .lock()
+            .unwrap()
+            .push(format!("unit {action} {name}"));
+        Ok(())
+    }
+
+    async fn unit_log(&self, name: &str) -> anyhow::Result<Value> {
+        Ok(serde_json::json!({
+            "source": name,
+            "available": true,
+            "lines": ["started", "password=hunter2"],
+            "truncated": false,
+        }))
     }
 
     async fn container_log(&self, name: &str, tail: u32) -> anyhow::Result<String> {

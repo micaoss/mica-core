@@ -5565,6 +5565,497 @@
         }
       }
     },
+    "/api/v1/units": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Every service declared or put there with `mica-unit`.",
+        "operationId": "api_v1_units_read",
+        "responses": {
+          "200": {
+            "description": "`init`, whether this root has `mica-unit` (`available`), and `units`: each one declared or in `mica-unit`'s directory, with `declared`, `managed` (micad applies it), `installed`, `enabled`, the init's `active` state, and `refused` for one declared for the other init",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "micad is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/units/{name}": {
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Declare or replace one service.",
+        "description": "micad refuses a name of the wrong form for the init, a unit of the other\ninit, a name (or an `Alias=`) the root ships, an enabled unit nothing\nwould start, and a root with no `mica-unit`; nothing is written then.",
+        "operationId": "api_v1_unit_write",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The unit file's name (systemd: `x.service`, `x.timer`, ...), or the script's (OpenRC)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnitBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The service was declared and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A body that is not `{kind, text, conf?, enabled}` (`validation_failed`); a service micad refuses (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed (`micad_failed`, `settings_io`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Remove one declared service: micad stops it and deletes it with its\nlinks.",
+        "operationId": "api_v1_unit_remove",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The declared service to remove",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The service was removed and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No service of this name is declared (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored services could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/units/{name}/logs": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "The newest lines of an installed service's log: its journal, or on\nOpenRC the RAM log's lines tagged with its name. Each line is scrubbed as\na service log's are before it leaves the device.",
+        "operationId": "api_v1_unit_log",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The installed service",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`source`, `available`, and when available the scrubbed `lines` (at most 200), oldest first, and `truncated`; otherwise `detail`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No such service is installed (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/units/{name}/{action}": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Start, stop or restart an installed service, managed by micad or put\nthere with `mica-unit`.",
+        "description": "What it does lasts until the next boot or the next change of `enabled`.",
+        "operationId": "api_v1_unit_action",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The installed service",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "`start`, `stop` or `restart`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The init carried out the verb"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The path names no action this route serves (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No such service is installed (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The init refused the verb (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/update": {
       "get": {
         "tags": [
@@ -9783,6 +10274,37 @@
             "description": "`builtIn` when no custom bundle is active, otherwise `custom`."
           }
         }
+      },
+      "UnitBody": {
+        "type": "object",
+        "description": "One service as it is declared: what `services.units.<name>` holds.",
+        "required": [
+          "kind",
+          "text",
+          "enabled"
+        ],
+        "properties": {
+          "conf": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The script's `conf.d` settings (OpenRC only)."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether it starts at boot; it is started when it becomes so and\nstopped when it stops being so."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`systemd` or `openrc`: the product's init, which `GET /api/v1/units`\nnames."
+          },
+          "text": {
+            "type": "string",
+            "description": "The unit file, or the openrc-run script."
+          }
+        },
+        "additionalProperties": false
       },
       "UpdateConfig": {
         "description": "The operator's update document as micad saved it: the layer-2 keys and\nnothing resolved.\n\nA key the operator never set is **absent** and one they set to `null` is\n**`null`**; both mean \"take the baked default\" and they are still two\ndifferent statements about the document. The resolved values — what this\ndevice will actually dial and follow — are `GET /api/v1/update`'s\n`lifecycle.policy` and `GET /api/v1/provisioning/status`'s `effective`."

@@ -56,6 +56,7 @@ mod tasks;
 mod tokens;
 mod ui_bundles;
 mod ui_console;
+mod units;
 mod web;
 mod wifi_ap;
 mod wifi_networks;

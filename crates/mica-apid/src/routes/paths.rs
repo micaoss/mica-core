@@ -312,6 +312,16 @@ pub(super) const V1_CONTAINER_SERVICE_LOG_ROUTE: &str =
 /// The settings dot-path the declared projects live at.
 pub(super) const CONTAINER_PROJECTS_SETTINGS_PATH: &str = "container.projects";
 
+/// The user's services: every one, one, its verbs and its log. The verbs are
+/// POST-only, as the containers' are.
+pub(super) const V1_UNITS_PATH: &str = "/v1/units";
+pub(super) const V1_UNIT_ROUTE: &str = "/v1/units/{name}";
+pub(super) const V1_UNIT_ACTION_ROUTE: &str = "/v1/units/{name}/{action}";
+pub(super) const V1_UNIT_LOG_ROUTE: &str = "/v1/units/{name}/logs";
+
+/// The settings dot-path the user's services live at.
+pub(super) const UNITS_SETTINGS_PATH: &str = "services.units";
+
 /// Each root's three spellings as one tuple, for the test that holds them
 /// together.
 #[cfg(test)]

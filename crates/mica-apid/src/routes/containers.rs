@@ -418,7 +418,7 @@ const DEFAULT_LOG_TAIL: u32 = 200;
 
 /// A settings map, or the envelope saying why it could not be read. An absent
 /// map is an empty one: the settings skip an empty map.
-async fn stored_map(
+pub(super) async fn stored_map(
     state: &AppState,
     path: &str,
 ) -> Result<serde_json::Map<String, Value>, Box<Response>> {

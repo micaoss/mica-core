@@ -164,6 +164,20 @@ pub trait SettingsApi: Send + Sync {
     async fn container_log(&self, _name: &str, _tail: u32) -> anyhow::Result<String> {
         anyhow::bail!("this build reads no container log")
     }
+    /// The user's services, declared or installed (`GetUnits`). Unavailable
+    /// by default, like every other observation.
+    async fn get_units(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no services")
+    }
+    /// One verb on an installed service: `start`, `stop` or `restart`
+    /// (`StartUnit` and its siblings).
+    async fn unit_action(&self, _name: &str, _action: &str) -> anyhow::Result<()> {
+        anyhow::bail!("this build drives no services")
+    }
+    /// An installed service's newest log lines (`GetUnitLog`).
+    async fn unit_log(&self, _name: &str) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no service log")
+    }
     /// The complete update state (`GetUpdateState`): micad reads native deployment records and
     /// re-derives the lifecycle before answering, so this is never stale.
     async fn get_update_state(&self) -> anyhow::Result<Value>;

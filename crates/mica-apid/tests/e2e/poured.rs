@@ -99,6 +99,9 @@ pub(super) fn probe_urls(path: &str, task_id: &str, snapshot_id: &str) -> Vec<St
         "/api/v1/container-projects/{project}/services/{service}/logs" => {
             owned(&["/api/v1/container-projects/app/services/web/logs"])
         }
+        // A service's log: one this device does not have, which is refused
+        // before any log is read.
+        "/api/v1/units/{name}/logs" => owned(&["/api/v1/units/x.service/logs"]),
         "/api/v1/tasks/{id}" => vec![format!("/api/v1/tasks/{task_id}")],
         "/api/v1/diagnostics/snapshots/{id}" => {
             vec![format!("/api/v1/diagnostics/snapshots/{snapshot_id}")]

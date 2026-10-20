@@ -90,6 +90,11 @@ trait Micad {
     fn restart_container(&self, name: &str) -> zbus::Result<()>;
     fn check_container_project(&self, project: &str, text: &str) -> zbus::Result<String>;
     fn get_container_log(&self, name: &str, tail: u32) -> zbus::Result<String>;
+    fn get_units(&self) -> zbus::Result<String>;
+    fn start_unit(&self, name: &str) -> zbus::Result<()>;
+    fn stop_unit(&self, name: &str) -> zbus::Result<()>;
+    fn restart_unit(&self, name: &str) -> zbus::Result<()>;
+    fn get_unit_log(&self, name: &str) -> zbus::Result<String>;
     fn reboot(&self) -> zbus::Result<()>;
     fn power_off(&self) -> zbus::Result<()>;
     fn get_update_state(&self) -> zbus::Result<String>;
@@ -516,6 +521,27 @@ impl SettingsApi for BusSettings {
         let proxy = self.proxy().await?;
         self.call("GetContainerLog", proxy.get_container_log(name, tail))
             .await
+    }
+
+    async fn get_units(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetUnits", proxy.get_units()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    async fn unit_action(&self, name: &str, action: &str) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        match action {
+            "start" => self.call("StartUnit", proxy.start_unit(name)).await,
+            "stop" => self.call("StopUnit", proxy.stop_unit(name)).await,
+            _ => self.call("RestartUnit", proxy.restart_unit(name)).await,
+        }
+    }
+
+    async fn unit_log(&self, name: &str) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetUnitLog", proxy.get_unit_log(name)).await?;
+        Ok(serde_json::from_str(&json)?)
     }
 
     async fn get_update_state(&self) -> anyhow::Result<Value> {
