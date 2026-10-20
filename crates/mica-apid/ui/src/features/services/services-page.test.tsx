@@ -13,6 +13,8 @@ const routes = {
     listen: { address: '127.0.0.1', port: 1883 },
     units: [{ unit: 'mica-mqtt-broker.service', activeState: 'active', unitFileState: 'enabled' }],
   },
+  '/api/v1/units': { init: 'systemd', available: true, units: [] },
+  '/api/v1/settings/services.units': {},
 }
 
 afterEach(() => {

@@ -557,3 +557,45 @@ export interface SnapshotCollected {
   droppedFields: number
   redactedFields: number
 }
+
+/// `GET /api/v1/units`: the user's own services, each one declared in the
+/// settings or put there with `mica-unit`.
+export interface UnitsOverview {
+  init: 'systemd' | 'openrc'
+  /// Whether this root has `mica-unit`; without it nothing can be declared.
+  available: boolean
+  units: UnitEntry[]
+}
+
+/// One service as micad reports it.
+export interface UnitEntry {
+  name: string
+  declared: boolean
+  /// micad applies it: declared, and for this device's init.
+  managed: boolean
+  installed: boolean
+  /// Linked to start at boot.
+  enabled: boolean
+  /// The init's state, for an installed service.
+  active?: string | null
+  kind?: 'systemd' | 'openrc'
+  /// Why a declared service is not applied.
+  refused?: string
+}
+
+/// One declared service: what `services.units.<name>` holds.
+export interface UserUnit {
+  kind: 'systemd' | 'openrc'
+  text: string
+  conf?: string
+  enabled: boolean
+}
+
+/// `GET /api/v1/units/{name}/logs`.
+export interface UnitLog {
+  source?: string
+  available: boolean
+  lines?: string[]
+  truncated?: boolean
+  detail?: string
+}

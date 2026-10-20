@@ -76,11 +76,18 @@ const routes = {
   '/api/v1/settings/hostname': 'mica-test',
   '/api/v1/claim': { state: 'claimed', rotationRequired: false },
   '/api/v1/network': network,
+  '/api/v1/units': {
+    init: 'openrc',
+    available: true,
+    units: [{ name: 'my-service', declared: true, managed: true, installed: true, enabled: true, active: 'started', kind: 'openrc' }],
+  },
+  '/api/v1/settings/services.units': { 'my-service': { kind: 'openrc', text: '#!/sbin/openrc-run\n', conf: 'X=1\n', enabled: true } },
+  '/api/v1/units/my-service/logs': { source: 'my-service', available: true, lines: ['started'], truncated: false },
 }
 
 /// Every page of the generated route tree, the undeclared CAN controller's
 /// included.
-const PAGES = ['/', '/network', '/network/eth0', '/network/can0', '/network/can1', '/services', '/access', '/system', '/system/ui']
+const PAGES = ['/', '/network', '/network/eth0', '/network/can0', '/network/can1', '/services', '/services/units/my-service', '/access', '/system', '/system/ui']
 
 beforeEach(() => {
   vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
