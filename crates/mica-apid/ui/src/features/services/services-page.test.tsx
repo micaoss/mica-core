@@ -2,14 +2,17 @@ import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderRoute, stubFetch } from '@/shared/testing/panel'
-import { SimulationProvider } from '@/shared/simulation/simulation-provider'
 import { ServicesPage } from './services-page'
 
 const routes = {
   '/api/v1/settings/container.enabled': true,
   '/api/v1/settings/mqtt.enabled': true,
-  '/api/v1/state/container': { state: 'running' },
-  '/api/v1/state/mqtt': { state: 'running' },
+  '/api/v1/state/container': { enabled: true, service: 'docker.service', serviceState: 'active' },
+  '/api/v1/state/mqtt': {
+    enabled: true,
+    listen: { address: '127.0.0.1', port: 1883 },
+    units: [{ unit: 'mica-mqtt-broker.service', activeState: 'active', unitFileState: 'enabled' }],
+  },
 }
 
 afterEach(() => {
@@ -18,7 +21,7 @@ afterEach(() => {
 })
 
 function renderPage() {
-  return renderRoute(<SimulationProvider><ServicesPage /></SimulationProvider>)
+  return renderRoute(<ServicesPage />)
 }
 
 describe('the services page', () => {
@@ -54,7 +57,8 @@ describe('the services page', () => {
     stubFetch(routes)
     renderPage()
 
-    expect((await screen.findAllByText('running')).length).toBeGreaterThan(0)
+    await waitFor(() => expect(screen.getAllByText('active')).toHaveLength(2))
+    expect(await screen.findByText('127.0.0.1:1883')).toBeTruthy()
     expect((await screen.findAllByText('enabled in the desired configuration')).length).toBeGreaterThan(0)
   })
 })

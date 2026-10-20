@@ -45,6 +45,18 @@ interface InterfaceConfig {
   dhcpServer?: DhcpServer
 }
 
+/// How a link is addressed: by its DHCP client, by a static address, or not
+/// at all -- a bridge port, or a link that only carries other traffic.
+type Addressing = 'dhcp' | 'static' | 'none'
+
+const changeKey = { dhcp: 'changeDhcp', static: 'changeStatic', none: 'changeNone' } as const
+
+/// An entry nobody declared yet takes DHCP, the device's own default.
+function declaredAddressing(configured: InterfaceConfig | undefined): Addressing {
+  if (configured === undefined || configured.dhcp) return 'dhcp'
+  return configured.static ? 'static' : 'none'
+}
+
 export function InterfaceDetailPage() {
   const { name } = useParams({ from: '/network_/$name' })
   const { t } = useTranslation()
@@ -57,7 +69,7 @@ export function InterfaceDetailPage() {
   const observed = status.data?.interfaces.entries?.find((entry) => entry.name === name)
   const bridge = bridgeMembership(configuredMap, name)
 
-  const [dhcp, setDhcp] = useState<boolean | undefined>()
+  const [mode, setMode] = useState<Addressing | undefined>()
   const [address, setAddress] = useState<string | undefined>()
   const [gateway, setGateway] = useState<string | undefined>()
   const [dns, setDns] = useState<string | undefined>()
@@ -82,7 +94,9 @@ export function InterfaceDetailPage() {
   const fdValue = fd ?? (configured?.can?.fd ? 'on' : 'off')
   const dataBitrateValue = dataBitrate ?? (configured?.can?.dataBitrate ?? 2000000).toString()
   // A tunnel has no DHCP client: its addressing is the address on the link.
-  const useDhcp = kind === 'wireguard' ? false : dhcp ?? configured?.dhcp ?? true
+  // A bridge port has none at all: the bridge carries it.
+  const modeValue: Addressing = kind === 'wireguard' ? 'static' : bridge !== undefined ? 'none' : mode ?? declaredAddressing(configured)
+  const useDhcp = modeValue === 'dhcp'
   const addressValue = address ?? configured?.static?.address ?? ''
   const gatewayValue = gateway ?? configured?.static?.gateway ?? ''
   const dnsValue = dns ?? (useDhcp ? configured?.dns : configured?.static?.dns)?.join(', ') ?? ''
@@ -101,7 +115,7 @@ export function InterfaceDetailPage() {
   // A server needs a subnet of its own to hand addresses out of, and a port
   // has no addressing at all. Both are the device's rules, stated here so the
   // form does not offer what the device would refuse.
-  const canServe = !useDhcp && addressValue !== '' && bridge === undefined
+  const canServe = modeValue === 'static' && addressValue !== '' && bridge === undefined
   // The ports this save would have to strip of their addressing, or declare
   // for the first time, before the device accepts the bridge.
   const claimedPorts = kind === 'bridge'
@@ -124,6 +138,8 @@ export function InterfaceDetailPage() {
         delete value.static
         // Absent and empty are the same thing to the device.
         if (splitList(dnsValue).length > 0) value.dns = splitList(dnsValue)
+      } else if (modeValue === 'none') {
+        delete value.static
       } else {
         value.static = {
           address: addressValue,
@@ -171,7 +187,7 @@ export function InterfaceDetailPage() {
   })
 
   const reset = () => {
-    setDhcp(undefined); setAddress(undefined); setGateway(undefined); setDns(undefined)
+    setMode(undefined); setAddress(undefined); setGateway(undefined); setDns(undefined)
     setParent(undefined); setVlanId(undefined); setPorts(undefined); setListenPort(undefined)
     setRoutes(undefined); setServer(undefined)
     setBitrate(undefined); setRestartMs(undefined); setFd(undefined); setDataBitrate(undefined)
@@ -258,22 +274,27 @@ export function InterfaceDetailPage() {
           <form className="grid gap-4" onSubmit={submit}>
             {kind === 'wireguard' ? (
               <p className="text-sm text-muted-foreground">{t('network.editor.tunnelAddressing')}</p>
+            ) : bridge !== undefined ? (
+              <p className="text-sm text-muted-foreground">{t('network.detail.portNote', { bridge })}</p>
             ) : (
               <FormField label={t('network.detail.mode')}>
                 {() => (
-                  <SegmentedControl<'dhcp' | 'static'>
+                  <SegmentedControl<Addressing>
                     label={t('network.detail.mode')}
-                    value={useDhcp ? 'dhcp' : 'static'}
-                    onValueChange={(mode) => setDhcp(mode === 'dhcp')}
+                    value={modeValue}
+                    onValueChange={setMode}
                     segments={[
                       { value: 'dhcp', label: 'DHCP' },
                       { value: 'static', label: t('network.detail.static') },
+                      { value: 'none', label: t('network.detail.none') },
                     ]}
                   />
                 )}
               </FormField>
             )}
-            {useDhcp ? (
+            {modeValue === 'none' ? (
+              bridge === undefined ? <p className="text-sm text-muted-foreground">{t('network.detail.noneNote')}</p> : null
+            ) : useDhcp ? (
               <>
                 <p className="text-sm text-muted-foreground">{t('network.detail.dhcpNote')}</p>
                 <FormField label={t('network.detail.dns')} hint={t('network.detail.dhcpDnsHint')}>
@@ -430,7 +451,7 @@ export function InterfaceDetailPage() {
         onSubmit={() => save.mutateAsync()}
       >
         <FactList facts={[
-          { id: 'change', label: t('network.review.change'), value: kind === 'can' ? t('network.can.change', { bitrate: bitrateValue }) : t(useDhcp ? 'network.detail.changeDhcp' : 'network.detail.changeStatic', { address: addressValue }), mono: true },
+          { id: 'change', label: t('network.review.change'), value: kind === 'can' ? t('network.can.change', { bitrate: bitrateValue }) : t(`network.detail.${changeKey[modeValue]}`, { address: addressValue }), mono: true },
           { id: 'affects', label: t('network.review.affects'), value: bridge ? t('network.review.affectsBridge', { name, bridge }) : name },
           ...(claimedPorts.length > 0 ? [{ id: 'ports', label: t('network.review.ports'), value: <span className="text-destructive">{t('network.review.portsCopy', { ports: claimedPorts.join(', ') })}</span> }] : []),
           { id: 'session', label: t('network.review.session'), value: (

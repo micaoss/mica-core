@@ -26,7 +26,7 @@ export function OverviewPage() {
   // The observed view and not `/api/v1/network`: the declared map says what an
   // integrator asked for, and the card is here to say what the device actually
   // reached the world through.
-  const network = useQuery({ queryKey: ['network-status'], queryFn: () => api<ObservedNetworkState>('/api/v1/network/status'), refetchInterval: 10_000 })
+  const network = useQuery({ queryKey: ['observed-network'], queryFn: () => api<ObservedNetworkState>('/api/v1/network/status'), refetchInterval: 10_000 })
   const hostname = useQuery({ queryKey: ['settings', 'hostname'], queryFn: () => api<string>('/api/v1/settings/hostname') })
   const tasks = useQuery({ queryKey: ['tasks'], queryFn: () => api<TaskRecord[]>('/api/v1/tasks'), refetchInterval: 5_000 })
   const update = useQuery({ queryKey: ['update-state'], queryFn: () => api<UpdateLifecycle>('/api/v1/update'), retry: false })

@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccessRouteImport } from './routes/access'
-import { Route as ApplicationsRouteImport } from './routes/applications'
 import { Route as NetworkRouteImport } from './routes/network'
 import { Route as ServicesRouteImport } from './routes/services'
 import { Route as SystemRouteImport } from './routes/system'
@@ -27,11 +26,6 @@ const IndexRoute = IndexRouteImport.update({
 const AccessRoute = AccessRouteImport.update({
   id: '/access',
   path: '/access',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApplicationsRoute = ApplicationsRouteImport.update({
-  id: '/applications',
-  path: '/applications',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NetworkRoute = NetworkRouteImport.update({
@@ -68,7 +62,6 @@ const SystemUiRoute = SystemUiRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/access': typeof AccessRoute
-  '/applications': typeof ApplicationsRoute
   '/network': typeof NetworkRoute
   '/services': typeof ServicesRoute
   '/system': typeof SystemRoute
@@ -79,7 +72,6 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/access': typeof AccessRoute
-  '/applications': typeof ApplicationsRoute
   '/network': typeof NetworkRoute
   '/services': typeof ServicesRoute
   '/system': typeof SystemRoute
@@ -91,7 +83,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/access': typeof AccessRoute
-  '/applications': typeof ApplicationsRoute
   '/network': typeof NetworkRoute
   '/services': typeof ServicesRoute
   '/system': typeof SystemRoute
@@ -104,7 +95,6 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/access'
-    | '/applications'
     | '/network'
     | '/services'
     | '/system'
@@ -115,7 +105,6 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/access'
-    | '/applications'
     | '/network'
     | '/services'
     | '/system'
@@ -126,7 +115,6 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/access'
-    | '/applications'
     | '/network'
     | '/services'
     | '/system'
@@ -138,7 +126,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccessRoute: typeof AccessRoute
-  ApplicationsRoute: typeof ApplicationsRoute
   NetworkRoute: typeof NetworkRoute
   ServicesRoute: typeof ServicesRoute
   SystemRoute: typeof SystemRoute
@@ -161,13 +148,6 @@ declare module '@tanstack/react-router' {
       path: '/access'
       fullPath: '/access'
       preLoaderRoute: typeof AccessRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/applications': {
-      id: '/applications'
-      path: '/applications'
-      fullPath: '/applications'
-      preLoaderRoute: typeof ApplicationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/network': {
@@ -218,7 +198,6 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccessRoute: AccessRoute,
-  ApplicationsRoute: ApplicationsRoute,
   NetworkRoute: NetworkRoute,
   ServicesRoute: ServicesRoute,
   SystemRoute: SystemRoute,

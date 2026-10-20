@@ -12,8 +12,7 @@ import { buttonVariants } from '@/shared/components/ui/button'
 import { Switch } from '@/shared/components/ui/switch'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
-import { SimulationNotice } from '@/shared/simulation/simulation-notice'
-import { findService, serviceEndpoint } from './service-catalog'
+import { findService, serviceObserved } from './service-catalog'
 import { MqttPanel } from './mqtt-panel'
 import { ContainersPanel } from './containers-panel'
 
@@ -48,8 +47,7 @@ export function ServiceDetailPage() {
 
   const Icon = service.icon
   const on = enabled.data === true
-  const observed = typeof state.data?.state === 'string' ? state.data.state : undefined
-  const endpoint = serviceEndpoint(state.data)
+  const { state: observed, endpoint } = serviceObserved(service.id, state.data)
 
   return (
     <Page>
@@ -96,7 +94,6 @@ export function ServiceDetailPage() {
         {service.id === 'mqtt' ? <MqttPanel /> : <ContainersPanel />}
       </PageSection>
 
-      <SimulationNotice scope={title} />
     </Page>
   )
 }

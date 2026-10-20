@@ -104,6 +104,45 @@ describe('one interface', () => {
     expect(JSON.parse(String((call?.[1] as RequestInit).body)).vlan).toEqual({ parent: 'eth1', id: 100 })
   })
 
+  /// A port has no addressing of its own, so its page offers none: an empty
+  /// required address field would be a form that can neither be saved as it
+  /// is nor saved filled in.
+  it('saves a bridge port with no addressing', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth1': () => jsonResponse({ taskId: 'task-1' }, 202) })
+    render('eth1')
+
+    expect(await screen.findByText(/A port of bridge br0 carries no addressing/)).toBeTruthy()
+    expect(screen.queryByLabelText('Address / prefix')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'DHCP' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Apply' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ kind: 'physical', dhcp: false })
+  })
+
+  it('takes a static link down to no addressing', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth2': () => jsonResponse({ taskId: 'task-1' }, 202) })
+    render('eth2')
+
+    expect(await screen.findByLabelText('Address / prefix')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'No address' }))
+    expect(screen.queryByLabelText('Address / prefix')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Apply' }))
+
+    const call = await waitFor(() => {
+      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(found).toBeTruthy()
+      return found
+    })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ kind: 'physical', dhcp: false })
+  })
+
   /// A bridge takes only declared interfaces with no addressing, so a port it
   /// gains is rewritten that way in the same write as the bridge, and the
   /// review says which interface loses its addressing.

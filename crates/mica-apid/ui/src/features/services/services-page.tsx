@@ -8,10 +8,9 @@ import { Page, PageHeader } from '@/shared/components/page'
 import { Panel } from '@/shared/components/panel'
 import { StatusBadge } from '@/shared/components/status-badge'
 import { Switch } from '@/shared/components/ui/switch'
-import { SimulationNotice } from '@/shared/simulation/simulation-notice'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
-import { serviceCatalog, serviceEndpoint, type ServiceDefinition } from './service-catalog'
+import { serviceCatalog, serviceObserved, type ServiceDefinition } from './service-catalog'
 import { useFeatures } from '@/shared/lib/features'
 
 export function ServicesPage() {
@@ -23,7 +22,6 @@ export function ServicesPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {serviceCatalog.filter((service) => serves(service.id)).map((service) => <ServiceCard key={service.id} service={service} />)}
       </div>
-      <SimulationNotice scope={t('services.title')} />
     </Page>
   )
 }
@@ -50,8 +48,7 @@ function ServiceCard({ service }: { service: ServiceDefinition }) {
   })
 
   const on = enabled.data === true
-  const observed = typeof state.data?.state === 'string' ? state.data.state : undefined
-  const endpoint = serviceEndpoint(state.data)
+  const { state: observed, endpoint } = serviceObserved(service.id, state.data)
 
   return (
     <Panel className="h-full" contentClassName="gap-3">
@@ -73,7 +70,7 @@ function ServiceCard({ service }: { service: ServiceDefinition }) {
       <p className="text-sm text-muted-foreground">{t(`services.${service.id}.warning`)}</p>
       {enabled.error ? <Callout tone="danger" title={failureDetail(enabled.error, t('common.requestFailed'))} /> : null}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
-        <StatusBadge tone={observed === 'running' ? 'success' : state.isError ? 'warning' : 'neutral'}>
+        <StatusBadge tone={observed === 'active' ? 'success' : observed === 'failed' || state.isError ? 'warning' : 'neutral'}>
           {observed ?? t('common.states.unknown')}
         </StatusBadge>
         <span className="text-sm text-muted-foreground">{update.isPending ? t('services.saving') : t(on ? 'services.desiredEnabled' : 'services.desiredDisabled')}</span>

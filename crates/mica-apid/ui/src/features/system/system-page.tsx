@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { Download, ExternalLink, PackageSearch, Power, RefreshCcw, Settings2, Upload } from 'lucide-react'
+import { ExternalLink, PackageSearch, Power, RefreshCcw, Settings2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import type { TaskAccepted, UiStatus } from '@/lib/types'
 import { Button, buttonVariants } from '@/shared/components/ui/button'
@@ -15,13 +15,10 @@ import { Page, PageHeader, PageSection } from '@/shared/components/page'
 import { Panel } from '@/shared/components/panel'
 import { RowItem, RowList } from '@/shared/components/row-item'
 import { StatusBadge, StatusDot } from '@/shared/components/status-badge'
-import { PlannedNotice } from '@/shared/simulation/planned'
 import { Input } from '@/shared/components/ui/input'
 import { Switch } from '@/shared/components/ui/switch'
 import { TaskProgress } from '@/shared/components/task-progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs'
-import { SimulationNotice } from '@/shared/simulation/simulation-notice'
-import { useSimulation } from '@/shared/simulation/simulation-provider'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
 import { InformationPanel } from '@/features/system/information-panel'
@@ -70,7 +67,6 @@ export function SystemPage() {
           </PageSection>
           <PageSection title={t('system.update.automaticTitle')} description={t('system.update.automaticDescription')}><AutomaticUpdatesPanel /></PageSection>
           <PageSection title={t('system.update.manualTitle')} description={t('system.update.manualDescription')}><ManualUpdate /></PageSection>
-          <PageSection title={t('system.backup.title')} description={t('system.backup.description')}><ConfigBackup /></PageSection>
           <PageSection title={t('system.recovery.additionTitle')} description={t('system.recovery.addition')}>
             <RollbackPanel />
             <CredentialRecoveryPanel />
@@ -80,10 +76,8 @@ export function SystemPage() {
         <TabsContent value="diagnostics" className="grid gap-6 pt-4">
           <DiagnosticsPanel />
           <LogsPanel />
-          <PageSection title={t('system.support.title')} description={t('system.support.description')}><SupportAccess /></PageSection>
         </TabsContent>
       </Tabs>
-      <SimulationNotice scope={t('system.simulationScope')} />
     </Page>
   )
 }
@@ -361,39 +355,6 @@ export function ManualUpdate() {
           onSubmit={(file) => upload.mutate(file)}
         />
       </div>
-    </Panel>
-  )
-}
-
-function ConfigBackup() {
-  const { t } = useTranslation()
-  return (
-    <div className="grid gap-3">
-      <PlannedNotice>{t('system.backup.planned')}</PlannedNotice>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Panel title={t('system.backup.exportTitle')} description={t('system.backup.exportCopy')}>
-          <Button className="justify-self-start" variant="outline" size="sm" disabled><Download />{t('system.backup.download')}</Button>
-        </Panel>
-        <Panel title={t('system.backup.importTitle')} description={t('system.backup.importCopy')}>
-          <Button className="justify-self-start" variant="outline" size="sm" disabled><Upload />{t('system.backup.restore')}</Button>
-        </Panel>
-      </div>
-    </div>
-  )
-}
-
-function SupportAccess() {
-  const { t } = useTranslation()
-  const simulation = useSimulation()
-  return (
-    <Panel>
-      <PlannedNotice>{t('system.support.planned')}</PlannedNotice>
-      <ToggleField
-        title={t('system.recovery.supportAccess')}
-        description={t('system.recovery.supportCopy')}
-        control={<Switch aria-label={t('system.recovery.supportAccess')} checked={simulation.supportAccess} onCheckedChange={simulation.setSupportAccess} />}
-      />
-      <p className="text-sm text-muted-foreground">{t(simulation.supportAccess ? 'system.support.on' : 'system.support.off')}</p>
     </Panel>
   )
 }

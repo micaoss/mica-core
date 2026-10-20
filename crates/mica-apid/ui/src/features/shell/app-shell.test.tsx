@@ -64,7 +64,7 @@ describe('the shell', () => {
     renderShell()
 
     const nav = await screen.findByRole('navigation', { name: 'Primary navigation' })
-    const destinations = ['Overview', 'Network', 'Services', 'Applications', 'Access', 'System']
+    const destinations = ['Overview', 'Network', 'Services', 'Access', 'System']
     for (const name of destinations) {
       expect(within(nav).getByRole('link', { name })).toBeTruthy()
     }

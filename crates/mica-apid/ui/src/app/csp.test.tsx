@@ -80,7 +80,7 @@ const routes = {
 
 /// Every page of the generated route tree, the undeclared CAN controller's
 /// included.
-const PAGES = ['/', '/network', '/network/eth0', '/network/can0', '/network/can1', '/services', '/applications', '/access', '/system', '/system/ui']
+const PAGES = ['/', '/network', '/network/eth0', '/network/can0', '/network/can1', '/services', '/access', '/system', '/system/ui']
 
 beforeEach(() => {
   vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({

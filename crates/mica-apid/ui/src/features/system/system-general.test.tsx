@@ -2,7 +2,6 @@ import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderPanel, renderRoute, stubFetch } from '@/shared/testing/panel'
-import { SimulationProvider } from '@/shared/simulation/simulation-provider'
 import { SystemPage, UiPanel, UpdateOverview } from './system-page'
 
 afterEach(() => {
@@ -72,7 +71,7 @@ describe('the hostname form', () => {
       'PUT /api/v1/settings/hostname': () => { current = 'workshop-01'; return jsonResponse({ taskId: 'task-1' }, 202) },
       '/api/v1/tasks/task-1': { id: 'task-1', operation: 'set', dotPath: 'hostname', source: 'api', status: 'finished', outcome: 'succeeded', enqueuedAt: new Date().toISOString(), foldedCount: 0 },
     })
-    renderRoute(<SimulationProvider><SystemPage /></SimulationProvider>)
+    renderRoute(<SystemPage />)
 
     const field = await screen.findByLabelText('Hostname')
     await userEvent.clear(field)
@@ -92,7 +91,7 @@ describe('the rest of the system tab', () => {
       '/api/v1/provisioning/status': { unclaimed: false },
       'POST /api/v1/update/install': () => new Response(null, { status: 202 }),
     })
-    renderRoute(<SimulationProvider><SystemPage /></SimulationProvider>)
+    renderRoute(<SystemPage />)
 
     await userEvent.click(await screen.findByRole('tab', { name: /Update/ }))
     const field = await screen.findByLabelText('Deployment ID')
@@ -106,16 +105,5 @@ describe('the rest of the system tab', () => {
 
     expect((await screen.findAllByText('Installation accepted. Follow its progress above.')).length).toBeGreaterThan(0)
     expect(fetch.mock.calls.some(([url]) => String(url) === '/api/v1/update/install')).toBe(true)
-  })
-
-  it('names the backup and support surfaces as planned rather than offering them', async () => {
-    stubFetch({ ...updateReady, '/api/v1/provisioning/status': { unclaimed: false }, '/api/v1/diagnostics/snapshots': { retention: { maxSnapshots: 5, maxTotalBytes: 1, maxSnapshotBytes: 1, schemaVersion: 1, redactionSchemaVersion: 1 }, snapshots: [] } })
-    renderRoute(<SimulationProvider><SystemPage /></SimulationProvider>)
-
-    await userEvent.click(await screen.findByRole('tab', { name: /Update/ }))
-    expect(screen.getByRole('button', { name: /Download .micabak/ }).hasAttribute('disabled')).toBe(true)
-
-    await userEvent.click(screen.getByRole('tab', { name: /Diagnostics/ }))
-    expect(await screen.findByRole('switch', { name: 'Enable support access' })).toBeTruthy()
   })
 })

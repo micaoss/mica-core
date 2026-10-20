@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Cable, ChevronDown, ChevronRight, KeyRound, Plus, Radar, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import { configuredSummary, networkRows, physicalInterfaces, visibleNetworkRows, type NetworkRow, listedAddresses } from '@/lib/network'
-import { band, groupScan, type ScannedBss, type ScannedNetwork } from '@/lib/wifi-scan'
+import { band, groupScan, scanSecurity, type ScannedBss, type ScannedNetwork } from '@/lib/wifi-scan'
 import type { NetworkOverview, ObservedNetworkState, TaskAccepted, WifiAccessPoint, WifiScan } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
@@ -116,7 +116,7 @@ export function NetworkPage() {
             where an operator who clicked a row is already looking. */}
         <TabsContent value="observed" className="grid gap-6 pt-4"><ObservedNetworkPanel /></TabsContent>
       </Tabs>
-      <InterfaceDialog key={adding ? 'new' : 'closed'} open={adding} onClose={() => setAdding(false)} ports={ports} />
+      <InterfaceDialog key={adding ? 'new' : 'closed'} open={adding} onClose={() => setAdding(false)} ports={ports} declared={Object.keys(network.data?.configured ?? {})} />
     </Page>
   )
 }
@@ -129,12 +129,12 @@ function isOnline(row: NetworkRow) {
   return ['routable', 'carrier', 'degraded'].includes(row.observed?.operationalState ?? '')
 }
 
-function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; onClose: () => void; ports: string[] }) {
+function InterfaceDialog({ open, onClose, ports: candidates, declared }: { open: boolean; onClose: () => void; ports: string[]; declared: string[] }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [kind, setKind] = useState<NonNullable<InterfaceConfig['kind']>>('physical')
-  const [dhcp, setDhcp] = useState(true)
+  const [mode, setMode] = useState<'dhcp' | 'static' | 'none'>('dhcp')
   const [address, setAddress] = useState('')
   const [gateway, setGateway] = useState('')
   const [dns, setDns] = useState('')
@@ -153,8 +153,10 @@ function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; 
 
   // A tunnel has no DHCP client and no gateway of its own: its addressing is
   // the address on the interface, and where its traffic goes is each peer's
-  // allowed IPs. Offering the switch would offer a configuration micad refuses.
-  const addressing = kind === 'wireguard' ? 'static' : dhcp ? 'dhcp' : 'static'
+  // allowed IPs. Offering the choice would offer a configuration micad refuses.
+  const addressing = kind === 'wireguard' ? 'static' : mode
+  // A PUT on a declared name replaces that entry; adding is never editing.
+  const taken = declared.includes(name.trim())
 
   const save = () => {
     // A CAN controller is its bit timing alone: the device refuses any
@@ -181,7 +183,7 @@ function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; 
     if (kind === 'vlan') value.vlan = { parent: parentValue, id: Number(vlanId) }
     if (kind === 'bridge') value.bridge = { ports }
     if (kind === 'wireguard') value.wireguard = { listenPort: Number(listenPort), peers: [] }
-    return api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(name)}`, json('PUT', value))
+    return api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(name.trim())}`, json('PUT', value))
       .then(() => queryClient.invalidateQueries({ queryKey: ['network'] }))
   }
 
@@ -195,9 +197,10 @@ function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; 
       success={t('network.editor.added', { name })}
       failure={t('network.editor.addTitle')}
       onSubmit={save}
+      submitDisabled={taken}
     >
-      <FormField label={t('network.editor.name')}>
-        {(id) => <Input id={id} value={name} onChange={(event) => setName(event.target.value)} required />}
+      <FormField label={t('network.editor.name')} hint={taken ? <span className="text-destructive">{t('network.editor.nameTaken', { name: name.trim() })}</span> : undefined}>
+        {(id) => <Input id={id} value={name} onChange={(event) => setName(event.target.value)} aria-invalid={taken} required />}
       </FormField>
       <FormField label={t('network.editor.kind')}>
         {(id) => (
@@ -240,11 +243,20 @@ function InterfaceDialog({ open, onClose, ports: candidates }: { open: boolean; 
       ) : kind === 'wireguard' ? (
         <p className="text-sm text-muted-foreground">{t('network.editor.tunnelAddressing')}</p>
       ) : (
-        <ToggleField
-          title={t('network.editor.dhcp')}
-          description={t('network.editor.dhcpCopy')}
-          control={<Switch checked={dhcp} onCheckedChange={setDhcp} aria-label={t('network.editor.dhcp')} />}
-        />
+        <FormField label={t('network.detail.mode')} hint={addressing === 'dhcp' ? t('network.editor.dhcpCopy') : addressing === 'none' ? t('network.detail.noneNote') : undefined}>
+          {() => (
+            <SegmentedControl<'dhcp' | 'static' | 'none'>
+              label={t('network.detail.mode')}
+              value={mode}
+              onValueChange={setMode}
+              segments={[
+                { value: 'dhcp', label: 'DHCP' },
+                { value: 'static', label: t('network.detail.static') },
+                { value: 'none', label: t('network.detail.none') },
+              ]}
+            />
+          )}
+        </FormField>
       )}
       {kind !== 'can' && addressing === 'static' ? (
         <>
@@ -317,6 +329,8 @@ function WifiPanel() {
   const [psk, setPsk] = useState('')
   const [hidden, setHidden] = useState(false)
   const [priority, setPriority] = useState('0')
+  // Set when the dialog was opened from a scanned network that needs a key.
+  const [needsKey, setNeedsKey] = useState(false)
   const [radio, setRadio] = useState<string>()
   const [confirmingClient, setConfirmingClient] = useState(false)
   // The station role, as its own resource: one radio, one switch. The list
@@ -360,7 +374,7 @@ function WifiPanel() {
     .then(() => {
       // Every field resets: a reopened dialog showing the previous network's
       // priority is a value nobody chose.
-      setSsid(''); setPsk(''); setHidden(false); setPriority('0')
+      setSsid(''); setPsk(''); setHidden(false); setPriority('0'); setNeedsKey(false)
       return queryClient.invalidateQueries({ queryKey: ['wifi-networks'] })
     })
   // A scan is a POST: it sweeps every channel and briefly costs the station
@@ -381,6 +395,7 @@ function WifiPanel() {
   const connect = (network: ScannedBss) => {
     setSsid(network.ssid)
     setPsk('')
+    setNeedsKey(scanSecurity(network.flags) !== 'open')
     setHidden(network.ssid === '')
     setPriority('0')
     setAdding(true)
@@ -426,7 +441,7 @@ function WifiPanel() {
         )}
         <div className="ml-auto flex items-center gap-3">
           <Switch checked={client.data?.enabled ?? false} onCheckedChange={(value) => toggle.mutate(value)} aria-label={t('network.wifi.client')} />
-          <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus />{t('network.wifi.add')}</Button>
+          <Button size="sm" variant="outline" onClick={() => { setNeedsKey(false); setAdding(true) }}><Plus />{t('network.wifi.add')}</Button>
         </div>
       </div>
       {panelError ? <Callout tone="danger" title={failureDetail(panelError, t('common.requestFailed'))} /> : null}
@@ -484,10 +499,13 @@ function WifiPanel() {
             } },
             { id: 'signal', header: t('network.wifi.signal'), cell: (network) => signal(network.best) },
             { id: 'band', header: t('network.wifi.bandHeader'), cell: (network) => [...new Set(network.accessPoints.map(bandLabel))].join(', ') },
-            { id: 'security', header: t('network.wifi.security'), cell: (network) => network.best.flags.includes('PSK') ? t('network.wifi.wpa') : t('network.wifi.open') },
-            { id: 'actions', header: '', align: 'end', cell: (network) => (
-              <Button type="button" size="sm" variant="outline" onClick={() => connect(network.best)}>{t('network.wifi.connect')}</Button>
-            ) },
+            { id: 'security', header: t('network.wifi.security'), cell: (network) => t(`network.wifi.securities.${scanSecurity(network.best.flags)}`) },
+            { id: 'actions', header: '', align: 'end', cell: (network) => {
+              // The client has no 802.1X or WEP: a network it cannot join is
+              // not offered as one it can.
+              const joinable = !['eap', 'wep'].includes(scanSecurity(network.best.flags))
+              return <Button type="button" size="sm" variant="outline" disabled={!joinable} onClick={() => connect(network.best)}>{t('network.wifi.connect')}</Button>
+            } },
           ]}
         />
       </CollectionPanel>
@@ -535,7 +553,7 @@ function WifiPanel() {
           {(id) => <Input id={id} value={ssid} onChange={(event) => setSsid(event.target.value)} required />}
         </FormField>
         <FormField label={t('network.wifi.password')}>
-          {(id) => <Input id={id} type="password" minLength={8} value={psk} onChange={(event) => setPsk(event.target.value)} />}
+          {(id) => <Input id={id} type="password" minLength={8} value={psk} onChange={(event) => setPsk(event.target.value)} required={needsKey} />}
         </FormField>
         <FormField label={t('network.wifi.priority')}>
           {(id) => <Input id={id} type="number" value={priority} onChange={(event) => setPriority(event.target.value)} />}
@@ -562,6 +580,13 @@ function WifiPanel() {
       </FormDialog>
     </>
   )
+}
+
+/// `10.10.0.2/24` as the route to that one host, `10.10.0.2/32`.
+function hostRoute(address: string | undefined) {
+  if (!address) return ''
+  const host = address.split('/')[0]
+  return `${host}/${host.includes(':') ? 128 : 32}`
 }
 
 function WireguardPanel({ configured }: { configured: Record<string, InterfaceConfig> }) {
@@ -602,12 +627,13 @@ function WireguardPanel({ configured }: { configured: Record<string, InterfaceCo
   // read, and an operator who just rotated is looking at this card.
   const devicePublicKey = rotate.data?.publicKey ?? state.data?.[iface]?.publicKey
   // The block a remote peer needs, in wg-quick's own spelling. `AllowedIPs` is
-  // this device's tunnel address: what the remote should route here, and the
-  // one value that cannot be guessed from the key.
+  // this device's tunnel address as a host route: what the remote should
+  // route here, and the one value that cannot be guessed from the key. The
+  // interface's own prefix would hand this device the whole tunnel subnet.
   const localPeerConfig = [
     '[Peer]',
     `PublicKey = ${devicePublicKey ?? ''}`,
-    `AllowedIPs = ${tunnel?.static?.address ?? ''}`,
+    `AllowedIPs = ${hostRoute(tunnel?.static?.address)}`,
     ...(tunnel?.wireguard?.listenPort ? [`Endpoint = ${window.location.hostname}:${tunnel.wireguard.listenPort}`] : []),
   ].join('\n')
 

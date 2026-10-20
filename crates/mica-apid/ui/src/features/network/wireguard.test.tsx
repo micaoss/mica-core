@@ -44,6 +44,15 @@ describe('the WireGuard tunnel', () => {
     expect(await screen.findByText(peer.publicKey)).toBeTruthy()
   })
 
+  /// The remote routes this one host into the tunnel, not the interface's
+  /// whole subnet.
+  it('gives the remote peer this device as a host route', async () => {
+    stubFetch({ ...routes, '/api/v1/state/network': { wg0: { publicKey: 'device-public-key=' } } })
+    await openTunnel()
+
+    expect(await screen.findByText(/AllowedIPs = 10\.10\.0\.2\/32/)).toBeTruthy()
+  })
+
   it('closes the peer removal confirmation and reports it', async () => {
     stubFetch({ ...routes, [`DELETE /api/v1/network/wg0/peers/${encodeURIComponent(peer.publicKey)}`]: () => new Response(null, { status: 204 }) })
     await openTunnel()

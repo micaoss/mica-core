@@ -39,3 +39,16 @@ export function groupScan(networks: ScannedBss[] = []): ScannedNetwork[] {
     })
     .sort((left, right) => strength(right.best) - strength(left.best) || left.ssid.localeCompare(right.ssid))
 }
+
+/// What joining a network takes, read from the supplicant's scan flags. The
+/// client joins WPA2 and WPA3 networks with a passphrase (`key_mgmt=WPA-PSK
+/// SAE`) and open ones; an 802.1X (EAP) or WEP network it cannot join at all.
+export type ScanSecurity = 'open' | 'psk' | 'sae' | 'eap' | 'wep'
+
+export function scanSecurity(flags: string): ScanSecurity {
+  if (flags.includes('PSK')) return 'psk'
+  if (flags.includes('SAE')) return 'sae'
+  if (flags.includes('EAP')) return 'eap'
+  if (flags.includes('WEP')) return 'wep'
+  return 'open'
+}

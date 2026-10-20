@@ -3,8 +3,6 @@ import type { Translation } from './resources'
 export const zhCN: Translation = {
   common: {
     optional: '可选',
-    planned: '计划中',
-    plannedCopy: '已完成设计，但设备尚未提供对应 API。此处的操作不会改变设备。',
     age: { now: '刚刚', minutes: '{{count}} 分钟前', hours: '{{count}} 小时前' },
     actions: { refresh: '刷新', enable: '启用', disable: '停用', copy: '复制', cancel: '取消', delete: '删除', close: '关闭', edit: '编辑', save: '保存', add: '添加' },
     states: { available: '可用', unavailable: '不可用', enabled: '已启用', disabled: '已停用', unknown: '未知', finished: '已完成', succeeded: '成功', failed: '失败', pending: '等待中', running: '执行中', queued: '已排队', healthy: '健康', routable: '可路由', carrier: '有载波', degraded: '降级' },
@@ -28,10 +26,6 @@ export const zhCN: Translation = {
   root: {
     connecting: '正在连接设备…',
     unavailable: '管理 API 当前不可用。请在 micad 就绪后重试。',
-  },
-  simulation: {
-    title: '模拟界面',
-    description: '{{scope}} 中尚未实现的功能使用临时示例状态。相关操作不会改变此设备，并会在页面重新加载后复位。',
   },
   shell: {
     bluetoothPin: {
@@ -61,7 +55,7 @@ export const zhCN: Translation = {
       offline: '设备不可达。',
       offlineCopy: '在管理面重新响应之前，所有变更都已暂停。已保存的内容不会丢失。',
     },
-    nav: { overview: '概览', network: '网络', services: '服务', applications: '应用', access: '访问', system: '系统' },
+    nav: { overview: '概览', network: '网络', services: '服务', access: '访问', system: '系统' },
   },
   auth: {
     login: {
@@ -119,9 +113,9 @@ export const zhCN: Translation = {
     detail: {
       overview: '概览', addressing: '寻址', danger: '危险操作',
       mac: 'MAC', mtu: 'MTU', memberOf: '所属网桥', noBridge: '不是网桥端口', link: '链路',
-      mode: '模式', static: '静态', dhcpNote: '地址、网关与 DNS 来自 DHCP 租约。', dhcpDnsHint: '可选。填写后使用这里的服务器，不再使用租约下发的 DNS。',
+      mode: '模式', static: '静态', none: '无地址', noneNote: '链路启用但不配置自己的地址，其上的路由按直连处理。', portNote: '作为网桥 {{bridge}} 的端口，它不配置自己的地址，由网桥配置。', dhcpNote: '地址、网关与 DNS 来自 DHCP 租约。', dhcpDnsHint: '可选。填写后使用这里的服务器，不再使用租约下发的 DNS。',
       address: '地址 / 前缀', gateway: '网关', dns: 'DNS 服务器', save: '审阅并保存', observedCopy: '设备对这条链路的观测：来自 networkd、其 DHCP 客户端和无线电。', deleted: '已从期望配置中移除 {{name}}。',
-      changeDhcp: '静态 → DHCP', changeStatic: '寻址 → 静态 {{address}}',
+      changeDhcp: '静态 → DHCP', changeStatic: '寻址 → 静态 {{address}}', changeNone: '寻址 → 无地址',
       dangerCopy: '删除接口只是从期望配置中移除，不会从设备上移除。删除 {{name}} 前，请先把它从引用它的网桥中移除。',
     },
     apply: {
@@ -170,14 +164,14 @@ export const zhCN: Translation = {
     },
     editor: {
       added: '接口 {{name}} 已保存。',
-      addTitle: '添加网络接口', editTitle: '编辑网络接口', description: '应用到设备前，请检查完整的期望状态。', name: '接口名称', kind: '接口类型', dhcp: '使用 DHCP', dhcpCopy: '自动获取地址与 DNS。', address: '地址', gateway: '网关', dns: 'DNS 服务器', parent: '父接口', vlanId: 'VLAN ID', ports: '网桥端口', portsHint: '该网桥接管的链路。端口自身不带寻址配置。', noPorts: '该设备没有可选的物理链路。', tunnelAddressing: '隧道没有 DHCP 客户端，也没有网关：它使用你指定的地址，流量走向由每个对端声明的允许 IP 决定。', listenPort: '监听端口', delete: '删除接口', deleteCopy: '从期望网络配置中删除 {{name}}？当前会话可能断开。',
+      addTitle: '添加网络接口', editTitle: '编辑网络接口', description: '应用到设备前，请检查完整的期望状态。', name: '接口名称', nameTaken: '{{name}} 已经声明过。请在列表中打开它进行修改。', kind: '接口类型', dhcpCopy: '自动获取地址与 DNS。', address: '地址', gateway: '网关', dns: 'DNS 服务器', parent: '父接口', vlanId: 'VLAN ID', ports: '网桥端口', portsHint: '该网桥接管的链路。端口自身不带寻址配置。', noPorts: '该设备没有可选的物理链路。', tunnelAddressing: '隧道没有 DHCP 客户端，也没有网关：它使用你指定的地址，流量走向由每个对端声明的允许 IP 决定。', listenPort: '监听端口', delete: '删除接口', deleteCopy: '从期望网络配置中删除 {{name}}？当前会话可能断开。',
     },
     wifi: {
       clientEnabled: '已启用 Wi-Fi 客户端。',
       clientDisabled: '已停用 Wi-Fi 客户端。',
       added: '网络 {{name}} 已保存。',
       removed: '网络 {{name}} 已删除。',
-      enabled: 'Wi-Fi 客户端', add: '添加 Wi-Fi 网络', addCopy: '凭据由 micad 保存，后续读取时会隐藏。', security: '安全', credential: '凭据', auto: '自动连接', wpa: 'WPA-PSK', saved: '已保存 · 不回显', noCredential: '无', priorityValue: '优先级 {{priority}}', client: 'Wi-Fi 客户端', hidden: '隐藏 SSID', priority: '优先级', password: '密码', open: '开放网络', empty: '没有保存 Wi-Fi 网络。', radio: '客户端网卡', scanTitle: '附近的网络', scan: '扫描', scanning: '扫描中…', scanned: '已获取扫描结果。', scanEmpty: '尚未扫描，或未发现网络。', scanUnavailable: '无法扫描。', scanApHolds: '接入点正在使用 {{iface}}，请先关闭接入点再扫描。', scanClientOff: 'Wi-Fi 客户端已关闭，开启后才能扫描。', exclusiveTitle: '关闭接入点？', exclusiveCopy: 'Wi-Fi 客户端和接入点不能同时使用 {{iface}}。开启客户端会关闭接入点。', exclusiveConfirm: '关闭接入点', hiddenNetwork: '（隐藏）', signal: '信号', bandHeader: '频段', band: '{{band}} GHz', accessPoints: '{{count}} 个接入点', accessPointsOf: '{{name}} 的接入点', connect: '连接', edit: '编辑 {{name}}', editCopy: '不填写新密码时，保留已存储的密钥。', keepKey: '留空表示保留已存储的密钥。', keepKeyPlaceholder: '保持不变', remove: '移除 {{name}}', removeCopy: '忘记 {{name}}？设备之后将不再自动连接此网络。' },
+      enabled: 'Wi-Fi 客户端', add: '添加 Wi-Fi 网络', addCopy: '凭据由 micad 保存，后续读取时会隐藏。', security: '安全', credential: '凭据', auto: '自动连接', wpa: 'WPA-PSK', securities: { open: '开放网络', psk: 'WPA-PSK', sae: 'WPA3-SAE', eap: 'WPA 企业版 · 不支持', wep: 'WEP · 不支持' }, saved: '已保存 · 不回显', noCredential: '无', priorityValue: '优先级 {{priority}}', client: 'Wi-Fi 客户端', hidden: '隐藏 SSID', priority: '优先级', password: '密码', open: '开放网络', empty: '没有保存 Wi-Fi 网络。', radio: '客户端网卡', scanTitle: '附近的网络', scan: '扫描', scanning: '扫描中…', scanned: '已获取扫描结果。', scanEmpty: '尚未扫描，或未发现网络。', scanUnavailable: '无法扫描。', scanApHolds: '接入点正在使用 {{iface}}，请先关闭接入点再扫描。', scanClientOff: 'Wi-Fi 客户端已关闭，开启后才能扫描。', exclusiveTitle: '关闭接入点？', exclusiveCopy: 'Wi-Fi 客户端和接入点不能同时使用 {{iface}}。开启客户端会关闭接入点。', exclusiveConfirm: '关闭接入点', hiddenNetwork: '（隐藏）', signal: '信号', bandHeader: '频段', band: '{{band}} GHz', accessPoints: '{{count}} 个接入点', accessPointsOf: '{{name}} 的接入点', connect: '连接', edit: '编辑 {{name}}', editCopy: '不填写新密码时，保留已存储的密钥。', keepKey: '留空表示保留已存储的密钥。', keepKeyPlaceholder: '保持不变', remove: '移除 {{name}}', removeCopy: '忘记 {{name}}？设备之后将不再自动连接此网络。' },
     bluetooth: {
       title: '蓝牙', copy: '适配器，以及本机信任的设备。已配对的设备记录在这里，所以重置会清除它，适配器也会忘掉配对密钥。',
       noAdapter: '该设备没有蓝牙适配器。',
@@ -346,35 +340,6 @@ export const zhCN: Translation = {
     disabledToast: '已停用 {{name}}。',
     saving: '正在保存…',
   },
-  applications: {
-    title: '应用', description: '本设备上已安装与可安装的工作负载。',
-    tabs: { installed: '已安装', catalog: '目录', activity: '活动' }, search: '搜索应用', count: '{{count}} 个应用',
-    planned: '应用功能尚无设备 API。本页内容都是临时的内存状态，刷新页面后会重置。',
-    retained: '{{count}} 个保留了数据',
-    blocked: { title: '容器运行时已停用', copy: '重新启用之前，容器应用无法启动。', action: '打开服务' },
-    columns: { application: '应用', source: '来源', kind: '类型', desired: '期望', runtime: '运行', health: '健康', action: '动作', result: '结果', time: '时间' },
-    sources: { catalog: '已验证目录', local: '本地签名者', system: '系统 · OS 验证' }, kinds: { container: '容器', native: '原生程序' },
-    states: { running: '运行中', stopped: '已停止', blocked: '被阻止', notInstalled: '未安装', healthy: '健康', unknown: '未知', retained: '数据已保留' },
-    actions: { open: '打开', start: '启动', stop: '停止', update: '更新', install: '安装', remove: '移除',
-      removed: '已移除 {{name}}。', started: '已启动 {{name}}。', stopped: '已停止 {{name}}。', updated: '已更新 {{name}}。' },
-    activityActions: { update: '更新', start: '启动', remove: '移除（保留数据）', install: '安装', changeRuntime: '更改运行状态' },
-    activityTimes: { justNow: '刚刚', hourAgo: '1 小时前', dayAgo: '1 天前', twoDaysAgo: '2 天前' },
-    remove: { title: '移除 {{name}}？', description: '工作负载会被移除，但应用的持久数据将保留。' }, empty: '没有符合搜索条件的应用。',
-    details: { description: '查看已安装制品、信任来源与实际运行状态。', version: '版本', source: '来源', kind: '运行类型', runtime: '运行状态', health: '健康状态', permissions: '权限', permissionsValue: '网络 · 持久存储 · 托管工作负载' },
-    catalogCached: '签名目录 · 6 分钟前缓存', publisher: '发布者', download: '下载', persistent: '持久空间', permissions: '权限',
-    catalogItems: {
-      mqtt: { publisher: 'MICA Project', size: '48 MiB', storage: '120 MiB', permissions: '网络 · 主机端口 · MQTT 主题' },
-      serial: { name: '串口桥接', publisher: 'MICA Project', size: '34 MiB', storage: '200 MiB', permissions: '网络 · /dev/ttyUSB0' },
-      agent: { name: '设备代理', publisher: '硬件厂商', size: '18 MiB', storage: '无', permissions: '网络 · 设备 · 原生服务' },
-    },
-    install: {
-      title: '安装 {{name}}', steps: { compatibility: '兼容性', access: '访问与存储', confirm: '确认', progress: '进度' },
-      compatible: '兼容 mica-cm4 rev 2 和 2026.08.2 版本。', version: '精确版本', digest: '制品摘要',
-      network: '监听 1883/tcp，并允许出站网络访问。', messaging: '发布和订阅 mica/# 主题。', resources: 'CPU 1.0 · 内存 256 MiB · PIDs 128。',
-      storage: '创建 120 MiB 持久卷。', changes: '下载并验证签名制品，随后安装并执行健康检查。失败时会回滚，不留下运行中的工作负载。',
-      back: '上一步', next: '下一步', confirm: '安装 2.4.0', done: '{{name}} 正在运行', open: '打开应用',
-    },
-  },
   access: {
     title: '访问',
     web: {
@@ -465,7 +430,6 @@ export const zhCN: Translation = {
   },
   system: {
     title: '系统',
-    simulationScope: '自动更新策略、临时支持访问与配置备份',
     tabs: { general: '常规', information: '信息', time: '时间', update: '更新与恢复', storage: '存储', diagnostics: '诊断', recovery: '恢复' },
     information: {
       loading: '正在读取系统信息…',
@@ -664,19 +628,6 @@ export const zhCN: Translation = {
         deleteCopy: '从本设备删除快照 {{id}}？保留策略也会自动删除最旧的快照；此操作会立即删除它。',
       },
     },
-    backup: {
-      title: '配置备份',
-      description: '包含网络、服务、访问与应用设置，不包含应用数据。',
-      planned: '设备尚无备份或恢复端点，两个操作均已禁用。',
-      exportTitle: '下载备份', exportCopy: '使用管理员密码加密。', download: '下载 .micabak',
-      importTitle: '从备份恢复', importCopy: '替换当前配置并重启设备，已安装的应用会保留。', restore: '上传并恢复',
-    },
-    support: {
-      title: '技术支持',
-      description: '面向支持工程师的限时远程访问，通过 PIN 授权。',
-      planned: '设备尚无支持访问端点。下面的开关只影响当前浏览器会话，不会签发 PIN。',
-      on: '支持访问将处于开启状态。', off: '当前没有开启任何远程支持访问。',
-    },
     recovery: {
       additionTitle: '设计之外的恢复能力',
       addition: '不属于已批准的设计。槽位回滚与凭据恢复是设备已发布的能力，在设计给出位置之前控制台先保留它们。',
@@ -717,7 +668,6 @@ export const zhCN: Translation = {
         stillHolding: '无论如何，已认证的会话都不得执行此流程。若你仍持有密码，请改在“访问”页面的“管理员密码”处更改。',
         noSoftwarePath: '在能够断言物理在场之前，管理员密码丢失的设备没有任何软件途径可以重新进入。',
       },
-      supportTitle: '临时支持访问', supportDescription: '授予有审计记录且限时的故障排查会话。', supportAccess: '启用支持访问', supportCopy: '60 分钟后自动失效。', supportExpires: '支持访问将在 60 分钟后失效', supportDisabled: '支持访问已停用',
     },
     identity: { title: '设备标识', description: '本地服务和发现功能使用的主机名。', hostname: '主机名', save: '保存主机名', saved: '主机名已保存。' },
     ui: {

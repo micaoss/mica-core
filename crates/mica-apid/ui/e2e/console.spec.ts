@@ -10,19 +10,11 @@ test('navigates the complete desktop console', async ({ page, isMobile }) => {
 
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
-  await page.getByRole('link', { name: 'Applications' }).click()
-  await expect(page.getByRole('heading', { name: 'Applications' })).toBeVisible()
-  await expect(page.getByText('Simulation', { exact: true })).toBeVisible()
-  await page.getByRole('tab', { name: 'Catalog' }).click()
-  const mqtt = page.locator('[data-slot=card]').filter({ hasText: 'MQTT Bridge' })
-  await mqtt.getByRole('button', { name: 'Install' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Install 2.4.0' }).click()
-  await expect(page.getByText('MQTT Bridge is running')).toBeVisible()
-  await page.getByRole('button', { name: 'Open application' }).click()
-  await page.getByRole('tab', { name: 'Installed' }).click()
-  await expect(page.getByRole('button', { name: 'MQTT Bridge', exact: true })).toBeVisible()
+  for (const name of ['Network', 'Services', 'Access', 'System']) {
+    await page.getByRole('link', { name }).click()
+    await expect(page.getByRole('heading', { name })).toBeVisible()
+  }
+  await expect(page.getByRole('link', { name: 'Applications' })).toHaveCount(0)
 })
 
 test('routes the reported update from the overview attention list', async ({ page, isMobile }) => {
@@ -35,7 +27,7 @@ test('routes the reported update from the overview attention list', async ({ pag
   await expect(page.getByRole('tab', { name: 'Update & recovery', selected: true })).toBeVisible()
 })
 
-test('writes real time settings while the simulation boundary stays named', async ({ page, isMobile }) => {
+test('writes real time settings', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop system workflow')
   await page.goto('./system')
   await page.getByRole('tab', { name: 'Time' }).click()
@@ -46,7 +38,6 @@ test('writes real time settings while the simulation boundary stays named', asyn
   await page.getByRole('textbox', { name: /^Timezone/ }).fill('Europe/Berlin')
   await page.getByRole('button', { name: 'Save timezone' }).click()
   await expect(page.getByText('Change applied.')).toBeVisible()
-  await expect(page.getByText('Simulation', { exact: true })).toBeVisible()
 })
 
 test('reads the observed network beside the desired configuration', async ({ page, isMobile }) => {
@@ -113,15 +104,6 @@ test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
   await expect(page.getByRole('heading', { name: 'Network' })).toBeVisible()
 })
 
-test('labels every route that contains simulated behavior', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'chromium', 'one browser covers the shared route boundary')
-  for (const path of ['./services', './applications', './system']) {
-    await page.goto(path)
-    await expect(page.getByText('Simulation', { exact: true })).toBeVisible()
-    await expect(page.getByText(/does not change this device/)).toBeVisible()
-  }
-})
-
 test('keeps a tall dialog inside a short appliance screen', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the geometry')
   // A 1024x600 panel is a normal appliance display. The dialog is height
@@ -130,7 +112,7 @@ test('keeps a tall dialog inside a short appliance screen', async ({ page }, tes
   await page.setViewportSize({ width: 1024, height: 520 })
   await page.goto('./network')
   await page.getByRole('button', { name: 'Add interface' }).click()
-  await page.getByRole('switch', { name: 'Use DHCP' }).click()
+  await page.getByRole('button', { name: 'Static' }).click()
 
   const dialog = page.locator('[data-slot=dialog-content]')
   const box = (await dialog.boundingBox())!
@@ -180,10 +162,9 @@ test('reports a saved policy', async ({ page }, testInfo) => {
 test('matches the approved responsive visual baseline', async ({ page }, testInfo) => {
   if (testInfo.project.name === 'tablet') {
     await page.addInitScript(() => localStorage.setItem('mica.ui.theme', 'dark'))
-    await page.goto('./applications')
-    await page.getByRole('tab', { name: 'Catalog' }).click()
+    await page.goto('./services')
     await expect(page.locator('html')).toHaveClass(/dark/)
-    await expect(page).toHaveScreenshot('applications-tablet-dark.png', { animations: 'disabled', fullPage: true })
+    await expect(page).toHaveScreenshot('services-tablet-dark.png', { animations: 'disabled', fullPage: true })
     return
   }
 
@@ -241,7 +222,8 @@ function payload(path: string, method: string): unknown {
   if (path === '/api/v1/tasks/task-e2e') return { id: 'task-e2e', operation: 'set', dotPath: 'settings', source: 'api', status: 'finished', outcome: 'succeeded', enqueuedAt: FIVE_MINUTES_AGO(), foldedCount: 0 }
   if (path === '/api/v1/ui') return { mode: 'builtIn' }
   if (path === '/api/v1/settings/container.enabled' || path === '/api/v1/settings/mqtt.enabled' || path === '/api/v1/settings/access.ssh.enabled') return true
-  if (path === '/api/v1/state/container' || path === '/api/v1/state/mqtt') return { state: 'running' }
+  if (path === '/api/v1/state/container') return { enabled: true, service: 'docker.service', serviceState: 'active' }
+  if (path === '/api/v1/state/mqtt') return { enabled: true, listen: { address: '127.0.0.1', port: 1883 }, units: [{ unit: 'mica-mqtt-broker.service', activeState: 'active', unitFileState: 'enabled' }] }
   if (path === '/api/v1/tokens') return []
   if (path === '/api/v1/ssh/authorized-keys') return { keys: [], notice: 'Every authorized key grants root on this appliance.' }
   if (path === '/api/v1/settings/wifi.client') return { enabled: true, interface: 'wlan0', networks: [] }

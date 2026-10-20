@@ -149,6 +149,41 @@ describe('the network page', () => {
     expect((within(dialog).getByLabelText('SSID') as HTMLInputElement).value).toBe('lab-5g')
   })
 
+  /// The client joins WPA2 and WPA3 with a passphrase and nothing else: a
+  /// WPA3 network is not "open", and an 802.1X or WEP one cannot be joined.
+  it('names each network\'s security and offers only what the client can join', async () => {
+    stubFetch({
+      ...routes,
+      'POST /api/v1/wifi/client/scan': () => jsonResponse({
+        available: true,
+        interface: 'wlan0',
+        networks: [
+          { ssid: 'wpa3', bssid: 'aa:00:00:00:00:01', signalDbm: -40, flags: '[WPA2-SAE-CCMP][ESS]' },
+          { ssid: 'corp', bssid: 'aa:00:00:00:00:02', signalDbm: -50, flags: '[WPA2-EAP-CCMP][ESS]' },
+          { ssid: 'old', bssid: 'aa:00:00:00:00:03', signalDbm: -60, flags: '[WEP][ESS]' },
+          { ssid: 'cafe', bssid: 'aa:00:00:00:00:04', signalDbm: -70, flags: '[ESS]' },
+        ],
+      }),
+    })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Scan' }))
+    const row = (ssid: string) => within(screen.getByText(ssid).closest('tr')!)
+    await screen.findByText('wpa3')
+    expect(row('wpa3').getByText('WPA3-SAE')).toBeTruthy()
+    expect(row('corp').getByText('WPA-Enterprise · not supported')).toBeTruthy()
+    expect(row('old').getByText('WEP · not supported')).toBeTruthy()
+    expect(row('cafe').getByText('Open network')).toBeTruthy()
+    expect(row('corp').getByRole('button', { name: 'Connect' }).hasAttribute('disabled')).toBe(true)
+    expect(row('old').getByRole('button', { name: 'Connect' }).hasAttribute('disabled')).toBe(true)
+
+    // A network that needs a key is not added without one.
+    await userEvent.click(row('wpa3').getByRole('button', { name: 'Connect' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add Wi-Fi network' })
+    expect(within(dialog).getByLabelText('Password').hasAttribute('required')).toBe(true)
+  })
+
   /// A mesh answers with one SSID from many access points: the list shows the
   /// network once, at its strongest, and opens to each access point.
   it('shows a network once with its access points behind it', async () => {
@@ -294,7 +329,7 @@ describe('the network page', () => {
     renderRoute(<NetworkPage />)
 
     await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
-    await userEvent.click(await screen.findByRole('switch', { name: 'Use DHCP' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Static' }))
 
     const dialog = await screen.findByRole('dialog')
     // Header and footer stay outside the scroll region, so both are present
@@ -338,6 +373,39 @@ describe('the add-interface dialog', () => {
     expect((await screen.findAllByText('Interface eth1 saved.')).length).toBeGreaterThan(0)
     const put = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')!
     expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ dhcp: true })
+  })
+
+  /// A PUT on a declared name would replace that entry, so the dialog that
+  /// adds refuses a name the device already declares.
+  it('refuses a name that is already declared', async () => {
+    const fetch = stubFetch(routes)
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText('Interface name'), 'eth0')
+
+    expect(within(dialog).getByText(/eth0 is already declared/)).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Add' }).hasAttribute('disabled')).toBe(true)
+    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
+  })
+
+  /// A link that only carries other traffic -- a future bridge port, a VLAN
+  /// parent -- is declared with no addressing at all.
+  it('declares an interface with no addressing', async () => {
+    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth1': () => jsonResponse({ taskId: 'task-1' }, 202) })
+    renderRoute(<NetworkPage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText('Interface name'), 'eth1')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'No address' }))
+    expect(within(dialog).queryByLabelText('Address')).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+
+    expect((await screen.findAllByText('Interface eth1 saved.')).length).toBeGreaterThan(0)
+    const put = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')!
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ dhcp: false })
   })
 
   /// A CAN controller is declared with its bit timing alone: no DHCP switch,

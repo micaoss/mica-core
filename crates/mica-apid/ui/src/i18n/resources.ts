@@ -1,8 +1,6 @@
 export const en = {
   common: {
     optional: 'optional',
-    planned: 'Planned',
-    plannedCopy: 'Designed, but the device has no API for it yet. Nothing here changes the device.',
     age: {
       now: 'just now',
       minutes: '{{count}} min ago',
@@ -62,10 +60,6 @@ export const en = {
     connecting: 'Connecting to the device…',
     unavailable: 'The management API is unavailable. Retry after micad is ready.',
   },
-  simulation: {
-    title: 'Simulation',
-    description: '{{scope}} uses temporary sample state for functions that are not implemented yet. This simulation does not change this device and resets when the page reloads.',
-  },
   shell: {
     bluetoothPin: {
       title: 'Save the Bluetooth pairing code',
@@ -108,7 +102,6 @@ export const en = {
       overview: 'Overview',
       network: 'Network',
       services: 'Services',
-      applications: 'Applications',
       access: 'Access',
       system: 'System',
     },
@@ -205,6 +198,9 @@ export const en = {
       link: 'Link',
       mode: 'Mode',
       static: 'Static',
+      none: 'No address',
+      noneNote: 'The link comes up with no address of its own. Routes on it are on-link.',
+      portNote: 'A port of bridge {{bridge}} carries no addressing of its own; the bridge does.',
       dhcpNote: 'Addressing, gateway and DNS come from the DHCP lease.',
       dhcpDnsHint: 'Optional. Servers named here are used instead of the ones the lease gives.',
       address: 'Address / prefix',
@@ -215,6 +211,7 @@ export const en = {
       deleted: '{{name}} was removed from the desired configuration.',
       changeDhcp: 'static → DHCP',
       changeStatic: 'addressing → static {{address}}',
+      changeNone: 'addressing → none',
       dangerCopy: 'An interface is removed from the desired configuration, not from the device. Remove {{name}} from any bridge that lists it before deleting it.',
     },
     apply: {
@@ -288,14 +285,14 @@ export const en = {
     editor: {
       added: 'Interface {{name}} saved.',
       addTitle: 'Add network interface', editTitle: 'Edit network interface', description: 'Review the complete desired state before applying it to the device.',
-      name: 'Interface name', kind: 'Interface kind', dhcp: 'Use DHCP', dhcpCopy: 'Acquire addressing and DNS automatically.', address: 'Address', gateway: 'Gateway', dns: 'DNS servers', parent: 'Parent interface', vlanId: 'VLAN ID', ports: 'Bridge ports', portsHint: 'The links this bridge takes over. A port carries no addressing of its own.', noPorts: 'This device reports no physical links to choose from.', tunnelAddressing: 'A tunnel has no DHCP client and no gateway: it carries the address you give it, and each peer declares which traffic it takes.', listenPort: 'Listen port', delete: 'Delete interface', deleteCopy: 'Delete {{name}} from the desired network configuration? This can disconnect the current session.',
+      name: 'Interface name', nameTaken: '{{name}} is already declared. Open it from the list to change it.', kind: 'Interface kind', dhcpCopy: 'Acquire addressing and DNS automatically.', address: 'Address', gateway: 'Gateway', dns: 'DNS servers', parent: 'Parent interface', vlanId: 'VLAN ID', ports: 'Bridge ports', portsHint: 'The links this bridge takes over. A port carries no addressing of its own.', noPorts: 'This device reports no physical links to choose from.', tunnelAddressing: 'A tunnel has no DHCP client and no gateway: it carries the address you give it, and each peer declares which traffic it takes.', listenPort: 'Listen port', delete: 'Delete interface', deleteCopy: 'Delete {{name}} from the desired network configuration? This can disconnect the current session.',
     },
     wifi: {
       clientEnabled: 'Wi-Fi client enabled.',
       clientDisabled: 'Wi-Fi client disabled.',
       added: 'Network {{name}} saved.',
       removed: 'Network {{name}} removed.',
-      enabled: 'Wi-Fi client', add: 'Add Wi-Fi network', addCopy: 'Credentials are stored by micad and are redacted on later reads.', security: 'Security', credential: 'Credential', auto: 'Auto-connect', wpa: 'WPA-PSK', saved: 'Saved · not echoed', noCredential: 'None', priorityValue: 'priority {{priority}}', client: 'Wi-Fi client', hidden: 'Hidden SSID', priority: 'Priority', password: 'Password', open: 'Open network', empty: 'No Wi-Fi networks are saved.', radio: 'Station radio', scanTitle: 'Networks on the air', scan: 'Scan', scanning: 'Scanning…', scanned: 'The radio reported what it found.', scanEmpty: 'No scan has been run, or the radio found nothing.', scanUnavailable: 'The radio could not scan.', scanApHolds: 'The access point is using {{iface}}. Switch it off to scan.', scanClientOff: 'The Wi-Fi client is switched off. Switch it on to scan.', exclusiveTitle: 'Switch off the access point?', exclusiveCopy: 'The Wi-Fi client and the access point cannot share {{iface}}. Switching the client on switches the access point off.', exclusiveConfirm: 'Switch off the access point', hiddenNetwork: '(hidden)', signal: 'Signal', bandHeader: 'Band', band: '{{band}} GHz', accessPoints: '{{count}} access points', accessPointsOf: 'Access points of {{name}}', connect: 'Connect', edit: 'Edit {{name}}', editCopy: 'The stored key is kept unless a new one is entered.', keepKey: 'Leave empty to keep the stored key.', keepKeyPlaceholder: 'unchanged', remove: 'Remove {{name}}', removeCopy: 'Forget {{name}}? The device will no longer connect to it automatically.',
+      enabled: 'Wi-Fi client', add: 'Add Wi-Fi network', addCopy: 'Credentials are stored by micad and are redacted on later reads.', security: 'Security', credential: 'Credential', auto: 'Auto-connect', wpa: 'WPA-PSK', securities: { open: 'Open network', psk: 'WPA-PSK', sae: 'WPA3-SAE', eap: 'WPA-Enterprise · not supported', wep: 'WEP · not supported' }, saved: 'Saved · not echoed', noCredential: 'None', priorityValue: 'priority {{priority}}', client: 'Wi-Fi client', hidden: 'Hidden SSID', priority: 'Priority', password: 'Password', open: 'Open network', empty: 'No Wi-Fi networks are saved.', radio: 'Station radio', scanTitle: 'Networks on the air', scan: 'Scan', scanning: 'Scanning…', scanned: 'The radio reported what it found.', scanEmpty: 'No scan has been run, or the radio found nothing.', scanUnavailable: 'The radio could not scan.', scanApHolds: 'The access point is using {{iface}}. Switch it off to scan.', scanClientOff: 'The Wi-Fi client is switched off. Switch it on to scan.', exclusiveTitle: 'Switch off the access point?', exclusiveCopy: 'The Wi-Fi client and the access point cannot share {{iface}}. Switching the client on switches the access point off.', exclusiveConfirm: 'Switch off the access point', hiddenNetwork: '(hidden)', signal: 'Signal', bandHeader: 'Band', band: '{{band}} GHz', accessPoints: '{{count}} access points', accessPointsOf: 'Access points of {{name}}', connect: 'Connect', edit: 'Edit {{name}}', editCopy: 'The stored key is kept unless a new one is entered.', keepKey: 'Leave empty to keep the stored key.', keepKeyPlaceholder: 'unchanged', remove: 'Remove {{name}}', removeCopy: 'Forget {{name}}? The device will no longer connect to it automatically.',
     },
     bluetooth: {
       title: 'Bluetooth',
@@ -537,54 +534,6 @@ export const en = {
     disabledToast: '{{name}} disabled.',
     saving: 'Saving…',
   },
-  applications: {
-    title: 'Applications',
-    description: 'Installed and available workloads for this device.',
-    tabs: { installed: 'Installed', catalog: 'Catalog', activity: 'Activity' },
-    search: 'Search applications',
-    count: '{{count}} applications',
-    planned: 'Applications have no device API yet. Everything on this page is temporary in-memory state that resets when the page reloads.',
-    retained: '{{count}} with retained data',
-    blocked: {
-      title: 'The container runtime is disabled',
-      copy: 'Container applications cannot start until it is enabled again.',
-      action: 'Open Services',
-    },
-    columns: { application: 'Application', source: 'Source', kind: 'Kind', desired: 'Desired', runtime: 'Runtime', health: 'Health', action: 'Action', result: 'Result', time: 'Time' },
-    sources: { catalog: 'Verified catalog', local: 'Local signer', system: 'System · OS verified' },
-    kinds: { container: 'Container', native: 'Native' },
-    states: { running: 'Running', stopped: 'Stopped', blocked: 'Blocked', notInstalled: 'Not installed', healthy: 'Healthy', unknown: 'Unknown', retained: 'Data retained' },
-    actions: { open: 'Open', start: 'Start', stop: 'Stop', update: 'Update', install: 'Install', remove: 'Remove',
-      removed: '{{name}} removed.', started: '{{name}} started.', stopped: '{{name}} stopped.', updated: '{{name}} updated.' },
-    activityActions: { update: 'Update', start: 'Start', remove: 'Remove (retain data)', install: 'Install', changeRuntime: 'Change runtime' },
-    activityTimes: { justNow: 'just now', hourAgo: '1 hour ago', dayAgo: '1 day ago', twoDaysAgo: '2 days ago' },
-    remove: { title: 'Remove {{name}}?', description: 'The workload is removed but its persistent application data is retained.' },
-    details: { description: 'Installed artifact, trust source and effective runtime state.', version: 'Version', source: 'Source', kind: 'Runtime kind', runtime: 'Runtime', health: 'Health', permissions: 'Permissions', permissionsValue: 'Network · persistent storage · managed workload' },
-    empty: 'No applications match this search.',
-    catalogCached: 'Signed catalog · cached 6 minutes ago',
-    publisher: 'Publisher',
-    download: 'Download',
-    persistent: 'Persistent storage',
-    permissions: 'Permissions',
-    catalogItems: {
-      mqtt: { publisher: 'MICA Project', size: '48 MiB', storage: '120 MiB', permissions: 'Network · host port · MQTT topics' },
-      serial: { name: 'Serial Bridge', publisher: 'MICA Project', size: '34 MiB', storage: '200 MiB', permissions: 'Network · /dev/ttyUSB0' },
-      agent: { name: 'Device Agent', publisher: 'Hardware vendor', size: '18 MiB', storage: 'None', permissions: 'Network · devices · native unit' },
-    },
-    install: {
-      title: 'Install {{name}}',
-      steps: { compatibility: 'Compatibility', access: 'Access & storage', confirm: 'Confirm', progress: 'Progress' },
-      compatible: 'Compatible with mica-cm4 rev 2 and release 2026.08.2.',
-      version: 'Exact version',
-      digest: 'Artifact digest',
-      network: 'Listen on 1883/tcp and allow outbound network access.',
-      messaging: 'Publish and subscribe to mica/# topics.',
-      resources: 'CPU 1.0 · memory 256 MiB · PIDs 128.',
-      storage: 'Create a 120 MiB persistent volume.',
-      changes: 'The signed artifact is downloaded, verified, installed and health-checked. Failed installation rolls back without leaving a running workload.',
-      back: 'Back', next: 'Next', confirm: 'Install 2.4.0', done: '{{name}} is running', open: 'Open application',
-    },
-  },
   access: {
     title: 'Access',
     web: {
@@ -734,7 +683,6 @@ export const en = {
   },
   system: {
     title: 'System',
-    simulationScope: 'Automatic-update policy, temporary support access and configuration backup',
     tabs: { general: 'General', information: 'Information', time: 'Time', update: 'Update & recovery', storage: 'Storage', diagnostics: 'Diagnostics', recovery: 'Recovery' },
     information: {
       loading: 'Reading system information…',
@@ -933,24 +881,6 @@ export const en = {
         deleteCopy: 'Delete snapshot {{id}} from this device? Retention also removes the oldest automatically; this removes it now.',
       },
     },
-    backup: {
-      title: 'Configuration backup',
-      description: 'Network, service, access and application settings. Application data is not included.',
-      planned: 'The device has no backup or restore endpoint yet. Both controls are disabled.',
-      exportTitle: 'Download backup',
-      exportCopy: 'Encrypted with the administrator password.',
-      download: 'Download .micabak',
-      importTitle: 'Restore from backup',
-      importCopy: 'Replaces the current configuration and reboots the device. Installed applications are retained.',
-      restore: 'Upload and restore',
-    },
-    support: {
-      title: 'Technical support',
-      description: 'Time-limited remote access for support engineers, authorized by PIN.',
-      planned: 'The device has no support-access endpoint yet. The switch below changes only this browser session, and no PIN is issued.',
-      on: 'Support access would be open.',
-      off: 'No remote support access is currently open.',
-    },
     recovery: {
       additionTitle: 'Recovery beyond the design',
       addition: 'Not part of the approved design. Slot rollback and credential recovery are shipped device capabilities the console keeps until the design has a place for them.',
@@ -996,7 +926,6 @@ export const en = {
         stillHolding: 'An authenticated session may not run this flow in any case. If you still hold the password, change it under Admin password on the Access page instead.',
         noSoftwarePath: 'Until presence can be asserted, a device whose administrator password is lost has no software path back in.',
       },
-      supportTitle: 'Temporary support access', supportDescription: 'Grant an audited, time-limited troubleshooting session.', supportAccess: 'Enable support access', supportCopy: 'Expires automatically after 60 minutes.', supportExpires: 'Support access expires in 60 minutes', supportDisabled: 'Support access is disabled',
     },
     identity: {
       title: 'Device identity',

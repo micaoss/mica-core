@@ -1,7 +1,7 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import { useIsFetching, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { CircleAlert, Cpu, Key, LayoutGrid, LogOut, Menu, Network, Package, RefreshCw, Server, Settings2, X } from 'lucide-react'
+import { CircleAlert, Cpu, Key, LayoutGrid, LogOut, Menu, Network, RefreshCw, Server, Settings2, X } from 'lucide-react'
 import { useState } from 'react'
 import { api, rememberSession } from '@/shared/lib/http'
 import { sessionKey } from '@/features/auth/auth'
@@ -19,7 +19,6 @@ const nav = [
   { to: '/' as const, label: 'shell.nav.overview' as const, icon: LayoutGrid },
   { to: '/network' as const, label: 'shell.nav.network' as const, icon: Network },
   { to: '/services' as const, label: 'shell.nav.services' as const, icon: Server },
-  { to: '/applications' as const, label: 'shell.nav.applications' as const, icon: Package },
   { to: '/access' as const, label: 'shell.nav.access' as const, icon: Key },
   { to: '/system' as const, label: 'shell.nav.system' as const, icon: Cpu },
 ]
