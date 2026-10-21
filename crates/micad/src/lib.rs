@@ -20,6 +20,7 @@ mod containerd;
 mod containers;
 pub mod ctr_cli;
 mod deployment;
+pub mod device_code;
 mod diagnostics;
 mod docker;
 mod fswrite;

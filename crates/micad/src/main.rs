@@ -13,7 +13,7 @@
 
 #![forbid(unsafe_code)]
 
-const USAGE: &str = "usage: micad [--version]\n       micad apid\n       micad update [status|check|install|rollback] [--reboot]\n       micad ctr <command> (micad ctr help)\n       micad unit <command> (micad unit help)";
+const USAGE: &str = "usage: micad [--version]\n       micad apid\n       micad update [status|check|install|rollback] [--reboot]\n       micad ctr <command> (micad ctr help)\n       micad unit <command> (micad unit help)\n       micad device-code\n       micad derive-ap-key --secret FILE CODE";
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -33,6 +33,8 @@ fn main() -> anyhow::Result<()> {
         Some("update") => micad::update_cli::main(&args[2..]),
         Some("ctr") => micad::ctr_cli::main(&args[2..]),
         Some("unit") => micad::unit_cli::main(&args[2..]),
+        Some("device-code") => micad::device_code::device_code_main(),
+        Some("derive-ap-key") => micad::device_code::derive_ap_key_main(&args[2..]),
         // Only the bare name or a version question starts down the daemon's
         // path: a mistyped subcommand must not start a second micad.
         None | Some("--version" | "-V") => micad::main(),
