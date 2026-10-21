@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  defaultPool,
   discardAll,
   inSubnet,
   nextName,
   overlaps,
   pendingChanges,
-  poolFromRange,
-  poolRange,
   rebase,
   sameEntry,
   stageCreate,
@@ -114,23 +111,12 @@ describe('a fresh read under a change set', () => {
   })
 })
 
-describe('IPv4 and the DHCP pool', () => {
+describe('IPv4', () => {
   it('tells host addresses and overlapping subnets', () => {
     expect(inSubnet('192.168.10.1', '192.168.10.0/24')).toBe(true)
     expect(inSubnet('192.168.10.255', '192.168.10.0/24')).toBe(false)
     expect(overlaps('10.0.0.0/8', '10.20.0.1/16')).toBe(true)
     expect(overlaps('192.168.1.1/24', '192.168.2.1/24')).toBe(false)
-  })
-
-  it('converts a pool between start–end and offset/size', () => {
-    expect(poolRange('192.168.10.1/24', { poolOffset: 100, poolSize: 50 })).toEqual({ start: '192.168.10.100', end: '192.168.10.149' })
-    expect(poolFromRange('192.168.10.1/24', '192.168.10.100', '192.168.10.149')).toEqual({ poolOffset: 100, poolSize: 50 })
-    expect(poolFromRange('192.168.10.1/24', '192.168.11.1', '192.168.10.149')).toBeUndefined()
-  })
-
-  it('offers a default pool only where the subnet can serve one', () => {
-    expect(defaultPool('192.168.10.1/24')).toEqual({ poolOffset: 100, poolSize: 50 })
-    expect(defaultPool('10.0.0.1/30')).toBeUndefined()
   })
 
   it('names the next free interface', () => {

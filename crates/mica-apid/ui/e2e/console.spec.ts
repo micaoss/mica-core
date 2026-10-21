@@ -308,7 +308,7 @@ function payload(path: string, method: string): unknown {
   return {}
 }
 
-/// A bench device for the network pages: an uplink, a LAN with a DHCP server,
+/// A bench device for the network pages: an uplink, a statically addressed LAN,
 /// an unplugged port, a joined radio and a tunnel with one peer. Registered
 /// after the device mock, so its answers take precedence.
 async function mockNetworkBench(page: Page) {
@@ -326,7 +326,7 @@ function benchPayload(path: string): unknown {
   if (path === '/api/v1/network') return {
     configured: {
       eth0: { dhcp: true },
-      eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, dhcpServer: { poolOffset: 100, poolSize: 50 } },
+      eth1: { dhcp: false, static: { address: '192.168.10.1/24' } },
       wg0: { kind: 'wireguard', dhcp: false, static: { address: '10.10.0.2/24', dns: [] }, wireguard: { listenPort: 51820, peers: [PEER] } },
     },
     configuredCount: 3,

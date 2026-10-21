@@ -17,7 +17,7 @@ import { notifySuccess } from '@/shared/feedback/toast'
 import { ChangeBar, EditBar } from './change-bar'
 import { updateChangeSet } from './change-set'
 import {
-  bridgeOf, defaultPool, overlaps, poolFromRange, poolRange, stageRemove, stageRevert, stageSet, vlansOn,
+  bridgeOf, overlaps, stageRemove, stageRevert, stageSet, vlansOn,
   type ChangeSet, type IfaceEntry,
 } from './model'
 import { Led, StatusLine, Tag, useKindLabel } from './parts'
@@ -224,8 +224,6 @@ function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; o
   const entry = iface.entry
   const map = data.staged.map
   const bridge = bridgeOf(map, name)
-  const server = !entry.dhcp && entry.static && entry.dhcpServer ? entry.dhcpServer : undefined
-  const range = server ? poolRange(entry.static?.address, server) : undefined
   return (
     <div className="grid gap-5">
       <Button className="justify-self-start" size="sm" onClick={onEdit}>{t('network.detail.edit')}</Button>
@@ -256,16 +254,6 @@ function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; o
                   { id: 'dns', label: t('network.fields.dns'), value: mono(entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none')) },
                 ]} />
           </Group>
-          {!entry.dhcp && entry.static && !data.openrc ? (
-            <Group title={t('network.fields.dhcpServer')}>
-              <FactList facts={server ? [
-                { id: 'state', label: t('network.fields.state'), value: t('network.values.on') },
-                { id: 'range', label: t('network.fields.poolRange'), value: mono(range ? `${range.start} – ${range.end}` : '—') },
-                { id: 'lease', label: t('network.fields.lease'), value: server.leaseSeconds ? t('network.values.seconds', { count: server.leaseSeconds }) : t('network.values.automatic') },
-                { id: 'dns', label: t('network.fields.serverDns'), value: server.dns?.length ? mono(server.dns.join(', ')) : t('network.values.uplinkDns') },
-              ] : [{ id: 'state', label: t('network.fields.state'), value: t('network.values.off') }]} />
-            </Group>
-          ) : null}
         </>
       )}
       {iface.kind === 'bridge' ? (
@@ -347,7 +335,6 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
   const toDhcp = () => set((current) => {
     const next: IfaceEntry = { ...current, dhcp: true }
     delete next.static
-    delete next.dhcpServer
     delete next.dns
     return next
   })
@@ -357,8 +344,6 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
     return next
   })
   const lease = applied?.obs
-  const canServe = !entry.dhcp && entry.static !== undefined && !data.openrc
-  const pool = entry.static?.address ? defaultPool(entry.static.address) : undefined
   const candidates = data.staged.order.filter((each) => data.staged.ifaces[each].kind === 'physical' && each !== name)
 
   return (
@@ -403,8 +388,6 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
           </FormField>
         </Group>
       )}
-
-      {canServe ? <DhcpServerForm data={data} name={name} problems={problems} pool={pool} /> : null}
 
       {iface.kind === 'bridge' ? (
         <Group title={t('network.detail.portsCount', { count: entry.bridge?.ports.length ?? 0 })}>
@@ -471,59 +454,6 @@ function suggestSubnet(data: NetworkData): string {
     if (!used.some((address) => overlaps(candidate, address))) return candidate
   }
   return '192.168.200.1/24'
-}
-
-function DhcpServerForm({ data, name, problems, pool }: { data: NetworkData; name: string; problems: Problems; pool?: { poolOffset: number; poolSize: number } }) {
-  const { t } = useTranslation()
-  const iface = data.staged.ifaces[name]
-  const entry = iface.entry
-  const address = entry.static?.address
-  const server = entry.dhcpServer
-  const range = server ? poolRange(address, server) : undefined
-  const [start, setStart] = useState(range?.start ?? '')
-  const [end, setEnd] = useState(range?.end ?? '')
-  const set = (change: (entry: IfaceEntry) => IfaceEntry) => updateChangeSet((current) => stageSet(current, name, iface.kind, change))
-  const typed = poolFromRange(address, start, end)
-  const local = server && (start || end) && !typed ? t('network.problems.poolSubnet') : undefined
-  const typeRange = (nextStart: string, nextEnd: string) => {
-    setStart(nextStart); setEnd(nextEnd)
-    const parsed = poolFromRange(address, nextStart, nextEnd)
-    if (parsed) set((current) => ({ ...current, dhcpServer: { ...(current.dhcpServer ?? { poolOffset: 0, poolSize: 0 }), ...parsed } }))
-  }
-  const toggle = (on: boolean) => {
-    if (!on) { set((current) => { const next = { ...current }; delete next.dhcpServer; return next }); return }
-    if (!pool) return
-    const range = poolRange(address, pool)
-    setStart(range?.start ?? ''); setEnd(range?.end ?? '')
-    set((current) => ({ ...current, dhcpServer: { ...pool } }))
-  }
-  return (
-    <Group title={t('network.fields.dhcpServer')}>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="grid gap-0.5"><span className="font-medium">{t('network.detail.serverOn')}</span><span className="text-muted-foreground">{t(pool ? 'network.detail.serverHint' : 'network.detail.serverNeedsAddress')}</span></span>
-        <Switch checked={server !== undefined} disabled={!pool && server === undefined} onCheckedChange={toggle} aria-label={t('network.detail.serverOn')} />
-      </label>
-      {server ? (
-        <>
-          <FormField label={t('network.fields.poolRange')} hint={local || problems.pool ? <span className="text-destructive">{local ?? t(problems.pool?.key ?? '', problems.pool?.params)}</span> : undefined}>
-            {(id) => (
-              <div className="flex items-center gap-2">
-                <Input id={id} className="font-mono" value={start} aria-label={t('network.detail.poolStart')} onChange={(event) => typeRange(event.target.value.trim(), end)} />
-                <span>–</span>
-                <Input className="font-mono" value={end} aria-label={t('network.detail.poolEnd')} onChange={(event) => typeRange(start, event.target.value.trim())} />
-              </div>
-            )}
-          </FormField>
-          <FormField label={t('network.fields.leaseSeconds')} hint={problems.lease ? <ProblemText problem={problems.lease} /> : undefined}>
-            {(id) => <Input id={id} className="w-32 font-mono" inputMode="numeric" value={server.leaseSeconds ?? ''} placeholder={t('network.values.automatic')} onChange={(event) => set((current) => { const digits = event.target.value.replace(/\D/g, ''); const next = { ...current, dhcpServer: { ...(current.dhcpServer ?? server) } }; if (digits) next.dhcpServer.leaseSeconds = Number(digits); else delete next.dhcpServer.leaseSeconds; return next })} />}
-          </FormField>
-          <FormField label={t('network.fields.serverDns')} hint={problems.serverDns ? <ProblemText problem={problems.serverDns} /> : t('network.detail.serverDnsHint')}>
-            {(id) => <ListInput id={id} values={server.dns} placeholder={t('network.detail.optional')} invalid={Boolean(problems.serverDns)} onChange={(dns) => set((current) => ({ ...current, dhcpServer: { ...(current.dhcpServer ?? server), dns } }))} />}
-          </FormField>
-        </>
-      ) : null}
-    </Group>
-  )
 }
 
 function RoutesForm({ data, name, problems }: { data: NetworkData; name: string; problems: Problems }) {

@@ -1,4 +1,4 @@
-import { defaultEntry, poolRange, type IfaceEntry, type ViewKind } from './model'
+import { defaultEntry, type IfaceEntry, type ViewKind } from './model'
 
 export type Translate = (key: string, params?: Record<string, unknown>) => string
 
@@ -40,14 +40,6 @@ export function summary(entry: IfaceEntry | undefined, kind: ViewKind, t: Transl
     rows.push([field('address'), shown.static.address || value('empty')])
     rows.push([field('gateway'), shown.static.gateway || value('none')])
     rows.push([field('dns'), list(shown.static.dns)])
-    const server = shown.dhcpServer
-    rows.push([field('dhcpServer'), value(server ? 'on' : 'off')])
-    if (server) {
-      const range = poolRange(shown.static.address, server)
-      rows.push([field('poolRange'), range ? `${range.start} – ${range.end}` : `+${server.poolOffset} × ${server.poolSize}`])
-      rows.push([field('lease'), server.leaseSeconds ? t('network.values.seconds', { count: server.leaseSeconds }) : value('automatic')])
-      rows.push([field('serverDns'), server.dns?.length ? server.dns.join(', ') : value('uplinkDns')])
-    }
   } else {
     rows.push([field('method'), value('noAddress')])
   }

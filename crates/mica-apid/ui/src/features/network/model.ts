@@ -10,9 +10,6 @@ export type ViewKind = IfaceKind | 'wifi'
 /// stored key.
 export interface WireguardPeer { name?: string; publicKey: string; presharedKey?: string; allowedIps: string[]; endpoint?: string; persistentKeepalive?: number }
 export interface StaticRoute { destination: string; gateway?: string; metric?: number }
-/// `dns` is absent when no server is announced: the device does not write an
-/// empty list.
-export interface DhcpServer { poolOffset: number; poolSize: number; dns?: string[]; leaseSeconds?: number }
 /// A CAN controller's parameters; no restart delay restarts nothing, and no FD is FD off.
 export interface CanConfig { bitrate: number; restartMs?: number; fd?: boolean; dataBitrate?: number }
 
@@ -27,7 +24,6 @@ export interface IfaceEntry {
   wireguard?: { listenPort?: number; peers: WireguardPeer[] }
   can?: CanConfig
   routes?: StaticRoute[]
-  dhcpServer?: DhcpServer
 }
 
 export type NetworkMap = Record<string, IfaceEntry>
@@ -62,10 +58,6 @@ export function normalize(entry: IfaceEntry): IfaceEntry {
   if (entry.wireguard) out.wireguard = clone(entry.wireguard)
   if (entry.can) out.can = { ...entry.can }
   if (entry.routes?.length) out.routes = entry.routes.map((route) => ({ ...route }))
-  if (entry.dhcpServer) {
-    const { dns, ...server } = entry.dhcpServer
-    out.dhcpServer = { ...server, ...(dns?.length ? { dns: [...dns] } : {}) }
-  }
   return out
 }
 
@@ -94,7 +86,6 @@ export function portEntry(current: IfaceEntry | undefined): IfaceEntry {
   const entry: IfaceEntry = { ...current, dhcp: false }
   delete entry.static
   delete entry.dns
-  delete entry.dhcpServer
   delete entry.routes
   return entry
 }
@@ -291,32 +282,6 @@ export function overlaps(left: string, right: string): boolean {
   const b = parseCidr(right)
   if (!a || !b) return false
   return a.net <= b.broadcast && b.net <= a.broadcast
-}
-
-/// The pool a new DHCP server offers on `cidr`: from .100, at most fifty
-/// addresses, inside the subnet. A subnet too small to serve has none.
-export function defaultPool(cidr: string): { poolOffset: number; poolSize: number } | undefined {
-  const subnet = parseCidr(cidr)
-  if (!subnet) return undefined
-  const hosts = subnet.broadcast - subnet.net - 1
-  if (hosts < 20) return undefined
-  const poolOffset = Math.min(100, Math.floor(hosts / 2))
-  return { poolOffset, poolSize: Math.min(50, hosts - poolOffset - 1) }
-}
-
-/// The first and last address a pool stored as an offset and a size hands out.
-export function poolRange(cidr: string | undefined, server: Pick<DhcpServer, 'poolOffset' | 'poolSize'>): { start: string; end: string } | undefined {
-  const subnet = parseCidr(cidr)
-  if (!subnet) return undefined
-  return { start: intToIp(subnet.net + server.poolOffset), end: intToIp(subnet.net + server.poolOffset + server.poolSize - 1) }
-}
-
-/// The offset and size of the range `start`–`end` in `cidr`, when both are
-/// host addresses of it in that order.
-export function poolFromRange(cidr: string | undefined, start: string, end: string): { poolOffset: number; poolSize: number } | undefined {
-  const subnet = parseCidr(cidr)
-  if (!subnet || !inSubnet(start, cidr) || !inSubnet(end, cidr) || ipToInt(start) > ipToInt(end)) return undefined
-  return { poolOffset: ipToInt(start) - subnet.net, poolSize: ipToInt(end) - ipToInt(start) + 1 }
 }
 
 export const NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,14}$/

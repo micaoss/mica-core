@@ -5,7 +5,7 @@ import { Plus } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/components/ui/button'
 import { CreateWizard } from './create-wizard'
-import { bridgeOf, poolRange, vlansOn } from './model'
+import { bridgeOf, vlansOn } from './model'
 import { Led, ROLES, roleOf, Tag, TEXT, useKindLabel, useStatusText, type Role } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus, exitOf } from './view'
@@ -67,7 +67,6 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
       : wanted
         ? <span className="text-muted-foreground"><span className="font-mono">{wanted}</span> · {t('network.list.notInEffect')}</span>
         : <span className="text-muted-foreground">{t(entry.dhcp ? 'network.list.waitingDhcp' : 'network.list.noAddress')}</span>
-  const server = !entry.dhcp && entry.dhcpServer ? poolRange(entry.static?.address, entry.dhcpServer) : undefined
   const note = text.note(status)
   const facts: [string, React.ReactNode][] = iface.kind === 'physical'
     ? [
@@ -108,10 +107,7 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
       ) : (
         <>
           <div className="text-sm">{iface.kind === 'wifi' ? obs?.address ? <span className="font-mono">{obs.address}</span> : <span className="text-muted-foreground">{t('network.list.noAddress')}</span> : address}</div>
-          <div className="text-sm">
-            {purpose(data, name, t)}
-            {server ? <span className="text-muted-foreground"> · {t('network.list.serving', { start: server.start.split('.').pop(), end: server.end.split('.').pop() })}</span> : null}
-          </div>
+          <div className="text-sm">{purpose(data, name, t)}</div>
           <div className={cn('text-sm', TEXT[status.tone])}>{text.label(status)}{note ? <span className="text-muted-foreground"> · {note}</span> : null}</div>
         </>
       )}

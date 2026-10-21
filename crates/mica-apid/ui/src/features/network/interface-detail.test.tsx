@@ -45,24 +45,6 @@ describe('one interface', () => {
     expect(screen.queryByRole('button', { name: 'Restore image default' })).toBeNull()
   })
 
-  it('stages a DHCP pool typed as a range, stored as an offset and a size', async () => {
-    stubFetch(networkRoutes())
-    open('eth1')
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-    const start = screen.getByLabelText('Pool start')
-    const end = screen.getByLabelText('Pool end')
-    expect((start as HTMLInputElement).value).toBe('192.168.10.100')
-    await userEvent.clear(start)
-    await userEvent.type(start, '192.168.10.50')
-    await userEvent.clear(end)
-    await userEvent.type(end, '192.168.10.59')
-    await userEvent.click(within(screen.getByRole('region', { name: 'Editing eth1' })).getByRole('button', { name: 'Done' }))
-
-    const dialog = await review()
-    expect(within(dialog).getByText('192.168.10.100 – 192.168.10.149')).toBeTruthy()
-    expect(within(dialog).getByText('192.168.10.50 – 192.168.10.59')).toBeTruthy()
-  })
-
   it('refuses a gateway outside the subnet before anything is staged', async () => {
     stubFetch(networkRoutes())
     open('eth1')

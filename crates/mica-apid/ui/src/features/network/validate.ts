@@ -1,10 +1,10 @@
-import { inSubnet, isIPv4, overlaps, parseCidr, poolRange, ipToInt, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
+import { inSubnet, isIPv4, overlaps, parseCidr, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
 
 /// A field the console refuses to stage as it is, with the message's key and
 /// its values. The device remains the authority: these only catch what it
 /// would refuse anyway, before the write.
 export interface Problem { key: string; params?: Record<string, string | number> }
-export type Problems = Partial<Record<'address' | 'gateway' | 'dns' | 'pool' | 'lease' | 'serverDns' | 'routes' | 'vlanId' | 'parent' | 'listenPort' | 'bitrate', Problem>>
+export type Problems = Partial<Record<'address' | 'gateway' | 'dns' | 'routes' | 'vlanId' | 'parent' | 'listenPort' | 'bitrate', Problem>>
 
 /// The addresses other interfaces hold or will hold, for the overlap check.
 export type AddressBook = { name: string; address: string }[]
@@ -56,15 +56,6 @@ export function validateEntry(name: string, kind: ViewKind, entry: IfaceEntry | 
       else if (!inSubnet(gateway, address)) problems.gateway = { key: 'network.problems.gatewaySubnet' }
     }
     if (ipList(entry.static.dns).length) problems.dns = { key: 'network.problems.dns', params: { list: ipList(entry.static.dns).join(', ') } }
-    const server = entry.dhcpServer
-    if (server && parseCidr(address)) {
-      const range = poolRange(address, server)
-      const own = address.split('/')[0]
-      if (!range || server.poolSize < 1 || !inSubnet(range.start, address) || !inSubnet(range.end, address)) problems.pool = { key: 'network.problems.poolSubnet' }
-      else if (ipToInt(own) >= ipToInt(range.start) && ipToInt(own) <= ipToInt(range.end)) problems.pool = { key: 'network.problems.poolOwn', params: { address: own } }
-      if (server.leaseSeconds !== undefined && server.leaseSeconds < 60) problems.lease = { key: 'network.problems.lease' }
-      if (ipList(server.dns).length) problems.serverDns = { key: 'network.problems.dns', params: { list: ipList(server.dns).join(', ') } }
-    }
   }
   for (const route of entry.routes ?? []) {
     if (!parseCidr(route.destination) || (route.gateway && !isIPv4(route.gateway))) { problems.routes = { key: 'network.problems.route' }; break }

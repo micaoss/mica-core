@@ -438,7 +438,6 @@ function withoutAddressing(entry: IfaceEntry): IfaceEntry {
   const next = { ...entry }
   delete next.static
   delete next.dns
-  delete next.dhcpServer
   return next
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { configured, observed } from '@/shared/testing/network'
 import type { NetworkMap } from './model'
-import { diffRows, summary } from './summary'
+import { diffRows } from './summary'
 import { addressBook, validateEntry } from './validate'
 import { buildView, computeStatus, exitOf, sessionInterface, type WifiView } from './view'
 
@@ -49,24 +49,17 @@ describe('the joined view', () => {
 describe('the review\'s lines', () => {
   it('lists only what changed between two configurations', () => {
     const rows = diffRows({ dhcp: true }, { dhcp: false, static: { address: '192.168.20.1/24' } }, 'physical', t)
-    expect(rows.map(([label]) => label)).toEqual(['network.fields.method', 'network.fields.address', 'network.fields.gateway', 'network.fields.dns', 'network.fields.dhcpServer'])
-  })
-
-  it('shows a DHCP pool as the range it hands out', () => {
-    const rows = new Map(summary({ dhcp: false, static: { address: '192.168.10.1/24' }, dhcpServer: { poolOffset: 100, poolSize: 50, leaseSeconds: 600 } }, 'physical', t))
-    expect(rows.get('network.fields.poolRange')).toBe('192.168.10.100 – 192.168.10.149')
-    expect(rows.get('network.fields.lease')).toBe('network.values.seconds{"count":600}')
+    expect(rows.map(([label]) => label)).toEqual(['network.fields.method', 'network.fields.address', 'network.fields.gateway', 'network.fields.dns'])
   })
 })
 
 describe('what the console refuses to stage', () => {
   const map = configured() as NetworkMap
 
-  it('catches an overlapping address, a pool over the interface\'s own address and a bad route', () => {
-    const entry = { dhcp: false, static: { address: '192.168.1.5/24' }, dhcpServer: { poolOffset: 1, poolSize: 10 }, routes: [{ destination: 'nowhere' }] }
+  it('catches an overlapping address and a bad route', () => {
+    const entry = { dhcp: false, static: { address: '192.168.1.5/24' }, routes: [{ destination: 'nowhere' }] }
     const problems = validateEntry('eth2', 'physical', entry, map, addressBook(map, { eth0: '192.168.1.24/24' }), false)
     expect(problems.address).toEqual({ key: 'network.problems.overlap', params: { name: 'eth0', address: '192.168.1.24/24' } })
-    expect(problems.pool).toEqual({ key: 'network.problems.poolOwn', params: { address: '192.168.1.5' } })
     expect(problems.routes?.key).toBe('network.problems.route')
   })
 

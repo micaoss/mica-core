@@ -9,7 +9,7 @@ export const PEER_KEY = 'xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg='
 export function configured() {
   return {
     eth0: { dhcp: true },
-    eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, dhcpServer: { poolOffset: 100, poolSize: 50 } },
+    eth1: { dhcp: false, static: { address: '192.168.10.1/24' } },
     wg0: { kind: 'wireguard', dhcp: false, static: { address: '10.8.0.1/24' }, wireguard: { listenPort: 51820, peers: [{ publicKey: PEER_KEY, allowedIps: ['10.8.0.2/32'], persistentKeepalive: 25 }] } },
     can0: { kind: 'can', can: { bitrate: 250000 } },
   } as Record<string, unknown>
