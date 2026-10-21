@@ -73,6 +73,7 @@ trait Micad {
     fn get_storage_status(&self) -> zbus::Result<String>;
     fn get_system_info(&self) -> zbus::Result<String>;
     fn get_telemetry(&self) -> zbus::Result<String>;
+    fn get_device_code(&self) -> zbus::Result<String>;
     fn get_observed_network(&self) -> zbus::Result<String>;
     fn get_failure_evidence(&self) -> zbus::Result<String>;
     fn get_log(&self, source: &str) -> zbus::Result<String>;
@@ -377,6 +378,12 @@ impl SettingsApi for BusSettings {
     async fn get_system_info(&self) -> anyhow::Result<Value> {
         let proxy = self.proxy().await?;
         let json = self.call("GetSystemInfo", proxy.get_system_info()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    async fn get_device_code(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetDeviceCode", proxy.get_device_code()).await?;
         Ok(serde_json::from_str(&json)?)
     }
 

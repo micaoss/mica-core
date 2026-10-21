@@ -300,6 +300,9 @@ export interface AvailableFact {
   detail?: string
 }
 
+/// `GET /api/v1/device/code`: the code printed on the label, or why there is none.
+export type DeviceCode = { code: string, source: string } | { code: null, reason: string }
+
 export interface TimeStatus {
   status: 'synchronized' | 'polling' | 'offline-degraded' | 'invalid-source' | 'unknown'
   synchronized?: boolean

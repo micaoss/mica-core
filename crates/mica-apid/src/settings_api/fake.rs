@@ -517,6 +517,11 @@ impl SettingsApi for FakeSettings {
         Ok(self.system_info.lock().unwrap().clone())
     }
 
+    /// The first vector of `docs/factory-ap-key.md`.
+    async fn get_device_code(&self) -> anyhow::Result<Value> {
+        Ok(serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid" }))
+    }
+
     async fn get_telemetry(&self) -> anyhow::Result<Value> {
         self.diagnostic_pause().await;
         Ok(self.telemetry.lock().unwrap().clone())

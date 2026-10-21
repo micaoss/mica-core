@@ -82,6 +82,7 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
         // that could format or repartition anything.
         .route(V1_STORAGE_STATUS_PATH, get(api_v1_storage_status))
         .route(V1_SYSTEM_INFO_PATH, get(api_v1_system_info))
+        .route(V1_DEVICE_CODE_PATH, get(api_v1_device_code))
         .route(V1_SYSTEM_TELEMETRY_PATH, get(api_v1_system_telemetry))
         .route(V1_SYSTEM_LOG_ROUTE, get(api_v1_system_log))
         .route(V1_NETWORK_STATUS_PATH, get(api_v1_network_status))

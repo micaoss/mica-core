@@ -1811,6 +1811,68 @@
         }
       }
     },
+    "/api/v1/device/code": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read the device code.",
+        "description": "The code printed on the device's label, `{code, source}` with the code in\nits printed form (`7KQ2-MX9D-HC4`), or `{code: null, reason}` on a device\nwhose board declares no usable source. Support reads it to identify a\ndevice; nothing here or anywhere on the device serves the access-point key\nderived from it.",
+        "operationId": "api_v1_device_code",
+        "responses": {
+          "200": {
+            "description": "`{code, source}`, or `{code: null, reason}`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/diagnostics/snapshots": {
       "get": {
         "tags": [

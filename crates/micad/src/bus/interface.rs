@@ -509,6 +509,21 @@ impl MicadService {
         self.container_action(name, ContainerAction::Restart).await
     }
 
+    /// JSON: this device's code and its source, `{code, source}`, or
+    /// `{code: null, reason}` when it has none (`docs/factory-ap-key.md`).
+    /// Never the access-point key or the product secret.
+    pub(super) async fn get_device_code(&self) -> String {
+        let code = match &self.device_root {
+            Some(root) => crate::device_code::device_code(root),
+            None => Err("this daemon reads no device".to_string()),
+        };
+        match code {
+            Ok(code) => code.to_json(),
+            Err(reason) => serde_json::json!({ "code": null, "reason": reason }),
+        }
+        .to_string()
+    }
+
     pub(super) async fn get_telemetry(&self) -> Result<String, SettingsFault> {
         let evidence = self.telemetry.observe().await.map_err(|err| {
             SettingsFault::Fdo(fdo::Error::Failed(format!("observe telemetry: {err:#}")))

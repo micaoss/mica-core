@@ -44,6 +44,7 @@ use utoipa::OpenApi;
         crate::routes::api_v1_time_status,
         crate::routes::api_v1_storage_status,
         crate::routes::api_v1_system_info,
+        crate::routes::api_v1_device_code,
         crate::routes::api_v1_system_telemetry,
         crate::routes::api_v1_system_log,
         crate::routes::api_v1_network_status,

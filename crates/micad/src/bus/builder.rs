@@ -173,6 +173,13 @@ impl MicadService {
         self
     }
 
+    /// Read the device code under `root` (`GetDeviceCode`).
+    #[must_use]
+    pub fn with_device_root(mut self, root: std::path::PathBuf) -> Self {
+        self.device_root = Some(root);
+        self
+    }
+
     /// Attach the log reader (`GetLog`).
     #[must_use]
     pub fn with_logs(mut self, logs: Arc<dyn crate::logs::LogReader>) -> Self {

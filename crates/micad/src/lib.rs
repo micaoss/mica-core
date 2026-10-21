@@ -351,6 +351,7 @@ async fn serve() -> anyhow::Result<()> {
         // (sysfs, /etc, the journal), so a dry-run daemon is never given one.
         service = service.with_system_info(Arc::new(system_info::HostSystemInfo::production()));
         service = service.with_telemetry(Arc::new(telemetry::SysfsTelemetry::production()));
+        service = service.with_device_root(std::path::PathBuf::from("/"));
         // The adapter and the pairing agent. The agent's state is shared with
         // the `org.bluez.Agent1` object registered below: it blocks on a
         // decision the console makes through the bus.

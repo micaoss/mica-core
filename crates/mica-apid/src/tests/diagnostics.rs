@@ -158,6 +158,26 @@ async fn the_telemetry_and_network_status_routes_are_read_only_observations() {
     }
 }
 
+// The device code is a support read: authenticated, GET only, and never
+// anything but the code and its source.
+#[tokio::test]
+async fn the_device_code_is_an_authenticated_read() {
+    let (tree, token) = with_token(secret_tree("hunter2secret"));
+    let (router, _fake, _dir) = diagnostics_app(tree);
+    let response = bearer(&router, "GET", "/api/v1/device/code", &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(response).await,
+        serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid" })
+    );
+    assert_eq!(
+        unauthenticated(&router, "GET", "/api/v1/device/code").await,
+        StatusCode::UNAUTHORIZED
+    );
+    let response = bearer_json(&router, "POST", "/api/v1/device/code", &token, "{}").await;
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
 // micad failures on the three reads travel under the classification like
 // every other bus read.
 #[tokio::test]

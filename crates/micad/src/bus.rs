@@ -161,6 +161,9 @@ pub struct MicadService {
     system_info: Arc<dyn SystemInfoSource>,
     /// Read-only board telemetry, on the same default.
     telemetry: Arc<dyn TelemetrySource>,
+    /// The root the device code is read under (`GetDeviceCode`); `None`
+    /// reads nothing, on the same rule.
+    device_root: Option<std::path::PathBuf>,
     /// Read-only container observation: what the engine says is there.
     ///
     /// Read-only in the strong sense -- the adapter runs `podman images` and
@@ -315,6 +318,7 @@ impl MicadService {
             storage_status: Arc::new(UnavailableStorageStatus),
             system_info: Arc::new(UnavailableSystemInfo),
             telemetry: Arc::new(UnavailableTelemetry),
+            device_root: None,
             failure_evidence: Arc::new(UnavailableFailureEvidence),
             logs: Arc::new(crate::logs::NoLogs),
             user_units: Arc::new(crate::user_units::UserUnits::unavailable()),

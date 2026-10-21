@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Box, Cpu, PackageOpen, Thermometer } from 'lucide-react'
 import { api } from '@/shared/lib/http'
-import type { AvailableFact, SystemInformation, SystemTelemetry, ThermalReading, WatchdogDevice } from '@/lib/types'
+import type { AvailableFact, DeviceCode, SystemInformation, SystemTelemetry, ThermalReading, WatchdogDevice } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { DataTable } from '@/shared/components/data-table'
 import { FactList, type Fact } from '@/shared/components/fact-list'
@@ -20,6 +20,11 @@ export function InformationPanel() {
     queryFn: () => api<SystemInformation>('/api/v1/system/info'),
     retry: false,
   })
+  const deviceCode = useQuery({
+    queryKey: ['device-code'],
+    queryFn: () => api<DeviceCode>('/api/v1/device/code'),
+    retry: false,
+  })
   const value = information.data
   return (
     <div className="grid gap-3">
@@ -31,6 +36,7 @@ export function InformationPanel() {
             <Panel title={t('system.information.identity.title')} description={t('system.information.identity.description')} action={<Cpu className="size-5 text-muted-foreground" />}>
               <FactList facts={[
                 fact('machineId', t('system.information.identity.machineId'), value.machineId, value.machineId.id, t),
+                ...(deviceCode.data ? [deviceCodeFact(deviceCode.data, t)] : []),
                 fact('board', t('system.information.identity.board'), value.board, join([value.board.model, value.board.source]), t),
                 fact('release', t('system.information.identity.release'), value.release, join([value.release.prettyName ?? value.release.name, value.release.imageVersion ?? value.release.versionId]), t),
                 fact('kernel', t('system.information.identity.kernel'), value.kernel, join([value.kernel.release, value.kernel.version]), t),
@@ -98,6 +104,12 @@ export function TelemetryPanel() {
 /// observed" and "observed as nothing" are different answers.
 function fact(id: string, label: string, source: AvailableFact, value: string | undefined, t: ReturnType<typeof useTranslation>['t']): Fact {
   return { id, label, value: source.available ? (value ?? t('common.notAvailable')) : <Unavailable fact={source} /> }
+}
+
+/// The label's code with its source, or the reason the board has none.
+function deviceCodeFact(value: DeviceCode, t: ReturnType<typeof useTranslation>['t']): Fact {
+  const source: AvailableFact = value.code === null ? { available: false, detail: value.reason } : { available: true }
+  return fact('deviceCode', t('system.information.identity.deviceCode'), source, value.code === null ? undefined : `${value.code} · ${value.source}`, t)
 }
 
 function formatReading(reading: ThermalReading) {

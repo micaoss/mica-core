@@ -114,6 +114,11 @@ pub trait SettingsApi: Send + Sync {
     /// private half never leaves micad and there is no accessor that returns
     /// one, so the only thing this call can hand back is the public half.
     async fn rotate_wireguard_key(&self, iface: &str) -> anyhow::Result<String>;
+    /// This device's code and its source, or why it has none
+    /// (`GetDeviceCode`). Unavailable by default.
+    async fn get_device_code(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no device code")
+    }
     /// The Bluetooth surface micad joins: the declared trust list, the
     /// adapter, the devices BlueZ holds, the pairing code and whatever is
     /// waiting to be confirmed (`GetBluetooth`).

@@ -245,6 +245,14 @@ Restart it, which is what a changed image tag needs.
 <method name="RestartContainer">
 <arg name="name" type="s" direction="in"/>
 </method>
+<!--
+JSON: this device's code and its source, `{code, source}`, or
+`{code: null, reason}` when it has none (`docs/factory-ap-key.md`).
+Never the access-point key or the product secret.
+-->
+<method name="GetDeviceCode">
+<arg type="s" direction="out"/>
+</method>
 <method name="GetTelemetry">
 <arg type="s" direction="out"/>
 </method>

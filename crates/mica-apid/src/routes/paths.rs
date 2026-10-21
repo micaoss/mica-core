@@ -109,6 +109,9 @@ pub(super) const V1_STORAGE_STATUS_PATH: &str = "/v1/storage/status";
 /// time, no dot-path, no write counterpart.
 pub(super) const V1_SYSTEM_INFO_PATH: &str = "/v1/system/info";
 
+/// The device code printed on the label, and its source.
+pub(super) const V1_DEVICE_CODE_PATH: &str = "/v1/device/code";
+
 /// Board telemetry: temperature, watchdog, reset reason. Same
 /// shape and same reasoning.
 pub(super) const V1_SYSTEM_TELEMETRY_PATH: &str = "/v1/system/telemetry";

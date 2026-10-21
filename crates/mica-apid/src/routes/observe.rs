@@ -126,6 +126,36 @@ pub(crate) async fn api_v1_system_info(
     }
 }
 
+/// Read the device code.
+///
+/// The code printed on the device's label, `{code, source}` with the code in
+/// its printed form (`7KQ2-MX9D-HC4`), or `{code: null, reason}` on a device
+/// whose board declares no usable source. Support reads it to identify a
+/// device; nothing here or anywhere on the device serves the access-point key
+/// derived from it.
+#[utoipa::path(
+    get,
+    path = V1_DEVICE_CODE_PATH,
+    context_path = API,
+    tag = "resources",
+    responses(
+        (status = 200, description = "`{code, source}`, or `{code: null, reason}`", body = ResourceValue),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_device_code(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    match state.api.get_device_code().await {
+        Ok(value) => api_response(StatusCode::OK, ResourceValue(value)),
+        Err(err) => bus_api_error(&err, None),
+    }
+}
+
 /// Read the board telemetry.
 ///
 /// Temperature (thermal zones and hwmon inputs), every watchdog device with

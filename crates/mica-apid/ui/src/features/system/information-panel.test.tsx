@@ -42,10 +42,15 @@ afterEach(() => {
 
 describe('system information', () => {
   it('renders identity, image provenance, boot slot and the package manifest', async () => {
-    stubFetch({ '/api/v1/system/info': information(), '/api/v1/system/telemetry': telemetryAbsent })
+    stubFetch({
+      '/api/v1/system/info': information(),
+      '/api/v1/system/telemetry': telemetryAbsent,
+      '/api/v1/device/code': { code: 'DFN4-L34C-T8N', source: 'emmc-cid' },
+    })
     renderPanel(<InformationPanel />)
 
     expect(await screen.findByText('7f1c2ad0f0e4')).toBeTruthy()
+    expect(await screen.findByText('DFN4-L34C-T8N · emmc-cid')).toBeTruthy()
     expect(screen.getByText('Radxa CM3576 · device-tree')).toBeTruthy()
     expect(screen.getByText('2026.09.0 · mica-system')).toBeTruthy()
     expect(screen.getByText('micad · 0.4.1-1')).toBeTruthy()

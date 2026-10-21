@@ -189,3 +189,26 @@ pub(super) async fn the_diagnostic_reads_are_absent_without_observers() {
     assert_eq!(failures["journal"]["lineCount"], 0);
     assert_eq!(failures["units"]["count"], 0);
 }
+
+/// The device code is read under the attached root, and its absence is an
+/// answer, not an error.
+#[tokio::test]
+pub(super) async fn the_device_code_names_its_source_or_why_there_is_none() {
+    let (service, _calls, dir) = service_with_mock();
+    let none: serde_json::Value = serde_json::from_str(&service.get_device_code().await).unwrap();
+    assert_eq!(none["code"], serde_json::Value::Null);
+
+    let root = dir.path().join("root");
+    let serial = root.join("sys/firmware/devicetree/base/serial-number");
+    std::fs::create_dir_all(serial.parent().unwrap()).unwrap();
+    std::fs::write(&serial, "a5f2c3d4e5f60718\0").unwrap();
+    let conf = root.join(crate::device_code::CONFIG_PATH);
+    std::fs::create_dir_all(conf.parent().unwrap()).unwrap();
+    std::fs::write(&conf, "source=dt-serial\n").unwrap();
+    let service = service.with_device_root(root);
+    let code: serde_json::Value = serde_json::from_str(&service.get_device_code().await).unwrap();
+    assert_eq!(
+        code,
+        serde_json::json!({"code": "LSZJ-2L3T-WFG", "source": "dt-serial"})
+    );
+}

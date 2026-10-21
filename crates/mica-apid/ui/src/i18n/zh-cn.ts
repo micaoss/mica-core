@@ -932,6 +932,7 @@ export const zhCN: Translation = {
         title: '设备标识',
         description: '稳定标识，以及正在运行的内核和镜像。',
         machineId: '机器 ID',
+        deviceCode: '设备码',
         board: '板卡',
         release: '发行版',
         kernel: '内核',

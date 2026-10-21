@@ -1116,6 +1116,7 @@ export const en = {
         title: 'Device identity',
         description: 'Stable identity and the running kernel and image.',
         machineId: 'Machine ID',
+        deviceCode: 'Device code',
         board: 'Board',
         release: 'Release',
         kernel: 'Kernel',
