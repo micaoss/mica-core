@@ -1,6 +1,5 @@
 //! WireGuard peers and key rotation.
 
-use crate::redact;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -155,7 +154,7 @@ pub(super) async fn api_write_peers(
     tag = "resources",
     params(("iface" = String, Path, description = "A declared `network` entry of kind `wireguard`")),
     responses(
-        (status = 200, description = "The stored peers, in stored order, each with the public key that is its `DELETE` path segment", body = Vec<WireguardPeerEntry>),
+        (status = 200, description = "The stored peers, in stored order, each with the public key that is its `DELETE` path segment and whether it has a pre-shared key", body = Vec<WireguardPeerState>),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 404, description = "No `network` entry has that name (`settings_not_found`)", body = ApiError),
         (status = 422, description = "The name is not an interface name, or the entry is not a WireGuard one (`validation_failed`)", body = ApiError),
@@ -172,16 +171,13 @@ pub(crate) async fn api_v1_peers_list(
 ) -> Response {
     let path = peers_settings_path(&iface);
     match tunnel_peers(&state, &iface, &path).await {
-        Ok(peers) => {
-            // Through the shared redactor, as the WiFi listing is: a peer's
-            // `presharedKey` reads as the sentinel.
-            // Infallible: a peer is a struct of strings and integers.
-            let value = match encode(&peers) {
-                Ok(value) => value,
-                Err(response) => return *response,
-            };
-            api_response(StatusCode::OK, redact::redact(value, &path))
-        }
+        Ok(peers) => api_response(
+            StatusCode::OK,
+            peers
+                .iter()
+                .map(WireguardPeerState::from)
+                .collect::<Vec<_>>(),
+        ),
         Err(response) => *response,
     }
 }
@@ -202,7 +198,7 @@ pub(crate) async fn api_v1_peers_list(
     params(("iface" = String, Path, description = "A declared `network` entry of kind `wireguard`")),
     request_body = WireguardPeerEntry,
     responses(
-        (status = 201, description = "The peer was added; the body carries it back", body = WireguardPeerEntry),
+        (status = 201, description = "The peer was added; the body carries it back as the collection reads it", body = WireguardPeerState),
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
@@ -251,17 +247,12 @@ pub(crate) async fn api_v1_peers_add(
             .at(&path),
         );
     }
-    // Serialized before the move into the list, so the echo is the entry as it
-    // was stored and not the body as it arrived.
-    let echoed = match encode(&peer) {
-        Ok(value) => value,
-        Err(response) => return *response,
-    };
+    let echoed = WireguardPeerState::from(&peer);
     peers.push(peer);
     if let Err(response) = api_write_peers(&state, &iface, &peers).await {
         return *response;
     }
-    api_response(StatusCode::CREATED, redact::redact(echoed, &path))
+    api_response(StatusCode::CREATED, echoed)
 }
 
 // The HTML pane answers 422 where this answers 404, deliberately: a form's

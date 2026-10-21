@@ -343,7 +343,7 @@ function benchPayload(path: string): unknown {
     ],
     probe: { ok: true, name: '0.debian.pool.ntp.org', latencyMs: 24, checkedAt: '2026-10-21T08:00:00Z' },
   }
-  if (path === '/api/v1/network/wg0/peers') return [PEER]
+  if (path === '/api/v1/network/wg0/peers') return [{ ...PEER, presharedKey: true, latestHandshake: null, rxBytes: null, txBytes: null }]
   if (path === '/api/v1/state/network') return { wg0: { publicKey: 'e2eDevicePublicKeye2eDevicePublicKeye2eDev0=' } }
   if (path === '/api/v1/wifi/client') return { enabled: true, interface: 'wlan0' }
   if (path === '/api/v1/wifi/ap') return { mode: 'off', interface: 'wlan0', ssid: 'mica-cm4', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60 }

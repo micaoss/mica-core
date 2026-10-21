@@ -21,7 +21,7 @@ import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { EditBar } from './change-bar'
 import { updateChangeSet } from './change-set'
 import { CreateWizard } from './create-wizard'
-import { overlaps, parseCidr, stageSet, type WireguardPeer } from './model'
+import { overlaps, parseCidr, stageSet, type WireguardPeerState } from './model'
 import { Led, StatusLine, Tag, TEXT, useStatusText } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus } from './view'
@@ -106,7 +106,7 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
   useEffect(() => { onEditing(draft !== undefined); return () => onEditing(false) }, [draft, onEditing])
   const [adding, setAdding] = useState(false)
   const [peer, setPeer] = useState(EMPTY_PEER)
-  const peers = useQuery({ queryKey: ['wireguard-peers', name], queryFn: () => api<WireguardPeer[]>(`/api/v1/network/${encodeURIComponent(name)}/peers`) })
+  const peers = useQuery({ queryKey: ['wireguard-peers', name], queryFn: () => api<WireguardPeerState[]>(`/api/v1/network/${encodeURIComponent(name)}/peers`) })
   const invalidatePeers = () => {
     void queryClient.invalidateQueries({ queryKey: ['wireguard-peers', name] })
     void queryClient.invalidateQueries({ queryKey: ['network'] })
@@ -158,7 +158,7 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
   if (!allowed.length || allowed.some((item) => !parseCidr(item) && !item.includes(':'))) peerErrors.allowedIps = t('network.wireguard.allowedFormat')
   if (peer.endpoint && !/^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+):\d{1,5}$/.test(peer.endpoint)) peerErrors.endpoint = t('network.wireguard.endpointFormat')
   if (peer.keepalive && !(Number(peer.keepalive) >= 1 && Number(peer.keepalive) <= 65535)) peerErrors.keepalive = t('network.wireguard.keepaliveRange')
-  const addPeer = () => api<WireguardPeer>(`/api/v1/network/${encodeURIComponent(name)}/peers`, json('POST', {
+  const addPeer = () => api<WireguardPeerState>(`/api/v1/network/${encodeURIComponent(name)}/peers`, json('POST', {
     ...(peer.name.trim() ? { name: peer.name.trim() } : {}),
     publicKey: peer.publicKey,
     ...(peer.presharedKey ? { presharedKey: peer.presharedKey } : {}),
@@ -232,7 +232,7 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
       <PageSection title={t('network.wireguard.peersCount', { count: peers.data?.length ?? 0 })} description={t('network.wireguard.peersCopy')}>
         {peers.error ? <Callout tone="danger" title={failureDetail(peers.error, t('common.requestFailed'))} /> : null}
         <CollectionPanel title={t('network.wireguard.peers')} action={<Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus />{t('network.wireguard.add')}</Button>}>
-          <DataTable<WireguardPeer>
+          <DataTable<WireguardPeerState>
             rows={peers.data}
             rowKey={(each) => each.publicKey}
             isPending={peers.isPending}

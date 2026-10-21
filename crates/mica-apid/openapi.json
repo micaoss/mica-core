@@ -3511,13 +3511,13 @@
         ],
         "responses": {
           "200": {
-            "description": "The stored peers, in stored order, each with the public key that is its `DELETE` path segment",
+            "description": "The stored peers, in stored order, each with the public key that is its `DELETE` path segment and whether it has a pre-shared key",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/WireguardPeerEntry"
+                    "$ref": "#/components/schemas/WireguardPeerState"
                   }
                 }
               }
@@ -3625,11 +3625,11 @@
         },
         "responses": {
           "201": {
-            "description": "The peer was added; the body carries it back",
+            "description": "The peer was added; the body carries it back as the collection reads it",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WireguardPeerEntry"
+                  "$ref": "#/components/schemas/WireguardPeerState"
                 }
               }
             }
@@ -11649,6 +11649,82 @@
           "publicKey": {
             "type": "string",
             "description": "The peer's X25519 public key: 32 bytes in padded base64. It is also\nthis entry's `DELETE` path segment, and its alphabet contains `/`, so a\nkey carrying one is percent-encoded there."
+          }
+        }
+      },
+      "WireguardPeerState": {
+        "type": "object",
+        "description": "One peer as the peer collection reads it: whether it has a pre-shared key\nrather than the key, and room for what the tunnel reports about it.",
+        "required": [
+          "publicKey",
+          "presharedKey",
+          "allowedIps"
+        ],
+        "properties": {
+          "allowedIps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CIDRs routed to this peer."
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`host:port` to send to."
+          },
+          "latestHandshake": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The last handshake, Unix seconds. Reserved: `null` until the device\nreports the tunnel's state.",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A label for the peer."
+          },
+          "persistentKeepalive": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Keepalive interval in seconds.",
+            "minimum": 0
+          },
+          "presharedKey": {
+            "type": "boolean",
+            "description": "Whether a pre-shared key is stored for the peer; the key is never read."
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "The peer's X25519 public key, also its `DELETE` path segment."
+          },
+          "rxBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes received from the peer. Reserved, as `latestHandshake` is.",
+            "minimum": 0
+          },
+          "txBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes sent to the peer. Reserved, as `latestHandshake` is.",
+            "minimum": 0
           }
         }
       },

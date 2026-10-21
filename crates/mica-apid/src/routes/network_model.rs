@@ -110,6 +110,51 @@ pub(crate) struct WireguardPeerEntry {
     pub(super) preshared_key: Option<String>,
 }
 
+/// One peer as the peer collection reads it: whether it has a pre-shared key
+/// rather than the key, and room for what the tunnel reports about it.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WireguardPeerState {
+    /// The peer's X25519 public key, also its `DELETE` path segment.
+    pub(super) public_key: String,
+    /// A label for the peer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) name: Option<String>,
+    /// Whether a pre-shared key is stored for the peer; the key is never read.
+    pub(super) preshared_key: bool,
+    /// `host:port` to send to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) endpoint: Option<String>,
+    /// CIDRs routed to this peer.
+    pub(super) allowed_ips: Vec<String>,
+    /// Keepalive interval in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) persistent_keepalive: Option<u16>,
+    /// The last handshake, Unix seconds. Reserved: `null` until the device
+    /// reports the tunnel's state.
+    pub(super) latest_handshake: Option<u64>,
+    /// Bytes received from the peer. Reserved, as `latestHandshake` is.
+    pub(super) rx_bytes: Option<u64>,
+    /// Bytes sent to the peer. Reserved, as `latestHandshake` is.
+    pub(super) tx_bytes: Option<u64>,
+}
+
+impl From<&micad_settings::WireguardPeer> for WireguardPeerState {
+    fn from(peer: &micad_settings::WireguardPeer) -> Self {
+        Self {
+            public_key: peer.public_key.clone(),
+            name: peer.name.clone(),
+            preshared_key: peer.preshared_key.is_some(),
+            endpoint: peer.endpoint.clone(),
+            allowed_ips: peer.allowed_ips.clone(),
+            persistent_keepalive: peer.persistent_keepalive,
+            latest_handshake: None,
+            rx_bytes: None,
+            tx_bytes: None,
+        }
+    }
+}
+
 /// Whether any peer in `entries` carries the redaction sentinel as its
 /// pre-shared key.
 pub(super) fn carries_redacted_psk<'a>(

@@ -395,6 +395,18 @@ pub(super) async fn a_preshared_key_is_redacted_and_the_sentinel_keeps_it() {
     assert_eq!(read["presharedKey"], json!("<redacted>"));
     assert_eq!(read["name"], json!("laptop"));
 
+    // The peer collection says only whether there is a key, and reserves the
+    // handshake and the traffic counters.
+    let response = bearer(&router, "GET", "/api/v1/network/wg0/peers", &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let peers = body_json(response).await;
+    assert_eq!(peers[0]["presharedKey"], json!(true));
+    assert_eq!(peers[0]["name"], json!("laptop"));
+    for field in ["latestHandshake", "rxBytes", "txBytes"] {
+        assert_eq!(peers[0][field], serde_json::Value::Null, "{field}");
+        assert!(peers[0].get(field).is_some(), "{field}");
+    }
+
     let mut map = body["configured"].clone();
     map["wg0"]["wireguard"]["listenPort"] = json!(51900);
     let response = bearer_json(&router, "PUT", "/api/v1/network", &token, &map.to_string()).await;
