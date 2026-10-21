@@ -1,9 +1,10 @@
 //! Network reconciler: renders systemd-networkd `.network` units and reloads
 //! networkd.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use micad_settings::{IfaceKind, Settings};
 use serde_json::json;
@@ -13,9 +14,11 @@ use crate::wgkeys::Keystore;
 
 mod ifupdown;
 mod render;
+mod settle;
 mod validate;
 pub use ifupdown::IfupdownReconciler;
 use render::*;
+pub use settle::{LinkSettle, NetworkdSettle, NoSettle};
 use validate::*;
 
 /// Directory networkd reads runtime unit files from.
@@ -193,13 +196,26 @@ impl KernelFeatures for DeployedKernel {
     }
 }
 
+/// An apply whose interfaces did not come up, so the files it replaced were
+/// put back.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}; the previous network configuration was restored")]
+pub struct RolledBack(pub String);
+
 /// Reconciler for the `network` settings subtree.
+///
+/// An apply replaces the unit files whole and reloads networkd. After the
+/// first apply of this process, which has nothing of its own to go back to,
+/// it waits for every interface it changed to come up, and on failure puts
+/// the previous files back and answers [`RolledBack`].
 pub struct NetworkReconciler<R: NetworkReload, D: LinkDelete> {
     target_dir: PathBuf,
     reloader: R,
     deleter: D,
     keys: Keystore,
     kernel: Arc<dyn KernelFeatures>,
+    settle: Arc<dyn LinkSettle>,
+    applied: AtomicBool,
 }
 
 impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
@@ -213,6 +229,62 @@ impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
             deleter,
             keys,
             kernel: Arc::new(NoClaim),
+            settle: Arc::new(NoSettle),
+            applied: AtomicBool::new(false),
+        }
+    }
+
+    /// Wait for changed interfaces through `settle`.
+    #[must_use]
+    pub fn with_settle(mut self, settle: Arc<dyn LinkSettle>) -> Self {
+        self.settle = settle;
+        self
+    }
+
+    /// The managed unit files in the target directory, by name.
+    fn managed_files(&self) -> anyhow::Result<BTreeMap<String, String>> {
+        let mut files = BTreeMap::new();
+        for entry in std::fs::read_dir(&self.target_dir)? {
+            let entry = entry?;
+            let Some(file_name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if is_mica_managed(&file_name) {
+                files.insert(file_name, std::fs::read_to_string(entry.path())?);
+            }
+        }
+        Ok(files)
+    }
+
+    /// Make the managed files `files`, from `current`: each changed one
+    /// written beside its place and renamed over it, and the rest removed.
+    fn replace_files(
+        &self,
+        files: &BTreeMap<String, String>,
+        current: &BTreeMap<String, String>,
+    ) -> anyhow::Result<()> {
+        for (file_name, text) in files {
+            if current.get(file_name) != Some(text) {
+                let staged = self.target_dir.join(format!(".{file_name}.tmp"));
+                std::fs::write(&staged, text)?;
+                std::fs::rename(&staged, self.target_dir.join(file_name))?;
+            }
+        }
+        for file_name in current.keys() {
+            if !files.contains_key(file_name) {
+                std::fs::remove_file(self.target_dir.join(file_name))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Delete each of `devices`. A failure is logged and not returned: the
+    /// usual cause is a device that was never created.
+    async fn delete_devices<'a>(&self, devices: impl IntoIterator<Item = &'a String>) {
+        for iface in devices {
+            if let Err(error) = self.deleter.delete_link(iface).await {
+                tracing::warn!(iface, %error, "could not delete network device");
+            }
         }
     }
 
@@ -234,6 +306,7 @@ impl NetworkReconciler<Networkd, NetworkctlDelete> {
             .unwrap_or_else(|_| PathBuf::from(DEFAULT_NETWORK_DIR));
         Self::new(dir, Networkd, NetworkctlDelete, production_keystore())
             .with_kernel(Arc::new(DeployedKernel::production()))
+            .with_settle(Arc::new(NetworkdSettle))
     }
 }
 
@@ -319,7 +392,8 @@ impl<R: NetworkReload, D: LinkDelete> Reconciler for NetworkReconciler<R, D> {
         let masters = bridge_ports(&settings.network);
         let children = vlan_children(&settings.network);
         std::fs::create_dir_all(&self.target_dir)?;
-        let mut rendered = BTreeSet::new();
+        let previous = self.managed_files()?;
+        let mut files = BTreeMap::new();
         let mut state = serde_json::Map::new();
         // Devices whose netdev properties changed. They apply at creation
         // only, so the device has to go and be built again.
@@ -332,7 +406,7 @@ impl<R: NetworkReload, D: LinkDelete> Reconciler for NetworkReconciler<R, D> {
                 masters.get(iface.as_str()).copied(),
                 children.get(iface.as_str()).map_or(&[][..], Vec::as_slice),
             );
-            std::fs::write(self.target_dir.join(&file_name), unit)?;
+            files.insert(file_name.clone(), unit);
             let mut entry = json!({
                 "file": file_name,
                 "dhcp": cfg.dhcp,
@@ -346,44 +420,66 @@ impl<R: NetworkReload, D: LinkDelete> Reconciler for NetworkReconciler<R, D> {
                 entry["publicKey"] = json!(self.keys.ensure(iface)?);
             }
             state.insert(iface.clone(), entry);
-            rendered.insert(file_name);
             if let Some(netdev) = render_netdev(iface, cfg, &self.keys) {
                 let netdev_name = format!("50-mica-{iface}.netdev");
-                let path = self.target_dir.join(&netdev_name);
-                if std::fs::read_to_string(&path)
-                    .is_ok_and(|previous| previous != netdev || psks.contains(iface))
+                if previous
+                    .get(&netdev_name)
+                    .is_some_and(|previous| *previous != netdev || psks.contains(iface))
                 {
                     recreate.insert(iface.clone());
                 }
-                std::fs::write(&path, netdev)?;
-                rendered.insert(netdev_name);
+                files.insert(netdev_name, netdev);
             }
         }
-        let mut torn_down = BTreeSet::new();
-        for entry in std::fs::read_dir(&self.target_dir)? {
-            let entry = entry?;
-            let file_name = entry.file_name();
-            let Some(file_name) = file_name.to_str() else {
-                continue;
-            };
-            if is_mica_managed(file_name) && !rendered.contains(file_name) {
-                if let Some(iface) = mica_netdev_iface(file_name) {
-                    torn_down.insert(iface.to_string());
-                }
-                std::fs::remove_file(entry.path())?;
-            }
-        }
+        let torn_down: BTreeSet<String> = previous
+            .keys()
+            .filter(|file_name| !files.contains_key(*file_name))
+            .filter_map(|file_name| mica_netdev_iface(file_name).map(str::to_string))
+            .collect();
+        self.replace_files(&files, &previous)?;
         // Before the reload, so networkd builds the recreated devices back on
-        // the same pass that deleted them. A failure is logged and not
-        // returned: the unit file is already gone, the usual cause is a device
-        // that was never created, and failing the apply here would report
-        // every interface that did converge as unconverged.
-        for iface in torn_down.union(&recreate) {
-            if let Err(error) = self.deleter.delete_link(iface).await {
-                tracing::warn!(iface, %error, "could not delete network device");
-            }
-        }
+        // the same pass that deleted them. Failing the apply on a delete would
+        // report every interface that did converge as unconverged.
+        self.delete_devices(torn_down.union(&recreate)).await;
         self.reloader.reload().await?;
+        if !self.applied.swap(true, Ordering::AcqRel) {
+            return Ok(serde_json::Value::Object(state));
+        }
+        let changed: BTreeMap<String, bool> = settings
+            .network
+            .keys()
+            .filter(|iface| {
+                [".network", ".netdev"].iter().any(|suffix| {
+                    let file_name = format!("50-mica-{iface}{suffix}");
+                    files.get(&file_name) != previous.get(&file_name)
+                })
+            })
+            .map(|iface| {
+                let netdev = format!("50-mica-{iface}.netdev");
+                let created = files.contains_key(&netdev);
+                (iface.clone(), created)
+            })
+            .collect();
+        if changed.is_empty() {
+            return Ok(serde_json::Value::Object(state));
+        }
+        if let Err(reason) = self.settle.settle(&changed).await {
+            tracing::warn!(%reason, "network apply did not come up; restoring the previous files");
+            self.replace_files(&previous, &files)?;
+            let rebuilt: BTreeSet<String> = files
+                .keys()
+                .chain(previous.keys())
+                .filter_map(|file_name| mica_netdev_iface(file_name))
+                .filter(|iface| {
+                    let netdev = format!("50-mica-{iface}.netdev");
+                    files.get(&netdev) != previous.get(&netdev)
+                })
+                .map(str::to_string)
+                .collect();
+            self.delete_devices(&rebuilt).await;
+            self.reloader.reload().await?;
+            return Err(RolledBack(reason).into());
+        }
         Ok(serde_json::Value::Object(state))
     }
 }

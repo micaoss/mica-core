@@ -22,9 +22,15 @@ const MAX_TASKS: usize = 128;
 pub struct TaskRecord {
     pub id: String,
     pub operation: String,
+    /// `network.apply` when the apply reaches the network, else
+    /// `settings.apply`.
+    pub kind: String,
     pub dot_path: String,
     pub source: String,
     pub status: String,
+    /// `saved` while queued, `applying` while running, `applied` once
+    /// finished, whatever the outcome.
+    pub phase: String,
     pub enqueued_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
@@ -34,6 +40,10 @@ pub struct TaskRecord {
     pub outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// The network interfaces a finished network apply added, changed or
+    /// removed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interfaces: Vec<String>,
     pub folded_count: u64,
 }
 
@@ -129,6 +139,7 @@ impl ApplyQueue {
                 .records
                 .get_mut(&id)
                 .expect("INVARIANT: every pending job has a task record");
+            record.kind = kind_of(&dot_path).to_string();
             record.dot_path = dot_path;
             record.folded_count += 1;
             return Enqueued {
@@ -160,6 +171,7 @@ impl ApplyQueue {
                     .get_mut(&id)
                     .expect("INVARIANT: every pending job has a task record");
                 record.dot_path.clear();
+                record.kind = kind_of("").to_string();
                 record.folded_count += 1;
                 return Enqueued {
                     record: record.clone(),
@@ -173,14 +185,17 @@ impl ApplyQueue {
         let record = TaskRecord {
             id: id.clone(),
             operation: operation.to_string(),
+            kind: kind_of(dot_path).to_string(),
             dot_path: dot_path.to_string(),
             source: source.to_string(),
             status: "queued".to_string(),
+            phase: "saved".to_string(),
             enqueued_at: timestamp(),
             started_at: None,
             finished_at: None,
             outcome: None,
             message: None,
+            interfaces: Vec::new(),
             folded_count: 0,
         };
         state.pending.push_back(ApplyJob {
@@ -213,6 +228,7 @@ impl ApplyQueue {
         let mut state = self.state.lock().await;
         let record = state.records.get_mut(id)?;
         record.status = "running".to_string();
+        record.phase = "applying".to_string();
         record.started_at = Some(timestamp());
         Some(record.clone())
     }
@@ -222,10 +238,13 @@ impl ApplyQueue {
         id: &str,
         outcome: &str,
         message: Option<String>,
+        interfaces: Vec<String>,
     ) -> Option<TaskRecord> {
         let mut state = self.state.lock().await;
         let record = state.records.get_mut(id)?;
         record.status = "finished".to_string();
+        record.phase = "applied".to_string();
+        record.interfaces = interfaces;
         record.finished_at = Some(timestamp());
         record.outcome = Some(outcome.to_string());
         record.message = message;
@@ -243,6 +262,15 @@ impl ApplyQueue {
             .iter()
             .filter_map(|id| state.records.get(id).cloned())
             .collect()
+    }
+}
+
+/// The kind of an apply at `dot_path`.
+fn kind_of(dot_path: &str) -> &'static str {
+    if crate::bus::paths_overlap(dot_path, "network") {
+        "network.apply"
+    } else {
+        "settings.apply"
     }
 }
 

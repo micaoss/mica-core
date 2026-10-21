@@ -17,9 +17,15 @@ const MAX_TASKS: usize = 128;
 pub struct TaskRecord {
     pub id: String,
     pub operation: String,
+    /// `network.apply` when the apply reaches the network, else
+    /// `settings.apply`.
+    pub kind: String,
     pub dot_path: String,
     pub source: String,
     pub status: String,
+    /// `saved` while queued, `applying` while running, `applied` once
+    /// finished, whatever the outcome.
+    pub phase: String,
     pub enqueued_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
@@ -29,6 +35,10 @@ pub struct TaskRecord {
     pub outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// The network interfaces a finished network apply added, changed or
+    /// removed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interfaces: Vec<String>,
     pub folded_count: u64,
 }
 
@@ -204,14 +214,17 @@ mod tests {
         TaskRecord {
             id: id.to_string(),
             operation: "settings-write".to_string(),
+            kind: "settings.apply".to_string(),
             dot_path: "hostname".to_string(),
             source: ":1.7".to_string(),
             status: "running".to_string(),
+            phase: "applying".to_string(),
             enqueued_at: "2026-08-31T00:00:00.000Z".to_string(),
             started_at: Some("2026-08-31T00:00:01.000Z".to_string()),
             finished_at: None,
             outcome: None,
             message: None,
+            interfaces: Vec::new(),
             folded_count: 0,
         }
     }

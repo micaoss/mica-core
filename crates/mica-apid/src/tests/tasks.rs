@@ -19,14 +19,17 @@ pub(super) async fn a_running_task_missing_after_resubscribe_becomes_interrupted
     registry.update(TaskRecord {
         id: "task-before-restart".to_string(),
         operation: "settings-write".to_string(),
+        kind: "settings.apply".to_string(),
         dot_path: "access.ssh.enabled".to_string(),
         source: ":1.9".to_string(),
         status: "running".to_string(),
+        phase: "applying".to_string(),
         enqueued_at: "2026-08-31T00:00:00.000Z".to_string(),
         started_at: Some("2026-08-31T00:00:01.000Z".to_string()),
         finished_at: None,
         outcome: None,
         message: None,
+        interfaces: Vec::new(),
         folded_count: 0,
     });
     registry.lapsed();

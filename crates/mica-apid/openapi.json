@@ -11607,9 +11607,11 @@
         "required": [
           "id",
           "operation",
+          "kind",
           "dotPath",
           "source",
           "status",
+          "phase",
           "enqueuedAt",
           "foldedCount"
         ],
@@ -11634,6 +11636,17 @@
           "id": {
             "type": "string"
           },
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The network interfaces a finished network apply added, changed or\nremoved."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`network.apply` when the apply reaches the network, else\n`settings.apply`."
+          },
           "message": {
             "type": [
               "string",
@@ -11648,6 +11661,10 @@
               "string",
               "null"
             ]
+          },
+          "phase": {
+            "type": "string",
+            "description": "`saved` while queued, `applying` while running, `applied` once\nfinished, whatever the outcome."
           },
           "source": {
             "type": "string"

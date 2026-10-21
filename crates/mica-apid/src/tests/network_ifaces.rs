@@ -667,14 +667,22 @@ pub(super) async fn a_network_write_waits_for_the_running_network_task() {
     let task = |id: &str, dot_path: &str, status: &str| crate::task_registry::TaskRecord {
         id: id.to_string(),
         operation: "settings-write".to_string(),
+        kind: if dot_path.starts_with("network") {
+            "network.apply"
+        } else {
+            "settings.apply"
+        }
+        .to_string(),
         dot_path: dot_path.to_string(),
         source: ":1.9".to_string(),
         status: status.to_string(),
+        phase: "applying".to_string(),
         enqueued_at: "2026-10-21T00:00:00.000Z".to_string(),
         started_at: None,
         finished_at: None,
         outcome: None,
         message: None,
+        interfaces: Vec::new(),
         folded_count: 0,
     };
     // Another subtree's task holds nothing back.

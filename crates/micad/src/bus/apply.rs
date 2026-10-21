@@ -3,7 +3,7 @@
 use crate::apply_queue::{ApplyJob, ApplyQueue, TaskRecord};
 use crate::reconciler::Reconciler;
 
-use micad_settings::{DocumentRefusal, SettingsError};
+use micad_settings::{DocumentRefusal, IfaceSettings, SettingsError, Store};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +11,9 @@ use tokio::sync::{Mutex, RwLock};
 use zbus::object_server::SignalEmitter;
 
 use super::*;
+
+/// The network settings subtree: interfaces by name.
+type NetworkMap = std::collections::BTreeMap<String, IfaceSettings>;
 
 impl MicadService {
     /// Validate and atomically persist `value` without waiting for a
@@ -277,6 +280,7 @@ impl MicadService {
             Arc::clone(&self.apply_lock),
             Arc::clone(&self.reconcilers),
             Arc::clone(&self.refusals),
+            self.store.clone(),
         ));
     }
 
@@ -423,6 +427,9 @@ async fn reconcile_matching(
         }
         let result = reconciler.apply(&settings).await;
         let mut inner = inner.write().await;
+        if reconciler.subtree() == "network" && result.is_ok() {
+            inner.applied_network = Some(settings.network.clone());
+        }
         if let Some(failure) = record(&mut inner.state, reconciler.name(), result) {
             failures.push(failure);
         }
@@ -444,6 +451,7 @@ pub(super) async fn run_apply_worker(
     apply_lock: Arc<Mutex<()>>,
     reconcilers: Arc<Vec<Box<dyn Reconciler>>>,
     refusals: Arc<RwLock<Vec<DocumentRefusal>>>,
+    store: Store,
 ) {
     loop {
         let ApplyJob { id, dot_path } = queue.next().await;
@@ -453,18 +461,92 @@ pub(super) async fn run_apply_worker(
         };
         publish_task_transition(&queue, &inner, &started).await;
 
-        let failures = {
+        let (failures, interfaces) = {
             let _apply = apply_lock.lock().await;
-            reconcile_subtree(&reconcilers, &inner, &refusals, &dot_path).await
+            let (applied, attempted) = {
+                let data = inner.read().await;
+                (data.applied_network.clone(), data.settings.network.clone())
+            };
+            let failures = reconcile_subtree(&reconcilers, &inner, &refusals, &dot_path).await;
+            if !paths_overlap(&dot_path, "network") {
+                (failures, Vec::new())
+            } else {
+                let interfaces = changed_interfaces(applied.as_ref(), &attempted);
+                if let Some(applied) = applied {
+                    restore_network(&queue, &inner, &refusals, &store, &attempted, applied).await;
+                }
+                (failures, interfaces)
+            }
         };
         let (outcome, message) = if failures.is_empty() {
             ("succeeded", None)
         } else {
             ("failed", Some(failures.join("; ")))
         };
-        if let Some(finished) = queue.finish(&id, outcome, message).await {
+        if let Some(finished) = queue.finish(&id, outcome, message, interfaces).await {
             publish_task_transition(&queue, &inner, &finished).await;
         }
+    }
+}
+
+/// The interfaces `attempted` adds, changes or removes against `applied`.
+fn changed_interfaces(applied: Option<&NetworkMap>, attempted: &NetworkMap) -> Vec<String> {
+    let empty = NetworkMap::new();
+    let applied = applied.unwrap_or(&empty);
+    applied
+        .keys()
+        .chain(attempted.keys())
+        .filter(|name| applied.get(*name) != attempted.get(*name))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .cloned()
+        .collect()
+}
+
+/// After a network apply the reconciler rolled back, store `applied` again
+/// in place of the `attempted` map it could not bring up, so the stored map
+/// is the one running. A write that landed since is newer than both, and
+/// stays.
+async fn restore_network(
+    queue: &ApplyQueue,
+    inner: &RwLock<Inner>,
+    refusals: &RwLock<Vec<DocumentRefusal>>,
+    store: &Store,
+    attempted: &NetworkMap,
+    applied: NetworkMap,
+) {
+    let preserve: Vec<String> = refusals
+        .read()
+        .await
+        .iter()
+        .map(|refusal| refusal.document.clone())
+        .collect();
+    let value = {
+        let mut data = inner.write().await;
+        let rolled_back = data
+            .state
+            .pointer("/network/rolledBack")
+            .and_then(Value::as_bool)
+            == Some(true);
+        if !rolled_back || data.settings.network != *attempted {
+            return;
+        }
+        let mut candidate = data.settings.clone();
+        candidate.network = applied;
+        let preserve: Vec<&str> = preserve.iter().map(String::as_str).collect();
+        if let Err(error) = store.preserving(&preserve).save(&candidate) {
+            tracing::error!(%error, "store the restored network map");
+            return;
+        }
+        let value = serde_json::to_string(&candidate.network);
+        data.settings = candidate;
+        value
+    };
+    let (Some(emitter), Ok(value)) = (queue.emitter(), value) else {
+        return;
+    };
+    if let Err(error) = MicadService::settings_changed(&emitter, "network", &value).await {
+        tracing::warn!(%error, "emit SettingsChanged for the restored network map");
     }
 }
 
@@ -514,10 +596,14 @@ pub(super) fn record(
         Err(err) => {
             tracing::error!(reconciler = name, error = %err, "reconciler apply failed");
             let message = format!("{name}: {err}");
-            (
-                serde_json::json!({ "error": err.to_string() }),
-                Some(message),
-            )
+            let mut entry = serde_json::json!({ "error": err.to_string() });
+            if err
+                .downcast_ref::<crate::reconciler::network::RolledBack>()
+                .is_some()
+            {
+                entry["rolledBack"] = Value::Bool(true);
+            }
+            (entry, Some(message))
         }
     };
     if let Some(map) = state.as_object_mut() {

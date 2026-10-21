@@ -201,14 +201,22 @@ impl FakeSettings {
             TaskRecord {
                 id: id.clone(),
                 operation: operation.to_string(),
+                kind: if path == "network" || path.starts_with("network.") {
+                    "network.apply"
+                } else {
+                    "settings.apply"
+                }
+                .to_string(),
                 dot_path: path.to_string(),
                 source: "test".to_string(),
                 status: "finished".to_string(),
+                phase: "applied".to_string(),
                 enqueued_at: "2026-08-31T00:00:00.000Z".to_string(),
                 started_at: Some("2026-08-31T00:00:00.000Z".to_string()),
                 finished_at: Some("2026-08-31T00:00:00.000Z".to_string()),
                 outcome: Some("succeeded".to_string()),
                 message: None,
+                interfaces: Vec::new(),
                 folded_count: 0,
             },
         );

@@ -136,7 +136,17 @@ provisioning state, a staged reset) is `settings.toml` on STATE. Each document h
 schema version, and an unknown key or version is refused, never converted. A document that does
 not parse disables only the subtrees it carries. Writes are validated against the whole tree,
 go through a fsynced undo journal, and are applied as a task (`SetSettings` returns its id;
-`TaskChanged` reports it).
+`TaskChanged` reports it). A task is `kind` `network.apply` when it reaches the network and
+`settings.apply` otherwise, in `phase` `saved`, `applying`, then `applied`; a finished network
+apply names the `interfaces` it added, changed or removed.
+
+**Network apply.** Under networkd, a network apply replaces the `50-mica-*` units whole, each
+written beside its place and renamed over it, and reloads networkd. After the first apply of
+the process, it waits up to 30 s for each interface whose units changed: networkd configured it,
+or it is `routable`, `degraded` or `enslaved`; one without carrier, or a device not plugged in,
+is not waited for, and one the apply creates must appear. When one fails or times out, the
+previous units go back, the devices whose `.netdev` changed are deleted, networkd reloads, the
+task fails naming the interface, and the stored network map goes back to the one last applied.
 
 **CAN interfaces.** `kind: "can"` is a CAN controller the kernel registered (`can0`); its
 `can` block:

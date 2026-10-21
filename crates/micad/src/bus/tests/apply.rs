@@ -42,6 +42,7 @@ pub(super) async fn a_wireguard_rotation_reapplies_only_the_network_subtree() {
 
 #[tokio::test]
 pub(super) async fn two_identical_queued_writes_run_one_reconcile() {
+    let dir = tempfile::tempdir().expect("tempdir");
     let queue = Arc::new(crate::apply_queue::ApplyQueue::new());
     let first = queue.enqueue("settings-write", "hostname", ":1.7").await;
     let second = queue.enqueue("settings-write", "hostname", ":1.8").await;
@@ -58,6 +59,7 @@ pub(super) async fn two_identical_queued_writes_run_one_reconcile() {
     let inner = Arc::new(tokio::sync::RwLock::new(Inner {
         settings: micad_settings::Settings::default(),
         state: serde_json::json!({}),
+        applied_network: None,
     }));
     let worker = tokio::spawn(run_apply_worker(
         Arc::clone(&queue),
@@ -65,6 +67,7 @@ pub(super) async fn two_identical_queued_writes_run_one_reconcile() {
         Arc::new(tokio::sync::Mutex::new(())),
         reconcilers,
         Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        store_in(&dir),
     ));
     queue.wake();
 
@@ -86,6 +89,108 @@ pub(super) async fn two_identical_queued_writes_run_one_reconcile() {
         *calls.lock().expect("call log"),
         vec!["hostname".to_string()]
     );
+}
+
+/// A network reconciler that applies the first time and, after that, rolls
+/// back.
+struct RollingBackNetwork {
+    applies: Mutex<u32>,
+}
+
+#[async_trait::async_trait]
+impl crate::reconciler::Reconciler for RollingBackNetwork {
+    fn name(&self) -> &'static str {
+        "network"
+    }
+
+    fn subtree(&self) -> &'static str {
+        "network"
+    }
+
+    async fn apply(
+        &self,
+        _settings: &micad_settings::Settings,
+    ) -> anyhow::Result<serde_json::Value> {
+        let mut applies = self.applies.lock().expect("apply count");
+        *applies += 1;
+        if *applies == 1 {
+            return Ok(serde_json::json!({}));
+        }
+        Err(crate::reconciler::network::RolledBack("eth1: it is off".to_string()).into())
+    }
+}
+
+/// Run one queued network apply to its end.
+async fn run_network_task(
+    queue: &crate::apply_queue::ApplyQueue,
+) -> crate::apply_queue::TaskRecord {
+    let task = queue.enqueue("settings-write", "network", ":1.7").await;
+    assert_eq!(task.record.kind, "network.apply");
+    assert_eq!(task.record.phase, "saved");
+    queue.wake();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let task = queue.get(&task.record.id).await.expect("task record");
+            if task.terminal() {
+                break task;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("task finishes")
+}
+
+#[tokio::test]
+pub(super) async fn a_rolled_back_network_apply_stores_the_applied_map_again() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = store_in(&dir);
+    let mut settings = micad_settings::Settings::default();
+    settings
+        .network
+        .insert("eth0".to_string(), micad_settings::IfaceSettings::default());
+    let applied = settings.network.clone();
+    let queue = Arc::new(crate::apply_queue::ApplyQueue::new());
+    let inner = Arc::new(tokio::sync::RwLock::new(Inner {
+        settings,
+        state: serde_json::json!({}),
+        applied_network: None,
+    }));
+    let reconcilers: Arc<Vec<Box<dyn crate::reconciler::Reconciler>>> =
+        Arc::new(vec![Box::new(RollingBackNetwork {
+            applies: Mutex::new(0),
+        })]);
+    let worker = tokio::spawn(run_apply_worker(
+        Arc::clone(&queue),
+        Arc::clone(&inner),
+        Arc::new(tokio::sync::Mutex::new(())),
+        reconcilers,
+        Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        store.clone(),
+    ));
+    let first = run_network_task(&queue).await;
+    assert_eq!(first.outcome.as_deref(), Some("succeeded"));
+    assert_eq!(first.phase, "applied");
+    assert_eq!(first.interfaces, ["eth0"]);
+
+    // The write the next apply cannot bring up has already been stored.
+    let mut attempted = inner.read().await.settings.clone();
+    attempted
+        .network
+        .insert("eth1".to_string(), micad_settings::IfaceSettings::default());
+    store.save(&attempted).expect("store the attempted map");
+    inner.write().await.settings = attempted;
+    let second = run_network_task(&queue).await;
+    worker.abort();
+
+    assert_eq!(second.outcome.as_deref(), Some("failed"));
+    assert_eq!(
+        second.message.as_deref(),
+        Some("network: eth1: it is off; the previous network configuration was restored")
+    );
+    assert_eq!(second.interfaces, ["eth1"]);
+    assert_eq!(inner.read().await.settings.network, applied);
+    assert_eq!(store.load().expect("load the store").network, applied);
 }
 
 #[tokio::test]

@@ -3,9 +3,12 @@ use micad_settings::{BridgeConfig, StaticConfig, VlanConfig, WireguardPeer};
 use micad_settings::{IfaceSettings, WireguardConfig};
 use std::sync::{Arc, Mutex};
 
+use super::settle;
+
 mod kinds;
 mod render;
 mod rules;
+mod transaction;
 mod wireguard;
 
 #[test]

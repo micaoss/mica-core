@@ -188,6 +188,8 @@ async fn bus_roundtrip() -> anyhow::Result<()> {
     assert_eq!(task["operation"], "settings-write");
     assert_eq!(task["dotPath"], "hostname");
     assert_eq!(task["status"], "queued");
+    assert_eq!(task["kind"], "settings.apply");
+    assert_eq!(task["phase"], "saved");
 
     let finished = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -201,6 +203,7 @@ async fn bus_roundtrip() -> anyhow::Result<()> {
     .await??;
     assert_eq!(finished["outcome"], "succeeded");
     assert_eq!(finished["foldedCount"], 0);
+    assert_eq!(finished["phase"], "applied");
 
     let hostname = proxy.get_settings("hostname").await?;
     assert_eq!(hostname, "\"unit-test-host\"");

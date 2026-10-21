@@ -70,6 +70,9 @@ pub fn paths_overlap(a: &str, b: &str) -> bool {
 struct Inner {
     settings: Settings,
     state: Value,
+    /// The network map the network reconciler last applied without error:
+    /// what a network apply that did not come up puts back.
+    applied_network: Option<std::collections::BTreeMap<String, micad_settings::IfaceSettings>>,
 }
 
 /// The `com.mica.micad1` service: settings tree, live-state tree, store,
@@ -282,7 +285,11 @@ impl MicadService {
         state: Value,
     ) -> Self {
         let installing = Arc::new(AtomicBool::new(false));
-        let inner = Arc::new(RwLock::new(Inner { settings, state }));
+        let inner = Arc::new(RwLock::new(Inner {
+            settings,
+            state,
+            applied_network: None,
+        }));
         let update = Arc::new(UpdateLifecycle::new(
             Arc::new(NoClient),
             PolicyStore::defaults(),

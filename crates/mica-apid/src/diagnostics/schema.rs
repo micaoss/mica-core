@@ -228,14 +228,17 @@ pub(super) fn schema() -> Rule {
     let task = obj(vec![
         ("id", S),
         ("operation", S),
+        ("kind", S),
         ("dotPath", S),
         ("source", S),
         ("status", S),
+        ("phase", S),
         ("enqueuedAt", S),
         ("startedAt", S),
         ("finishedAt", S),
         ("outcome", S),
         ("message", S),
+        ("interfaces", arr(S)),
         ("foldedCount", S),
     ]);
     let failures = obj(vec![

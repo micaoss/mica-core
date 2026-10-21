@@ -299,7 +299,7 @@ trait NetworkManager {
 }
 
 /// networkd's `Describe`, parsed and otherwise untouched.
-async fn describe_raw() -> anyhow::Result<Value> {
+pub(crate) async fn describe_raw() -> anyhow::Result<Value> {
     tokio::time::timeout(OBSERVE_TIMEOUT, async {
         let connection = zbus::Connection::system()
             .await

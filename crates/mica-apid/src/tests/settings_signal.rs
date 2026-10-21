@@ -83,9 +83,11 @@ impl FakeMicad {
         let task = serde_json::json!({
             "id": "fake-task-1",
             "operation": "settings-write",
+            "kind": "settings.apply",
             "dotPath": path,
             "source": ":1.9",
             "status": "running",
+            "phase": "applying",
             "enqueuedAt": "2026-08-31T00:00:00.000Z",
             "startedAt": "2026-08-31T00:00:01.000Z",
             "foldedCount": 0
