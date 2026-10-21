@@ -134,7 +134,7 @@ async fn the_agent_registers_each_time_bluetoothd_appears() {
     let wait_for = |count: usize| {
         let calls = std::sync::Arc::clone(&calls);
         async move {
-            tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::time::timeout(BUS_CALL, async {
                 while calls.lock().unwrap().len() < count {
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
@@ -174,8 +174,9 @@ async fn the_agent_registers_each_time_bluetoothd_appears() {
     let _ = bus.wait();
 }
 
-/// How long one call to the private bus may take: it answers in milliseconds.
-const BUS_CALL: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long one call to the private bus may take. It answers in milliseconds,
+/// but shares the machine with the rest of the gate.
+const BUS_CALL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// `call`, or a failure naming `what` once [`BUS_CALL`] has passed.
 async fn bounded<T>(what: &str, call: impl std::future::Future<Output = T>) -> T {
@@ -215,9 +216,16 @@ async fn the_agent_serves_the_recorded_interface() {
     )
     .await
     .unwrap();
+    // BlueZ is another peer on the bus, so the agent is read from one too.
+    let client = bounded(
+        "connecting the reader",
+        zbus::connection::Builder::address(address.trim()).build(),
+    )
+    .await
+    .unwrap();
     let proxy = bounded(
         "building the proxy",
-        zbus::fdo::IntrospectableProxy::builder(&connection)
+        zbus::fdo::IntrospectableProxy::builder(&client)
             .destination(connection.unique_name().unwrap().to_owned())
             .path(AGENT_PATH)
             .build(),
