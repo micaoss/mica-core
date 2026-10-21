@@ -1,6 +1,8 @@
 [Unit]
 Description=mica management daemon
-After=dbus.service
+# mica-accounts binds the apps' accounts over /etc/passwd and /etc/group
+# before micad names or removes one (under OpenRC, mica-mounts does).
+After=dbus.service mica-accounts.service
 # main.rs deliberately hard-fails when STATE is unwritable; without this
 # ordering that policy can race the mount, and Restart=on-failure under the
 # default start-rate limit would park the daemon in "failed" on a slow disk.

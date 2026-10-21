@@ -174,7 +174,18 @@ async fn serve() -> anyhow::Result<()> {
             ),
         }
         match reset::apply_pending(&store, &mut settings, &reset::Roots::from_env()) {
-            Ok(outcome) => tracing::info!(?outcome, "staged reset checked"),
+            Ok(outcome) => {
+                tracing::info!(?outcome, "staged reset checked");
+                if matches!(
+                    outcome,
+                    reset::Outcome::Applied(
+                        micad_settings::ResetTier::ApplicationData
+                            | micad_settings::ResetTier::FullFactory
+                    )
+                ) {
+                    apps::rebuild_accounts();
+                }
+            }
             Err(error) => {
                 // Keep application writers stopped until the staged scope is
                 // complete; shared DATA failure needs recovery, not a new root.

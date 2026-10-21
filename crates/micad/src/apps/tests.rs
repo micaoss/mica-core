@@ -194,6 +194,8 @@ impl Rig {
         let mut apps = Apps::new(dir.path(), units, Arc::clone(&fetch) as Arc<dyn Fetch>);
         apps.uid_base = rustix::process::geteuid().as_raw();
         apps.setpriv = setpriv;
+        // No mica-accounts until a test writes its stand-in here.
+        apps.accounts = dir.path().join("mica-accounts");
         let apps = Arc::new(apps);
         Self {
             dir,
@@ -669,6 +671,63 @@ fn a_group_that_reaches_past_the_app_or_has_no_name_is_refused() {
     ] {
         assert!(flow::group_refusal(gid, text).is_some(), "{gid}");
     }
+}
+
+/// Where mica-accounts is, an app's own uid is named `mica-app-<name>` at
+/// install and loses its name at the purge; a refusal fails the install.
+#[tokio::test]
+async fn mica_accounts_names_an_apps_own_uid() {
+    let rig = Rig::new(Init::Systemd);
+    let base = rig.apps.uid_base;
+    let log = rig.path("accounts.log");
+    std::fs::write(
+        rig.path("mica-accounts"),
+        format!(
+            "#!/bin/sh\necho \"$*\" >> {}\n[ \"$2\" != mica-app-bad ] || {{ echo 'mica-accounts: refused' >&2; exit 1; }}\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(
+        rig.path("mica-accounts"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let own = json!({ "services": [{ "name": "demo", "exec": ["files/run"] }] });
+    rig.install(&rig.bundle("demo", "1.0", own.clone(), None), false)
+        .await
+        .unwrap();
+    rig.apps.remove("demo", false).await.unwrap();
+    rig.install(&rig.bundle("demo", "1.0", own, None), false)
+        .await
+        .unwrap();
+    rig.apps.remove("demo", true).await.unwrap();
+    // A root app has no account of its own.
+    rig.install(&rig.bundle("rooted", "1.0", json!({}), None), false)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        format!(
+            "add mica-app-demo {base} {base}\nadd mica-app-demo {base} {base}\nremove mica-app-demo\n"
+        )
+    );
+
+    let bad = json!({ "services": [{ "name": "bad", "exec": ["files/run"] }] });
+    let Err(AppError::Failed(err)) = rig
+        .install(&rig.bundle("bad", "1.0", bad, None), false)
+        .await
+    else {
+        panic!("a refused account fails the install")
+    };
+    assert!(
+        format!("{err:#}").contains("mica-accounts: refused"),
+        "{err:#}"
+    );
+    assert!(!rig.record().apps.contains_key("bad"));
+    assert!(!rig.record().uids.contains_key("bad"));
+    let tail = format!("add mica-app-bad {base} {base}\nremove mica-app-bad\n");
+    assert!(std::fs::read_to_string(&log).unwrap().ends_with(&tail));
 }
 
 /// Under OpenRC the service is a script micad writes, under supervise-daemon.

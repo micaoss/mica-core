@@ -94,6 +94,10 @@ fn populated_roots() -> (TempDir, Roots) {
     write(&roots.state.join("containerd/web.json"), "declaration");
     write(&roots.state.join("systemd-units/vendor.service"), "unit");
     write(&roots.state.join("openrc-local/init.d/vendor"), "service");
+    write(
+        &roots.state.join("accounts/passwd"),
+        "mica-app-demo:x:30000:30000::/srv/apps/demo:/usr/sbin/nologin\n",
+    );
     write(&roots.state.join("mica/secrets/device-password"), "secret");
     write(&roots.state.join(APID_IDENTITY), "uploaded identity");
     write(
@@ -258,6 +262,7 @@ fn tier_two_clears_the_application_layer_and_keeps_the_platform() {
     assert!(!exists(&roots.state.join("containerd/web.json")));
     assert!(!exists(&roots.state.join("systemd-units/vendor.service")));
     assert!(!exists(&roots.state.join("openrc-local/init.d")));
+    assert!(!exists(&roots.state.join("accounts/passwd")));
     assert!(
         !exists(&roots.state.join(APP_SEEDS_RECORD)),
         "the image's app seeds come back with the apps"

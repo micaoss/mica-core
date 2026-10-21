@@ -10,7 +10,9 @@ use serde_json::{Value, json};
 use super::bundle;
 use super::manifest::{self, Manifest, Privileges, Problem, RunAs};
 use super::render::{self, Account};
-use super::{AppEntry, AppError, Apps, Installed, LastResult, MAX_APPS, Record, UID_COUNT, now};
+use super::{
+    AppEntry, AppError, Apps, Installed, LastResult, MAX_APPS, Record, UID_COUNT, account_name, now,
+};
 use crate::user_units::Verb;
 
 /// The most bytes of a first-run hook's output kept.
@@ -224,10 +226,19 @@ impl Apps {
             && !old
                 .as_ref()
                 .is_some_and(|entry| entry.first_run.contains(&version));
+        let had_uid = record.uids.contains_key(&name);
         let account = self.account(&name, &manifest, &mut record)?;
-        let switched = self
-            .switch(&name, from.as_ref(), &manifest, account.as_ref(), run_hook)
-            .await;
+        let switched = match &account {
+            Some(account) => self.name_account(&name, account.uid).await,
+            None => Ok(()),
+        };
+        let switched = match switched {
+            Ok(()) => {
+                self.switch(&name, from.as_ref(), &manifest, account.as_ref(), run_hook)
+                    .await
+            }
+            Err(err) => Err(err),
+        };
         let action = if old.is_some() { "upgrade" } else { "install" };
         match switched {
             Ok(()) => {
@@ -299,6 +310,9 @@ impl Apps {
                     }
                     (None, _) => {
                         self.teardown(&manifest).await;
+                        if account.is_some() && !had_uid {
+                            let _ = self.accounts_tool(&["remove", &account_name(&name)]).await;
+                        }
                         let _ = std::fs::remove_dir_all(&app_dir);
                         if !data_was_there {
                             let _ = std::fs::remove_dir_all(&data);
@@ -494,6 +508,35 @@ impl Apps {
         }))
     }
 
+    /// Name `uid` `mica-app-<name>` through mica-accounts, which keeps it
+    /// unchanged when it has it already.
+    async fn name_account(&self, name: &str, uid: u32) -> anyhow::Result<()> {
+        let uid = uid.to_string();
+        self.accounts_tool(&["add", &account_name(name), &uid, &uid])
+            .await
+    }
+
+    /// Run mica-accounts with `args`; nothing on a root without it, whose
+    /// apps' uids stay unnamed.
+    async fn accounts_tool(&self, args: &[&str]) -> anyhow::Result<()> {
+        if !self.accounts.exists() {
+            return Ok(());
+        }
+        let output = tokio::process::Command::new(&self.accounts)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await
+            .with_context(|| format!("run {}", self.accounts.display()))?;
+        anyhow::ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        Ok(())
+    }
+
     /// The ids the root's accounts and groups and the apps hold.
     fn taken_ids(&self, record: &Record) -> BTreeSet<u32> {
         let mut taken: BTreeSet<u32> = record.uids.values().copied().collect();
@@ -643,7 +686,7 @@ impl Apps {
             tracing::warn!(path = %path.display(), %err, "keep the first-run output");
         }
         if let Some(logger) = &self.logger {
-            send_to_log(logger, &format!("mica-app-{name}"), log).await;
+            send_to_log(logger, &account_name(name), log).await;
         }
         outcome
     }
@@ -772,8 +815,10 @@ impl Apps {
             }
         }
         record.apps.remove(name);
-        if purge {
-            record.uids.remove(name);
+        if purge && record.uids.remove(name).is_some() {
+            self.accounts_tool(&["remove", &account_name(name)])
+                .await
+                .unwrap_or_else(|err| tracing::warn!(app = name, %err, "remove the app's account"));
         }
         self.write_record(&record)?;
         tracing::info!(app = name, purge, "app removed");

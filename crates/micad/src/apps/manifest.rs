@@ -13,8 +13,10 @@ pub const MAX_UNITS: usize = 16;
 const MAX_ENV: usize = 64;
 /// The longest version string.
 const MAX_VERSION_LEN: usize = 64;
-/// The longest name.
+/// The longest service name.
 const MAX_NAME_LEN: usize = 32;
+/// The longest app name: its account, `mica-app-<name>`, is at most 32.
+const MAX_APP_NAME_LEN: usize = 23;
 /// The architectures a bundle may name, and `all`.
 const ARCHES: [&str; 4] = ["amd64", "arm64", "armhf", "all"];
 /// The most services one app declares.
@@ -275,9 +277,15 @@ fn is_device(path: &str) -> bool {
     })
 }
 
-/// Whether `name` can be an app's: 1 to 32 of `[a-z0-9-]`, not starting with
+/// Whether `name` can be an app's: 1 to 23 of `[a-z0-9-]`, not starting with
 /// `-`.
 pub fn is_app_name(name: &str) -> bool {
+    name.len() <= MAX_APP_NAME_LEN && is_service_name(name)
+}
+
+/// Whether `name` can be a service's: 1 to 32 of `[a-z0-9-]`, not starting
+/// with `-`.
+fn is_service_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_NAME_LEN
         && !name.starts_with('-')
@@ -318,7 +326,7 @@ pub fn check_fields(manifest: &Manifest, init: Init, arch: &str) -> Vec<Problem>
         fail(
             "manifest",
             format!(
-                "name {:?} is not 1 to {MAX_NAME_LEN} of a-z, 0-9 and -",
+                "name {:?} is not 1 to {MAX_APP_NAME_LEN} of a-z, 0-9 and -",
                 manifest.name
             ),
         );
@@ -479,7 +487,7 @@ fn check_privileges(manifest: &Manifest, fail: &mut impl FnMut(&'static str, Str
         .collect();
     let mut names = std::collections::BTreeSet::new();
     for service in &manifest.services {
-        if !is_app_name(&service.name) {
+        if !is_service_name(&service.name) {
             fail(
                 "manifest",
                 format!(
@@ -667,6 +675,14 @@ mod tests {
             .map(|p| p.rule)
             .collect();
         assert_eq!(rules, ["init"]);
+    }
+
+    #[test]
+    fn an_app_name_leaves_room_for_its_account() {
+        assert!(is_app_name(&"a".repeat(23)));
+        assert!(!is_app_name(&"a".repeat(24)));
+        assert!(is_service_name(&"a".repeat(32)));
+        assert!(!is_service_name(&"a".repeat(33)));
     }
 
     fn own_user() -> Manifest {

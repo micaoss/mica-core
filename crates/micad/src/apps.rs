@@ -43,8 +43,10 @@ const MAX_APPS: usize = 16;
 const HOOK_TIMEOUT: Duration = Duration::from_secs(300);
 /// The first uid an app's own user gets; the next [`UID_COUNT`] are apps'.
 const UID_BASE: u32 = 30000;
-/// How many uids apps may have.
-const UID_COUNT: u32 = 1000;
+/// How many uids apps may have: 30000 to 39999, mica-accounts' range.
+const UID_COUNT: u32 = 10000;
+/// The Base tool that names apps' accounts in `/etc/passwd` and `/etc/group`.
+const ACCOUNTS_TOOL: &str = "/usr/lib/mica/mica-accounts";
 
 /// Why an app request is refused or failed.
 #[derive(Debug)]
@@ -176,6 +178,8 @@ pub struct Apps {
     uid_base: u32,
     /// What a first-run hook of an app's own user runs through.
     setpriv: PathBuf,
+    /// mica-accounts; a root without it leaves apps' uids unnamed.
+    accounts: PathBuf,
     busy: AtomicBool,
 }
 
@@ -186,6 +190,32 @@ impl Drop for Busy {
     fn drop(&mut self) {
         self.0.busy.store(false, Ordering::Release);
     }
+}
+
+/// Have mica-accounts bind `/etc/passwd` and `/etc/group` again from what
+/// STATE holds, after a reset cleared the apps' accounts there. A root
+/// without it has nothing to rebuild.
+pub fn rebuild_accounts() {
+    if !Path::new(ACCOUNTS_TOOL).exists() {
+        return;
+    }
+    match std::process::Command::new(ACCOUNTS_TOOL)
+        .arg("build")
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => tracing::warn!(
+            stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+            "mica-accounts build"
+        ),
+        Err(err) => tracing::warn!(%err, "mica-accounts build"),
+    }
+}
+
+/// The name of `app`'s own account.
+fn account_name(app: &str) -> String {
+    format!("mica-app-{app}")
 }
 
 fn now() -> String {
@@ -203,6 +233,7 @@ impl Apps {
             hook_timeout: HOOK_TIMEOUT,
             uid_base: UID_BASE,
             setpriv: PathBuf::from(render::SETPRIV),
+            accounts: PathBuf::from(ACCOUNTS_TOOL),
             busy: AtomicBool::new(false),
         }
     }
@@ -351,7 +382,7 @@ impl Apps {
             let root = m.privileges.user == manifest::RunAs::Root;
             json!({
                 "user": m.privileges.user,
-                "account": (!root).then(|| format!("mica-app-{name}")),
+                "account": (!root).then(|| account_name(name)),
                 "uid": if root { None } else { self.read_record().uids.get(name).copied() },
                 "capabilities": m.privileges.capabilities,
                 "devices": m.privileges.devices,

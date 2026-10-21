@@ -287,7 +287,8 @@ absence is reported with its reason rather than as a healthy reading:
 - **Power, reset and recovery.** Reboot and power-off are recorded with their caller before they
   run. A staged reset applies one tier: `configuration`, `application-data` or `full-factory`
   (which keeps identity). `application-data` and `full-factory` also clear DATA/state
-  `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10) and remove
+  `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10) and
+  `accounts` (the apps' accounts, then `mica-accounts build`), remove
   the record of the image's app seeds (section 3.11), and
   refuse to run while `/run/docker.pid` names a live dockerd, whose storage they would clear
   under it. A board-declared physical recovery action at boot maps to a tier. A
@@ -531,14 +532,14 @@ directory or a symbolic link, or one there twice refuses it. The manifest:
 | Field | Meaning |
 | --- | --- |
 | `schemaVersion` | `1` |
-| `name` | 1 to 32 of `[a-z0-9-]`, not starting with `-` |
+| `name` | 1 to 23 of `[a-z0-9-]`, not starting with `-`, so its account `mica-app-<name>` is at most 32 |
 | `version` | A version in dpkg's order, at most 64 characters |
 | `arch` | Some of `amd64`, `arm64`, `armhf`, or `all`; the device's must be among them |
 | `description` | Optional |
 | `privileges` | `{"user", "capabilities", "devices"}`: `user` is `app` (default) or `root`; an app of its own user lists the `CAP_*` its services keep and the device nodes under `/dev` they may open. `CAP_SYS_ADMIN`, `CAP_SYS_MODULE`, `CAP_SYS_PTRACE`, `CAP_DAC_OVERRIDE`, `CAP_DAC_READ_SEARCH`, `CAP_SYS_RAWIO`, `CAP_SYS_BOOT`, `CAP_SETUID`, `CAP_SETGID`, `CAP_SETPCAP`, `CAP_CHOWN`, `CAP_FOWNER`, `CAP_MKNOD`, `CAP_BPF` and `CAP_SYS_CHROOT` reach past the app and are refused: an app that needs one runs as root. A root app lists neither |
 | `services` | An app of its own user's: at most 16 `{"name", "exec", "enable"}`. `name` is 1 to 32 of `[a-z0-9-]`, its unit `<name>.service` or the OpenRC script `<name>`; `exec` a file in `files/`, then its arguments, where `${VAR}` names an `APP_*` or `env` variable and no quote, backslash, backquote or control character appears; `enable` starts it at boot and at install |
 | `units` | A root app's: at most 16 `{"systemd"?, "openrc"?, "enable"}`, each naming its file in `units/<init>/`; a bundle with units has one for the device's init |
-| `env` | At most 64 upper-case variables outside `APP_`, without quotes, backslashes, `$`, backquotes or control characters |
+| `env` | At most 64 upper-case variables outside `APP_`, without quotes, backslashes, `$`, backquotes or control characters. Every process on the device can read them, as it can the manifest, so they hold no secret |
 | `firstRun` | Optional, an executable file in `hooks/` |
 | `update` | Optional `{"url", "auto"}`: an `https` version file, and whether a newer version installs on its own |
 | `seedPolicy` | `follow-image` (default) or `once`, below |
@@ -546,10 +547,13 @@ directory or a symbolic link, or one there twice refuses it. The manifest:
 A unit is refused when the root ships its name, `services.units` declares it, another app has it,
 or a hand installed it with `mica-unit`. At most 16 apps are installed.
 
-**An app's own user.** micad gives the app a uid, the same as its gid, from 30000 to 30999, one no
+**An app's own user.** micad gives the app a uid, the same as its gid, from 30000 to 39999, one no
 account or group of the root has, and keeps it in `/mica/apps/apps.json` through a remove until a
-purge. The root's accounts are read-only, so it has no name there: micad shows it as
-`mica-app-<name>`, and `ps` the number. `/srv/apps/<name>` is the app's, and is given back to root
+purge. Base's `/usr/lib/mica/mica-accounts` names it `mica-app-<name>`: micad runs `add
+mica-app-<name> <uid> <uid>` at each install of the app (a refusal fails the install) and `remove`
+at the purge, and the tool keeps the accounts on DATA/state `accounts` and binds them over
+`/etc/passwd` and `/etc/group` before micad starts. On a root without the tool the uid has no
+name: micad still shows it as `mica-app-<name>`, and `ps` the number. `/srv/apps/<name>` is the app's, and is given back to root
 should a later version run as root. Each service runs through `setpriv` as that uid, with no
 supplementary groups but those of its devices' nodes (a node that is not a character device, or
 one of group `disk`, `kmem`, `shadow`, `sudo`, `wheel`, `adm`, `tty` or `utmp`, or of a gid with no

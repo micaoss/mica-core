@@ -76,8 +76,10 @@ const APP_SEEDS_RECORD: &str = "mica/seeded-apps.json";
 /// settings that declared them, or the daemon would bring the old containers
 /// back at boot before micad declares none. `systemd-units` and `openrc-local`
 /// hold the user's services (`services.units`), bound to
-/// `/usr/local/lib/systemd/system` and `/usr/local/etc`.
-const STATE_APPLICATION_DIRS: &[&str] = &["containerd", "systemd-units", "openrc-local"];
+/// `/usr/local/lib/systemd/system` and `/usr/local/etc`. `accounts` holds the
+/// apps' accounts mica-accounts names, rebuilt after the reset.
+const STATE_APPLICATION_DIRS: &[&str] =
+    &["containerd", "systemd-units", "openrc-local", "accounts"];
 /// dockerd's pid file, written while it runs.
 const DOCKER_PID_FILE: &str = "/run/docker.pid";
 
