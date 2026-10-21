@@ -68,10 +68,10 @@ pub(super) async fn a_switched_off_adapter_opens_no_window() {
     assert_eq!(service.agent.window().await, None);
 }
 
-/// Pairing records the device in the trust list, trusted: an operator who
-/// confirmed a passkey has said yes to this device.
+/// Pairing records the device in the trust list, untrusted: trusting it is
+/// the operator's further yes.
 #[tokio::test]
-pub(super) async fn pairing_records_the_device_as_trusted() {
+pub(super) async fn pairing_records_the_device_untrusted() {
     let (service, adapter, _dir) = service_with_bluetooth(true, true);
 
     service
@@ -87,8 +87,50 @@ pub(super) async fn pairing_records_the_device_as_trusted() {
             .contains(&"pair AA:BB:CC:DD:EE:01".to_string())
     );
     let declared = &service.inner.read().await.settings.bluetooth.devices;
-    assert!(declared["AA:BB:CC:DD:EE:01"].trusted);
+    assert!(!declared["AA:BB:CC:DD:EE:01"].trusted);
     assert_eq!(declared["AA:BB:CC:DD:EE:01"].name, "phone");
+}
+
+/// Trust and block are the operator's, one flag at a time, on a declared
+/// device only.
+#[tokio::test]
+pub(super) async fn a_declared_device_is_trusted_and_blocked_by_flag() {
+    let (service, _adapter, _dir) = service_with_bluetooth(true, true);
+    service
+        .write_setting(
+            "bluetooth.devices",
+            serde_json::json!({ "AA:BB:CC:DD:EE:01": { "name": "phone" } }),
+        )
+        .await
+        .expect("declare");
+
+    service
+        .set_bluetooth_device_flag("AA:BB:CC:DD:EE:01", "trusted", true)
+        .await
+        .expect("trust");
+    service
+        .set_bluetooth_device_flag("AA:BB:CC:DD:EE:01", "blocked", true)
+        .await
+        .expect("block");
+    let device = service.inner.read().await.settings.bluetooth.devices["AA:BB:CC:DD:EE:01"].clone();
+    assert!(device.trusted && device.blocked, "{device:?}");
+
+    service
+        .set_bluetooth_device_flag("AA:BB:CC:DD:EE:01", "trusted", false)
+        .await
+        .expect("untrust");
+    assert!(!service.inner.read().await.settings.bluetooth.devices["AA:BB:CC:DD:EE:01"].trusted);
+
+    for (address, flag) in [
+        ("AA:BB:CC:DD:EE:02", "trusted"),
+        ("AA:BB:CC:DD:EE:01", "paired"),
+    ] {
+        let refused = service.set_bluetooth_device_flag(address, flag, true).await;
+        assert!(
+            matches!(refused, Err(zbus::fdo::Error::InvalidArgs(_))),
+            "{refused:?}"
+        );
+    }
 }
 
 /// Every action is refused on a device whose Bluetooth is off, and on one
@@ -174,7 +216,7 @@ pub(super) async fn removing_a_device_drops_the_declaration_and_the_keys() {
 /// reconciler removes a paired device nobody declares, so an accepted pairing
 /// left undeclared would be undone by the next pass.
 #[tokio::test]
-pub(super) async fn an_accepted_peer_pairing_is_declared_trusted() {
+pub(super) async fn an_accepted_peer_pairing_is_declared_untrusted() {
     let (service, _adapter, _dir) = service_with_bluetooth(true, true);
     service.agent.open_window().await;
     let agent = Arc::clone(&service.agent);
@@ -194,7 +236,7 @@ pub(super) async fn an_accepted_peer_pairing_is_declared_trusted() {
 
     assert!(waiting.await.expect("agent"), "BlueZ is told yes");
     let declared = &service.inner.read().await.settings.bluetooth.devices;
-    assert!(declared["AA:BB:CC:DD:EE:01"].trusted);
+    assert!(!declared["AA:BB:CC:DD:EE:01"].trusted);
     assert_eq!(declared["AA:BB:CC:DD:EE:01"].name, "phone");
 }
 

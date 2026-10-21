@@ -93,6 +93,7 @@ trait Micad {
     fn get_ble_provisioning(&self) -> zbus::Result<String>;
     fn open_ble_provisioning(&self, seconds: u64) -> zbus::Result<String>;
     fn close_ble_provisioning(&self) -> zbus::Result<()>;
+    fn set_bluetooth_device_flag(&self, address: &str, flag: &str, on: bool) -> zbus::Result<()>;
     fn pair_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
     fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> zbus::Result<()>;
     fn remove_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
@@ -523,6 +524,21 @@ impl SettingsApi for BusSettings {
         let proxy = self.proxy().await?;
         self.call("CloseBleProvisioning", proxy.close_ble_provisioning())
             .await
+    }
+
+    /// Set a declared device's `trusted` or `blocked` flag.
+    async fn set_bluetooth_device_flag(
+        &self,
+        address: &str,
+        flag: &str,
+        on: bool,
+    ) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "SetBluetoothDeviceFlag",
+            proxy.set_bluetooth_device_flag(address, flag, on),
+        )
+        .await
     }
 
     /// Pair with a device and record it in the trust list.

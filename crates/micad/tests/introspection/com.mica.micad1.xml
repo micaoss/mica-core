@@ -292,6 +292,15 @@ Drop a device: out of the trust list, and out of the adapter.
 <arg name="address" type="s" direction="in"/>
 </method>
 <!--
+Set a declared device's `flag`, `trusted` or `blocked`, to `on`, and
+bring the adapter to it.
+-->
+<method name="SetBluetoothDeviceFlag">
+<arg name="address" type="s" direction="in"/>
+<arg name="flag" type="s" direction="in"/>
+<arg name="on" type="b" direction="in"/>
+</method>
+<!--
 Start a declared container, through mica-containerd:
 `<project>/<service>`, or `<project>` for every container of it.
 -->

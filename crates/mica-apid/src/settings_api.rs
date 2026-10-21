@@ -164,6 +164,16 @@ pub trait SettingsApi: Send + Sync {
     async fn close_ble_provisioning(&self) -> anyhow::Result<()> {
         anyhow::bail!("this build runs no BLE provisioning")
     }
+    /// Set a declared device's `trusted` or `blocked` flag
+    /// (`SetBluetoothDeviceFlag`).
+    async fn set_bluetooth_device_flag(
+        &self,
+        _address: &str,
+        _flag: &str,
+        _on: bool,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("this build drives no Bluetooth adapter")
+    }
     /// Pair with a device (`PairBluetoothDevice`).
     async fn pair_bluetooth_device(&self, _address: &str) -> anyhow::Result<()> {
         anyhow::bail!("this build drives no Bluetooth adapter")

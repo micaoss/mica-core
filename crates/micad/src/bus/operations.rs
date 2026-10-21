@@ -124,7 +124,7 @@ impl MicadService {
         self.declare_paired_device(address).await
     }
 
-    /// Record a device the operator said yes to in the trust list, trusted,
+    /// Record a device the operator said yes to in the trust list, untrusted,
     /// and bring the adapter to it.
     ///
     /// Both pairing directions end here: the reconciler removes a paired
@@ -148,10 +148,9 @@ impl MicadService {
             address.to_string(),
             micad_settings::PairedDevice {
                 name,
-                // Trusted on pairing: an operator who just confirmed a passkey
-                // has said yes to this device, and a paired-but-untrusted
-                // device asks again on every reconnect.
-                trusted: true,
+                // Untrusted until the operator trusts it: a paired device
+                // reconnects with its keys, and trust is a further yes.
+                trusted: false,
                 blocked: false,
             },
         );

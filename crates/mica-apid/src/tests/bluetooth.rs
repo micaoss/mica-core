@@ -186,4 +186,33 @@ pub(super) async fn the_device_path_pairs_and_serves_no_other_verb() {
     assert_eq!(fake.update_calls(), ["bluetooth pair AA:BB:CC:DD:EE:01"]);
 }
 
+// Trust and block are actions on a declared device, one flag each.
+#[tokio::test]
+pub(super) async fn the_device_path_trusts_and_blocks() {
+    let (router, fake) = test_app(bluetooth_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    for action in ["trust", "untrust", "block", "unblock"] {
+        let response = json_request(
+            &router,
+            "POST",
+            &format!("{BLUETOOTH_API}/devices/AA:BB:CC:DD:EE:01/{action}"),
+            json!({}),
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT, "{action}");
+    }
+    assert_eq!(
+        fake.update_calls(),
+        [
+            "bluetooth trusted AA:BB:CC:DD:EE:01 true",
+            "bluetooth trusted AA:BB:CC:DD:EE:01 false",
+            "bluetooth blocked AA:BB:CC:DD:EE:01 true",
+            "bluetooth blocked AA:BB:CC:DD:EE:01 false",
+        ]
+    );
+}
+
 // --- The access point and the scan ------------------------------------------

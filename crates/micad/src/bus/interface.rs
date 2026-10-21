@@ -648,6 +648,40 @@ impl MicadService {
         Ok(())
     }
 
+    /// Set a declared device's `flag`, `trusted` or `blocked`, to `on`, and
+    /// bring the adapter to it.
+    pub(super) async fn set_bluetooth_device_flag(
+        &self,
+        address: &str,
+        flag: &str,
+        on: bool,
+    ) -> fdo::Result<()> {
+        self.require_feature(micad_settings::Feature::Bluetooth)?;
+        let _apply = self.apply_lock.lock().await;
+        let mut devices = self.inner.read().await.settings.bluetooth.devices.clone();
+        let Some(device) = devices.get_mut(address) else {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "no device named {address:?} is declared on this device"
+            )));
+        };
+        match flag {
+            "trusted" => device.trusted = on,
+            "blocked" => device.blocked = on,
+            _ => {
+                return Err(fdo::Error::InvalidArgs(format!(
+                    "{flag:?} is not a device flag: `trusted` or `blocked`"
+                )));
+            }
+        }
+        let value = serde_json::to_value(&devices).unwrap_or(Value::Null);
+        self.persist_setting("bluetooth.devices", value)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("persist the trust list: {err}")))?;
+        drop(_apply);
+        self.apply_subtree("bluetooth").await;
+        Ok(())
+    }
+
     /// Start a declared container, through mica-containerd:
     /// `<project>/<service>`, or `<project>` for every container of it.
     pub(super) async fn start_container(&self, name: &str) -> fdo::Result<()> {

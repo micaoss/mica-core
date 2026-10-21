@@ -769,7 +769,7 @@
         "tags": [
           "actions"
         ],
-        "summary": "Pair with a device this device started the pairing with.",
+        "summary": "Act on a device: `pair` with one this device started the pairing with;\n`trust`, `untrust`, `block` or `unblock` a declared one. A paired device\nstarts untrusted.",
         "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_device_action",
         "parameters": [
@@ -785,7 +785,7 @@
           {
             "name": "action",
             "in": "path",
-            "description": "`pair`",
+            "description": "`pair`, `trust`, `untrust`, `block` or `unblock`",
             "required": true,
             "schema": {
               "type": "string"
@@ -794,7 +794,7 @@
         ],
         "responses": {
           "204": {
-            "description": "The pairing was started"
+            "description": "The pairing was started, or the flag set"
           },
           "401": {
             "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
@@ -837,7 +837,7 @@
             }
           },
           "422": {
-            "description": "The address is not a Bluetooth address (`settings_rejected`)",
+            "description": "The address is not a Bluetooth address, or no device of it is declared (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {

@@ -704,6 +704,15 @@ impl SettingsApi for FakeSettings {
         self.update_call("ble provisioning close")
     }
 
+    async fn set_bluetooth_device_flag(
+        &self,
+        address: &str,
+        flag: &str,
+        on: bool,
+    ) -> anyhow::Result<()> {
+        self.update_call(&format!("bluetooth {flag} {address} {on}"))
+    }
+
     async fn pair_bluetooth_device(&self, address: &str) -> anyhow::Result<()> {
         self.update_call(&format!("bluetooth pair {address}"))
     }

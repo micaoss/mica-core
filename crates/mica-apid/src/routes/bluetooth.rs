@@ -221,7 +221,9 @@ pub(crate) async fn api_v1_bluetooth_pairing_request(
     }
 }
 
-/// Pair with a device this device started the pairing with.
+/// Act on a device: `pair` with one this device started the pairing with;
+/// `trust`, `untrust`, `block` or `unblock` a declared one. A paired device
+/// starts untrusted.
 #[utoipa::path(
     post,
     path = V1_BLUETOOTH_DEVICE_ACTION_ROUTE,
@@ -229,14 +231,14 @@ pub(crate) async fn api_v1_bluetooth_pairing_request(
     tag = "actions",
     params(
         ("address" = String, Path, description = "The device's address, `AA:BB:CC:DD:EE:FF`"),
-        ("action" = String, Path, description = "`pair`"),
+        ("action" = String, Path, description = "`pair`, `trust`, `untrust`, `block` or `unblock`"),
     ),
     responses(
-        (status = 204, description = "The pairing was started"),
+        (status = 204, description = "The pairing was started, or the flag set"),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 404, description = "The path names no action this route serves (`not_found`)", body = ApiError),
-        (status = 422, description = "The address is not a Bluetooth address (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "The address is not a Bluetooth address, or no device of it is declared (`settings_rejected`)", body = ApiError),
         (status = 500, description = "Bluetooth is switched off, this device has no adapter, or the pairing failed (`micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
@@ -250,6 +252,18 @@ pub(crate) async fn api_v1_bluetooth_device_action(
 ) -> Response {
     let result = match action.as_str() {
         "pair" => state.api.pair_bluetooth_device(&address).await,
+        "trust" | "untrust" => {
+            state
+                .api
+                .set_bluetooth_device_flag(&address, "trusted", action == "trust")
+                .await
+        }
+        "block" | "unblock" => {
+            state
+                .api
+                .set_bluetooth_device_flag(&address, "blocked", action == "block")
+                .await
+        }
         // An allowlist and not a passthrough: a path segment that is not one
         // of these names nothing.
         _ => return item_not_found(BLUETOOTH_SETTINGS_PATH, &action),
