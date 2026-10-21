@@ -8562,7 +8562,8 @@
           "api",
           "settingsSchemaVersion",
           "daemon",
-          "features"
+          "features",
+          "init"
         ],
         "properties": {
           "api": {
@@ -8577,6 +8578,10 @@
               "type": "string"
             },
             "description": "The features this device serves, from the product it was built as:\nany of `wifi`, `bluetooth`, `ssh`, `containers`, `mqtt`. The routes of\na feature not listed are not served and answer 404."
+          },
+          "init": {
+            "type": "string",
+            "description": "The init system the product runs: `systemd` or `openrc`."
           },
           "settingsSchemaVersion": {
             "type": "integer",
@@ -9786,6 +9791,13 @@
               "null"
             ],
             "description": "Returned only for an authenticated browser session."
+          },
+          "localAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The device address this request arrived on, IPv4 written as IPv4.\nReturned only on `GET` for an authenticated browser session."
           },
           "state": {
             "type": "string",

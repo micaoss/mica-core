@@ -174,6 +174,8 @@ pub struct AppState {
     /// The features the product carries; the routes of any other are not
     /// mounted.
     pub(crate) features: micad_settings::Features,
+    /// The init system the product runs.
+    pub(crate) init: micad_settings::Init,
     /// The bytes an extracted UI bundle leaves free on DATA: the signed boot
     /// policy's DATA reserve, the one the deployment client keeps.
     data_reserve: u64,
@@ -249,6 +251,7 @@ impl AppState {
             // directory, like every store above.
             builtin: Arc::new(None),
             features: micad_settings::Features::all(),
+            init: micad_settings::Init::Systemd,
             data_reserve: DEFAULT_DATA_RESERVE,
             secure_cookies: true,
             identity: Arc::new(crate::tls::IdentityStore::new(
@@ -287,6 +290,13 @@ impl AppState {
     #[must_use]
     pub fn with_features(mut self, features: micad_settings::Features) -> Self {
         self.features = features;
+        self
+    }
+
+    /// Report `init` as the product's init system.
+    #[must_use]
+    pub fn with_init(mut self, init: micad_settings::Init) -> Self {
+        self.init = init;
         self
     }
 

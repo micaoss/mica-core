@@ -22,6 +22,10 @@ pub(crate) struct SessionStatus {
     /// Returned only for an authenticated browser session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) csrf_token: Option<String>,
+    /// The device address this request arrived on, IPv4 written as IPv4.
+    /// Returned only on `GET` for an authenticated browser session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) local_address: Option<String>,
 }
 
 impl SessionStatus {
@@ -29,6 +33,7 @@ impl SessionStatus {
         Self {
             state: "setup",
             csrf_token: None,
+            local_address: None,
         }
     }
 
@@ -36,6 +41,7 @@ impl SessionStatus {
         Self {
             state: "unauthenticated",
             csrf_token: None,
+            local_address: None,
         }
     }
 
@@ -43,6 +49,7 @@ impl SessionStatus {
         Self {
             state: "authenticated",
             csrf_token: Some(csrf_token),
+            local_address: None,
         }
     }
 }
@@ -66,6 +73,7 @@ pub(crate) struct SessionLoginRequest {
 )]
 pub(crate) async fn api_v1_session_status(
     State(state): State<AppState>,
+    local: Option<axum::Extension<crate::local_addr::LocalAddr>>,
     headers: HeaderMap,
 ) -> Response {
     let access = match access_settings(&state).await {
@@ -77,7 +85,11 @@ pub(crate) async fn api_v1_session_status(
     }
     let status = session::cookie_from_headers(&headers)
         .and_then(|cookie| state.sessions.csrf_token(&cookie))
-        .map_or_else(SessionStatus::unauthenticated, SessionStatus::authenticated);
+        .map_or_else(SessionStatus::unauthenticated, |csrf_token| SessionStatus {
+            local_address: local
+                .map(|axum::Extension(local)| local.0.ip().to_canonical().to_string()),
+            ..SessionStatus::authenticated(csrf_token)
+        });
     api_response(StatusCode::OK, status)
 }
 

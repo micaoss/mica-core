@@ -24,6 +24,8 @@ pub(crate) struct ApiMeta {
     /// any of `wifi`, `bluetooth`, `ssh`, `containers`, `mqtt`. The routes of
     /// a feature not listed are not served and answer 404.
     pub(super) features: Vec<&'static str>,
+    /// The init system the product runs: `systemd` or `openrc`.
+    pub(super) init: &'static str,
 }
 
 /// List the API major versions this build serves.
@@ -84,6 +86,7 @@ pub(crate) async fn api_v1_meta(
             settings_schema_version: micad_settings::STATE_SCHEMA_VERSION,
             daemon: "apid",
             features: state.features.words(),
+            init: state.init.as_str(),
         },
     )
 }

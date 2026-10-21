@@ -97,3 +97,40 @@ pub(super) async fn cookie_api_access_requires_csrf_only_for_mutations() {
         json!("new-host")
     );
 }
+
+// The address the request arrived on is told to the signed-in browser only,
+// IPv4 written as IPv4 even when the socket is dual-stack.
+#[tokio::test]
+pub(super) async fn session_status_names_the_local_address_when_signed_in() {
+    use crate::local_addr::LocalAddr;
+    let (router, _) = test_app(configured_tree("hunter2secret"));
+    let cookie = login(&router, "hunter2secret").await;
+    let local = LocalAddr("[::ffff:192.168.1.24]:8080".parse().unwrap());
+
+    let mut request = axum::http::Request::builder()
+        .uri("/api/v1/session")
+        .header(axum::http::header::COOKIE, format!("apid_session={cookie}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    request.extensions_mut().insert(local);
+    let body: serde_json::Value =
+        serde_json::from_str(&body_string(send(&router, request).await).await)
+            .expect("session JSON");
+    assert_eq!(body["localAddress"], "192.168.1.24");
+
+    let mut anonymous = axum::http::Request::builder()
+        .uri("/api/v1/session")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    anonymous.extensions_mut().insert(local);
+    let body: serde_json::Value =
+        serde_json::from_str(&body_string(send(&router, anonymous).await).await)
+            .expect("session JSON");
+    assert_eq!(body, json!({ "state": "unauthenticated" }));
+
+    let body: serde_json::Value = serde_json::from_str(
+        &body_string(get(&router, "/api/v1/session", Some(&cookie)).await).await,
+    )
+    .expect("session JSON");
+    assert!(body.get("localAddress").is_none(), "{body}");
+}

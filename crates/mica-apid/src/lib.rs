@@ -19,6 +19,7 @@ mod bus_client;
 mod config;
 mod diagnostics;
 mod healthcheck;
+mod local_addr;
 mod openapi;
 mod persist;
 mod provisioning_api;
@@ -35,6 +36,17 @@ fn product_features() -> micad_settings::Features {
     micad_settings::Features::load(path).unwrap_or_else(|err| {
         tracing::error!(path = %path.display(), error = %err, "product features unreadable; serving every feature");
         micad_settings::Features::all()
+    })
+}
+
+/// The init system of the product this root was built as. An unreadable
+/// product file is reported and read as systemd; micad refuses to start on
+/// one, so the console has nothing to manage either way.
+fn product_init() -> micad_settings::Init {
+    let path = std::path::Path::new(micad_settings::PRODUCT_FILE);
+    micad_settings::Init::load(path).unwrap_or_else(|err| {
+        tracing::error!(path = %path.display(), error = %err, "product init unreadable; reporting systemd");
+        micad_settings::Init::Systemd
     })
 }
 
@@ -208,6 +220,7 @@ async fn serve() -> anyhow::Result<()> {
         .with_persistence(&config.state_dir)
         .with_builtin_ui(&config.ui_dir)
         .with_features(product_features())
+        .with_init(product_init())
         .with_secure_cookies(config.listeners.https_addr.is_some())
         .with_data_reserve(routes::data_reserve(
             std::fs::read_to_string(routes::BOOT_POLICY_PATH)
@@ -287,10 +300,15 @@ async fn serve() -> anyhow::Result<()> {
 
     // `with_connect_info` installs the peer address the audit trail reads
     // (`audit::Source`); without it every audit line would say `unknown`.
-    let app = routes::app(state).into_make_service_with_connect_info::<std::net::SocketAddr>();
+    // Both listeners also add `local_addr::LocalAddr`.
+    let app = routes::app(state);
     match (https_listener, https_addr, rustls_config) {
         (Some(https_listener), Some(https_addr), Some(rustls_config)) => {
-            let https = axum_server::from_tcp_rustls(https_listener, rustls_config)?.serve(app);
+            let acceptor = axum_server::tls_rustls::RustlsAcceptor::new(rustls_config)
+                .acceptor(local_addr::LocalAddrAcceptor);
+            let https = axum_server::from_tcp(https_listener)?
+                .acceptor(acceptor)
+                .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>());
             // With HTTPS on, plain HTTP only redirects: no login crosses the
             // network in the clear.
             let http = axum::serve(
@@ -309,7 +327,7 @@ async fn serve() -> anyhow::Result<()> {
             });
         }
         _ => {
-            let http = axum::serve(http_listener, app);
+            let http = local_addr::serve_http(http_listener, app);
             tokio::spawn(async move {
                 if let Err(err) = http.await {
                     tracing::error!(error = %err, "http server failed");

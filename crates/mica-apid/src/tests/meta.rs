@@ -13,7 +13,7 @@ pub(super) const VERSIONS_BODY: &str = r#"{"versions":["v1"],"current":"v1"}"#;
 // The exact document the discovery table gives for `/api/v1/meta`.
 pub(super) fn meta_body() -> String {
     format!(
-        r#"{{"api":"v1","settingsSchemaVersion":{},"daemon":"apid","features":["wifi","bluetooth","ssh","containers","mqtt"]}}"#,
+        r#"{{"api":"v1","settingsSchemaVersion":{},"daemon":"apid","features":["wifi","bluetooth","ssh","containers","mqtt"],"init":"systemd"}}"#,
         micad_settings::STATE_SCHEMA_VERSION
     )
 }
@@ -69,6 +69,22 @@ pub(super) async fn api_v1_meta_answers_for_a_session() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_api_headers(&response, "/api/v1/meta");
     assert_eq!(body_string(response).await, meta_body());
+}
+
+// An OpenRC product says so, and the console hides what its backend refuses.
+#[tokio::test]
+pub(super) async fn api_v1_meta_names_the_init_system() {
+    let (tree, token) = with_token(configured_tree("hunter2secret"));
+    let router = app(
+        AppState::new(Arc::new(FakeSettings::new(tree)), SIGNING_KEY)
+            .with_init(micad_settings::Init::Openrc),
+    );
+
+    let response = bearer(&router, "GET", "/api/v1/meta", &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let meta: serde_json::Value =
+        serde_json::from_str(&body_string(response).await).expect("meta JSON");
+    assert_eq!(meta["init"], "openrc");
 }
 
 // The trap, refused: a client that follows the gate's redirect lands on
