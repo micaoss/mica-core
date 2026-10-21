@@ -74,6 +74,46 @@ async fn a_refused_bundle_names_why_and_leaves_nothing() {
     assert_eq!(left(&uploads), 0);
 }
 
+/// A bundle that asks for privileges beyond the installed version's is a 409
+/// naming them, and nothing is left; with `acceptPrivileges` it is taken.
+#[tokio::test]
+async fn a_bundle_asking_for_privileges_is_asked_about_first() {
+    let uploads = TempDir::new().unwrap();
+    let (router, fake, token) = apps_app(&uploads);
+    let asked = bearer_bytes(
+        &router,
+        APPS,
+        b"root".to_vec(),
+        "application/octet-stream",
+        &token,
+    )
+    .await;
+    assert_eq!(asked.status(), StatusCode::CONFLICT);
+    let body = body_json(asked).await;
+    assert_eq!(body["error"]["code"], json!("app_privileges"));
+    assert_eq!(
+        body["error"]["params"],
+        json!({ "root": true, "capabilities": [], "devices": [] })
+    );
+    assert_eq!(left(&uploads), 0);
+    let accepted = bearer_bytes(
+        &router,
+        &format!("{APPS}?acceptPrivileges=true"),
+        b"root".to_vec(),
+        "application/octet-stream",
+        &token,
+    )
+    .await;
+    assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        fake.container_calls(),
+        [
+            "app install 4 reinstall=false",
+            "app install 4 reinstall=false"
+        ]
+    );
+}
+
 /// The reads, the task actions, the verbs and the removal reach micad; an
 /// app that is not installed is a 404 and an unknown action is too.
 #[tokio::test]

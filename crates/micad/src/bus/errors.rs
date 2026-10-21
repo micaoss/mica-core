@@ -141,6 +141,10 @@ pub const APP_INVALID_ERROR: &str = "com.mica.micad1.Error.AppInvalid";
 pub const APP_BUSY_ERROR: &str = "com.mica.micad1.Error.AppBusy";
 /// D-Bus error name for an install of the version that is installed.
 pub const APP_INSTALLED_ERROR: &str = "com.mica.micad1.Error.AppInstalled";
+/// D-Bus error name for a bundle that asks for privileges the request did not
+/// accept; the description is JSON, `{"message", "privileges": {"root",
+/// "capabilities", "devices"}}`.
+pub const APP_PRIVILEGES_ERROR: &str = "com.mica.micad1.Error.AppPrivileges";
 
 /// Reply error of the app methods: a name and its description.
 #[derive(Debug)]
@@ -158,6 +162,13 @@ impl From<crate::apps::AppError> for AppFault {
                 return Self {
                     name: APP_INVALID_ERROR,
                     message: serde_json::json!({ "message": message, "details": problems })
+                        .to_string(),
+                };
+            }
+            AppError::Privileges(_, delta) => {
+                return Self {
+                    name: APP_PRIVILEGES_ERROR,
+                    message: serde_json::json!({ "message": message, "privileges": delta })
                         .to_string(),
                 };
             }

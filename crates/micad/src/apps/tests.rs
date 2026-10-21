@@ -1011,18 +1011,92 @@ fn more_privileges_are_root_a_capability_or_a_device() {
         ..own(&[], &[])
     };
     let tun = own(&["CAP_NET_ADMIN"], &["/dev/net/tun"]);
-    assert!(!flow::asks_for_more(&tun, &tun));
-    assert!(!flow::asks_for_more(&tun, &own(&[], &[])));
-    assert!(!flow::asks_for_more(&root, &tun));
-    assert!(flow::asks_for_more(&tun, &root));
-    assert!(flow::asks_for_more(
-        &tun,
-        &own(&["CAP_NET_ADMIN", "CAP_NET_RAW"], &["/dev/net/tun"])
-    ));
-    assert!(flow::asks_for_more(
-        &tun,
-        &own(&["CAP_NET_ADMIN"], &["/dev/net/tun", "/dev/ttyUSB0"])
-    ));
+    let delta = |root: bool, caps: &[&str], devices: &[&str]| flow::PrivilegeDelta {
+        root,
+        capabilities: caps.iter().map(|c| c.to_string()).collect(),
+        devices: devices.iter().map(|d| d.to_string()).collect(),
+    };
+    assert_eq!(flow::privilege_delta(Some(&tun), &tun), None);
+    assert_eq!(flow::privilege_delta(Some(&tun), &own(&[], &[])), None);
+    assert_eq!(flow::privilege_delta(Some(&root), &tun), None);
+    assert_eq!(flow::privilege_delta(None, &own(&[], &[])), None);
+    assert_eq!(
+        flow::privilege_delta(Some(&tun), &root),
+        Some(delta(true, &[], &[]))
+    );
+    assert_eq!(
+        flow::privilege_delta(None, &tun),
+        Some(delta(false, &["CAP_NET_ADMIN"], &["/dev/net/tun"]))
+    );
+    assert_eq!(
+        flow::privilege_delta(
+            Some(&tun),
+            &own(
+                &["CAP_NET_ADMIN", "CAP_NET_RAW"],
+                &["/dev/net/tun", "/dev/ttyUSB0"]
+            )
+        ),
+        Some(delta(false, &["CAP_NET_RAW"], &["/dev/ttyUSB0"]))
+    );
+}
+
+/// An install someone asked for answers what the bundle asks for beyond the
+/// installed version, and installs it once that is accepted.
+#[tokio::test]
+async fn an_install_asks_before_it_gives_more_privileges() {
+    let rig = Rig::new(Init::Systemd);
+    let ask = InstallOptions {
+        ask_privileges: true,
+        ..Default::default()
+    };
+    let services = ServicesSettings::default();
+    let plain = json!({ "services": [{ "name": "demo", "exec": ["files/run"] }] });
+    rig.apps
+        .install(
+            &rig.bundle("demo", "1.0", plain, None),
+            "upload",
+            ask,
+            &services,
+        )
+        .await
+        .unwrap();
+    let more = json!({
+        "privileges": { "capabilities": ["CAP_NET_RAW"] },
+        "services": [{ "name": "demo", "exec": ["files/run"] }],
+    });
+    let Err(AppError::Privileges(message, delta)) = rig
+        .apps
+        .install(
+            &rig.bundle("demo", "2.0", more.clone(), None),
+            "upload",
+            ask,
+            &services,
+        )
+        .await
+    else {
+        panic!("a capability more is asked about")
+    };
+    assert!(message.contains("beyond 1.0"), "{message}");
+    assert_eq!(delta.capabilities, ["CAP_NET_RAW"]);
+    assert_eq!(rig.record().apps["demo"].current.version, "1.0");
+    rig.install(&rig.bundle("demo", "2.0", more, None), false)
+        .await
+        .unwrap();
+    assert_eq!(rig.record().apps["demo"].current.version, "2.0");
+
+    let Err(AppError::Privileges(_, delta)) = rig
+        .apps
+        .install(
+            &rig.bundle("rooted", "1.0", json!({}), None),
+            "upload",
+            ask,
+            &services,
+        )
+        .await
+    else {
+        panic!("a root app is asked about")
+    };
+    assert!(delta.root);
 }
 
 #[tokio::test]

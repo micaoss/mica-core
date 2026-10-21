@@ -41,6 +41,10 @@ pub struct InstallOptions {
     /// Refuse a bundle that asks for more privileges than the installed
     /// version: an update no one started.
     pub unattended: bool,
+    /// Answer [`AppError::Privileges`] for a bundle that asks for more
+    /// privileges than the installed version, or for any on a first install:
+    /// the one who asked has not seen them yet.
+    pub ask_privileges: bool,
 }
 
 impl Apps {
@@ -88,15 +92,38 @@ impl Apps {
         if !problems.is_empty() {
             return Err(AppError::Invalid(problems));
         }
-        if options.unattended
-            && let Some(entry) = record.apps.get(&manifest.name)
-        {
-            let installed = self.manifest_of(&manifest.name, &entry.current.version)?;
-            if asks_for_more(&installed.privileges, &manifest.privileges) {
-                return Err(AppError::Refused(format!(
-                    "{} {} asks for more privileges than {}; only an install by hand takes it",
-                    manifest.name, manifest.version, entry.current.version
-                )));
+        if options.unattended || options.ask_privileges {
+            let entry = record.apps.get(&manifest.name);
+            let installed = match entry {
+                Some(entry) => Some(self.manifest_of(&manifest.name, &entry.current.version)?),
+                None => None,
+            };
+            let delta = privilege_delta(
+                installed.as_ref().map(|installed| &installed.privileges),
+                &manifest.privileges,
+            );
+            match (delta, entry) {
+                (Some(_), Some(entry)) if options.unattended => {
+                    return Err(AppError::Refused(format!(
+                        "{} {} asks for more privileges than {}; only an install by hand takes it",
+                        manifest.name, manifest.version, entry.current.version
+                    )));
+                }
+                (Some(delta), _) if options.ask_privileges => {
+                    return Err(AppError::Privileges(
+                        format!(
+                            "{} {} asks for privileges{}; accept them to install it",
+                            manifest.name,
+                            manifest.version,
+                            entry.map_or(String::new(), |entry| format!(
+                                " beyond {}",
+                                entry.current.version
+                            ))
+                        ),
+                        delta,
+                    ));
+                }
+                _ => {}
             }
         }
         Ok(manifest)
@@ -1012,19 +1039,47 @@ pub(super) fn group_refusal(gid: u32, groups: Option<&str>) -> Option<String> {
     }
 }
 
-/// Whether `next` runs as root where `installed` did not, or keeps a
-/// capability or opens a device `installed` did not.
-pub(super) fn asks_for_more(installed: &Privileges, next: &Privileges) -> bool {
-    if installed.user == RunAs::Root {
-        return false;
+/// What an app asks for beyond what it has.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct PrivilegeDelta {
+    /// It runs as root, with full control of the device.
+    pub root: bool,
+    /// `CAP_*` names it keeps.
+    pub capabilities: Vec<String>,
+    /// Device nodes it opens.
+    pub devices: Vec<String>,
+}
+
+/// What `next` asks for beyond `installed` (nothing on a first install):
+/// root where `installed` did not run as root, or capabilities and devices
+/// it did not have. None when it asks for nothing more.
+pub(super) fn privilege_delta(
+    installed: Option<&Privileges>,
+    next: &Privileges,
+) -> Option<PrivilegeDelta> {
+    if installed.is_some_and(|installed| installed.user == RunAs::Root) {
+        return None;
     }
-    next.user == RunAs::Root
-        || next
-            .capabilities
-            .iter()
-            .any(|cap| !installed.capabilities.contains(cap))
-        || next
-            .devices
-            .iter()
-            .any(|device| !installed.devices.contains(device))
+    let delta = if next.user == RunAs::Root {
+        PrivilegeDelta {
+            root: true,
+            ..PrivilegeDelta::default()
+        }
+    } else {
+        let new = |had: Option<&Vec<String>>, now: &[String]| -> Vec<String> {
+            now.iter()
+                .filter(|item| !had.is_some_and(|had| had.contains(item)))
+                .cloned()
+                .collect()
+        };
+        PrivilegeDelta {
+            root: false,
+            capabilities: new(
+                installed.map(|installed| &installed.capabilities),
+                &next.capabilities,
+            ),
+            devices: new(installed.map(|installed| &installed.devices), &next.devices),
+        }
+    };
+    (delta != PrivilegeDelta::default()).then_some(delta)
 }

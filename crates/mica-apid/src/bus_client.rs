@@ -110,7 +110,13 @@ trait Micad {
     fn get_unit_log(&self, name: &str) -> zbus::Result<String>;
     fn get_apps(&self) -> zbus::Result<String>;
     fn get_app(&self, name: &str) -> zbus::Result<String>;
-    fn install_app(&self, path: &str, reinstall: bool, upgrade: bool) -> zbus::Result<String>;
+    fn install_app(
+        &self,
+        path: &str,
+        reinstall: bool,
+        upgrade: bool,
+        accept_privileges: bool,
+    ) -> zbus::Result<String>;
     fn rollback_app(&self, name: &str) -> zbus::Result<String>;
     fn remove_app(&self, name: &str, purge: bool) -> zbus::Result<String>;
     fn check_app_update(&self, name: &str) -> zbus::Result<String>;
@@ -691,10 +697,18 @@ impl SettingsApi for BusSettings {
         Ok(serde_json::from_str(&json)?)
     }
 
-    async fn install_app(&self, path: &str, reinstall: bool) -> anyhow::Result<String> {
+    async fn install_app(
+        &self,
+        path: &str,
+        reinstall: bool,
+        accept_privileges: bool,
+    ) -> anyhow::Result<String> {
         let proxy = self.proxy().await?;
-        self.call("InstallApp", proxy.install_app(path, reinstall, false))
-            .await
+        self.call(
+            "InstallApp",
+            proxy.install_app(path, reinstall, false, accept_privileges),
+        )
+        .await
     }
 
     async fn app_flow(&self, name: &str, flow: &str) -> anyhow::Result<String> {

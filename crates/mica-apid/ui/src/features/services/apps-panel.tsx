@@ -6,6 +6,7 @@ import { Package } from 'lucide-react'
 import { ApiError, api } from '@/shared/lib/http'
 import type { AppEntry, TaskAccepted } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
+import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { DataTable } from '@/shared/components/data-table'
 import { FilePicker } from '@/shared/components/file-picker'
 import { CollectionPanel } from '@/shared/components/panel'
@@ -15,27 +16,48 @@ import { failureDetail } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { APPS, appState, appTone, useApps } from './apps'
 
+/// What a bundle asks for beyond the installed version (`app_privileges`).
+interface PrivilegesAsked {
+  root?: boolean
+  capabilities?: string[]
+  devices?: string[]
+}
+
+/// The bundle is streamed as its own bytes, as an update archive is.
+function postBundle(file: File, acceptPrivileges: boolean) {
+  return api<TaskAccepted>(acceptPrivileges ? `${APPS}?acceptPrivileges=true` : APPS, {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: file,
+  })
+}
+
 /// The user's apps: each bundle micad installed, and the upload of another.
+/// A bundle asking for privileges the installed version lacks is installed
+/// only once the user accepts them.
 export function AppsPanel() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const apps = useApps()
   const [task, setTask] = useState<string>()
-  // The bundle is streamed as its own bytes, as an update archive is.
+  const [asked, setAsked] = useState<{ file: File, privileges: PrivilegesAsked }>()
+  const taken = (accepted: TaskAccepted) => {
+    setTask(accepted.taskId)
+    void queryClient.invalidateQueries({ queryKey: ['apps'] })
+  }
   const upload = useMutationFeedback<TaskAccepted, File>({
-    mutationFn: (file) => api<TaskAccepted>(APPS, {
-      method: 'POST',
-      headers: { 'content-type': 'application/octet-stream' },
-      body: file,
-    }),
+    mutationFn: (file) => postBundle(file, false),
     success: t('services.apps.uploaded'),
     failure: t('services.apps.upload'),
-    onSuccess: (accepted) => {
-      setTask(accepted.taskId)
-      void queryClient.invalidateQueries({ queryKey: ['apps'] })
+    onSuccess: taken,
+    onError: (error, file) => {
+      if (error instanceof ApiError && error.code === 'app_privileges') {
+        setAsked({ file, privileges: (error.params ?? {}) as PrivilegesAsked })
+      }
     },
   })
   const rules = upload.error instanceof ApiError ? upload.error.rules ?? [] : []
+  const list = (items?: string[]) => (items ?? []).join(', ')
 
   return (
     <div className="grid gap-3">
@@ -64,6 +86,31 @@ export function AppsPanel() {
               </Callout>
             ) : null}
             <TaskProgress taskId={task} />
+            {asked ? (
+              <ConfirmDialog
+                open
+                onOpenChange={(open) => { if (!open) setAsked(undefined) }}
+                tone={asked.privileges.root ? 'danger' : 'neutral'}
+                title={t('services.apps.privileges.title')}
+                description={(
+                  <span className="grid gap-2">
+                    <span>{t('services.apps.privileges.copy')}</span>
+                    <span className="grid gap-1">
+                      {asked.privileges.root ? <span className="font-medium">{t('services.apps.privileges.root')}</span> : null}
+                      {asked.privileges.capabilities?.length ? <span className="font-mono">{t('services.apps.privileges.capabilities', { list: list(asked.privileges.capabilities) })}</span> : null}
+                      {asked.privileges.devices?.length ? <span className="font-mono">{t('services.apps.privileges.devices', { list: list(asked.privileges.devices) })}</span> : null}
+                    </span>
+                  </span>
+                )}
+                confirmLabel={t('services.apps.privileges.accept')}
+                success={t('services.apps.uploaded')}
+                failure={t('services.apps.upload')}
+                onConfirm={async () => {
+                  taken(await postBundle(asked.file, true))
+                  setAsked(undefined)
+                }}
+              />
+            ) : null}
           </div>
         )}
       >

@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use crate::user_units::UserUnits;
 pub use bundle::MAX_ARCHIVE_BYTES;
 pub use flow::InstallOptions;
+use flow::PrivilegeDelta;
 use manifest::Manifest;
 pub use manifest::Problem;
 pub use update::{CHECK_EVERY, Fetch, HttpFetch};
@@ -61,6 +62,9 @@ pub enum AppError {
     Installed(String),
     /// The request cannot be done as asked.
     Refused(String),
+    /// The bundle asks for these privileges beyond the installed version's,
+    /// and the request did not accept them.
+    Privileges(String, PrivilegeDelta),
     /// It was tried and failed.
     Failed(anyhow::Error),
 }
@@ -76,7 +80,10 @@ impl std::fmt::Display for AppError {
                 write!(f, "the bundle is refused: {}", lines.join("; "))
             }
             Self::Busy => write!(f, "another app change is running"),
-            Self::NotFound(message) | Self::Installed(message) | Self::Refused(message) => {
+            Self::NotFound(message)
+            | Self::Installed(message)
+            | Self::Refused(message)
+            | Self::Privileges(message, _) => {
                 write!(f, "{message}")
             }
             Self::Failed(err) => write!(f, "{err:#}"),

@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 use crate::unit_cli::bus_error;
 
 const USAGE: &str = "\
-usage: micad app install <file> [--reinstall] [--detach]
-       micad app upgrade <file> [--detach]
+usage: micad app install <file> [--reinstall] [--yes] [--detach]
+       micad app upgrade <file> [--yes] [--detach]
        micad app update <name> [--detach]
        micad app check [name]
        micad app rollback <name> [--detach]
@@ -24,7 +24,10 @@ usage: micad app install <file> [--reinstall] [--detach]
 
   install   install or upgrade the app in a bundle; --reinstall installs the
             installed version again
-  upgrade   the same, refused when the app is not installed
+  upgrade   the same, refused when the app is not installed. A bundle that
+            asks for privileges beyond the installed version's (root,
+            capabilities, devices; any on a first install) prints them and
+            asks first, unless --yes
   update    fetch the newer version its update URL offers, and upgrade
   check     read its update URL now (every app with one, without a name)
   rollback  switch to the previous version
@@ -53,7 +56,13 @@ trait MicadApps {
     fn get_task(&self, id: &str) -> zbus::Result<String>;
     fn get_apps(&self) -> zbus::Result<String>;
     fn get_app(&self, name: &str) -> zbus::Result<String>;
-    fn install_app(&self, path: &str, reinstall: bool, upgrade: bool) -> zbus::Result<String>;
+    fn install_app(
+        &self,
+        path: &str,
+        reinstall: bool,
+        upgrade: bool,
+        accept_privileges: bool,
+    ) -> zbus::Result<String>;
     fn rollback_app(&self, name: &str) -> zbus::Result<String>;
     fn remove_app(&self, name: &str, purge: bool) -> zbus::Result<String>;
     fn check_app_update(&self, name: &str) -> zbus::Result<String>;
@@ -67,6 +76,8 @@ enum Command {
         file: String,
         reinstall: bool,
         upgrade: bool,
+        /// Accept the privileges the bundle asks for without asking.
+        yes: bool,
     },
     Update(String),
     Check(Option<String>),
@@ -84,36 +95,42 @@ enum Command {
     Help,
 }
 
-/// The words, `--detach` taken out, and whether it was there.
-fn detach(words: &[&str]) -> (Vec<String>, bool) {
+/// The words, `flag` taken out, and whether it was there.
+fn take(words: &[String], flag: &str) -> (Vec<String>, bool) {
     let kept = words
         .iter()
-        .filter(|word| **word != "--detach")
-        .map(|word| (*word).to_string())
+        .filter(|word| *word != flag)
+        .cloned()
         .collect::<Vec<_>>();
-    let detached = kept.len() != words.len();
-    (kept, detached)
+    let found = kept.len() != words.len();
+    (kept, found)
 }
 
 fn parse(args: &[String]) -> Result<(Command, bool), String> {
-    let words: Vec<&str> = args.iter().map(String::as_str).collect();
-    let (words, detached) = detach(&words);
+    let (words, detached) = take(args, "--detach");
+    let (words, yes) = take(&words, "--yes");
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    if yes && !matches!(words.first(), Some(&("install" | "upgrade"))) {
+        return Err("--yes is for install and upgrade".into());
+    }
     let command = match words.as_slice() {
         ["install", file] => Command::Install {
             file: (*file).to_string(),
             reinstall: false,
             upgrade: false,
+            yes,
         },
         ["install", file, "--reinstall"] | ["install", "--reinstall", file] => Command::Install {
             file: (*file).to_string(),
             reinstall: true,
             upgrade: false,
+            yes,
         },
         ["upgrade", file] => Command::Install {
             file: (*file).to_string(),
             reinstall: false,
             upgrade: true,
+            yes,
         },
         ["update", name] => Command::Update((*name).to_string()),
         ["check"] => Command::Check(None),
@@ -148,6 +165,51 @@ fn parse(args: &[String]) -> Result<(Command, bool), String> {
         [other, ..] => return Err(format!("unknown command or arguments: {other}")),
     };
     Ok((command, detached))
+}
+
+/// micad's answer when the bundle asks for privileges not yet accepted:
+/// `{"message", "privileges": {"root", "capabilities", "devices"}}`.
+fn privileges_asked(err: &zbus::Error) -> Option<Value> {
+    match crate::bus::error_reply(err) {
+        Some((name, Some(message))) if name == crate::bus::APP_PRIVILEGES_ERROR => {
+            serde_json::from_str(&message).ok()
+        }
+        _ => None,
+    }
+}
+
+/// What `asked` asks for, a line each.
+fn render_privileges(asked: &Value) -> String {
+    let mut out = format!("{}\n", asked["message"].as_str().unwrap_or_default());
+    let privileges = &asked["privileges"];
+    if privileges["root"] == json!(true) {
+        out.push_str("  runs as root, with full control of the device\n");
+    }
+    for (key, label) in [("capabilities", "capabilities"), ("devices", "devices")] {
+        let items: Vec<&str> = privileges[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        if !items.is_empty() {
+            out.push_str(&format!("  {label}: {}\n", items.join(", ")));
+        }
+    }
+    out
+}
+
+/// Whether the operator, at a terminal, accepts; never without one.
+fn confirm() -> Result<bool> {
+    use std::io::{BufRead as _, IsTerminal as _, Write as _};
+    if !std::io::stdin().is_terminal() {
+        return Ok(false);
+    }
+    eprint!("install it? [y/N] ");
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().lock().read_line(&mut answer)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
 }
 
 /// `micad app`'s entry point: exit 0 done, 1 failed, 2 misused.
@@ -187,12 +249,24 @@ async fn run(command: Command, detached: bool) -> Result<()> {
             file,
             reinstall,
             upgrade,
+            yes,
         } => {
             // micad reads the file, from its own working directory.
             let path = std::fs::canonicalize(&file).with_context(|| format!("read {file}"))?;
-            micad
-                .install_app(&path.to_string_lossy(), reinstall, upgrade)
-                .await
+            let path = path.to_string_lossy();
+            match micad.install_app(&path, reinstall, upgrade, yes).await {
+                Err(err) => match privileges_asked(&err) {
+                    Some(asked) => {
+                        eprint!("{}", render_privileges(&asked));
+                        if !confirm()? {
+                            bail!("not installed; --yes accepts the privileges");
+                        }
+                        micad.install_app(&path, reinstall, upgrade, true).await
+                    }
+                    None => Err(err),
+                },
+                answer => answer,
+            }
         }
         Command::Update(name) => micad.update_app(&name).await,
         Command::Rollback(name) => micad.rollback_app(&name).await,
@@ -442,18 +516,20 @@ mod tests {
                 Command::Install {
                     file: "a.tar.gz".into(),
                     reinstall: true,
-                    upgrade: false
+                    upgrade: false,
+                    yes: false
                 },
                 true
             ))
         );
         assert_eq!(
-            parse(&words("upgrade a.tar.gz")),
+            parse(&words("upgrade a.tar.gz --yes")),
             Ok((
                 Command::Install {
                     file: "a.tar.gz".into(),
                     reinstall: false,
-                    upgrade: true
+                    upgrade: true,
+                    yes: true
                 },
                 false
             ))
@@ -482,6 +558,24 @@ mod tests {
         assert!(parse(&words("logs demo --tail 0")).is_err());
         assert!(parse(&words("install")).is_err());
         assert!(parse(&words("remove demo --keep")).is_err());
+        assert!(parse(&words("remove demo --yes")).is_err());
+    }
+
+    #[test]
+    fn the_privileges_asked_are_a_line_each() {
+        let asked = json!({
+            "message": "demo 2.0 asks for privileges beyond 1.0; accept them to install it",
+            "privileges": { "root": false, "capabilities": ["CAP_NET_RAW"], "devices": ["/dev/ttyUSB0"] },
+        });
+        assert_eq!(
+            render_privileges(&asked),
+            "demo 2.0 asks for privileges beyond 1.0; accept them to install it\n  capabilities: CAP_NET_RAW\n  devices: /dev/ttyUSB0\n"
+        );
+        let root = json!({ "message": "x", "privileges": { "root": true, "capabilities": [], "devices": [] } });
+        assert_eq!(
+            render_privileges(&root),
+            "x\n  runs as root, with full control of the device\n"
+        );
     }
 
     #[test]

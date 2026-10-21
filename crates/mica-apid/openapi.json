@@ -591,6 +591,15 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "acceptPrivileges",
+            "in": "path",
+            "description": "Accept the privileges the bundle asks for beyond the installed\nversion's; without it such a bundle is refused (`app_privileges`).",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -656,7 +665,7 @@
             }
           },
           "409": {
-            "description": "Another app change is running (`app_busy`), or this version is installed and `reinstall` is not set (`app_installed`)",
+            "description": "Another app change is running (`app_busy`), this version is installed and `reinstall` is not set (`app_installed`), or the bundle asks for privileges beyond the installed version's (any, on a first install) and `acceptPrivileges` is not set (`app_privileges`, with `params` `{root, capabilities, devices}`: what it asks for more; nothing is installed)",
             "content": {
               "application/json": {
                 "schema": {

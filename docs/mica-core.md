@@ -616,22 +616,27 @@ install or update by hand takes it.
 | Member | Does |
 | --- | --- |
 | `GetApps`, `GetApp(name)` | `{available, arch, apps}`, and one of them: each app's `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user`, `account` and `uid` of its own user, `capabilities`, `devices`), `last` (the last flow's `action`, `outcome` `ok` or `failed`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` |
-| `InstallApp(path, reinstall, upgrade)` | Install the bundle at `path`; `upgrade` refuses an app not installed |
+| `InstallApp(path, reinstall, upgrade, acceptPrivileges)` | Install the bundle at `path`; `upgrade` refuses an app not installed. Unless `acceptPrivileges`, a bundle that asks for privileges beyond the installed version's is refused with them (`AppPrivileges`) |
 | `RollbackApp(name)`, `RemoveApp(name, purge)`, `CheckAppUpdate(name)`, `UpdateApp(name)` | The flows above |
 | `StartApp`, `StopApp`, `RestartApp(name)` | The verb on its units, at once |
 | `GetAppLog(name)` | Each unit's newest lines, as `GetUnitLog`, and the first-run output |
 
 A broken bundle is `com.mica.micad1.Error.AppInvalid`, its description JSON `{"message",
 "details": [{"rule", "detail"}]}`; a flow while another runs is `AppBusy`; the installed version
-again is `AppInstalled`; an unknown app is `NotFound`. `GetUnits` names the app a unit is part
+again is `AppInstalled`; an unknown app is `NotFound`. A bundle asking for privileges not accepted
+is `AppPrivileges`, its description JSON `{"message", "privileges": {"root", "capabilities",
+"devices"}}`: what it asks for beyond the installed version (`root` when it runs as root and the
+installed one does not), or on a first install everything it asks for, nothing for an app of its
+own user that keeps no capability and opens no device. An app already running as root asks for
+nothing more. Seeds and updates (`UpdateApp`) are not asked. `GetUnits` names the app a unit is part
 of as `app`, and a `services.units` write naming an app's unit is refused (`unit_taken`).
 
 **On the device: `micad app`.**
 
 | Command | Does |
 | --- | --- |
-| `install <file> [--reinstall]` | Install or upgrade the app in a bundle |
-| `upgrade <file>` | The same, refused when the app is not installed |
+| `install <file> [--reinstall] [--yes]` | Install or upgrade the app in a bundle. A bundle that asks for privileges beyond the installed version's prints them and asks at the terminal; `--yes` accepts them, and without a terminal nothing is installed |
+| `upgrade <file> [--yes]` | The same, refused when the app is not installed |
 | `update <name>` | Fetch the newer version its update URL offers, and upgrade |
 | `check [name]` | Read its update URL now; every app with one, without a name |
 | `rollback <name>` | Switch to the previous version |
@@ -646,7 +651,11 @@ lists an app's units as the app's and refuses to change them.
 `POST /api/v1/apps` takes a bundle as `application/octet-stream` (`?reinstall=true`), written to
 `/mica/apps/.incoming` and installed as a task: a broken bundle is 422 `app_invalid` with each
 rule in `rules`, one that cannot be installed here 422 `app_refused`, a flow running or the
-installed version 409 `app_busy` or `app_installed`, above 256 MiB 413 `app_too_large`.
+installed version 409 `app_busy` or `app_installed`, above 256 MiB 413 `app_too_large`. A bundle
+asking for privileges beyond the installed version's is 409 `app_privileges`, with `params`
+`{root, capabilities, devices}` (`AppPrivileges` above) and nothing installed;
+`?acceptPrivileges=true` takes it. The console then shows what the bundle asks for and uploads it
+again with `acceptPrivileges` once the user accepts.
 `DELETE /api/v1/apps/{name}` (`?purge=true`) removes; `POST /api/v1/apps/{name}/{action}`
 is `rollback`, `check` or `update` (a task) or `start`, `stop` or `restart`; `GET
 /api/v1/apps/{name}/logs` is the log, each line scrubbed of secrets. The console lists the apps

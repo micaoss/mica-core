@@ -392,6 +392,9 @@ pub(super) const MICAD_APP_INVALID: &str = "com.mica.micad1.Error.AppInvalid";
 pub(super) const MICAD_APP_BUSY: &str = "com.mica.micad1.Error.AppBusy";
 /// micad's refusal of the version that is installed.
 pub(super) const MICAD_APP_INSTALLED: &str = "com.mica.micad1.Error.AppInstalled";
+/// micad's refusal of privileges the request did not accept; the message is
+/// JSON.
+pub(super) const MICAD_APP_PRIVILEGES: &str = "com.mica.micad1.Error.AppPrivileges";
 pub(super) const FDO_IO_ERROR: &str = "org.freedesktop.DBus.Error.IOError";
 pub(super) const FDO_FAILED: &str = "org.freedesktop.DBus.Error.Failed";
 

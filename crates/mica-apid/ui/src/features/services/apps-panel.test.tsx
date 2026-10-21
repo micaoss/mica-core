@@ -99,6 +99,55 @@ describe('the apps', () => {
     expect(screen.getByText('unit_taken')).toBeTruthy()
   })
 
+  it('asks before it installs a bundle that asks for more privileges', async () => {
+    const fetch = stubFetch({
+      ...routes,
+      'POST /api/v1/apps': () => jsonResponse({ error: {
+        code: 'app_privileges',
+        message: 'tailscale 1.80.0 asks for privileges beyond 1.78.1; accept them to install it',
+        source: 'micad',
+        params: { root: false, capabilities: ['CAP_NET_BIND_SERVICE'], devices: ['/dev/ttyUSB0'] },
+      } }, 409),
+      'POST /api/v1/apps?acceptPrivileges=true': () => jsonResponse({ taskId: 'task-1' }, 202),
+    })
+    renderRoute(<AppsPanel />)
+    await screen.findByRole('link', { name: 'tailscale' })
+
+    const bundle = await upload()
+
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('The bundle asks for more privileges')).toBeTruthy()
+    expect(within(dialog).getByText('Capabilities: CAP_NET_BIND_SERVICE')).toBeTruthy()
+    expect(within(dialog).getByText('Devices: /dev/ttyUSB0')).toBeTruthy()
+    expect(within(dialog).queryByText(/runs as root/)).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Install with these privileges' }))
+
+    expect(await screen.findByText('Applying apps.tailscale…')).toBeTruthy()
+    const accepted = fetch.mock.calls.find(([path]) => String(path) === '/api/v1/apps?acceptPrivileges=true')
+    expect((accepted?.[1] as RequestInit).body).toBe(bundle)
+  })
+
+  it('installs nothing when the privileges are declined', async () => {
+    const fetch = stubFetch({
+      ...routes,
+      'POST /api/v1/apps': () => jsonResponse({ error: {
+        code: 'app_privileges', message: 'agent 1.0 asks for privileges', source: 'micad',
+        params: { root: true, capabilities: [], devices: [] },
+      } }, 409),
+    })
+    renderRoute(<AppsPanel />)
+    await screen.findByRole('link', { name: 'tailscale' })
+
+    await upload()
+
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('It runs as root, with full control of the device.')).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(fetch.mock.calls.some(([path]) => String(path).includes('acceptPrivileges'))).toBe(false)
+  })
+
   it('says so on a device that keeps no apps', async () => {
     stubFetch({ ...routes, '/api/v1/apps': { available: false, arch: 'arm64', apps: [] } })
     renderRoute(<AppsPanel />)

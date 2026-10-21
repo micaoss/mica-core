@@ -28,6 +28,11 @@ pub(crate) struct InstallQuery {
     /// Install the version that is installed again.
     #[serde(default)]
     pub(super) reinstall: bool,
+    /// Accept the privileges the bundle asks for beyond the installed
+    /// version's; without it such a bundle is refused (`app_privileges`).
+    #[serde(default, rename = "acceptPrivileges")]
+    #[param(rename = "acceptPrivileges")]
+    pub(super) accept_privileges: bool,
 }
 
 /// Whether a removal deletes the app's data.
@@ -56,6 +61,17 @@ fn app_bus_error(err: &anyhow::Error) -> Response {
                 (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     ApiError::micad("app_invalid", message).with_rules(rules),
+                )
+            }
+            MICAD_APP_PRIVILEGES => {
+                let asked: Value = serde_json::from_str(&message).unwrap_or(Value::Null);
+                (
+                    StatusCode::CONFLICT,
+                    ApiError::micad(
+                        "app_privileges",
+                        asked["message"].as_str().unwrap_or(&message).to_string(),
+                    )
+                    .with_params(asked["privileges"].clone()),
                 )
             }
             MICAD_APP_BUSY => (StatusCode::CONFLICT, ApiError::micad("app_busy", message)),
@@ -147,7 +163,7 @@ pub(crate) async fn api_v1_app_read(
         (status = 400, description = "The upload was interrupted (`app_upload_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
-        (status = 409, description = "Another app change is running (`app_busy`), or this version is installed and `reinstall` is not set (`app_installed`)", body = ApiError),
+        (status = 409, description = "Another app change is running (`app_busy`), this version is installed and `reinstall` is not set (`app_installed`), or the bundle asks for privileges beyond the installed version's (any, on a first install) and `acceptPrivileges` is not set (`app_privileges`, with `params` `{root, capabilities, devices}`: what it asks for more; nothing is installed)", body = ApiError),
         (status = 413, description = "The bundle is above 256 MiB (`app_too_large`)", body = ApiError),
         (status = 415, description = "The body is not `application/octet-stream` (`app_upload_type`)", body = ApiError),
         (status = 422, description = "The bundle breaks a rule (`app_invalid`, each in `rules`), or cannot be installed here (`app_refused`)", body = ApiError),
@@ -257,7 +273,11 @@ pub(crate) async fn api_v1_app_install(
     drop(file);
     match state
         .api
-        .install_app(&upload.to_string_lossy(), query.reinstall)
+        .install_app(
+            &upload.to_string_lossy(),
+            query.reinstall,
+            query.accept_privileges,
+        )
         .await
     {
         Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),

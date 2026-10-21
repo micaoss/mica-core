@@ -476,9 +476,15 @@ impl SettingsApi for FakeSettings {
     }
 
     /// A bundle whose bytes begin `bad` is refused as micad refuses one that
-    /// breaks a rule; `busy`, as while another app flow runs. micad takes the
-    /// file either way.
-    async fn install_app(&self, path: &str, reinstall: bool) -> anyhow::Result<String> {
+    /// breaks a rule; `busy`, as while another app flow runs; `root`, unless
+    /// its privileges are accepted, as one that asks to run as root. micad
+    /// takes the file either way.
+    async fn install_app(
+        &self,
+        path: &str,
+        reinstall: bool,
+        accept_privileges: bool,
+    ) -> anyhow::Result<String> {
         let bytes = std::fs::read(path)?;
         let _ = std::fs::remove_file(path);
         self.container_calls
@@ -493,6 +499,16 @@ impl SettingsApi for FakeSettings {
             return Err(bus_error(
                 "com.mica.micad1.Error.AppInvalid",
                 &details.to_string(),
+            ));
+        }
+        if bytes.starts_with(b"root") && !accept_privileges {
+            let asked = serde_json::json!({
+                "message": "harbour-agent 2.1.0 asks for privileges; accept them to install it",
+                "privileges": { "root": true, "capabilities": [], "devices": [] },
+            });
+            return Err(bus_error(
+                "com.mica.micad1.Error.AppPrivileges",
+                &asked.to_string(),
             ));
         }
         if bytes.starts_with(b"busy") {

@@ -557,8 +557,10 @@ impl MicadService {
 
     /// Install or upgrade the bundle at `path`; answers the task's id.
     /// `reinstall` installs the installed version again, `upgrade` refuses
-    /// an app that is not installed. The bundle's manifest is checked before
-    /// the answer.
+    /// an app that is not installed. Unless `accept_privileges`, a bundle
+    /// that asks for privileges beyond the installed version's (any, on a
+    /// first install) is refused with them. The bundle's manifest is checked
+    /// before the answer.
     pub(super) async fn install_app(
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
@@ -566,11 +568,13 @@ impl MicadService {
         path: &str,
         reinstall: bool,
         upgrade: bool,
+        accept_privileges: bool,
     ) -> Result<String, AppFault> {
         let options = crate::apps::InstallOptions {
             reinstall,
             upgrade,
             unattended: false,
+            ask_privileges: !accept_privileges,
         };
         Ok(self
             .install_app_now(&emitter, sender_of(&header), path, options)

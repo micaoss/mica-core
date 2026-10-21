@@ -251,8 +251,15 @@ pub trait SettingsApi: Send + Sync {
         anyhow::bail!("this build reads no apps")
     }
     /// Install or upgrade the bundle apid wrote at `path` (`InstallApp`),
-    /// answering the task id. micad takes the file.
-    async fn install_app(&self, _path: &str, _reinstall: bool) -> anyhow::Result<String> {
+    /// answering the task id. micad takes the file. Unless
+    /// `accept_privileges`, a bundle asking for privileges beyond the
+    /// installed version's is refused with them.
+    async fn install_app(
+        &self,
+        _path: &str,
+        _reinstall: bool,
+        _accept_privileges: bool,
+    ) -> anyhow::Result<String> {
         anyhow::bail!("this build installs no apps")
     }
     /// `rollback`, `check` or `update` an app (`RollbackApp`,

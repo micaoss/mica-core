@@ -379,6 +379,20 @@ test('captures the apps on the services page', async ({ page }, testInfo) => {
   await page.goto('./services/apps/harbour-agent')
   await expect(page.getByText('This app runs as root')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('app-detail-root.png'), animations: 'disabled' })
+  // A bundle asking for more than the installed version is asked about.
+  await page.route('**/api/v1/apps', (route) => route.request().method() === 'GET'
+    ? route.fulfill(json({ available: true, arch: 'arm64', apps: [TAILSCALE, HARBOUR_AGENT] }))
+    : route.fulfill(json({ error: {
+      code: 'app_privileges',
+      message: 'tailscale 1.104.2 asks for privileges beyond 1.102.1; accept them to install it',
+      source: 'micad',
+      params: { root: false, capabilities: ['CAP_NET_BIND_SERVICE'], devices: ['/dev/ttyUSB0'] },
+    } }, 409)))
+  await page.goto('./services')
+  await page.locator('input[type=file]').setInputFiles({ name: 'tailscale-1.104.2-arm64.tar.gz', mimeType: 'application/gzip', buffer: Buffer.from('bundle') })
+  await page.getByRole('button', { name: 'Install', exact: true }).click()
+  await expect(page.getByRole('alertdialog').getByText('Devices: /dev/ttyUSB0')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('app-privileges.png'), animations: 'disabled' })
 })
 
 test('keeps a tall dialog inside a short appliance screen', async ({ page }, testInfo) => {
