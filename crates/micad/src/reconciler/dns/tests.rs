@@ -33,6 +33,7 @@ fn settings(enabled: bool, servers: &[&str], records: Vec<StaticRecord>) -> Sett
 
 fn nas() -> StaticRecord {
     StaticRecord {
+        id: "nas".to_string(),
         hostname: "nas.lan".to_string(),
         address: "192.168.1.5".to_string(),
         comment: Some("the NAS".to_string()),

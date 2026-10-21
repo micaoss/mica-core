@@ -43,7 +43,7 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
         ("dns.global", r#"{"enabled":true,"servers":["9.9.9.9"]}"#),
         (
             "dns.staticRecords",
-            r#"[{"address":"192.168.1.5","comment":"the NAS","hostname":"nas"}]"#,
+            r#"[{"address":"192.168.1.5","comment":"the NAS","hostname":"nas","id":"r1"}]"#,
         ),
     ] {
         let url = format!("/api/v1/settings/{path}");

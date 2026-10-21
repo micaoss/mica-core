@@ -394,6 +394,7 @@ fn global_dns_servers_are_other_hosts_listed_once() {
 #[test]
 fn static_records_name_other_hosts_once() {
     let record = |hostname: &str, address: &str, comment: Option<&str>| StaticRecord {
+        id: hostname.to_ascii_lowercase().replace(['.', '*'], "-"),
         hostname: hostname.to_string(),
         address: address.to_string(),
         comment: comment.map(str::to_string),
@@ -406,20 +407,31 @@ fn static_records_name_other_hosts_once() {
         validate_dns(&dns, "mica", &BTreeMap::new())
     };
     assert!(check(vec![record("nas.lan", "192.168.1.5", Some("the NAS"))]).is_ok());
-    assert!(check(vec![record("printer", "fd00::5", None)]).is_ok());
+    assert!(check(vec![record("printer", "fd00::5", None)]).is_err());
     assert!(check(vec![record("*.lan", "192.168.1.5", None)]).is_err());
     assert!(check(vec![record("localhost", "192.168.1.5", None)]).is_err());
     assert!(check(vec![record("MICA", "192.168.1.5", None)]).is_err());
     assert!(check(vec![record("nas", "nas.lan", None)]).is_err());
     assert!(check(vec![record("nas", "192.168.1.5", Some("a\nb"))]).is_err());
     assert!(check(vec![record("nas", "192.168.1.5", Some(&"x".repeat(65)))]).is_err());
-    assert!(
-        check(vec![
-            record("nas", "192.168.1.5", None),
-            record("NAS", "192.168.1.6", None)
-        ])
-        .is_err()
-    );
+    let mut twice = vec![
+        record("nas", "192.168.1.5", None),
+        record("NAS", "192.168.1.6", None),
+    ];
+    twice[1].id = "nas-2".to_string();
+    assert!(check(twice).is_err());
+    let mut same_id = vec![
+        record("nas", "192.168.1.5", None),
+        record("printer", "192.168.1.6", None),
+    ];
+    same_id[1].id = "nas".to_string();
+    assert!(check(same_id).is_err());
+    let mut no_id = record("nas", "192.168.1.5", None);
+    no_id.id = String::new();
+    assert!(check(vec![no_id]).is_err());
+    let mut odd_id = record("nas", "192.168.1.5", None);
+    odd_id.id = "a b".to_string();
+    assert!(check(vec![odd_id]).is_err());
     let many: Vec<StaticRecord> = (0..=MAX_STATIC_RECORDS)
         .map(|index| record(&format!("host{index}"), "192.168.1.5", None))
         .collect();
@@ -433,7 +445,7 @@ fn a_hostname_that_a_record_already_names_is_refused() {
     settings
         .set(
             "dns.staticRecords",
-            serde_json::json!([{ "hostname": "nas", "address": "192.168.1.5" }]),
+            serde_json::json!([{ "id": "r1", "hostname": "nas", "address": "192.168.1.5" }]),
         )
         .unwrap();
     assert!(settings.set("hostname", serde_json::json!("nas")).is_err());

@@ -31,9 +31,12 @@ pub struct GlobalDns {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StaticRecord {
+    /// What names the record to the API: 1 to [`MAX_RECORD_ID_LEN`] letters,
+    /// digits, `-` and `_`, unique among the records.
+    pub id: String,
     /// The host name, without a wildcard.
     pub hostname: String,
-    /// The IPv4 or IPv6 address it resolves to.
+    /// The IPv4 address it resolves to.
     pub address: String,
     /// A note for people, written after the record as a comment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -46,6 +49,8 @@ pub const MAX_GLOBAL_DNS_SERVERS: usize = 3;
 pub const MAX_STATIC_RECORDS: usize = 100;
 /// The longest record comment, in characters.
 pub const MAX_RECORD_COMMENT_CHARS: usize = 64;
+/// The longest record id, in bytes.
+pub const MAX_RECORD_ID_LEN: usize = 32;
 
 /// Whether `name` is a host name: dot-separated labels of letters, digits and
 /// inner hyphens, each at most 63 bytes, at most 253 in all.
@@ -76,10 +81,11 @@ fn own_addresses(network: &BTreeMap<String, IfaceSettings>) -> BTreeSet<IpAddr> 
 /// Refuse a `dns` subtree no resolver should be given: a global server that
 /// is not IPv4, is loopback or unspecified, is one of the interfaces' own
 /// addresses or is listed twice, more than [`MAX_GLOBAL_DNS_SERVERS`], and
-/// none while switched on; a record whose name is not a host name, is
-/// `localhost` or this device's `hostname` or is listed twice, whose address
-/// is not one, or whose comment is long or carries a control character, and
-/// more than [`MAX_STATIC_RECORDS`].
+/// none while switched on; a record whose id is not 1 to
+/// [`MAX_RECORD_ID_LEN`] of `[A-Za-z0-9_-]` or is listed twice, whose name is
+/// not a host name, is `localhost` or this device's `hostname` or is listed
+/// twice, whose address is not IPv4, or whose comment is long or carries a
+/// control character, and more than [`MAX_STATIC_RECORDS`].
 pub fn validate_dns(
     dns: &DnsSettings,
     hostname: &str,
@@ -122,7 +128,23 @@ pub fn validate_dns(
         ));
     }
     let mut names = BTreeSet::new();
+    let mut ids = BTreeSet::new();
     for record in &dns.static_records {
+        let id_ok = !record.id.is_empty()
+            && record.id.len() <= MAX_RECORD_ID_LEN
+            && record
+                .id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
+        if !id_ok {
+            return Err(format!(
+                "dns.staticRecords id {:?} is not 1 to {MAX_RECORD_ID_LEN} letters, digits, `-` or `_`",
+                record.id
+            ));
+        }
+        if !ids.insert(record.id.as_str()) {
+            return Err(format!("dns.staticRecords lists id {} twice", record.id));
+        }
         let name = record.hostname.to_ascii_lowercase();
         if !is_host_name(&name) {
             return Err(format!(
@@ -142,9 +164,9 @@ pub fn validate_dns(
                 record.hostname
             ));
         }
-        if record.address.parse::<IpAddr>().is_err() {
+        if record.address.parse::<Ipv4Addr>().is_err() {
             return Err(format!(
-                "dns.staticRecords address {:?} for {} is not an IP address",
+                "dns.staticRecords address {:?} for {} is not an IPv4 address",
                 record.address, record.hostname
             ));
         }

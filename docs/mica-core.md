@@ -119,7 +119,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | --- | --- |
 | `hostname` | The hostname |
 | `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes; a `can` entry has its block alone (below) |
-| `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{hostname, address, comment?}`) go into the hosts file |
+| `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
 | `access` | SSH (switch, listen addresses, authorized keys), the console, the API's listeners (`web`), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default) |
 | `container` | The engine switch (`enabled`) and the declared Compose projects (`projects`, section 3.9) |
