@@ -266,6 +266,11 @@ pub(super) const BLUETOOTH_SETTINGS_PATH: &str = "bluetooth";
 pub(super) const V1_WIFI_AP_PATH: &str = "/v1/wifi/ap";
 pub(super) const WIFI_AP_PATH: &str = "wifi.ap";
 
+/// The radio's role: which of the two holds it, written with that role's
+/// configuration in one write.
+pub(super) const V1_WIFI_PATH: &str = "/v1/wifi";
+pub(super) const WIFI_SETTINGS_PATH: &str = "wifi";
+
 /// The network cluster: the interface map, one interface, and a tunnel's peer collection.
 ///
 /// The prefix is needed separately for the reason the token collection's is:

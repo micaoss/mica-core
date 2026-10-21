@@ -61,6 +61,7 @@ mod units;
 mod web;
 mod wifi_ap;
 mod wifi_networks;
+mod wifi_role;
 mod wifi_station;
 mod wireguard;
 use assets::*;

@@ -8418,6 +8418,177 @@
         }
       }
     },
+    "/api/v1/wifi": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read which role holds the radio.",
+        "operationId": "api_v1_wifi_read",
+        "responses": {
+          "200": {
+            "description": "The radio's role: the access point's when it is on, else the station's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiRole"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "micad is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Switch the radio's role and write that role's configuration, as one write\nand one task.",
+        "description": "`enabled: false` stops both roles. `mode: client` starts the station and\nstops the access point, and `client.addressing` replaces the radio's\ninterface entry. `mode: ap` stops the station and writes `ap` with `start`\nas its mode; `psk` absent keeps the stored key.",
+        "operationId": "api_v1_wifi_write",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WifiRoleWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The role and its configuration were written and the reconcile queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The write carries the radio's addressing while a network task has not finished (`busy`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, the mode is not `client` or `ap`, a role's configuration comes without its mode, the access point or the addressing is one its own route refuses, or the body carries the redaction sentinel (`validation_failed`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed to write (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/wifi/ap": {
       "get": {
         "tags": [
@@ -8484,7 +8655,7 @@
           "resources"
         ],
         "summary": "Configure the access point: switch it on, name it, key it, place it.",
-        "description": "**`psk` absent keeps the stored key**, for the reason the known-network\nroute gives: a read substitutes the redaction sentinel, so an operator\nchanging the channel has not been shown the key, and treating absence as\n\"no key\" would publish an open access point.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "description": "**`psk` absent keeps the stored key**, for the reason the known-network\nroute gives: a read substitutes the redaction sentinel, so an operator\nchanging the channel has not been shown the key, and treating absence as\n\"no key\" would publish an open access point.\n\nA `countryCode` other than the stored one needs `countryConfirmed: true`.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_wifi_ap_write",
         "requestBody": {
           "content": {
@@ -8548,7 +8719,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, the mode or the security is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, the pool or the lease is one the DHCP server cannot serve, or the body carries the redaction sentinel (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "The body is not this shape, the mode or the security is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, the pool or the lease is one the DHCP server cannot serve, or the body carries the redaction sentinel (`validation_failed`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -11673,6 +11844,108 @@
         },
         "additionalProperties": false
       },
+      "WifiApConfig": {
+        "type": "object",
+        "description": "The access point as the role write names it: `start` in place of `mode`,\nwhich `enabled: false` turns off.",
+        "required": [
+          "start",
+          "interface",
+          "channel",
+          "countryCode",
+          "address",
+          "holdDownSeconds",
+          "graceSeconds"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "countryCode": {
+            "type": "string"
+          },
+          "countryConfirmed": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`true` confirms a `countryCode` other than the stored one."
+          },
+          "graceSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "holdDownSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "interface": {
+            "type": "string"
+          },
+          "leaseSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "pool": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccessPointPool"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "psk": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent keeps the stored key."
+          },
+          "security": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ssid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start": {
+            "type": "string",
+            "description": "`always`, or `provisioning`: only while no uplink works."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WifiClientConfig": {
+        "type": "object",
+        "description": "The station's part of the role write.",
+        "required": [
+          "addressing"
+        ],
+        "properties": {
+          "addressing": {
+            "$ref": "#/components/schemas/NetworkInterface",
+            "description": "The radio's own interface entry, replacing `network.<radio>`."
+          }
+        },
+        "additionalProperties": false
+      },
       "WifiClientRole": {
         "type": "object",
         "description": "Forget one known WiFi network by its SSID.\n\nAnswers **404** when no stored network carries that SSID. There is no\nThe station role: the radio it runs on and whether it runs.",
@@ -11729,6 +12002,70 @@
             "description": "The network name, which is also this entry's `DELETE` path segment."
           }
         }
+      },
+      "WifiRole": {
+        "type": "object",
+        "description": "The radio's role.",
+        "required": [
+          "enabled",
+          "mode",
+          "locked"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether either role holds the radio."
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "Whether another feature holds the Wi-Fi configuration; never, yet."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`client` or `ap`; `client` while off."
+          }
+        }
+      },
+      "WifiRoleWrite": {
+        "type": "object",
+        "description": "One write of the radio's role and the configuration of that role.",
+        "required": [
+          "enabled",
+          "mode"
+        ],
+        "properties": {
+          "ap": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WifiApConfig",
+                "description": "The access point, required with `mode: ap` and refused otherwise."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "client": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WifiClientConfig",
+                "description": "The station's configuration, only with `mode: client`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "`false` stops both roles."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`client` or `ap`."
+          }
+        },
+        "additionalProperties": false
       },
       "WireguardParameters": {
         "type": "object",
