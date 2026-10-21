@@ -82,4 +82,4 @@ export function exchange({ context, idProver, idVerifier, w0, w1, L, x, y }) {
   }
 }
 
-export { be, big, sha256 }
+export { add, be, big, neg, sha256 }

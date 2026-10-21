@@ -145,6 +145,8 @@ struct Bench {
     audit: Arc<Mutex<Vec<String>>>,
     wifi_locked: Arc<AtomicBool>,
     phone: Phone,
+    /// The device's last `share`.
+    share: Value,
     _dir: tempfile::TempDir,
 }
 
@@ -189,6 +191,7 @@ impl Bench {
             audit,
             wifi_locked,
             phone: Phone::default(),
+            share: Value::Null,
             _dir: dir,
         };
         bench.engine.handle(Input::Tick).await;
@@ -364,6 +367,7 @@ impl Bench {
             .session(json!({ "t": "share", "shareP": BASE64.encode(prover::share(&w0, &x)) }))
             .await;
         let share_v = BASE64.decode(share["shareV"].as_str().unwrap()).unwrap();
+        self.share = share.clone();
         let t = Transcript {
             context: if auth == "temp-code" {
                 CONTEXT_TEMP_CODE
@@ -712,6 +716,9 @@ async fn a_phone_that_stops_after_the_share_has_used_an_attempt() {
         1,
         "counted before the answer"
     );
+    // The page learns of a wrong password at confirmV, so the share says
+    // what is left.
+    assert_eq!(bench.share["attemptsLeft"], json!(4));
     bench
         .engine
         .handle(Input::Disconnected {

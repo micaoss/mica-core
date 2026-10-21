@@ -152,8 +152,9 @@ refuses anything else.
 1. page -> `{"t":"start","auth":"password"}` (or `"temp-code"`)
 2. device -> `{"t":"params","salt":<16 bytes>,"iterations":300000}`
 3. page -> `{"t":"share","shareP":<X, 65 bytes>}`
-4. device -> `{"t":"share","shareV":<Y, 65 bytes>,"confirmV":<32 bytes>}`
-5. page verifies `confirmV`; on a mismatch the password is wrong and the page stops here.
+4. device -> `{"t":"share","shareV":<Y, 65 bytes>,"confirmV":<32 bytes>,"attemptsLeft":n}`
+5. page verifies `confirmV`; on a mismatch the password is wrong and the page stops here, telling
+   the user `attemptsLeft`.
 6. page -> `{"t":"confirm","confirmP":<32 bytes>}`
 7. device -> `{"t":"ready"}`, or `{"t":"error","reason":"auth_failed","attemptsLeft":n}`
 
@@ -164,7 +165,8 @@ refuses anything else.
 
 **Counting failures.** The device counts the attempt as failed when it sends step 4, and persists the
 count first. A valid `confirmP` takes that one failure back. So a page that gives up at step 5 has
-used an attempt. After 5 consecutive failures the device locks for 10 minutes, then 1 hour, then 24
+used an attempt. `attemptsLeft` in step 4 is the attempts left after this one is counted, before
+the lockout; it is optional for a receiver, which ignores members it does not know. After 5 consecutive failures the device locks for 10 minutes, then 1 hour, then 24
 hours on each further lockout. Counts and lockouts survive reboots. A successful exchange resets
 the consecutive count; an administrator's console login resets both. A lockout also closes a
 `manual` window and voids its code. Every failure is audited.
@@ -269,7 +271,8 @@ session added. While a session holds the radio, the console's Wi-Fi routes answe
 Produced by the reference in [ble-provisioning/reference](ble-provisioning/reference/README.md)
 (Node.js, BigInt P-256), which first reproduces the RFC 9383 P256-SHA256-HKDF-HMAC-SHA256 vector
 exactly. All values are hex unless shown as JSON. `x`
-and `y` are fixed here; real sessions draw them at random.
+and `y` are fixed here; real sessions draw them at random. The device has counted no failures
+before, so `attemptsLeft` is 4.
 
 ### SPAKE2+, auth password
 
@@ -298,7 +301,7 @@ kDeviceToPhone = 794e4eceb4a026ee4ac2b6441dda6895ace89e4d7e4f34052daf56fca4e0773
 session messages:
 {"t":"params","salt":"AAECAwQFBgcICQoLDA0ODw==","iterations":600000}
 {"t":"share","shareP":"BK9vF7lyUFMatOlmcgG5fAeBxscgJXbF13REj1v1K+R/8oObmSd0WT7EO070NTXnmgKelZejsFwjJE3mg+oqCF0="}
-{"t":"share","shareV":"BODwjBbxWHFFMMH/giprbCxGpgjFi6HGFqLUKZSpy9riGZeWpSab/AkiUSwlqsSgBjoRf2V7fQ3MxPtaqr78PHk=","confirmV":"8T+RLtQ9dNlZrP2pWjn6JVI1+tqkRLYAWlDbTwbJ5u8="}
+{"t":"share","shareV":"BODwjBbxWHFFMMH/giprbCxGpgjFi6HGFqLUKZSpy9riGZeWpSab/AkiUSwlqsSgBjoRf2V7fQ3MxPtaqr78PHk=","confirmV":"8T+RLtQ9dNlZrP2pWjn6JVI1+tqkRLYAWlDbTwbJ5u8=","attemptsLeft":4}
 {"t":"confirm","confirmP":"kgyaMKrMOgLbmjmEGp1fzKaYxeDItSTiQXyUzwX46lw="}
 ```
 
@@ -329,7 +332,7 @@ kDeviceToPhone = c4ebe7b4f1cc19323117793857779e4ed38319a58c46b6715b960b9cb265e5a
 session messages:
 {"t":"params","salt":"8OHSw7Sllod4aVpLPC0eDw==","iterations":600000}
 {"t":"share","shareP":"BPYjEmWKq6uQkw0gCDkgdfIe0ZGq3sAO49brpV9rtMQKZ22y0Xj4F5ntcDLWCBA+oPxQB2r2A+GW7lCOE7EXIrw="}
-{"t":"share","shareV":"BJQWrXatmQOdWpCW+MPOZFtO0wj0DwYyFPc4G7L4PR1Dq4OB34SIgo/rYMceYKBPTTopzJl+mQm3Qk/EZ6wVeu8=","confirmV":"e022Lu3zJhgZ5lhfi5My0YWOTyr/cgt9nkIItVBY+Rw="}
+{"t":"share","shareV":"BJQWrXatmQOdWpCW+MPOZFtO0wj0DwYyFPc4G7L4PR1Dq4OB34SIgo/rYMceYKBPTTopzJl+mQm3Qk/EZ6wVeu8=","confirmV":"e022Lu3zJhgZ5lhfi5My0YWOTyr/cgt9nkIItVBY+Rw=","attemptsLeft":4}
 {"t":"confirm","confirmP":"KVgvqQ1QF3UPK2Ww2cA4bq+F3laaWc27l7okxFH/3p0="}
 ```
 

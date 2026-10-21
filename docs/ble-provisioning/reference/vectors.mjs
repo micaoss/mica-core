@@ -54,7 +54,7 @@ for (const [mode, pw] of [['password', 'harbour-pw-1'], ['temp-code', '40718263'
   console.log('\nsession messages:')
   console.log(JSON.stringify({ t: 'params', salt: b64(salt), iterations }))
   console.log(JSON.stringify({ t: 'share', shareP: b64(e.X) }))
-  console.log(JSON.stringify({ t: 'share', shareV: b64(e.Y), confirmV: b64(e.confirmV) }))
+  console.log(JSON.stringify({ t: 'share', shareV: b64(e.Y), confirmV: b64(e.confirmV), attemptsLeft: 4 }))
   console.log(JSON.stringify({ t: 'confirm', confirmP: b64(e.confirmP) }))
   if (mode === 'password') pwKeys = keys
 }

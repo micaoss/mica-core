@@ -622,6 +622,7 @@ impl Engine {
             "t": "share",
             "shareV": BASE64.encode(answer.share_v),
             "confirmV": BASE64.encode(answer.keys.confirm_v),
+            "attemptsLeft": charged.attempts_left(),
         });
         if let Some(connection) = &mut self.connection {
             connection.phase = Phase::Confirm {
