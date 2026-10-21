@@ -68,7 +68,7 @@ pub(super) async fn a_vlan_parent_that_is_not_declared_is_422_and_writes_nothing
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert_api_headers(&response, "vlan parent");
     let error = envelope(response).await;
-    assert_eq!(error["code"], "validation_failed");
+    assert_eq!(error["code"], "vlan_parent_invalid");
     assert_eq!(error["source"], "apid");
     assert_eq!(error["path"], json!("network.vlan9"));
     assert!(
@@ -102,7 +102,7 @@ pub(super) async fn a_bridge_port_that_is_not_declared_is_422_and_writes_nothing
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let error = envelope(response).await;
-    assert_eq!(error["code"], "validation_failed");
+    assert_eq!(error["code"], "bridge_port_invalid");
     assert!(
         error["message"]
             .as_str()
@@ -240,12 +240,11 @@ pub(super) async fn removing_a_port_a_bridge_still_lists_is_refused() {
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let error = envelope(response).await;
-    assert!(
-        error["message"]
-            .as_str()
-            .unwrap()
-            .contains("has bridge port \"eth1\", which is not a declared network entry"),
-        "{error}"
+    assert_eq!(error["code"], "in_use");
+    assert_eq!(error["params"], json!({ "name": "eth1", "refs": "br0" }));
+    assert_eq!(
+        error["details"],
+        json!([{ "interface": "eth1", "field": "name", "code": "in_use", "params": { "name": "eth1", "refs": "br0" } }])
     );
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
     assert_eq!(stored_network_map(&fake).await, before);
@@ -327,7 +326,7 @@ pub(super) async fn the_whole_map_put_replaces_atomically_and_validates_relation
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(envelope(response).await["code"], "validation_failed");
+    assert_eq!(envelope(response).await["code"], "bridge_port_invalid");
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
     assert_eq!(stored_network_map(&fake).await, before);
 
@@ -360,7 +359,9 @@ pub(super) async fn the_whole_map_put_replaces_atomically_and_validates_relation
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(envelope(response).await["code"], "validation_failed");
+    let error = envelope(response).await;
+    assert_eq!(error["code"], "name_invalid");
+    assert_eq!(error["details"][0]["interface"], "waytoolongiface016");
 
     // A body that is not a map of interfaces at all is 422; a body that is not
     // JSON is 400.
@@ -415,8 +416,8 @@ pub(super) async fn the_typed_network_writes_refuse_an_address_that_is_not_a_cid
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
     assert_eq!(stored_network_map(&fake).await, before);
 
-    // The map route: one bad entry refuses the whole body, and the error envelope
-    // names that entry rather than the map, because that is what failed.
+    // The map route: one bad entry refuses the whole body, and the detail
+    // names that entry, because that is what failed.
     let response = put_network_map(
         &router,
         &token,
@@ -429,7 +430,9 @@ pub(super) async fn the_typed_network_writes_refuse_an_address_that_is_not_a_cid
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let error = envelope(response).await;
     assert_eq!(error["code"], "validation_failed");
-    assert_eq!(error["path"], json!("network.eth1"));
+    assert_eq!(error["path"], json!("network"));
+    assert_eq!(error["details"][0]["interface"], "eth1");
+    assert_eq!(error["details"][0]["field"], "static.address");
     assert!(
         error["message"]
             .as_str()

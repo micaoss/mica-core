@@ -46,6 +46,7 @@ mod network_ifaces;
 mod network_peers;
 mod network_read;
 mod network_routes;
+mod network_rules;
 mod network_status;
 mod password;
 mod power;

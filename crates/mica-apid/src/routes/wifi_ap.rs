@@ -658,9 +658,7 @@ async fn radio_addressing(
     check_network_idle(state)?;
     let mut candidate = api_network_entries(state).await?;
     candidate.insert(radio.clone(), cfg.clone());
-    relational_refusal(&candidate, &path)?;
-    address_refusal(&radio, &cfg)?;
-    routing_refusal(&radio, &cfg)?;
+    map_refusal(&candidate, &[radio.as_str()], &path)?;
     Ok((path, encode(&cfg)?))
 }
 

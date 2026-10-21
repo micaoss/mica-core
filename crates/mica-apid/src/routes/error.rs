@@ -43,6 +43,40 @@ pub(crate) struct ApiErrorDetail {
     /// service and field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) problems: Option<Vec<super::containers::ComposeProblem>>,
+    /// Every rule a refused network write breaks, by interface and field;
+    /// `code`, `message` and `params` above are the first one's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) details: Option<Vec<ErrorDetail>>,
+}
+
+/// One rule a refused write breaks.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub(crate) struct ErrorDetail {
+    /// The interface the rule is about.
+    pub(super) interface: String,
+    /// The field within it: `name`, `static.address`, `static.gateway`,
+    /// `vlan.parent`, `vlan.id`, `bridge.ports`, `routes`, `dns`, ...
+    pub(super) field: &'static str,
+    /// The rule's code: `name_invalid`, `address_overlap`,
+    /// `gateway_out_of_subnet`, `metric_duplicate`, `vlan_duplicate`,
+    /// `vlan_parent_invalid`, `bridge_port_taken`, `bridge_port_invalid`,
+    /// `bridge_port_addressed`, `in_use`, or `validation_failed` for a
+    /// field's own syntax.
+    pub(super) code: &'static str,
+    /// The values the rule's message names.
+    #[schema(value_type = Object)]
+    pub(super) params: Value,
+}
+
+impl From<micad_settings::NetworkViolation> for ErrorDetail {
+    fn from(violation: micad_settings::NetworkViolation) -> Self {
+        Self {
+            interface: violation.interface,
+            field: violation.field,
+            code: violation.code,
+            params: violation.params,
+        }
+    }
 }
 
 impl ApiError {
@@ -63,6 +97,7 @@ impl ApiError {
                 path: None,
                 params: None,
                 problems: None,
+                details: None,
             },
         }
     }
@@ -74,6 +109,11 @@ impl ApiError {
 
     pub(super) fn with_params(mut self, params: Value) -> Self {
         self.error.params = Some(params);
+        self
+    }
+
+    pub(super) fn with_details(mut self, details: Vec<ErrorDetail>) -> Self {
+        self.error.details = Some(details);
         self
     }
 

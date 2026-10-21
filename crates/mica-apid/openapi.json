@@ -3079,7 +3079,7 @@
           "resources"
         ],
         "summary": "Replace the whole interface map, validated as one tree.",
-        "description": "The only way to make two interdependent entries legal in one step: adding a\nbridge and its ports through the per-interface route means declaring the\nports first, because a bridge naming an undeclared port is refused.\n\nThe body names the version `GET` answered: a map changed since then is\n**409** `version_conflict`, and so is any write while a network task has\nnot finished (`busy`). Answers **422** with the failing rule's own message\nwhen the map does not validate. Nothing is written in either case.\n`?dryRun=true` validates and answers what the write would change.",
+        "description": "The only way to make two interdependent entries legal in one step: adding a\nbridge and its ports through the per-interface route means declaring the\nports first, because a bridge naming an undeclared port is refused.\n\nThe body names the version `GET` answered: a map changed since then is\n**409** `version_conflict`, and so is any write while a network task has\nnot finished (`busy`). A map that does not validate is **422**: `code`,\n`message` and `params` are the first broken rule's, and `details` lists\nevery one by interface and field. Nothing is written in either case.\n`?dryRun=true` validates and answers what the write would change.",
         "operationId": "api_v1_network_write",
         "parameters": [
           {
@@ -3177,7 +3177,7 @@
             }
           },
           "422": {
-            "description": "`dryRun` is not a boolean, the body is not a version and a map of interfaces, a key is not an interface name, an entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses it -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3382,7 +3382,7 @@
             }
           },
           "422": {
-            "description": "The name is not an interface name, the body is not an interface, the entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses the resulting map (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "The name is not an interface name, or the body is not an interface (`validation_failed`); or the resulting map breaks a rule, each in `details` with the code `PUT /api/v1/network` answers it with; or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3428,7 +3428,7 @@
           "resources"
         ],
         "summary": "Remove one interface, re-validating the rest of the map without it.",
-        "description": "Removing an interface another entry depends on — a port still listed by a\nbridge — is **422** with the failing rule's own message, and nothing is\nwritten. Remove the dependent reference first.\n\nRead-modify-write: two concurrent removals lose one.",
+        "description": "Removing an interface another entry depends on — a port still listed by a\nbridge, a VLAN's parent — is **422** `in_use` naming them, and nothing is\nwritten. Remove the dependent reference first.\n\nRead-modify-write: two concurrent removals lose one.",
         "operationId": "api_v1_network_iface_remove",
         "parameters": [
           {
@@ -3496,7 +3496,7 @@
             }
           },
           "422": {
-            "description": "The name is not an interface name, or removing the entry breaks a relational rule -- a bridge still lists it as a port, a VLAN still names it as a parent (`validation_failed`)",
+            "description": "The name is not an interface name (`validation_failed`), or a bridge still lists it as a port or a VLAN still names it as a parent (`in_use`, with `refs`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9662,6 +9662,16 @@
           "code": {
             "type": "string"
           },
+          "details": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            },
+            "description": "Every rule a refused network write breaks, by interface and field;\n`code`, `message` and `params` above are the first one's."
+          },
           "message": {
             "type": "string"
           },
@@ -10628,6 +10638,34 @@
           "server": {
             "type": "string",
             "description": "The server asked."
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "description": "One rule a refused write breaks.",
+        "required": [
+          "interface",
+          "field",
+          "code",
+          "params"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The rule's code: `name_invalid`, `address_overlap`,\n`gateway_out_of_subnet`, `metric_duplicate`, `vlan_duplicate`,\n`vlan_parent_invalid`, `bridge_port_taken`, `bridge_port_invalid`,\n`bridge_port_addressed`, `in_use`, or `validation_failed` for a\nfield's own syntax."
+          },
+          "field": {
+            "type": "string",
+            "description": "The field within it: `name`, `static.address`, `static.gateway`,\n`vlan.parent`, `vlan.id`, `bridge.ports`, `routes`, `dns`, ..."
+          },
+          "interface": {
+            "type": "string",
+            "description": "The interface the rule is about."
+          },
+          "params": {
+            "type": "object",
+            "description": "The values the rule's message names."
           }
         }
       },

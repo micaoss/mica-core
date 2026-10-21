@@ -88,8 +88,9 @@ pub(crate) async fn api_v1_network_read(
 ///
 /// The body names the version `GET` answered: a map changed since then is
 /// **409** `version_conflict`, and so is any write while a network task has
-/// not finished (`busy`). Answers **422** with the failing rule's own message
-/// when the map does not validate. Nothing is written in either case.
+/// not finished (`busy`). A map that does not validate is **422**: `code`,
+/// `message` and `params` are the first broken rule's, and `details` lists
+/// every one by interface and field. Nothing is written in either case.
 /// `?dryRun=true` validates and answers what the write would change.
 #[utoipa::path(
     put,
@@ -105,7 +106,7 @@ pub(crate) async fn api_v1_network_read(
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 409, description = "`baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)", body = ApiError),
-        (status = 422, description = "`dryRun` is not a boolean, the body is not a version and a map of interfaces, a key is not an interface name, an entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses it -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -166,29 +167,13 @@ pub(crate) async fn api_v1_network_write(
             }
         }
     }
-    // The keys as well as the bodies. `Settings::set` checks a new
-    // `network` key itself, but it checks it *after* the write is
-    // built, and a 422 that says which name is wrong beats one that says the
-    // tree did not deserialize.
-    for iface in entries.keys() {
-        if let Err(response) = check_iface_name(iface, NETWORK_SETTINGS_PATH) {
-            return *response;
-        }
-    }
-    if let Err(response) = relational_refusal(&entries, NETWORK_SETTINGS_PATH) {
+    // Every entry here is one the request carried: this route replaces the
+    // map rather than merging into it. The keys are checked as well as the
+    // bodies: `Settings::set` checks a new `network` key itself, but only
+    // after the write is built.
+    let carried: Vec<&str> = entries.keys().map(String::as_str).collect();
+    if let Err(response) = map_refusal(&entries, &carried, NETWORK_SETTINGS_PATH) {
         return *response;
-    }
-    // After the relational pass and not before it, so a body that breaks both
-    // gets the relational answer. Every entry here
-    // is one the request carried: this route replaces the map rather than
-    // merging into it.
-    for (iface, cfg) in &entries {
-        if let Err(response) = address_refusal(iface, cfg) {
-            return *response;
-        }
-        if let Err(response) = routing_refusal(iface, cfg) {
-            return *response;
-        }
     }
     if dry_run {
         // Entries this build cannot read count as removed: the write drops them.
@@ -242,7 +227,7 @@ pub(crate) async fn api_v1_network_write(
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 409, description = "A network task has not finished (`busy`)", body = ApiError),
-        (status = 422, description = "The name is not an interface name, the body is not an interface, the entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses the resulting map (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "The name is not an interface name, or the body is not an interface (`validation_failed`); or the resulting map breaks a rule, each in `details` with the code `PUT /api/v1/network` answers it with; or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -273,19 +258,13 @@ pub(crate) async fn api_v1_network_iface_write(
     if let Err(response) = restore_preshared_keys(&iface, &mut cfg, &candidate) {
         return *response;
     }
-    // The candidate tree and not the one entry, for the reason the pane's
-    // comment gives: every relational rule is about two entries at once.
+    // The candidate tree, for the relational rules, which are about two
+    // entries at once; the entry's own rules for the one entry the request
+    // carries: a stored entry that already holds an unparseable address is
+    // not this request's fault and must not make an edit to a different
+    // interface fail.
     candidate.insert(iface.clone(), cfg.clone());
-    if let Err(response) = relational_refusal(&candidate, &path) {
-        return *response;
-    }
-    // `cfg` and not `candidate`: the one entry the request carries. A stored
-    // entry that already holds an unparseable address is not this request's
-    // fault and must not make an edit to a different interface fail.
-    if let Err(response) = address_refusal(&iface, &cfg) {
-        return *response;
-    }
-    if let Err(response) = routing_refusal(&iface, &cfg) {
+    if let Err(response) = map_refusal(&candidate, &[iface.as_str()], &path) {
         return *response;
     }
     // The entry's own dot-path and not the whole map, so a concurrent edit of
@@ -306,7 +285,7 @@ pub(crate) async fn api_v1_network_iface_write(
 /// Remove one interface, re-validating the rest of the map without it.
 ///
 /// Removing an interface another entry depends on — a port still listed by a
-/// bridge — is **422** with the failing rule's own message, and nothing is
+/// bridge, a VLAN's parent — is **422** `in_use` naming them, and nothing is
 /// written. Remove the dependent reference first.
 ///
 /// Read-modify-write: two concurrent removals lose one.
@@ -322,7 +301,7 @@ pub(crate) async fn api_v1_network_iface_write(
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 404, description = "No `network` entry has that name (`settings_not_found`). Well-formed and absent, which is a different answer from malformed", body = ApiError),
         (status = 409, description = "A network task has not finished (`busy`)", body = ApiError),
-        (status = 422, description = "The name is not an interface name, or removing the entry breaks a relational rule -- a bridge still lists it as a port, a VLAN still names it as a parent (`validation_failed`)", body = ApiError),
+        (status = 422, description = "The name is not an interface name (`validation_failed`), or a bridge still lists it as a port or a VLAN still names it as a parent (`in_use`, with `refs`)", body = ApiError),
         (status = 500, description = "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -347,6 +326,21 @@ pub(crate) async fn api_v1_network_iface_remove(
     }
     if let Err(response) = check_network_idle(&state) {
         return *response;
+    }
+    let refs = references_to(&candidate, &iface);
+    if !refs.is_empty() {
+        let refs = refs.join(", ");
+        let message = format!("{iface} is named by {refs}; remove those references first");
+        let violation = NetworkViolation::new(
+            &iface,
+            "name",
+            "in_use",
+            serde_json::json!({ "name": iface, "refs": refs }),
+            message,
+        );
+        if let Err(response) = violations_refusal(vec![violation], &path) {
+            return *response;
+        }
     }
     if let Err(response) = relational_refusal(&candidate, &path) {
         return *response;

@@ -71,8 +71,9 @@ pub use model::{
     validate_wifi_psk,
 };
 pub use network_rules::{
-    MAX_CAN_BITRATE, MAX_CAN_DATA_BITRATE, MAX_CAN_RESTART_MS, MAX_IFACE_LEN, check_iface_name,
-    is_host_port, is_ip_or_cidr, is_wireguard_key, validate_can, validate_peers, validate_topology,
+    MAX_CAN_BITRATE, MAX_CAN_DATA_BITRATE, MAX_CAN_RESTART_MS, MAX_IFACE_LEN, NetworkViolation,
+    check_iface_name, is_host_port, is_ip_or_cidr, is_wireguard_key, topology_violations,
+    validate_can, validate_peers, validate_topology,
 };
 pub use path::{json_path_get, path_segments, quote_path_segment};
 pub use recovery::{

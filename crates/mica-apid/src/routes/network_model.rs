@@ -321,39 +321,46 @@ pub(super) fn check_iface_name(iface: &str, path: &str) -> Result<(), Box<Respon
     )))
 }
 
-/// `entries` refused by a relational rule, in the error envelope.
-///
-/// The message is [`validate_entries`]' own, which is the reconciler's own
-/// sentence: no phrasing this route could pre-write would say which entry and
-/// which field made the tree illegal.
+/// A write refused by `violations`, or nothing when there are none: 422 with
+/// the first rule's code, message and values, and every rule broken under
+/// `details`, each naming the entry and the field.
+pub(super) fn violations_refusal(
+    violations: Vec<NetworkViolation>,
+    path: &str,
+) -> Result<(), Box<Response>> {
+    let Some(first) = violations.first() else {
+        return Ok(());
+    };
+    let error = ApiError::apid(first.code, first.message.clone())
+        .with_params(first.params.clone())
+        .at(path);
+    Err(Box::new(api_response(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        error.with_details(violations.into_iter().map(ErrorDetail::from).collect()),
+    )))
+}
+
+/// `entries` refused by a relational rule ([`relational_violations`]).
 pub(super) fn relational_refusal(
     entries: &NetworkEntries,
     path: &str,
 ) -> Result<(), Box<Response>> {
-    validate_entries(entries).map_err(|message| {
-        Box::new(api_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            ApiError::apid("validation_failed", message).at(path),
-        ))
-    })
+    violations_refusal(relational_violations(entries), path)
 }
 
-/// One entry's static address refused by the wizard's rule, in the error
-/// envelope.
-///
-/// The message is [`validate_static_address`]'s own -- the sentence the setup
-/// wizard and the network pane already print -- so the typed routes and the
-/// forms cannot state the rule in two ways.
-///
-/// The `path` member names the entry and not the subtree the route writes: on
-/// `PUT /api/v1/network` that subtree is `network`, which would not say which
-/// of the entries the body carried is the wrong one.
-///
-/// Called on the entries a **request** carries and never on the tree as read.
-/// [`api_v1_network_iface_remove`] re-validates the stored map without the
-/// removed entry, and putting this rule in that shared re-validation would make
-/// removing an unrelated interface start failing on bad data already on disk.
-/// The routing rules of one entry.
+/// A candidate map refused by any rule it breaks ([`map_violations`]); the
+/// per-entry rules for the entries the request carries only, so bad data
+/// already stored in an entry the request does not touch does not fail it.
+pub(super) fn map_refusal(
+    entries: &NetworkEntries,
+    carried: &[&str],
+    path: &str,
+) -> Result<(), Box<Response>> {
+    violations_refusal(map_violations(entries, carried), path)
+}
+
+/// The routing rules of one entry, as the field and the message of the first
+/// one it breaks.
 ///
 /// Two refusals, both about configurations networkd would accept and nothing
 /// could use:
@@ -362,71 +369,62 @@ pub(super) fn relational_refusal(
 ///   address;
 /// - a second default route, declared as a `0.0.0.0/0` route beside a
 ///   `static.gateway` that already is one.
-pub(super) fn routing_refusal(iface: &str, cfg: &IfaceSettings) -> Result<(), Box<Response>> {
-    let refuse = |message: String| {
-        Box::new(api_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            ApiError::apid("validation_failed", message).at(&iface_settings_path(iface)),
-        ))
-    };
+///
+/// And `dns`, which replaces a lease's servers, only beside DHCP.
+pub(super) fn routing_problem(cfg: &IfaceSettings) -> Option<(&'static str, String)> {
     let has_gateway = cfg
         .static_
         .as_ref()
         .is_some_and(|static_| static_.gateway.is_some());
     for route in &cfg.routes {
         if !is_ip_or_cidr(&route.destination) {
-            return Err(refuse(format!(
-                "the route destination {:?} is not a network in CIDR notation, such as `10.20.0.0/16`",
-                route.destination
-            )));
+            return Some((
+                "routes",
+                format!(
+                    "the route destination {:?} is not a network in CIDR notation, such as `10.20.0.0/16`",
+                    route.destination
+                ),
+            ));
         }
         if let Some(gateway) = &route.gateway
             && gateway.parse::<IpAddr>().is_err()
         {
-            return Err(refuse(format!(
-                "the route via {gateway:?} does not name an address; omit the gateway for an on-link route"
-            )));
+            return Some((
+                "routes",
+                format!(
+                    "the route via {gateway:?} does not name an address; omit the gateway for an on-link route"
+                ),
+            ));
         }
         if is_default_destination(&route.destination) && has_gateway {
-            return Err(refuse(format!(
-                "this entry declares a default route twice: once as `static.gateway` and once as the route to {:?}. Keep one",
-                route.destination
-            )));
+            return Some((
+                "routes",
+                format!(
+                    "this entry declares a default route twice: once as `static.gateway` and once as the route to {:?}. Keep one",
+                    route.destination
+                ),
+            ));
         }
     }
     if !cfg.dns.is_empty() {
         if !cfg.dhcp || cfg.static_.is_some() {
-            return Err(refuse(
+            return Some(("dns",
                 "`dns` replaces the servers of a DHCP lease, so it needs `dhcp`; a static entry names its servers in `static.dns`"
                     .to_string(),
             ));
         }
         for dns in &cfg.dns {
             if dns.parse::<IpAddr>().is_err() {
-                return Err(refuse(format!("the DNS server {dns:?} is not an address")));
+                return Some(("dns", format!("the DNS server {dns:?} is not an address")));
             }
         }
     }
-    Ok(())
+    None
 }
 
 /// Whether a destination is the default route, in either family.
 pub(super) fn is_default_destination(destination: &str) -> bool {
     matches!(destination, "0.0.0.0/0" | "::/0")
-}
-
-pub(super) fn address_refusal(iface: &str, cfg: &IfaceSettings) -> Result<(), Box<Response>> {
-    let address = cfg
-        .static_
-        .as_ref()
-        .map_or("", |static_| static_.address.as_str());
-    validate_static_address(cfg.dhcp, address).map_err(|message| {
-        Box::new(api_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            ApiError::apid("validation_failed", message.to_string())
-                .at(&iface_settings_path(iface)),
-        ))
-    })
 }
 
 /// A candidate map written back whole, at the `network` root. Answers the id

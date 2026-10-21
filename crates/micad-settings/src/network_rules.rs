@@ -206,28 +206,73 @@ pub fn validate_can(iface: &str, cfg: &IfaceSettings) -> Result<(), String> {
     }
 }
 
-/// Refuse relations between entries that cannot be built: a VLAN whose parent
-/// is not declared or is a CAN interface, a bridge port that is not declared,
-/// is a CAN interface, carries addressing of its own, or is claimed by two
-/// bridges.
+/// One rule a network map breaks: the entry and the field, the rule's code,
+/// the values its message names, and the message.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct NetworkViolation {
+    pub interface: String,
+    pub field: &'static str,
+    pub code: &'static str,
+    pub params: serde_json::Value,
+    #[serde(skip)]
+    pub message: String,
+}
+
+impl NetworkViolation {
+    #[must_use]
+    pub fn new(
+        interface: &str,
+        field: &'static str,
+        code: &'static str,
+        params: serde_json::Value,
+        message: String,
+    ) -> Self {
+        Self {
+            interface: interface.to_string(),
+            field,
+            code,
+            params,
+            message,
+        }
+    }
+}
+
+/// Every relation between entries that cannot be built: a VLAN whose parent
+/// is not declared or is a CAN interface (`vlan_parent_invalid`), a bridge
+/// port that is not declared or is a CAN interface (`bridge_port_invalid`),
+/// carries addressing of its own (`bridge_port_addressed`), or is claimed by
+/// two bridges (`bridge_port_taken`).
 ///
 /// Over the whole subtree, because every rule here is about two entries at
 /// once: editing `eth1` to take an address is refused when `br0` claims it.
-pub fn validate_topology(network: &BTreeMap<String, IfaceSettings>) -> Result<(), String> {
+#[must_use]
+pub fn topology_violations(network: &BTreeMap<String, IfaceSettings>) -> Vec<NetworkViolation> {
+    let mut found = Vec::new();
     let mut claimed_by: BTreeMap<&str, &str> = BTreeMap::new();
     for (iface, cfg) in network {
         if let Some(vlan) = &cfg.vlan {
+            let parent = serde_json::json!({ "parent": vlan.parent, "id": vlan.id });
             match network.get(&vlan.parent) {
-                None => {
-                    return Err(format!(
+                None => found.push(NetworkViolation::new(
+                    iface,
+                    "vlan.parent",
+                    "vlan_parent_invalid",
+                    parent,
+                    format!(
                         "network.{iface} has VLAN parent {:?}, which is not a declared network entry",
                         vlan.parent
-                    ));
-                }
-                Some(parent) if parent.kind == IfaceKind::Can => {
-                    return Err(format!(
-                        "network.{iface} has VLAN parent {:?}, which is a CAN interface",
-                        vlan.parent
+                    ),
+                )),
+                Some(parent_cfg) if parent_cfg.kind == IfaceKind::Can => {
+                    found.push(NetworkViolation::new(
+                        iface,
+                        "vlan.parent",
+                        "vlan_parent_invalid",
+                        parent,
+                        format!(
+                            "network.{iface} has VLAN parent {:?}, which is a CAN interface",
+                            vlan.parent
+                        ),
                     ));
                 }
                 Some(_) => {}
@@ -237,29 +282,62 @@ pub fn validate_topology(network: &BTreeMap<String, IfaceSettings>) -> Result<()
             continue;
         };
         for port in &bridge.ports {
+            let params = serde_json::json!({ "port": port, "bridge": iface });
             let Some(port_cfg) = network.get(port) else {
-                return Err(format!(
-                    "network.{iface} has bridge port {port:?}, which is not a declared network entry"
+                found.push(NetworkViolation::new(
+                    iface,
+                    "bridge.ports",
+                    "bridge_port_invalid",
+                    params,
+                    format!(
+                        "network.{iface} has bridge port {port:?}, which is not a declared network entry"
+                    ),
                 ));
+                continue;
             };
             if port_cfg.kind == IfaceKind::Can {
-                return Err(format!(
-                    "network.{port} is a CAN interface and cannot be a port of bridge {iface}"
+                found.push(NetworkViolation::new(
+                    iface,
+                    "bridge.ports",
+                    "bridge_port_invalid",
+                    params,
+                    format!(
+                        "network.{port} is a CAN interface and cannot be a port of bridge {iface}"
+                    ),
                 ));
+                continue;
             }
             if port_cfg.dhcp || port_cfg.static_.is_some() {
-                return Err(format!(
-                    "network.{port} is a port of bridge {iface} and must not carry addressing of its own"
+                found.push(NetworkViolation::new(
+                    port,
+                    "dhcp",
+                    "bridge_port_addressed",
+                    params.clone(),
+                    format!(
+                        "network.{port} is a port of bridge {iface} and must not carry addressing of its own"
+                    ),
                 ));
             }
             if let Some(other) = claimed_by.insert(port, iface) {
-                return Err(format!(
-                    "network.{port} is claimed as a port by both bridge {other} and bridge {iface}"
+                found.push(NetworkViolation::new(
+                    iface,
+                    "bridge.ports",
+                    "bridge_port_taken",
+                    serde_json::json!({ "port": port, "bridge": other }),
+                    format!("network.{port} is claimed as a port by both bridge {other} and bridge {iface}"),
                 ));
             }
         }
     }
-    Ok(())
+    found
+}
+
+/// [`topology_violations`] as the first one's message.
+pub fn validate_topology(network: &BTreeMap<String, IfaceSettings>) -> Result<(), String> {
+    match topology_violations(network).into_iter().next() {
+        Some(violation) => Err(violation.message),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
