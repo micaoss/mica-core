@@ -57,6 +57,7 @@ export function networkRoutes(map: Record<string, unknown> = configured(), statu
     '/api/v1/network': { configured: map, configuredCount: Object.keys(map).length, observed: { available: true, interfaceCount: 0, interfaces: [] } },
     '/api/v1/network/status': status,
     '/api/v1/settings/hostname': 'mica-bench',
+    '/api/v1/settings/dns': { global: { enabled: false, servers: ['9.9.9.9'] }, staticRecords: [{ hostname: 'nas.lan', address: '192.168.1.20', comment: 'Storage' }] },
     '/api/v1/wifi/client': { enabled: false, interface: 'wlan0' },
     '/api/v1/wifi/ap': accessPoint(),
     '/api/v1/wifi/client/networks': [{ ssid: 'marina', psk: '<redacted>', hidden: false, priority: 10 }],

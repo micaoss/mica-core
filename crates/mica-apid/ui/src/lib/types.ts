@@ -90,6 +90,17 @@ export interface WifiAccessPoint {
   graceSeconds: number
 }
 
+export interface StaticRecord { hostname: string; address: string; comment?: string }
+
+/// The `dns` settings subtree: the global servers, kept while switched off,
+/// and the names the device resolves itself.
+export interface DnsSettings {
+  global: { enabled: boolean; servers: string[] }
+  staticRecords?: StaticRecord[]
+}
+
+export interface DnsTestResult { server: string; reachable: boolean; ms: number | null }
+
 export interface WifiScan {
   available: boolean
   interface?: string
