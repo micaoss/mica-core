@@ -76,7 +76,7 @@ impl SnapshotStore {
         &self.root
     }
 
-    pub(super) fn path_of(&self, id: u64) -> PathBuf {
+    pub(crate) fn path_of(&self, id: u64) -> PathBuf {
         self.root.join(format!("{id}.json"))
     }
 

@@ -52,7 +52,7 @@ const MAX_CONF: u64 = micad_settings::MAX_USER_UNIT_CONF_BYTES as u64 + 1;
     default_service = "com.mica.micad",
     default_path = "/com/mica/micad"
 )]
-trait Micad {
+pub(crate) trait Micad {
     fn get_settings(&self, path: &str) -> zbus::Result<String>;
     fn set_settings(&self, path: &str, value_json: &str) -> zbus::Result<String>;
     fn get_task(&self, id: &str) -> zbus::Result<String>;
@@ -396,7 +396,7 @@ fn render_log(log: &Value, tail: usize) -> Result<String> {
 
 /// Wait until micad has applied `task`, and fail with its message if the
 /// reconcile failed.
-async fn wait(micad: &MicadProxy<'_>, task: &str) -> Result<()> {
+pub(crate) async fn wait(micad: &MicadProxy<'_>, task: &str) -> Result<()> {
     let deadline = tokio::time::Instant::now() + TASK_TIMEOUT;
     loop {
         let record: Value = serde_json::from_str(&micad.get_task(task).await.map_err(bus_error)?)?;
@@ -417,7 +417,7 @@ async fn wait(micad: &MicadProxy<'_>, task: &str) -> Result<()> {
 }
 
 /// micad's refusal, in its own words rather than the bus error's name.
-fn bus_error(error: zbus::Error) -> anyhow::Error {
+pub(crate) fn bus_error(error: zbus::Error) -> anyhow::Error {
     match crate::bus::error_reply(&error) {
         Some((name, message)) => anyhow::anyhow!(message.unwrap_or(name)),
         None => anyhow::Error::new(error).context("micad"),

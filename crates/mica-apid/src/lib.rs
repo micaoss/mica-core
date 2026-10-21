@@ -17,6 +17,7 @@ mod auth;
 mod bundle;
 mod bus_client;
 mod config;
+mod diag_cli;
 mod diagnostics;
 mod healthcheck;
 mod local_addr;
@@ -65,6 +66,15 @@ use tokio::signal::unix::{SignalKind, signal};
 use crate::settings_api::SettingsApi;
 
 /// The daemon entry point of the `mica-apid` executable.
+/// `micad diag`: a diagnostic snapshot made over the bus, without apid.
+///
+/// # Errors
+///
+/// Fails when the runtime cannot be built; a failed snapshot exits 1.
+pub fn diag_main(args: &[String]) -> anyhow::Result<()> {
+    diag_cli::main(args)
+}
+
 pub fn main() -> anyhow::Result<()> {
     // `--version` is answered and returned from here, above every line that
     // makes this process a daemon. The position is the requirement: a handler

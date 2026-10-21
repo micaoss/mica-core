@@ -522,6 +522,11 @@ the mode away from `network` only while SSH is on with an authorized key (409
 `web_mode_needs_ssh`): `micad web network` over SSH is the way back. Root on the device is not
 held to it.
 
+On the device, root's commands work in every mode, over the bus to micad: `micad web status`
+names the mode and the listeners, `micad web network|local|off` sets the mode and waits for it to
+apply (exit 0 done, 1 failed, 2 misused), and `micad diag` collects the diagnostic snapshot
+`POST /api/v1/diagnostics` makes, into the same store, and prints its path.
+
 Under `network` apid listens where `access.web` says (`GET`/`PUT /api/v1/web`, the console's
 access page), read at start from `/run/mica/apid.json`: by default plain HTTP on 8080 and no HTTPS,
 so it takes neither 80 nor 443 from another service. With `httpsEnabled` it serves HTTPS on

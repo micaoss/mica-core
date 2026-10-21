@@ -49,6 +49,7 @@ mod update_codes;
 mod update_lifecycle;
 mod update_policy;
 mod user_units;
+pub mod web_cli;
 mod wgkeys;
 
 use std::path::{Path, PathBuf};
