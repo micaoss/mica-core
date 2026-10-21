@@ -86,7 +86,7 @@ fn app_bus_error(err: &anyhow::Error) -> Response {
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "`available` (whether this daemon keeps apps), `arch` and `apps`: each with `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `last` (`action`, `outcome`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` (`version`, `policy`)", body = ResourceValue),
+        (status = 200, description = "`available` (whether this daemon keeps apps), `arch` and `apps`: each with `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user` `app` or `root`, `account` and `uid` of an app's own user, `capabilities`, `devices`), `last` (`action`, `outcome`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` (`version`, `policy`)", body = ResourceValue),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 500, description = "micad failed (`micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),

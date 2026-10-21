@@ -729,6 +729,8 @@ export interface AppEntry {
   /// The version a rollback returns to.
   previous: string | null
   units: { name: string; enabled: boolean; active: string | null }[]
+  /// Root has the whole device; an app's own user only what it declares.
+  privileges: { user: 'app' | 'root'; account: string | null; uid: number | null; capabilities: string[]; devices: string[] } | null
   last: { action: string; outcome: string; message?: string; at: string } | null
   update: { url: string; auto: boolean; available: string | null; checkedAt: string | null; error: string | null } | null
   seed: { version: string; policy: string | null } | null

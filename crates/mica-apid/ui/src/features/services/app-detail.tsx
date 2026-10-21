@@ -80,6 +80,16 @@ export function AppDetailPage() {
     { id: 'installed', title: t('services.apps.installedAt'), value: app.installedAt },
     { id: 'sha256', title: 'sha256', value: app.sha256 },
   ]
+  const privileges = app.privileges
+  if (privileges) {
+    rows.push({
+      id: 'runsAs',
+      title: t('services.apps.runsAs'),
+      value: privileges.user === 'root' ? 'root' : t('services.apps.ownUser', { account: privileges.account, uid: privileges.uid }),
+    })
+    if (privileges.capabilities.length > 0) rows.push({ id: 'capabilities', title: t('services.apps.capabilities'), value: privileges.capabilities.join(', ') })
+    if (privileges.devices.length > 0) rows.push({ id: 'devices', title: t('services.apps.devices'), value: privileges.devices.join(', ') })
+  }
 
   return (
     <Page>
@@ -90,6 +100,7 @@ export function AppDetailPage() {
         action={<StatusBadge tone={appTone(app)}>{t(`services.apps.states.${appState(app)}`, { defaultValue: appState(app) })}</StatusBadge>}
       />
 
+      {privileges?.user === 'root' ? <Callout tone="warning" title={t('services.apps.root')}>{t('services.apps.rootCopy')}</Callout> : null}
       {app.last?.outcome === 'failed' ? (
         <Callout tone="warning" title={t('services.apps.lastFailed', { action: app.last.action })}>{app.last.message}</Callout>
       ) : null}

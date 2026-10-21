@@ -19,6 +19,7 @@ const demo = {
   installedAt: '2026-10-21T08:00:00Z',
   previous: '1.76.6',
   units: [{ name: 'tailscaled.service', enabled: true, active: 'active' }],
+  privileges: { user: 'app', account: 'mica-app-tailscale', uid: 30000, capabilities: ['CAP_NET_ADMIN', 'CAP_NET_RAW'], devices: ['/dev/net/tun'] },
   last: { action: 'upgrade', outcome: 'ok', at: '2026-10-21T08:00:00Z' },
   update: { url: 'https://apps.example/tailscale/latest.json', auto: false, available: '1.80.0', checkedAt: '2026-10-21T08:00:00Z', error: null },
   seed: null,
@@ -45,6 +46,16 @@ describe('the apps', () => {
     expect(within(row).getByText('1.78.1')).toBeTruthy()
     expect(within(row).getByText('1.80.0 available')).toBeTruthy()
     expect(within(row).getByText('running')).toBeTruthy()
+    expect(within(row).queryByText('runs as root')).toBeNull()
+  })
+
+  it('marks an app that runs as root', async () => {
+    const root = { ...demo, name: 'agent', privileges: { user: 'root', account: null, uid: null, capabilities: [], devices: [] } }
+    stubFetch({ ...routes, '/api/v1/apps': { available: true, arch: 'arm64', apps: [root] } })
+    renderRoute(<AppsPanel />)
+
+    const row = (await screen.findByRole('link', { name: 'agent' })).closest('tr') as HTMLElement
+    expect(within(row).getByText('runs as root')).toBeTruthy()
   })
 
   it('uploads a bundle as the body of one request and follows its task', async () => {

@@ -21,6 +21,7 @@ const demo = {
   installedAt: '2026-10-21T08:00:00Z',
   previous: '1.76.6',
   units: [{ name: 'tailscaled.service', enabled: true, active: 'active' }],
+  privileges: { user: 'app', account: 'mica-app-tailscale', uid: 30000, capabilities: ['CAP_NET_ADMIN', 'CAP_NET_RAW'], devices: ['/dev/net/tun'] },
   last: { action: 'upgrade', outcome: 'ok', at: '2026-10-21T08:00:00Z' },
   update: { url: 'https://apps.example/tailscale/latest.json', auto: false, available: '1.80.0', checkedAt: '2026-10-21T08:00:00Z', error: null },
   seed: { version: '1.78.1', policy: 'follow-image' },
@@ -58,6 +59,19 @@ describe('one app', () => {
     expect(screen.getByText('1.80.0 available')).toBeTruthy()
     expect(await screen.findByText(/authkey=\[redacted\]/)).toBeTruthy()
     expect(screen.getByText('state directory made')).toBeTruthy()
+    expect(screen.getByText('its own user mica-app-tailscale (uid 30000)')).toBeTruthy()
+    expect(screen.getByText('CAP_NET_ADMIN, CAP_NET_RAW')).toBeTruthy()
+    expect(screen.getByText('/dev/net/tun')).toBeTruthy()
+    expect(screen.queryByText('This app runs as root')).toBeNull()
+  })
+
+  it('says a root app has full control of the device', async () => {
+    const root = { ...demo, privileges: { user: 'root', account: null, uid: null, capabilities: [], devices: [] } }
+    stubFetch({ ...routes, '/api/v1/apps': { available: true, arch: 'arm64', apps: [root] } })
+    renderPage()
+
+    expect(await screen.findByText('This app runs as root')).toBeTruthy()
+    expect(screen.getByText(/full control of the device/)).toBeTruthy()
   })
 
   it('updates, and follows the task micad answers with', async () => {

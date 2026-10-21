@@ -346,7 +346,7 @@ test('captures the apps on the services page', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) })
   await page.route('**/api/v1/apps', (route) => route.request().method() === 'GET'
-    ? route.fulfill(json({ available: true, arch: 'arm64', apps: [TAILSCALE] }))
+    ? route.fulfill(json({ available: true, arch: 'arm64', apps: [TAILSCALE, HARBOUR_AGENT] }))
     : route.fulfill(json({ error: {
       code: 'app_invalid',
       message: 'the bundle breaks 2 rules',
@@ -375,6 +375,10 @@ test('captures the apps on the services page', async ({ page }, testInfo) => {
   await expect(page.getByRole('heading', { name: 'tailscale' })).toBeVisible()
   await expect(page.getByText('magicsock')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('app-detail.png'), animations: 'disabled', fullPage: true })
+  await page.route('**/api/v1/apps/harbour-agent/logs', (route) => route.fulfill(json({ name: 'harbour-agent', units: [], firstRun: null })))
+  await page.goto('./services/apps/harbour-agent')
+  await expect(page.getByText('This app runs as root')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('app-detail-root.png'), animations: 'disabled' })
 })
 
 test('keeps a tall dialog inside a short appliance screen', async ({ page }, testInfo) => {
@@ -548,17 +552,30 @@ async function mockNetworkBench(page: Page) {
 
 const TAILSCALE = {
   name: 'tailscale',
-  version: '1.88.3',
+  version: '1.102.1',
   description: 'Tailscale node for remote access to this device',
   arch: ['amd64', 'arm64'],
   sha256: '9f2c4e1a7b3d5f60c8e2a4b6d8f0123456789abcdef0123456789abcdef01234',
   source: 'upload',
   installedAt: '2026-10-20T16:40:00Z',
-  previous: '1.88.1',
+  previous: '1.100.0',
   units: [{ name: 'tailscaled.service', enabled: true, active: 'active' }],
+  privileges: { user: 'app', account: 'mica-app-tailscale', uid: 30000, capabilities: ['CAP_NET_ADMIN', 'CAP_NET_RAW'], devices: ['/dev/net/tun'] },
   last: { action: 'upgrade', outcome: 'ok', at: '2026-10-20T16:40:12Z' },
-  update: { url: 'https://pkgs.example.eu/mica/tailscale/latest.json', auto: false, available: '1.90.0', checkedAt: '2026-10-21T06:00:00Z', error: null },
+  update: { url: 'https://pkgs.example.eu/mica/tailscale/latest.json', auto: false, available: '1.104.2', checkedAt: '2026-10-21T06:00:00Z', error: null },
   seed: null,
+}
+
+const HARBOUR_AGENT = {
+  ...TAILSCALE,
+  name: 'harbour-agent',
+  version: '3.2.0',
+  description: 'Marina berth sensors, by the harbour office',
+  source: 'seed',
+  previous: null,
+  units: [{ name: 'harbour-agent.service', enabled: true, active: 'active' }],
+  privileges: { user: 'root', account: null, uid: null, capabilities: [], devices: [] },
+  update: null,
 }
 
 const PEER = { name: 'Harbour office', publicKey: 'cmVtb3RlUGVlcktleXJlbW90ZVBlZXJLZXlyZW1vdGU=', presharedKey: '<redacted>', allowedIps: ['10.10.0.1/32'], endpoint: 'vpn.example.eu:51820', persistentKeepalive: 25 }

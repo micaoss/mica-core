@@ -79,7 +79,10 @@ export function AppsPanel() {
             columns={[
               { id: 'name', header: t('services.apps.name'), cell: (row) => (
                 <span className="flex flex-col">
-                  <Link to="/services/apps/$name" params={{ name: row.name }} className="font-mono font-medium text-primary hover:underline">{row.name}</Link>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <Link to="/services/apps/$name" params={{ name: row.name }} className="font-mono font-medium text-primary hover:underline">{row.name}</Link>
+                    {row.privileges?.user === 'root' ? <StatusBadge tone="warning">{t('services.apps.runsAsRoot')}</StatusBadge> : null}
+                  </span>
                   {row.description ? <small className="text-muted-foreground">{row.description}</small> : null}
                 </span>
               ) },

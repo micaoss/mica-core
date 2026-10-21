@@ -515,7 +515,7 @@
         "operationId": "api_v1_apps_read",
         "responses": {
           "200": {
-            "description": "`available` (whether this daemon keeps apps), `arch` and `apps`: each with `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `last` (`action`, `outcome`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` (`version`, `policy`)",
+            "description": "`available` (whether this daemon keeps apps), `arch` and `apps`: each with `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user` `app` or `root`, `account` and `uid` of an app's own user, `capabilities`, `devices`), `last` (`action`, `outcome`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` (`version`, `policy`)",
             "content": {
               "application/json": {
                 "schema": {
