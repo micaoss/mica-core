@@ -28,13 +28,6 @@ export const zhCN: Translation = {
     unavailable: '管理 API 当前不可用。请在 micad 就绪后重试。',
   },
   shell: {
-    bluetoothPin: {
-      title: '请保存蓝牙配对码',
-      copy: '设备已生成专属的 6 位蓝牙配对码，之后手机或平板配对时需要输入。请妥善保存；也可以在 网络 → 蓝牙 中查看。',
-      saved: '我已保存',
-      later: '稍后提醒',
-      recorded: '已记录配对码已保存。',
-    },
     documentTitle: 'mica 控制台',
     homeLabel: 'mica 控制台首页',
     product: 'mica',

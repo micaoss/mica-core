@@ -52,8 +52,8 @@ pub use features::{ContainerEngine, Feature, Features, Init, PRODUCT_FILE};
 pub use model::{
     APID_LISTENERS_PATH, APID_LOCAL_SOCKET_PATH, AccessSettings, ApMode, ApPool, ApSecurity,
     ApiToken, AuthorizedKey, BleProvisioningSettings, BluetoothSettings, BridgeConfig, CanConfig,
-    ClaimChannel, ClaimSettings, ConsoleSettings, ContainerSettings, DEFAULT_PAIRING_PIN,
-    DEVICE_ID_LEN, DeviceCredentialSettings, DnsSettings, GlobalDns, IfaceKind, IfaceSettings,
+    ClaimChannel, ClaimSettings, ConsoleSettings, ContainerSettings, DEVICE_ID_LEN,
+    DeviceCredentialSettings, DnsSettings, GlobalDns, IfaceKind, IfaceSettings,
     MAX_CONTAINER_PROJECT_BYTES, MAX_CONTAINER_PROJECTS, MAX_CONTAINER_PROJECTS_BYTES,
     MAX_GLOBAL_DNS_SERVERS, MAX_NTP_SERVERS, MAX_PASSPHRASE_LEN, MAX_RECORD_COMMENT_CHARS,
     MAX_RECORD_ID_LEN, MAX_STATIC_RECORDS, MAX_USER_UNIT_BYTES, MAX_USER_UNIT_CONF_BYTES,
@@ -67,8 +67,7 @@ pub use model::{
     is_openrc_script_name, is_project_name, is_systemd_template, is_systemd_unit_name,
     is_wpa_quotable, unit_install_values, validate_ap_pool, validate_bluetooth,
     validate_container_project_dirs, validate_container_projects, validate_device_id, validate_dns,
-    validate_ntp_servers, validate_pairing_pin, validate_services, validate_timezone_name,
-    validate_wifi_psk,
+    validate_ntp_servers, validate_services, validate_timezone_name, validate_wifi_psk,
 };
 pub use network_rules::{
     MAX_CAN_BITRATE, MAX_CAN_DATA_BITRATE, MAX_CAN_RESTART_MS, MAX_IFACE_LEN, NetworkViolation,

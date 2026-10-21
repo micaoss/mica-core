@@ -38,7 +38,6 @@ fn the_two_sides_are_named_apart_and_never_merged() {
             rssi: Some(-60),
             ..Device::default()
         }]),
-        "421137",
     );
 
     // Declared and in range are different lists: the phone is declared and
@@ -54,7 +53,6 @@ fn the_two_sides_are_named_apart_and_never_merged() {
     assert_eq!(value["devices"]["entries"][0]["rssi"], json!(-60));
     assert_eq!(value["adapter"]["discovering"], json!(true));
     assert_eq!(value["adapter"]["name"], json!("mica"));
-    assert_eq!(value["pin"], json!("421137"));
 }
 
 #[test]
@@ -63,7 +61,6 @@ fn an_adapter_that_did_not_answer_is_absent_and_never_empty() {
         &BTreeMap::new(),
         Err("bluetoothd is not running".to_string()),
         Err("bluetoothd is not running".to_string()),
-        "0000",
     );
 
     assert_eq!(value["adapter"]["available"], json!(false));

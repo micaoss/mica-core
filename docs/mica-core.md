@@ -123,7 +123,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `access` | SSH (switch, listen addresses, authorized keys), the console, the API's listeners (`web`), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
 | `container` | The engine switch (`enabled`) and the declared Compose projects (`projects`, section 3.9) |
-| `bluetooth` | The switch (on by default), the phone app's code `pin` (six digits, which `mica-bled` authenticates the app with and no Bluetooth pairing is answered with; `000000` until the device is claimed with Bluetooth on, then six random digits unless one is declared; apid refuses `000000`, which only a reset returns to), the trust list. Documents that still carry `discoverable` or `alias` load, and the keys are dropped at the next save |
+| `bluetooth` | The switch (on by default), the trust list, and `provisioning.autoWhenOffline` (BLE provisioning, `docs/ble-provisioning.md`; on by default). Documents that still carry `discoverable`, `alias` or `pin` load, and the keys are dropped at the next save |
 | `mqtt` | The switch, the broker listener (default `127.0.0.1:1883`), whether clients authenticate |
 | `time` | NTP servers and the presentation timezone |
 | `services` | The user's own services (`units`, section 3.10) |
@@ -200,7 +200,7 @@ live-state tree under its name.
 | `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; a running `apid.service` restarted when it changed | the same, `apid` |
 | `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
-| `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. When the root carries `/usr/bin/mica-bled` (mica-pkgs), `/run/mica/bled.env` (the device id, apid's local socket) and `mica-bled.service` while Bluetooth is on and the adapter is there; otherwise the service is stopped and the file removed | the same through `mica-bluetoothd`, and `mica-bled` |
+| `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. A BLE provisioning window keeps the adapter powered while Bluetooth is switched off | the same through `mica-bluetoothd` |
 
 The station and the access point share one radio and take turns. The station is on by default:
 its supplicant runs whenever `wifi.client.enabled` is set, with no network block until one is
@@ -557,17 +557,10 @@ argon2id, failed logins back off persistently, and security-relevant actions go 
 
 **The local socket.** apid also serves the API on `/run/mica/apid.sock`, whatever `access.web`
 says, for the device itself. A caller there carries no credential: the kernel's peer credentials
-name its uid, the uid names a scope, and the scope names the routes it may call; anything else,
-and any uid without a scope, is 403 `not_allowed`. Two scopes:
-
-- root may call the whole API, which is how a command line on the device configures it;
-- `mica-bled` (the user of that name in `/etc/passwd`) may call the routes
-  `mica-app:docs/protocol.md` section 7.1 tunnels, `GET /api/v1/bluetooth` and
-  `PUT /api/v1/settings/bluetooth.pin`.
-
-Both work before the device is claimed. The socket is `0660` with the `mica-bled` group, or
-`0600` on a root without one, so nobody else can connect. The forced rotation of a bootstrap claim
-binds a local caller like any other.
+name its uid, and only root may call the API, all of it, which is how a command line on the device
+configures it, before the device is claimed too; any other uid is 403 `not_allowed`. The socket is
+`0600`, so nobody else can connect. The forced rotation of a bootstrap claim binds a local caller
+like any other.
 
 **What leaves the device.** Settings and state pass a structural redactor, so secrets such as
 password hashes are never served. A diagnostic snapshot is bounded, redacted and stored in

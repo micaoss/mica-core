@@ -13,7 +13,6 @@ pub(super) fn bluetooth_tree() -> serde_json::Value {
     let mut tree = configured_tree("hunter2secret");
     tree["bluetooth"] = json!({
         "enabled": true,
-        "pin": "421137",
         "devices": { "AA:BB:CC:DD:EE:01": { "name": "phone", "trusted": true, "blocked": false } },
     });
     tree
@@ -38,8 +37,8 @@ pub(super) async fn the_bluetooth_read_answers_micads_document() {
     assert!(body["pairWindow"].is_null());
 }
 
-// The adapter write is the switch, and it keeps the trust list and the app
-// code: devices arrive by pairing, and the code is mica-bled's.
+// The adapter write is the switch, and it keeps the trust list: devices
+// arrive by pairing.
 #[tokio::test]
 pub(super) async fn the_adapter_write_is_the_switch_alone() {
     let (router, fake) = test_app(bluetooth_tree());
@@ -59,7 +58,6 @@ pub(super) async fn the_adapter_write_is_the_switch_alone() {
     assert_eq!(fake.set_paths(), vec!["bluetooth.enabled".to_string()]);
     let stored = fake.get_settings("bluetooth").await.unwrap();
     assert_eq!(stored["enabled"], json!(false));
-    assert_eq!(stored["pin"], json!("421137"));
     assert_eq!(
         stored["devices"]["AA:BB:CC:DD:EE:01"]["name"],
         json!("phone")

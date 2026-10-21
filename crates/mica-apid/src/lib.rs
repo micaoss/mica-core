@@ -146,13 +146,9 @@ pub fn version_line(binary: &str) -> String {
 }
 
 /// Bind the local socket at `path`, replacing the one a previous apid left:
-/// root's and `group`'s to connect to (`0660`), or root's alone (`0600`) on a
-/// root without the group. What a caller may do is its uid's scope
-/// (`routes::local`).
-fn bind_local_socket(
-    path: &std::path::Path,
-    group: Option<u32>,
-) -> Option<tokio::net::UnixListener> {
+/// root's alone to connect to (`0600`). A caller other than root is refused
+/// anyway (`routes::local`).
+fn bind_local_socket(path: &std::path::Path) -> Option<tokio::net::UnixListener> {
     use std::os::unix::fs::PermissionsExt;
     let bound = (|| {
         match std::fs::remove_file(path) {
@@ -160,14 +156,7 @@ fn bind_local_socket(
             _ => {}
         }
         let listener = tokio::net::UnixListener::bind(path)?;
-        let mode = match group {
-            Some(gid) => {
-                std::os::unix::fs::chown(path, None, Some(gid))?;
-                0o660
-            }
-            None => 0o600,
-        };
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         Ok(listener)
     })();
     match bound {
@@ -281,14 +270,10 @@ async fn serve() -> anyhow::Result<()> {
 
     // Not `?`: the local socket is for services on this device, and failing to
     // bind it must not take the console down with it.
-    let users = routes::LocalUsers::from_files(
-        &std::fs::read_to_string("/etc/passwd").unwrap_or_default(),
-        &std::fs::read_to_string("/etc/group").unwrap_or_default(),
-    );
-    if let Some(listener) = bind_local_socket(&config.local_socket, users.bled_group) {
+    if let Some(listener) = bind_local_socket(&config.local_socket) {
         let local = axum::serve(
             listener,
-            routes::local_app(state.clone(), users)
+            routes::local_app(state.clone())
                 .into_make_service_with_connect_info::<routes::LocalPeer>(),
         );
         tokio::spawn(async move {

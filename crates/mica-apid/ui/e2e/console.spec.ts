@@ -200,7 +200,6 @@ test('captures the device code, the claim key and the pairing window', async ({ 
     }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       enabled: true,
-      pin: '421137',
       declared,
       adapter: { available: true, address: 'EC:B5:0A:97:9D:25', name: 'mica-cm4', powered: true, discoverable: open },
       devices: { available: true, entries: [{ address: 'AA:BB:CC:DD:EE:01', name: 'Bridge tablet', paired: true, trusted: true, blocked: false, connected: true, rssi: -52 }] },

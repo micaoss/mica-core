@@ -516,7 +516,7 @@
         "operationId": "api_v1_bluetooth_read",
         "responses": {
           "200": {
-            "description": "`enabled`, `declared`, `adapter` (`name`, `address`, `powered`, `discoverable`), `devices`, `pending` (`name`, `mac`, `passkey`), `pairWindow` (`expiresAt`, or null) and `pin` (the phone app's code), each named apart",
+            "description": "`enabled`, `declared`, `adapter` (`name`, `address`, `powered`, `discoverable`), `devices`, `pending` (`name`, `mac`, `passkey`) and `pairWindow` (`expiresAt`, or null), each named apart",
             "content": {
               "application/json": {
                 "schema": {
@@ -5151,13 +5151,13 @@
           "resources"
         ],
         "summary": "Write one scalar setting by dot-path.",
-        "description": "Accepts nine paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,\n`time.ntp.servers`, `time.timezone` and `bluetooth.pin` (six digits, not\n`000000`). Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
+        "description": "Accepts eight paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,\n`time.ntp.servers` and `time.timezone`. Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
         "operationId": "api_v1_settings_write",
         "parameters": [
           {
             "name": "path",
             "in": "path",
-            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone` or `bluetooth.pin`",
+            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` or `time.timezone`",
             "required": true,
             "schema": {
               "type": "string"
@@ -11952,7 +11952,7 @@
         }
       },
       "SettingsWrite": {
-        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname`,\n`time.timezone` and `bluetooth.pin`, `off`, `provisioning` or `always` for\n`wifi.ap.mode`, `true` or `false` for the four switches, and a JSON array\nof server strings for `time.ntp.servers`. Anything else is **422**."
+        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname` and\n`time.timezone`, `off`, `provisioning` or `always` for\n`wifi.ap.mode`, `true` or `false` for the four switches, and a JSON array\nof server strings for `time.ntp.servers`. Anything else is **422**."
       },
       "SetupRequest": {
         "type": "object",

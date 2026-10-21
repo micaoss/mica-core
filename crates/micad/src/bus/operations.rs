@@ -234,7 +234,6 @@ impl MicadService {
         self.require_feature(micad_settings::Feature::Bluetooth)
             .map_err(SettingsFault::Fdo)?;
         let settings = self.inner.read().await.settings.clone();
-        let pin = self.pairing_pin(&settings);
         let devices = self
             .bluetooth
             .devices()
@@ -272,7 +271,6 @@ impl MicadService {
                 .await
                 .map_err(|err| format!("{err:#}")),
             devices.clone(),
-            &pin,
         );
         value["enabled"] = serde_json::json!(settings.bluetooth.enabled);
         value["pending"] = Value::Array(pending);

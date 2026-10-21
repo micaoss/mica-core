@@ -3,7 +3,6 @@ import { bluetoothRows, remaining } from './bluetooth'
 
 const overview = {
   enabled: true,
-  pin: '421137',
   declared: {
     'AA:BB:CC:DD:EE:01': { name: 'phone', trusted: true, blocked: false },
     'AA:BB:CC:DD:EE:02': { name: 'headset', trusted: true, blocked: true },

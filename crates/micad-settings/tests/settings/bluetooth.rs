@@ -9,7 +9,6 @@ pub(super) fn bluetooth_defaults_are_on() {
     let settings = Settings::default();
 
     assert!(settings.bluetooth.enabled);
-    assert!(settings.bluetooth.pin.is_none());
     assert!(settings.bluetooth.devices.is_empty());
     assert_eq!(
         serde_json::to_value(&settings.bluetooth).unwrap(),
@@ -17,8 +16,8 @@ pub(super) fn bluetooth_defaults_are_on() {
     );
 }
 
-/// A document from before the pairing window still loads; the keys it no
-/// longer has are dropped when it is next written.
+/// A document from before the pairing window and BLE provisioning still
+/// loads; the keys it no longer has are dropped when it is next written.
 #[test]
 pub(super) fn retired_bluetooth_keys_load_and_are_not_written_again() {
     let bluetooth: micad_settings::BluetoothSettings = serde_json::from_value(serde_json::json!({
@@ -28,7 +27,7 @@ pub(super) fn retired_bluetooth_keys_load_and_are_not_written_again() {
     assert_eq!(
         serde_json::to_value(&bluetooth).unwrap(),
         serde_json::json!({
-            "enabled": true, "pin": "421137", "provisioning": { "autoWhenOffline": true },
+            "enabled": true, "provisioning": { "autoWhenOffline": true },
         })
     );
     assert!(
@@ -40,27 +39,9 @@ pub(super) fn retired_bluetooth_keys_load_and_are_not_written_again() {
     );
 }
 
-/// The pairing code a device offers when none is declared: the default one.
+/// What a device map may hold.
 #[test]
-pub(super) fn an_absent_pairing_code_is_the_default_one() {
-    let mut settings = Settings::default();
-    assert_eq!(settings.bluetooth.pairing_pin(), "000000");
-    assert_eq!(micad_settings::DEFAULT_PAIRING_PIN, "000000");
-
-    settings.bluetooth.pin = Some("421137".to_string());
-    assert_eq!(settings.bluetooth.pairing_pin(), "421137");
-}
-
-/// What a pairing code may be, and what a device map may hold.
-#[test]
-pub(super) fn a_pairing_code_and_a_device_map_are_refused_when_no_adapter_could_use_them() {
-    assert!(micad_settings::validate_pairing_pin("421137").is_ok());
-    assert!(micad_settings::validate_pairing_pin("000000").is_ok());
-    assert!(micad_settings::validate_pairing_pin("4211").is_err());
-    assert!(micad_settings::validate_pairing_pin("1234567").is_err());
-    assert!(micad_settings::validate_pairing_pin("abcdef").is_err());
-    assert!(micad_settings::validate_pairing_pin("12 456").is_err());
-
+pub(super) fn a_device_map_is_refused_when_no_adapter_could_use_it() {
     let mut settings = Settings::default();
     let refused = settings.set(
         "bluetooth.devices",

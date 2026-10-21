@@ -65,8 +65,6 @@ export interface BluetoothDevice {
 /// observed are named apart because they answer different questions.
 export interface BluetoothOverview {
   enabled: boolean
-  /// The phone app's code (`mica-bled`), shown once by the sign-in notice.
-  pin: string
   declared: Record<string, { name: string; trusted: boolean; blocked: boolean }>
   adapter: AvailableFact & {
     address?: string

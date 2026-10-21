@@ -630,7 +630,6 @@ impl SettingsApi for FakeSettings {
         let pending: Vec<Value> = self.bluetooth_pending.lock().unwrap().clone();
         Ok(serde_json::json!({
             "enabled": true,
-            "pin": "421137",
             "declared": { "AA:BB:CC:DD:EE:01": { "name": "phone", "trusted": true, "blocked": false } },
             "adapter": { "available": true, "address": "11:22:33:44:55:66", "name": "edge-42", "powered": true, "discoverable": window.is_some(), "discovering": false },
             "devices": { "available": true, "entries": [

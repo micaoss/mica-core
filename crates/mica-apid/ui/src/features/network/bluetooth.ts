@@ -1,8 +1,5 @@
 import type { BluetoothOverview } from '@/lib/types'
 
-/// The phone app's code a device offers until it is claimed.
-export const DEFAULT_PIN = '000000'
-
 export interface BluetoothRow {
   address: string
   name: string

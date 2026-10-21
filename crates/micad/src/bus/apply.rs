@@ -87,7 +87,7 @@ impl MicadService {
             .collect();
         // Run before the tree's lock is taken, since it runs a process.
         let checked = self.check_written_projects(writes).await?;
-        let sealed = {
+        {
             let mut inner = self.inner.write().await;
             if claim && inner.settings.access.web_admin.is_some() {
                 return Err(SettingsError::Claimed);
@@ -112,27 +112,6 @@ impl MicadService {
                             .into(),
                 });
             }
-            // The claim seals the app code (`bluetooth.pin`). Before it the
-            // code is the default one, which a setup over Bluetooth needs; once the
-            // device has an administrator and Bluetooth is on it is six random
-            // digits, written by the write that made both true: the claim, or
-            // switching Bluetooth on after it. A declared code is somebody's
-            // and stays.
-            let sealable = |settings: &micad_settings::Settings| {
-                settings.access.web_admin.is_some() && settings.bluetooth.enabled
-            };
-            let sealed = (!sealable(&inner.settings)
-                && sealable(&candidate)
-                && candidate.bluetooth.pairing_pin() == micad_settings::DEFAULT_PAIRING_PIN
-                && self.features.has(micad_settings::Feature::Bluetooth)
-                && !preserve
-                    .iter()
-                    .any(|document| document == micad_settings::BLUETOOTH_DOCUMENT))
-            .then(crate::bluetooth::random_pairing_pin)
-            .flatten();
-            if let Some(pin) = &sealed {
-                candidate.bluetooth.pin = Some(pin.clone());
-            }
             // A feature the product does not carry keeps whatever it holds: a
             // write around its subtree that would change it is refused too.
             for feature in micad_settings::Feature::ALL {
@@ -148,10 +127,6 @@ impl MicadService {
             let preserve: Vec<&str> = preserve.iter().map(String::as_str).collect();
             self.store.preserving(&preserve).save(&candidate)?;
             inner.settings = candidate;
-            sealed
-        };
-        if sealed.is_some() {
-            tracing::info!("the default Bluetooth app code was replaced");
         }
         // The write landed, so the document it reached now holds what this
         // build writes and parses as this build reads: its refusal is over, and

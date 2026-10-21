@@ -12,7 +12,6 @@ afterEach(() => {
 
 const overview: BluetoothOverview = {
   enabled: true,
-  pin: '421137',
   declared: { 'AA:BB:CC:DD:EE:01': { name: 'phone', trusted: true, blocked: false } },
   adapter: { available: true, address: '11:22:33:44:55:66', name: 'edge-42', powered: true, discoverable: false },
   devices: {

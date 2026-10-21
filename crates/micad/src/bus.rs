@@ -340,12 +340,6 @@ impl MicadService {
         }
     }
 
-    /// The phone app's code (`bluetooth.pin`), as the Bluetooth read
-    /// answers it.
-    fn pairing_pin(&self, settings: &micad_settings::Settings) -> String {
-        settings.bluetooth.pairing_pin().to_string()
-    }
-
     /// Refuse a Bluetooth action on a device that has no adapter or has it
     /// switched off, rather than letting it fail as a bus error about an
     /// object that does not exist.

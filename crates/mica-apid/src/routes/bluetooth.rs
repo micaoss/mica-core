@@ -44,7 +44,7 @@ pub(crate) struct PairWindow {
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "`enabled`, `declared`, `adapter` (`name`, `address`, `powered`, `discoverable`), `devices`, `pending` (`name`, `mac`, `passkey`), `pairWindow` (`expiresAt`, or null) and `pin` (the phone app's code), each named apart", body = Object),
+        (status = 200, description = "`enabled`, `declared`, `adapter` (`name`, `address`, `powered`, `discoverable`), `devices`, `pending` (`name`, `mac`, `passkey`) and `pairWindow` (`expiresAt`, or null), each named apart", body = Object),
         (status = 401, description = "No API credential was supplied", body = ApiError),
         (status = 503, description = "micad is unavailable", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out", body = ApiError),

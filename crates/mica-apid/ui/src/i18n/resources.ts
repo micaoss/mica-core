@@ -61,13 +61,6 @@ export const en = {
     unavailable: 'The management API is unavailable. Retry after micad is ready.',
   },
   shell: {
-    bluetoothPin: {
-      title: 'Save the Bluetooth pairing code',
-      copy: 'This device now has its own six-digit pairing code. A phone or tablet that pairs with it later is asked for it. Keep it somewhere safe; it is also shown under Network → Bluetooth.',
-      saved: 'I have saved it',
-      later: 'Remind me later',
-      recorded: 'The pairing code is noted as saved.',
-    },
     documentTitle: 'mica console',
     homeLabel: 'mica console home',
     product: 'mica',

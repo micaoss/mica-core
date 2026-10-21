@@ -1,5 +1,4 @@
-//! Bluetooth settings: the adapter, the pairing PIN, trusted devices and BLE
-//! provisioning.
+//! Bluetooth settings: the adapter, trusted devices and BLE provisioning.
 //!
 //! The adapter is never discoverable or pairable by a setting: an operator
 //! opens a pairing window for three minutes instead (micad's `bluetooth`
@@ -21,25 +20,19 @@ pub struct BluetoothSettings {
     /// On by default: a powered adapter that is not discoverable is seen by
     /// nobody, and a phone can pair as soon as the operator starts a pairing.
     pub enabled: bool,
-    /// The code `mica-bled` authenticates the phone app with.
-    ///
-    /// **Displayed, not hidden**: somebody types it into the app. No Bluetooth
-    /// pairing is answered with it. Absent is [`DEFAULT_PAIRING_PIN`]: the
-    /// code every unclaimed device offers, so a phone can set one up before
-    /// it has an administrator.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pin: Option<String>,
     /// The devices this device has paired with, by address.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, PairedDevice>,
     /// BLE provisioning (`docs/ble-provisioning.md`).
     pub provisioning: BleProvisioningSettings,
-    /// `discoverable` and `alias`, which earlier documents carry: read and
-    /// dropped at the next save.
+    /// `discoverable`, `alias` and `pin`, which earlier documents carry: read
+    /// and dropped at the next save.
     #[serde(skip_serializing)]
     pub discoverable: Retired,
     #[serde(skip_serializing)]
     pub alias: Retired,
+    #[serde(skip_serializing)]
+    pub pin: Retired,
 }
 
 /// A key an earlier schema had and this one does not: accepted with any
@@ -59,11 +52,11 @@ impl Default for BluetoothSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            pin: None,
             devices: BTreeMap::new(),
             provisioning: BleProvisioningSettings::default(),
             discoverable: Retired,
             alias: Retired,
+            pin: Retired,
         }
     }
 }
@@ -99,46 +92,12 @@ pub struct PairedDevice {
     pub blocked: bool,
 }
 
-/// How many digits a pairing code carries.
-///
-/// Every keypad that will be asked to enter one has digits and nothing else,
-/// and six is what a passkey holds.
-pub(super) const PIN_LEN: usize = 6;
-
-/// The pairing code of a device that declares none: the one a phone setting
-/// up an unclaimed device knows without being told.
-pub const DEFAULT_PAIRING_PIN: &str = "000000";
-
-impl BluetoothSettings {
-    /// The pairing code this device offers: the declared one, or
-    /// [`DEFAULT_PAIRING_PIN`].
-    #[must_use]
-    pub fn pairing_pin(&self) -> &str {
-        self.pin.as_deref().unwrap_or(DEFAULT_PAIRING_PIN)
-    }
-}
-
-/// Refuse a pairing code no keypad could enter.
-///
-/// # Errors
-///
-/// Returns the sentence the refusal carries.
-pub fn validate_pairing_pin(pin: &str) -> Result<(), String> {
-    if pin.len() != PIN_LEN || !pin.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(format!("a pairing code is {PIN_LEN} digits"));
-    }
-    Ok(())
-}
-
 /// Refuse a device map no adapter could hold.
 ///
 /// # Errors
 ///
 /// Returns the sentence the refusal carries.
 pub fn validate_bluetooth(settings: &BluetoothSettings) -> Result<(), String> {
-    if let Some(pin) = &settings.pin {
-        validate_pairing_pin(pin)?;
-    }
     for address in settings.devices.keys() {
         if !is_bluetooth_address(address) {
             return Err(format!(

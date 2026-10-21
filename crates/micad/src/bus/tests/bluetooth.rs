@@ -2,10 +2,10 @@
 
 use super::*;
 
-/// The read names the declared list, the adapter, the devices and the code
-/// a legacy peer will be told -- apart, never merged.
+/// The read names the declared list, the adapter and the devices -- apart,
+/// never merged -- and offers no pairing code.
 #[tokio::test]
-pub(super) async fn the_bluetooth_read_names_each_side_and_the_pairing_code() {
+pub(super) async fn the_bluetooth_read_names_each_side() {
     let (service, _adapter, _dir) = service_with_bluetooth(true, true);
 
     let value: serde_json::Value =
@@ -19,8 +19,7 @@ pub(super) async fn the_bluetooth_read_names_each_side_and_the_pairing_code() {
         serde_json::json!("AA:BB:CC:DD:EE:01")
     );
     assert_eq!(value["declared"], serde_json::json!({}));
-    // The default code, because the tree declares none.
-    assert_eq!(value["pin"], serde_json::json!("000000"));
+    assert!(value.get("pin").is_none());
     assert_eq!(value["pending"], serde_json::json!([]));
     assert!(value["pairWindow"].is_null());
 }
@@ -248,131 +247,4 @@ pub(super) async fn a_confirmation_with_nothing_waiting_is_refused() {
         format!("{error}").contains("no pairing confirmation"),
         "{error}"
     );
-}
-
-const ADMIN_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA";
-
-/// Until the device has an administrator its pairing code is the default
-/// one, which setup over Bluetooth needs; the claim replaces it with six
-/// random digits, which the agent answers from then on.
-#[tokio::test]
-pub(super) async fn the_claim_replaces_the_default_pairing_code_with_six_random_digits() {
-    let (service, _adapter, _dir) = service_with_bluetooth(true, true);
-    service
-        .write_setting("hostname", serde_json::json!("edge-1"))
-        .await
-        .expect("an unrelated write");
-    assert!(service.inner.read().await.settings.bluetooth.pin.is_none());
-
-    service
-        .write_setting(
-            "access.webAdmin",
-            serde_json::json!({ "password_hash": ADMIN_HASH }),
-        )
-        .await
-        .expect("claim");
-
-    let pin = service
-        .inner
-        .read()
-        .await
-        .settings
-        .bluetooth
-        .pin
-        .clone()
-        .expect("the claim declares a code");
-    assert_eq!(pin.len(), 6, "{pin}");
-    assert!(pin.bytes().all(|byte| byte.is_ascii_digit()), "{pin}");
-    assert_ne!(pin, micad_settings::DEFAULT_PAIRING_PIN);
-
-    // A later password change is not a claim: the code stays.
-    service
-        .write_setting(
-            "access.webAdmin",
-            serde_json::json!({ "password_hash": format!("{ADMIN_HASH}x") }),
-        )
-        .await
-        .expect("password change");
-    assert_eq!(
-        service.inner.read().await.settings.bluetooth.pin.as_deref(),
-        Some(pin.as_str())
-    );
-}
-
-/// A code somebody declared is theirs: the claim keeps it. One declared as
-/// the default is the default, and is sealed like an absent one.
-#[tokio::test]
-pub(super) async fn the_claim_keeps_a_declared_pairing_code() {
-    let (service, _adapter, _dir) = service_with_bluetooth(true, true);
-    service
-        .write_setting("bluetooth.pin", serde_json::json!("471100"))
-        .await
-        .expect("declare a code");
-    service
-        .write_setting(
-            "access.webAdmin",
-            serde_json::json!({ "password_hash": ADMIN_HASH }),
-        )
-        .await
-        .expect("claim");
-    assert_eq!(
-        service.inner.read().await.settings.bluetooth.pin.as_deref(),
-        Some("471100")
-    );
-
-    let (service, _adapter, _dir) = service_with_bluetooth(true, true);
-    service
-        .write_setting("bluetooth.pin", serde_json::json!("000000"))
-        .await
-        .expect("declare the default");
-    service
-        .write_setting(
-            "access.webAdmin",
-            serde_json::json!({ "password_hash": ADMIN_HASH }),
-        )
-        .await
-        .expect("claim");
-    assert_ne!(
-        service.inner.read().await.settings.bluetooth.pairing_pin(),
-        micad_settings::DEFAULT_PAIRING_PIN
-    );
-}
-
-/// Bluetooth switched off at the claim leaves the code alone; switching it on
-/// afterwards, on a claimed device, is when the code is sealed.
-#[tokio::test]
-pub(super) async fn the_code_is_sealed_only_once_bluetooth_is_on() {
-    let (service, _adapter, _dir) = service_with_bluetooth(false, true);
-    service
-        .write_setting(
-            "access.webAdmin",
-            serde_json::json!({ "password_hash": ADMIN_HASH }),
-        )
-        .await
-        .expect("claim");
-    assert!(service.inner.read().await.settings.bluetooth.pin.is_none());
-
-    service
-        .write_setting("bluetooth.enabled", serde_json::json!(true))
-        .await
-        .expect("switch on");
-    let pin = service.inner.read().await.settings.bluetooth.pin.clone();
-    assert!(pin.as_ref().is_some_and(|pin| pin.len() == 6), "{pin:?}");
-}
-
-/// A product without Bluetooth gets no code at all.
-#[tokio::test]
-pub(super) async fn a_product_without_bluetooth_gets_no_code() {
-    let (service, _adapter, _dir) = service_with_bluetooth(true, true);
-    let service = service.with_features(micad_settings::Features::only(&[
-        micad_settings::Feature::Wifi,
-    ]));
-    service
-        .write_setting(
-            "access.webAdmin",
-            serde_json::json!({ "password_hash": ADMIN_HASH }),
-        )
-        .await
-        .expect("claim");
-    assert!(service.inner.read().await.settings.bluetooth.pin.is_none());
 }

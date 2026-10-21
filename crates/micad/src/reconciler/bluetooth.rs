@@ -7,13 +7,7 @@
 //! The subject is **optional hardware**, which no other reconciler here has.
 //! A board with no radio must not grow a failing unit: when there is no
 //! adapter the pass reports `unsupported` with the reason and touches nothing.
-//!
-//! It also runs `mica-bled`, the phone app's way in over Bluetooth LE, when
-//! the root carries it: running while Bluetooth is on and the adapter is
-//! there, stopped otherwise. The package ships the unit; micad only starts it
-//! by name, and writes the one file it reads.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -22,29 +16,9 @@ use micad_settings::Settings;
 use super::Reconciler;
 use super::systemd::{UnitControl, is_active};
 use crate::bluetooth::{BluetoothControl, Device};
-use crate::fswrite::write_config_if_changed;
 
 /// The unit BlueZ ships.
 pub const BLUETOOTH_UNIT: &str = "bluetooth.service";
-
-/// The unit mica-pkgs' `mica-bled` ships; OpenRC's script has the same stem.
-const BLED_UNIT: &str = "mica-bled.service";
-/// The binary whose presence says the root carries `mica-bled`: the same
-/// answer under either init, and no unit lookup that fails on a root without.
-const BLED_BINARY: &str = "/usr/bin/mica-bled";
-/// What `mica-bled` is started with: the device id and apid's local socket.
-/// Its unit does not start without it.
-const BLED_ENV: &str = "/run/mica/bled.env";
-/// The device id is not a secret, and init reads the file as root anyway.
-const BLED_ENV_MODE: u32 = 0o644;
-/// `ActiveState` of a unit systemd has given up on.
-const FAILED_STATE: &str = "failed";
-
-/// Where `mica-bled` is looked for and its environment written.
-struct Bled {
-    binary: PathBuf,
-    env: PathBuf,
-}
 
 /// Reconciler for the `bluetooth` subtree.
 pub struct BluetoothReconciler<C: UnitControl> {
@@ -53,7 +27,6 @@ pub struct BluetoothReconciler<C: UnitControl> {
     unit: &'static str,
     control: C,
     adapter: Arc<dyn BluetoothControl>,
-    bled: Bled,
 }
 
 impl<C: UnitControl> BluetoothReconciler<C> {
@@ -63,19 +36,7 @@ impl<C: UnitControl> BluetoothReconciler<C> {
             unit: BLUETOOTH_UNIT,
             control,
             adapter,
-            bled: Bled {
-                binary: PathBuf::from(BLED_BINARY),
-                env: PathBuf::from(BLED_ENV),
-            },
         }
-    }
-
-    /// The same reconciler looking for `mica-bled` at `binary` and writing its
-    /// environment to `env`, so tests stay inside a temporary directory.
-    #[cfg(test)]
-    fn with_bled(mut self, binary: PathBuf, env: PathBuf) -> Self {
-        self.bled = Bled { binary, env };
-        self
     }
 
     /// The same reconciler over `mica-bluetoothd`, bluetoothd on an OpenRC
@@ -132,84 +93,6 @@ impl<C: UnitControl> BluetoothReconciler<C> {
     }
 }
 
-impl<C: UnitControl> BluetoothReconciler<C> {
-    /// Run `mica-bled` against the current device id, restarting it when its
-    /// environment changed. What it reports, rather than an error: the
-    /// adapter is applied either way, and a phone service that does not start
-    /// must not make the adapter's pass fail.
-    async fn bled_on(&self, settings: &Settings) -> serde_json::Value {
-        if !self.bled.binary.exists() {
-            return serde_json::json!({ "outcome": "absent" });
-        }
-        let result = async {
-            let device_id = settings
-                .provisioning
-                .device_id
-                .as_deref()
-                .filter(|id| micad_settings::validate_device_id(id).is_ok())
-                .ok_or_else(|| anyhow::anyhow!("the device id is not provisioned"))?;
-            let env = format!(
-                "MICA_BLED_DEVICE_ID={device_id}\nMICA_BLED_APID={}\n",
-                micad_settings::APID_LOCAL_SOCKET_PATH
-            );
-            let changed = write_config_if_changed(&self.bled.env, &env, BLED_ENV_MODE)?;
-            let state = self.control.active_state(BLED_UNIT).await?;
-            if is_active(&state) {
-                if changed {
-                    self.control.restart(BLED_UNIT).await?;
-                }
-            } else {
-                if state == FAILED_STATE {
-                    self.control.reset_failed(BLED_UNIT).await?;
-                }
-                self.control.start(BLED_UNIT).await?;
-            }
-            anyhow::Ok(())
-        }
-        .await;
-        match result {
-            Ok(()) => serde_json::json!({ "outcome": "running", "unit": BLED_UNIT }),
-            Err(err) => {
-                tracing::warn!(error = %format!("{err:#}"), "bluetooth: mica-bled did not start");
-                serde_json::json!({
-                    "outcome": "failed",
-                    "unit": BLED_UNIT,
-                    "detail": format!("{err:#}"),
-                })
-            }
-        }
-    }
-
-    /// Stop `mica-bled` and take its environment away, so nothing starts it
-    /// against a switch that is off.
-    async fn bled_off(&self) -> serde_json::Value {
-        if !self.bled.binary.exists() {
-            return serde_json::json!({ "outcome": "absent" });
-        }
-        let result = async {
-            if is_active(&self.control.active_state(BLED_UNIT).await?) {
-                self.control.stop(BLED_UNIT).await?;
-            }
-            match std::fs::remove_file(&self.bled.env) {
-                Err(err) if err.kind() != std::io::ErrorKind::NotFound => Err(err.into()),
-                _ => anyhow::Ok(()),
-            }
-        }
-        .await;
-        match result {
-            Ok(()) => serde_json::json!({ "outcome": "stopped", "unit": BLED_UNIT }),
-            Err(err) => {
-                tracing::warn!(error = %format!("{err:#}"), "bluetooth: mica-bled did not stop");
-                serde_json::json!({
-                    "outcome": "failed",
-                    "unit": BLED_UNIT,
-                    "detail": format!("{err:#}"),
-                })
-            }
-        }
-    }
-}
-
 #[async_trait::async_trait]
 impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
     fn name(&self) -> &'static str {
@@ -225,8 +108,6 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
         // A provisioning window powers the adapter even when Bluetooth is
         // switched off, and gives it back when it closes.
         if !wanted.enabled && !crate::ble_provisioning::radio_held() {
-            // mica-bled first: it is bluetoothd's client.
-            let bled = self.bled_off().await;
             // Stopped, not disabled: the unit ships enabled with the package
             // and enablement is not this switch's business. What the switch
             // decides is whether the adapter is running now.
@@ -236,7 +117,6 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
             return Ok(serde_json::json!({
                 "outcome": "disabled",
                 "unit": self.unit,
-                "bled": bled,
             }));
         }
 
@@ -256,7 +136,6 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
                     "outcome": "unsupported",
                     "unit": self.unit,
                     "detail": format!("{err:#}"),
-                    "bled": self.bled_off().await,
                 }));
             }
         };
@@ -274,11 +153,6 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
             self.adapter.set_alias(&alias).await?;
         }
         let (adjusted, removed) = self.reconcile_devices(settings).await;
-        let bled = if wanted.enabled {
-            self.bled_on(settings).await
-        } else {
-            self.bled_off().await
-        };
 
         Ok(serde_json::json!({
             "outcome": "applied",
@@ -288,7 +162,6 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
             "declaredCount": wanted.devices.len(),
             "adjustedDevices": adjusted,
             "removedDevices": removed,
-            "bled": bled,
         }))
     }
 }

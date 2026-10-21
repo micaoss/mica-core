@@ -202,28 +202,6 @@ trait AgentManager1 {
     fn request_default_agent(&self, agent: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
 }
 
-/// Six random digits, for the app code a claimed device offers; `None`
-/// when the system has no randomness to give, which leaves the default code.
-#[must_use]
-pub fn random_pairing_pin() -> Option<String> {
-    use aws_lc_rs::rand::{SecureRandom, SystemRandom};
-    // The largest multiple of a million below 2^32: drawing under it keeps
-    // every code equally likely.
-    const BOUND: u32 = 4_294_000_000;
-    let random = SystemRandom::new();
-    loop {
-        let mut bytes = [0u8; 4];
-        if random.fill(&mut bytes).is_err() {
-            tracing::warn!("no randomness for a pairing code; the default code stays");
-            return None;
-        }
-        let value = u32::from_le_bytes(bytes);
-        if value < BOUND {
-            return Some(format!("{:06}", value % 1_000_000));
-        }
-    }
-}
-
 /// The adapter BlueZ publishes.
 ///
 /// One adapter and not a chosen one: an appliance has a radio or it does not,
@@ -452,7 +430,6 @@ pub fn observed_json(
     declared: &BTreeMap<String, micad_settings::PairedDevice>,
     adapter: Result<Adapter, String>,
     devices: Result<Vec<Device>, String>,
-    pin: &str,
 ) -> Value {
     let adapter = match adapter {
         Ok(adapter) => json!({
@@ -485,9 +462,6 @@ pub fn observed_json(
     };
     json!({
         "declared": declared,
-        // The code the phone app authenticates with (`mica-bled`). Published
-        // because somebody types it into the app.
-        "pin": pin,
         "adapter": adapter,
         "devices": devices,
     })
