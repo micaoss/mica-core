@@ -32,7 +32,7 @@ pub(super) fn the_dhcp_pool_is_derived_from_the_access_point_address() {
         ),
     ] {
         assert_eq!(
-            render_networkd("wlan0", address, None, None).unwrap(),
+            render_networkd("wlan0", address, None, None, &[]).unwrap(),
             expected,
             "pool for {address}"
         );
@@ -75,7 +75,7 @@ pub(super) fn an_address_that_cannot_carry_a_pool_is_rejected() {
         "192.168.4.1/24\nEvil=1", // an injection attempt
     ] {
         assert!(
-            render_networkd("wlan0", bad, None, None).is_err(),
+            render_networkd("wlan0", bad, None, None, &[]).is_err(),
             "{bad:?} was accepted as an access-point address"
         );
     }
@@ -108,7 +108,7 @@ pub(super) fn a_declared_pool_and_lease_replace_the_derived_ones() {
         size: 50,
     };
     assert_eq!(
-        render_networkd("wlan0", "192.168.4.1/24", Some(pool), Some(3600)).unwrap(),
+        render_networkd("wlan0", "192.168.4.1/24", Some(pool), Some(3600), &[]).unwrap(),
         "[Match]\nName=wlan0\n\n[Network]\nAddress=192.168.4.1/24\nDHCPServer=yes\n\n\
          [DHCPServer]\nPoolOffset=100\nPoolSize=50\nDefaultLeaseTimeSec=3600\n"
     );
@@ -117,10 +117,46 @@ pub(super) fn a_declared_pool_and_lease_replace_the_derived_ones() {
         offset: 1,
         size: 10,
     };
-    assert!(render_networkd("wlan0", "192.168.4.1/24", Some(own), None).is_err());
+    assert!(render_networkd("wlan0", "192.168.4.1/24", Some(own), None, &[]).is_err());
     let past = micad_settings::ApPool {
         offset: 200,
         size: 56,
     };
-    assert!(render_networkd("wlan0", "192.168.4.1/24", Some(past), None).is_err());
+    assert!(render_networkd("wlan0", "192.168.4.1/24", Some(past), None, &[]).is_err());
+}
+
+// With global DNS on, the clients are handed the global servers: the uplinks
+// learn none to pass on. Off, networkd hands out the uplink's own.
+#[test]
+pub(super) fn global_dns_servers_are_what_the_clients_are_handed() {
+    let servers = ["9.9.9.9".to_string(), "1.1.1.1".to_string()];
+    assert_eq!(
+        render_networkd("wlan0", "192.168.4.1/24", None, None, &servers).unwrap(),
+        "[Match]\nName=wlan0\n\n[Network]\nAddress=192.168.4.1/24\nDHCPServer=yes\n\n\
+         [DHCPServer]\nPoolOffset=2\nPoolSize=253\nDNS=9.9.9.9 1.1.1.1\n"
+    ); // A server that is not an address never reaches the file.
+    let injected = ["9.9.9.9\n[Network]\nDHCP=yes".to_string()];
+    assert!(render_networkd("wlan0", "192.168.4.1/24", None, None, &injected).is_err());
+}
+
+#[tokio::test]
+pub(super) async fn a_global_dns_change_rewrites_the_access_point_unit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
+    assert!(reconciler.reads().contains(&"dns"));
+    let mut settings = settings_with(lab_ap());
+    reconciler.apply(&settings).await.unwrap();
+    let unit = || std::fs::read_to_string(paths.networkd()).unwrap();
+    assert!(!unit().contains("DNS="), "{}", unit());
+
+    settings.dns.global = micad_settings::GlobalDns {
+        enabled: true,
+        servers: vec!["9.9.9.9".to_string()],
+    };
+    reconciler.apply(&settings).await.unwrap();
+    assert!(unit().ends_with("DNS=9.9.9.9\n"), "{}", unit());
+    // Switched off, the list kept is not handed out.
+    settings.dns.global.enabled = false;
+    reconciler.apply(&settings).await.unwrap();
+    assert!(!unit().contains("DNS="), "{}", unit());
 }

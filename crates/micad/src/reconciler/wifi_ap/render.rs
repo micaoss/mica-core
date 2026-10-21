@@ -213,7 +213,8 @@ pub(super) fn render_config(ap: &WifiApSettings, ssid: &str, psk: Option<&str>) 
 }
 
 /// Render the networkd unit that addresses the access-point link and runs the
-/// DHCP server on it.
+/// DHCP server on it. `dns` is what the clients are handed; empty leaves
+/// networkd's own choice, the uplink's servers.
 ///
 /// The address is re-rendered from the parsed value rather than echoed, so a
 /// value that parsed cannot carry anything else into the file.
@@ -222,6 +223,7 @@ pub(super) fn render_networkd(
     address: &str,
     pool: Option<ApPool>,
     lease_seconds: Option<u32>,
+    dns: &[String],
 ) -> Result<String> {
     let (host, prefix) = parse_cidr(address)?;
     let (offset, size) = ap_pool(host, prefix, pool)?;
@@ -233,17 +235,22 @@ pub(super) fn render_networkd(
     if let Some(seconds) = lease_seconds {
         out.push_str(&format!("DefaultLeaseTimeSec={seconds}\n"));
     }
+    let dns = dns_servers(dns)?;
+    if !dns.is_empty() {
+        out.push_str(&format!("DNS={dns}\n"));
+    }
     Ok(out)
 }
 
 /// Render busybox udhcpd's configuration for the access-point link, the
 /// OpenRC counterpart of [`render_networkd`]: the same pool, the access point
-/// as the clients' router.
+/// as the clients' router, and `dns` as their servers when it names any.
 pub(super) fn render_udhcpd(
     interface: &str,
     address: &str,
     pool: Option<ApPool>,
     lease_seconds: Option<u32>,
+    dns: &[String],
     pidfile: &str,
 ) -> Result<String> {
     let (host, prefix) = parse_cidr(address)?;
@@ -262,7 +269,26 @@ pub(super) fn render_udhcpd(
     if let Some(seconds) = lease_seconds {
         out.push_str(&format!("option lease {seconds}\n"));
     }
+    let dns = dns_servers(dns)?;
+    if !dns.is_empty() {
+        out.push_str(&format!("option dns {dns}\n"));
+    }
     Ok(out)
+}
+
+/// The servers handed to the clients, each re-rendered from its parsed IPv4
+/// address, so a value that parsed cannot carry anything else into the file.
+fn dns_servers(dns: &[String]) -> Result<String> {
+    let servers = dns
+        .iter()
+        .map(|server| {
+            server
+                .parse::<Ipv4Addr>()
+                .map(|ip| ip.to_string())
+                .map_err(|_| anyhow!("dns.global.servers: {server:?} is not an IPv4 address"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(servers.join(" "))
 }
 
 /// SSID for a device with this identifier.

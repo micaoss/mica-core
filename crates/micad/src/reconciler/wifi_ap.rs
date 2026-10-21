@@ -284,7 +284,13 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
 
     /// Write the service's environment and udhcpd's configuration; report
     /// whether either changed.
-    fn apply_openrc(&self, env: &Path, ap: &WifiApSettings, config: &Path) -> Result<bool> {
+    fn apply_openrc(
+        &self,
+        env: &Path,
+        ap: &WifiApSettings,
+        dns: &[String],
+        config: &Path,
+    ) -> Result<bool> {
         let udhcpd = &self.network_dir;
         let mut changed = write_config_if_changed(
             udhcpd,
@@ -293,6 +299,7 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
                 &ap.address,
                 ap.pool,
                 ap.lease_seconds,
+                dns,
                 OPENRC_UDHCPD_PID,
             )?,
             0o644,
@@ -315,7 +322,12 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
     /// Render the networkd unit for `interface` when the access point is meant
     /// to be up, remove every unit of this reconciler's that is not the wanted
     /// one, and report the wanted name plus whether anything changed.
-    fn apply_networkd(&self, ap: &WifiApSettings, up: bool) -> Result<(Option<String>, bool)> {
+    fn apply_networkd(
+        &self,
+        ap: &WifiApSettings,
+        dns: &[String],
+        up: bool,
+    ) -> Result<(Option<String>, bool)> {
         let interface = ap.interface.as_str();
         std::fs::create_dir_all(&self.network_dir)
             .with_context(|| format!("create {}", self.network_dir.display()))?;
@@ -324,7 +336,7 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
         let mut changed = false;
         if let Some(name) = &wanted {
             let path = self.network_dir.join(name);
-            let rendered = render_networkd(interface, &ap.address, ap.pool, ap.lease_seconds)?;
+            let rendered = render_networkd(interface, &ap.address, ap.pool, ap.lease_seconds, dns)?;
             if std::fs::read_to_string(&path).ok() != Some(rendered.clone()) {
                 std::fs::write(&path, &rendered)
                     .with_context(|| format!("render {}", path.display()))?;
@@ -398,6 +410,11 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
         "wifi"
     }
 
+    fn reads(&self) -> &'static [&'static str] {
+        // The clients are handed the global DNS servers while they are on.
+        &["dns"]
+    }
+
     async fn apply(&self, settings: &Settings) -> Result<serde_json::Value> {
         let ap = &settings.wifi.ap;
         validate_interface(&ap.interface)?;
@@ -446,13 +463,20 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
             config_changed = write_config_if_changed(&config_path, &rendered, CONFIG_MODE)?;
         }
 
+        // Global DNS stops the uplinks learning servers, so the clients are
+        // handed the global ones; otherwise each init's own choice stands.
+        let dns: &[String] = if settings.dns.global.enabled {
+            &settings.dns.global.servers
+        } else {
+            &[]
+        };
         let (networkd_unit, networkd_changed) = match &self.openrc_env {
             Some(env) if up => {
-                config_changed |= self.apply_openrc(env, ap, &config_path)?;
+                config_changed |= self.apply_openrc(env, ap, dns, &config_path)?;
                 (None, false)
             }
             Some(_) => (None, false),
-            None => self.apply_networkd(ap, up)?,
+            None => self.apply_networkd(ap, dns, up)?,
         };
         if networkd_changed {
             self.reloader.reload().await?;
