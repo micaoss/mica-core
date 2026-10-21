@@ -127,6 +127,25 @@ test('captures each network page for review', async ({ page }, testInfo) => {
   // The dialog fades in; capture it at rest.
   await expect(review).toHaveCSS('opacity', '1')
   await page.screenshot({ path: testInfo.outputPath('network-review.png') })
+
+  await page.route('**/api/v1/dns/test', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ server: '9.9.9.9', reachable: true, ms: 18 }, { server: '149.112.112.112', reachable: false, ms: null }]) }))
+  await page.goto('./network?tab=dns')
+  await page.getByRole('button', { name: 'Edit' }).first().click()
+  await page.getByRole('button', { name: 'Test servers' }).click()
+  await expect(page.getByText('Reachable · 18 ms')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('network-dns-edit.png'), fullPage: true })
+
+  await page.goto('./network?tab=wifi')
+  await page.getByRole('button', { name: 'Edit' }).last().click()
+  await page.getByRole('button', { name: 'Access point' }).click()
+  await page.mouse.wheel(0, 4000)
+  await page.screenshot({ path: testInfo.outputPath('network-wifi-ap-edit.png') })
+
+  await page.goto('./network?tab=wireguard&tunnel=wg0')
+  await page.getByRole('button', { name: 'Add peer' }).click()
+  const peer = page.getByRole('dialog', { name: 'Add peer' })
+  await expect(peer).toHaveCSS('opacity', '1')
+  await page.screenshot({ path: testInfo.outputPath('network-peer-add.png') })
 })
 
 test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
@@ -301,7 +320,7 @@ async function mockNetworkBench(page: Page) {
   })
 }
 
-const PEER = { publicKey: 'cmVtb3RlUGVlcktleXJlbW90ZVBlZXJLZXlyZW1vdGU=', allowedIps: ['10.10.0.1/32'], endpoint: 'vpn.example.eu:51820', persistentKeepalive: 25 }
+const PEER = { name: 'Harbour office', publicKey: 'cmVtb3RlUGVlcktleXJlbW90ZVBlZXJLZXlyZW1vdGU=', presharedKey: '<redacted>', allowedIps: ['10.10.0.1/32'], endpoint: 'vpn.example.eu:51820', persistentKeepalive: 25 }
 
 function benchPayload(path: string): unknown {
   if (path === '/api/v1/network') return {
@@ -311,13 +330,24 @@ function benchPayload(path: string): unknown {
       wg0: { kind: 'wireguard', dhcp: false, static: { address: '10.10.0.2/24', dns: [] }, wireguard: { listenPort: 51820, peers: [PEER] } },
     },
     configuredCount: 3,
+    revision: 'e2e-revision',
     observed: { available: true, interfaceCount: 0, interfaces: [] },
+  }
+  if (path === '/api/v1/settings/dns') return {
+    global: { enabled: true, servers: ['9.9.9.9', '149.112.112.112'] },
+    staticRecords: [
+      { hostname: 'nas.lan', address: '192.168.10.20', comment: 'Chart server' },
+      { hostname: 'plotter', address: '192.168.10.30' },
+    ],
   }
   if (path === '/api/v1/network/wg0/peers') return [PEER]
   if (path === '/api/v1/state/network') return { wg0: { publicKey: 'e2eDevicePublicKeye2eDevicePublicKeye2eDev0=' } }
   if (path === '/api/v1/wifi/client') return { enabled: true, interface: 'wlan0' }
   if (path === '/api/v1/wifi/ap') return { mode: 'off', interface: 'wlan0', ssid: 'mica-cm4', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60 }
-  if (path === '/api/v1/wifi/client/networks') return [{ ssid: 'marina-guest', psk: '<redacted>', hidden: false, priority: 10 }]
+  if (path === '/api/v1/wifi/client/networks') return [
+    { ssid: 'marina-guest', psk: '<redacted>', hidden: false, priority: 10 },
+    { ssid: 'fuel-dock', psk: '<redacted>', hidden: false, priority: 1, autoConnect: false },
+  ]
   if (path === '/api/v1/network/status') return {
     interfaces: { available: true, count: 5, entries: [
       {
