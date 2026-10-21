@@ -10,8 +10,11 @@ export interface SessionStatus {
 /// A refused Compose file's problem, by service and field.
 export interface ApiProblem { service: string; field: string; detail: string }
 
+/// One rule a refused network write broke, by interface and field.
+export interface ApiErrorDetail { interface: string; field: string; code: string; params?: Record<string, unknown> }
+
 interface ApiErrorBody {
-  error?: { code?: string; message?: string; path?: string; problems?: ApiProblem[] }
+  error?: { code?: string; message?: string; path?: string; problems?: ApiProblem[]; params?: Record<string, unknown>; details?: ApiErrorDetail[] }
 }
 
 export class ApiError extends Error {
@@ -21,6 +24,8 @@ export class ApiError extends Error {
     readonly code?: string,
     readonly path?: string,
     readonly problems?: ApiProblem[],
+    readonly params?: Record<string, unknown>,
+    readonly details?: ApiErrorDetail[],
   ) {
     super(message)
   }
@@ -53,6 +58,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       body.error?.code,
       body.error?.path,
       body.error?.problems,
+      body.error?.params,
+      body.error?.details,
     )
   }
   if (response.status === 204) return undefined as T

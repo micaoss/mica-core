@@ -197,15 +197,16 @@ function Observation({ data, name }: { data: NetworkData; name: string }) {
   const gateway = obs?.lease?.router ?? (!entry.dhcp && obs?.address ? entry.static?.gateway : undefined)
   const facts = iface.kind === 'can'
     ? [
-        { id: 'state', label: t('network.fields.state'), value: obs?.operationalState ?? '—' },
-        { id: 'bitrate', label: t('network.fields.bitrate'), value: t('network.status.notes.bitrateUnreported') },
+        { id: 'state', label: t('network.fields.state'), value: obs?.can?.busState ?? obs?.operationalState ?? '—' },
+        { id: 'bitrate', label: t('network.fields.bitrate'), value: obs?.can?.bitrate ? t('network.status.notes.bitrate', { kbps: obs.can.bitrate / 1000 }) : t('network.status.notes.bitrateUnreported') },
+        obs?.can && { id: 'errors', label: t('network.fields.busErrors'), value: t('network.values.busErrors', { tx: obs.can.txErrors ?? 0, rx: obs.can.rxErrors ?? 0, busOff: obs.can.busOffCount ?? 0 }) },
       ]
     : [
         { id: 'link', label: t('network.fields.link'), value: link },
         { id: 'address', label: t('network.fields.address'), value: obs?.address ? <span><span className="font-mono">{obs.address}</span> <span className="text-muted-foreground">{obs.source}</span></span> : '—' },
         { id: 'gateway', label: t('network.fields.gateway'), value: gateway ?? '—', mono: true },
         { id: 'dns', label: t('network.fields.dns'), value: obs?.dns.length ? obs.dns.join(', ') : '—', mono: true },
-        obs?.lease?.lifetimeSeconds !== undefined && { id: 'lease', label: t('network.fields.leaseLeft'), value: t('network.values.seconds', { count: obs.lease.lifetimeSeconds }) },
+        obs?.lease?.remainingSeconds !== undefined && { id: 'lease', label: t('network.fields.leaseLeft'), value: t('network.values.seconds', { count: obs.lease.remainingSeconds }) },
         { id: 'mac', label: t('network.fields.mac'), value: obs?.mac ?? '—', mono: true },
         bridgeOf(map, name) && { id: 'bridge', label: t('network.list.memberOf'), value: bridgeOf(map, name), mono: true },
       ]

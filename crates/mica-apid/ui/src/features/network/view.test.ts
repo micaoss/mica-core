@@ -39,6 +39,33 @@ describe('the joined view', () => {
     expect(computeStatus(joined, 'eth1').label).toBe('bridgePort')
   })
 
+  it('reads a CAN controller\'s bus state and a tunnel\'s handshakes', () => {
+    const status = observed()
+    const now = 1_800_000_000_000
+    for (const entry of status.interfaces.entries!) {
+      if (entry.name === 'can0') entry.can = { available: true, busState: 'error-passive', bitrate: 500000, txErrors: 130, rxErrors: 0 }
+      if (entry.name === 'wg0') entry.wireguard = { available: true, peers: [{ publicKey: 'a', latestHandshake: now / 1000 - 30 }, { publicKey: 'b', latestHandshake: null }] }
+    }
+    const map: NetworkMap = { ...configured() as NetworkMap, wg0: { kind: 'wireguard', static: { address: '10.8.0.1/24' }, wireguard: { peers: [{ publicKey: 'a' }, { publicKey: 'b' }] } } as NetworkMap[string] }
+    const joined = buildView(map, status, off, now)
+    expect(computeStatus(joined, 'can0')).toEqual({ tone: 'warning', label: 'busErrors', note: { key: 'network.status.notes.bitrate', params: { kbps: 500 } } })
+    expect(computeStatus(joined, 'wg0')).toEqual({ tone: 'success', label: 'connected', note: { key: 'network.status.notes.peersUp', params: { up: 1, count: 2 } } })
+  })
+
+  it('says why the access point is down and leaves a missing interface unobserved', () => {
+    const ap: WifiView = { radio: 'wlan0', mode: 'ap', apRunning: false, apReason: 'radio_blocked', stations: 0 }
+    const status = observed()
+    status.interfaces.entries!.push({ name: 'eth9', present: false } as never)
+    const joined = buildView({ ...configured() as NetworkMap, eth9: { dhcp: true } }, status, ap)
+    expect(computeStatus(joined, 'wlan0')).toEqual({ tone: 'danger', label: 'apDown', note: { key: 'network.status.notes.apReason.radio_blocked' } })
+    expect(computeStatus(joined, 'eth9').label).toBe('notCreated')
+  })
+
+  it('takes the session\'s interface from the device when it says', () => {
+    expect(sessionInterface({ ...observed(), session: { interface: 'eth0', localAddress: '192.168.1.24' } }, '192.168.10.1')).toBe('eth0')
+    expect(sessionInterface({ ...observed(), session: { interface: null } }, '192.168.10.1')).toBeNull()
+  })
+
   it('names the interface that holds the address the browser came in on', () => {
     expect(sessionInterface(observed(), '192.168.10.1')).toBe('eth1')
     expect(sessionInterface(observed(), '203.0.113.9')).toBeNull()

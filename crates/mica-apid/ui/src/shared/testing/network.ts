@@ -24,7 +24,7 @@ const v4 = (address: string, prefixLength: number, configSource = 'static') => (
 export function observed(overrides: Partial<ObservedNetworkState> = {}): ObservedNetworkState {
   const entries = [
     link('lo', 1, { type: 'loopback', addresses: [{ family: 'ipv4', address: '127.0.0.1', prefixLength: 8, scope: 'host' }] }),
-    link('eth0', 2, { hardwareAddress: '02:00:00:00:00:01', addresses: [v4('192.168.1.24', 24, 'DHCPv4')], dns: ['192.168.1.1'], dhcp: { available: true, lease: { server: '192.168.1.1', router: '192.168.1.1', lifetimeSeconds: 3600 } } }),
+    link('eth0', 2, { hardwareAddress: '02:00:00:00:00:01', addresses: [v4('192.168.1.24', 24, 'DHCPv4')], dns: ['192.168.1.1'], lease: { available: true, server: '192.168.1.1', router: '192.168.1.1', remainingSeconds: 3600 } }),
     link('eth1', 3, { hardwareAddress: '02:00:00:00:00:02', addresses: [v4('192.168.10.1', 24)] }),
     link('eth2', 4, { hardwareAddress: '02:00:00:00:00:03', link: { carrier: false, operationalState: 'no-carrier' } }),
     link('wlan0', 5, { type: 'wlan', link: { carrier: false, operationalState: 'no-carrier' } }),
@@ -66,6 +66,7 @@ export function networkRoutes(map: Record<string, unknown> = configured(), statu
     },
     '/api/v1/wifi/client': { enabled: false, interface: 'wlan0' },
     '/api/v1/wifi/ap': accessPoint(),
+    '/api/v1/wifi/channels?country=DE': { countryCode: 'DE', channels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], auto: false },
     '/api/v1/wifi/client/networks': [{ ssid: 'marina', psk: '<redacted>', hidden: false, priority: 10 }],
     '/api/v1/state/network': { wg0: { publicKey: 'Q2hhbmdlTWVQbGVhc2VDaGFuZ2VNZVBsZWFzZTAwMDA=' } },
     '/api/v1/network/wg0/peers': [{ name: 'Harbour office', publicKey: PEER_KEY, presharedKey: true, allowedIps: ['10.8.0.2/32'], persistentKeepalive: 25, latestHandshake: null, rxBytes: null, txBytes: null }],

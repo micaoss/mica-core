@@ -59,10 +59,12 @@ export function wifiView(client: WifiClientRole | undefined, ap: WifiAccessPoint
   const radio = apOn ? ap.interface : client?.interface ?? ap?.interface ?? status?.capabilities.wifi.interfaces[0]
   const point = (status?.accessPoint?.entries ?? []).find((entry) => entry.interface === radio)
   const association = (status?.wifi.associations ?? []).find((entry) => entry.interface === radio && entry.associated)
+  const running = status?.accessPoint?.running
   return {
     radio,
     mode: apOn ? 'ap' : client?.enabled ? 'client' : 'off',
-    apRunning: point !== undefined,
+    apRunning: running ?? point !== undefined,
+    apReason: running === false ? status?.accessPoint.reason ?? undefined : undefined,
     apSsid: ap?.ssid,
     stations: point?.stationCount ?? 0,
     association: association ? { ssid: association.ssid, bssid: association.bssid, rssiDbm: association.rssiDbm, linkSpeedMbps: association.linkSpeedMbps } : undefined,

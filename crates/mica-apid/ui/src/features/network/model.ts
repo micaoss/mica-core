@@ -95,8 +95,8 @@ export function portEntry(current: IfaceEntry | undefined): IfaceEntry {
 
 /// Change one interface. A bridge's ports follow its port list: a port that
 /// joins loses its own addressing, and one that leaves goes back to DHCP. A
-/// VLAN's parent is declared if it was not, since the device refuses a VLAN
-/// on an undeclared parent.
+/// VLAN's undeclared parent stays undeclared: the device declares it with
+/// the configuration it runs, and the review's dry run says so.
 export function stageSet(set: ChangeSet, name: string, kind: ViewKind, change: (entry: IfaceEntry) => IfaceEntry): ChangeSet {
   const current = set.staged[name] ?? defaultEntry(kind)
   const next = change(clone(current))
@@ -111,8 +111,6 @@ export function stageSet(set: ChangeSet, name: string, kind: ViewKind, change: (
       if (staged[port]) staged[port] = { ...staged[port], dhcp: true }
     }
   }
-  const parent = next.vlan?.parent
-  if (next.kind === 'vlan' && parent && staged[parent] === undefined) staged[parent] = { dhcp: true }
   return { ...set, staged }
 }
 

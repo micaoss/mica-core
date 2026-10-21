@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { Plus, Radar, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
-import type { TaskAccepted, WifiAccessPoint, WifiScan } from '@/lib/types'
+import type { TaskAccepted, WifiAccessPoint, WifiChannels, WifiScan } from '@/lib/types'
 import { band, groupScan, scanSecurity, type ScannedNetwork } from '@/lib/wifi-scan'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
@@ -23,7 +24,7 @@ import { failureDetail, notifyFailure, notifySuccess } from '@/shared/feedback/t
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { EditBar } from './change-bar'
 import { inSubnet, intToIp, ipToInt, isIPv4, overlaps, parseCidr, sameEntry, type IfaceEntry } from './model'
-import { channelsFor, countryName, ELSEWHERE, EUROPE } from './regulatory'
+import { countryName, ELSEWHERE, EUROPE } from './regulatory'
 import type { NetworkData } from './use-network'
 
 interface WifiNetwork { ssid: string; psk?: string; hidden: boolean; priority: number; autoConnect?: boolean }
@@ -83,7 +84,14 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
     addressing: structuredClone(stored),
     customDns: Boolean(stored.dns?.length),
   })
-  const errors = draft ? draftErrors(draft, data, t) : {}
+  const channels = useQuery({
+    queryKey: ['wifi-channels', draft?.country],
+    queryFn: () => api<WifiChannels>(`/api/v1/wifi/channels?country=${encodeURIComponent(draft?.country ?? '')}`),
+    enabled: draft !== undefined && draft.mode === 'ap',
+    retry: false,
+  })
+  const allowed = channels.data ? [...(channels.data.auto ? [0] : []), ...channels.data.channels] : undefined
+  const errors = draft ? draftErrors(draft, data, allowed, t) : {}
   const errorCount = Object.keys(errors).length
   const modeChanged = draft !== undefined && draft.enabled && wifi.mode !== 'off' && draft.mode !== wifi.mode
   const turningOff = draft !== undefined && !draft.enabled && wifi.mode !== 'off'
@@ -135,7 +143,7 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
 
       <PageSection title={t('network.wifi.config')} description={draft ? t('network.wifi.editHint') : t('network.wifi.configCopy', { radio: radio || '—' })}>
         <Panel className={draft ? 'ring-2 ring-primary/40' : undefined}>
-          {draft ? <ConfigForm draft={draft} setDraft={setDraft} errors={errors} current={wifi.mode} /> : (
+          {draft ? <ConfigForm draft={draft} setDraft={setDraft} errors={errors} current={wifi.mode} allowed={allowed} /> : (
             <>
               <div><Button size="sm" disabled={!radio} onClick={start}>{t('network.detail.edit')}</Button></div>
               <ConfigView data={data} />
@@ -201,7 +209,14 @@ function storedFields(ap: WifiAccessPoint) {
   }
 }
 
-function draftErrors(draft: Draft, data: NetworkData, t: (key: string, params?: Record<string, unknown>) => string): Record<string, string> {
+/// `channel` as the operator reads it: 0 is the access point's own choice.
+function channelLabel(channel: number, t: TFunction): string {
+  return channel === 0 ? t('network.wifi.channelAuto') : t('network.wifi.channelValue', { channel })
+}
+
+/// `allowed` is what the device says the chosen country allows; until it has
+/// said, the channel is not judged.
+function draftErrors(draft: Draft, data: NetworkData, allowed: number[] | undefined, t: (key: string, params?: Record<string, unknown>) => string): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!draft.enabled) return errors
   if (draft.mode === 'ap') {
@@ -218,7 +233,7 @@ function draftErrors(draft: Draft, data: NetworkData, t: (key: string, params?: 
     }
     if (draft.lease && !(Number(draft.lease) >= MIN_LEASE)) errors.lease = t('network.wifi.leaseShort', { count: MIN_LEASE })
     if (!draft.countryConfirmed) errors.country = t('network.wifi.confirmCountry')
-    if (!channelsFor(draft.country).includes(draft.channel)) errors.channel = t('network.wifi.channelInvalid')
+    if (allowed && !allowed.includes(draft.channel)) errors.channel = t('network.wifi.channelInvalid')
     return errors
   }
   const entry = draft.addressing
@@ -252,7 +267,7 @@ function StateFacts({ data }: { data: NetworkData }) {
     { id: 'mode', label: t('network.wifi.mode'), value: <strong>{t('network.wifi.modes.ap')}</strong> },
     { id: 'state', label: t('network.fields.state'), value: wifi.apRunning ? <span className="text-success">{t('network.status.apRunning')}</span> : <span className="text-destructive">{t('network.status.apDown')}</span> },
     { id: 'ssid', label: 'SSID', value: <strong>{wifi.apSsid || t('network.wifi.ssidAuto')}</strong> },
-    { id: 'channel', label: t('network.wifi.channel'), value: data.ap.data ? t('network.wifi.channelValue', { channel: data.ap.data.channel }) : '—' },
+    { id: 'channel', label: t('network.wifi.channel'), value: data.ap.data ? channelLabel(data.ap.data.channel, t) : '—' },
     { id: 'clients', label: t('network.wifi.clients'), value: t('network.wifi.clientCount', { count: wifi.stations }) },
   ]} />
 }
@@ -273,7 +288,7 @@ function ConfigView({ data }: { data: NetworkData }) {
       { id: 'security', label: t('network.wifi.security'), value: t(`network.wifi.apSecurities.${ap.security ?? 'wpa2-psk'}`) },
       ap.security !== 'open' && { id: 'psk', label: t('network.wifi.password'), value: t('network.wifi.pskHidden') },
       { id: 'country', label: t('network.wifi.country'), value: `${countryName(ap.countryCode, i18n.resolvedLanguage ?? 'en')} (${ap.countryCode})` },
-      { id: 'channel', label: t('network.wifi.channel'), value: t('network.wifi.channelValue', { channel: ap.channel }) },
+      { id: 'channel', label: t('network.wifi.channel'), value: channelLabel(ap.channel, t) },
       { id: 'address', label: t('network.wifi.apAddress'), value: ap.address, mono: true },
       { id: 'pool', label: t('network.wifi.pool'), value: ap.dhcpServer ? `${ap.dhcpServer.poolStart} – ${ap.dhcpServer.poolEnd}` : '—', mono: true },
       { id: 'lease', label: t('network.wifi.lease'), value: ap.dhcpServer?.leaseSeconds ? t('network.values.seconds', { count: ap.dhcpServer.leaseSeconds }) : t('network.wifi.leaseDefault') },
@@ -295,7 +310,7 @@ function ConfigView({ data }: { data: NetworkData }) {
   return <FactList facts={facts} />
 }
 
-function ConfigForm({ draft, setDraft, errors, current }: { draft: Draft; setDraft: (draft: Draft) => void; errors: Record<string, string>; current: 'off' | 'client' | 'ap' }) {
+function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draft; setDraft: (draft: Draft) => void; errors: Record<string, string>; current: 'off' | 'client' | 'ap'; allowed: number[] | undefined }) {
   const { t, i18n } = useTranslation()
   const locale = i18n.resolvedLanguage ?? 'en'
   const hint = (key: string, fallback?: ReactNode) => errors[key] ? <span className="text-destructive">{errors[key]}</span> : fallback
@@ -341,7 +356,7 @@ function ConfigForm({ draft, setDraft, errors, current }: { draft: Draft; setDra
           <FormField label={t('network.wifi.country')} hint={hint('country', t('network.wifi.countryHint'))}>
             {(id) => (
               <div className="grid gap-2">
-                <Select value={draft.country} onValueChange={(value) => { const country = String(value); setDraft({ ...draft, country, channel: channelsFor(country).includes(draft.channel) ? draft.channel : 1 }) }}>
+                <Select value={draft.country} onValueChange={(value) => { const country = String(value); setDraft({ ...draft, country }) }}>
                   <SelectTrigger id={id} className="w-72"><SelectValue>{`${countryName(draft.country, locale)} (${draft.country})`}</SelectValue></SelectTrigger>
                   <SelectContent>{countries.map((code) => <SelectItem key={code} value={code}>{countryName(code, locale)} ({code})</SelectItem>)}</SelectContent>
                 </Select>
@@ -356,8 +371,8 @@ function ConfigForm({ draft, setDraft, errors, current }: { draft: Draft; setDra
             <FormField label={t('network.wifi.channel')} hint={hint('channel', t('network.wifi.channelHint'))}>
               {(id) => (
                 <Select value={String(draft.channel)} onValueChange={(value) => setDraft({ ...draft, channel: Number(value) })}>
-                  <SelectTrigger id={id} className="w-48 font-mono"><SelectValue /></SelectTrigger>
-                  <SelectContent>{channelsFor(draft.country).map((channel) => <SelectItem key={channel} value={String(channel)}>{t('network.wifi.channelValue', { channel })}</SelectItem>)}</SelectContent>
+                  <SelectTrigger id={id} className="w-48 font-mono"><SelectValue>{channelLabel(draft.channel, t)}</SelectValue></SelectTrigger>
+                  <SelectContent>{(allowed ?? [draft.channel]).map((channel) => <SelectItem key={channel} value={String(channel)}>{channelLabel(channel, t)}</SelectItem>)}</SelectContent>
                 </Select>
               )}
             </FormField>
@@ -574,6 +589,7 @@ function Stations({ data }: { data: NetworkData }) {
           rowKey={(station) => station.mac}
           empty={t('network.wifi.noStations')}
           columns={[
+            { id: 'host', header: t('network.wifi.host'), cell: (station) => station.hostname || station.address ? <span>{station.hostname ?? '—'} <span className="font-mono text-[0.8125rem] text-muted-foreground">{station.address ?? ''}</span></span> : '—' },
             { id: 'mac', header: 'MAC', cell: (station) => <span className="font-mono text-[0.8125rem]">{station.mac}</span> },
             { id: 'signal', header: t('network.wifi.signal'), cell: (station) => station.signalDbm !== undefined ? `${station.signalDbm} dBm` : '—' },
             { id: 'connected', header: t('network.wifi.connectedFor'), cell: (station) => station.connectedSeconds !== undefined ? t('network.wifi.minutes', { count: Math.floor(station.connectedSeconds / 60) }) : '—' },

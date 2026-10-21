@@ -39,9 +39,9 @@ describe('the change set', () => {
     expect(set.staged.eth1).toEqual({ dhcp: true })
   })
 
-  it('declares a VLAN\'s parent when it was not', () => {
+  it('leaves a VLAN\'s undeclared parent to the device', () => {
     const set = stageCreate(start({}), { kind: 'vlan', name: 'eth0-10', parent: 'eth0', vlanId: 10 })
-    expect(set.staged.eth0).toEqual({ dhcp: true })
+    expect(set.staged.eth0).toBeUndefined()
     expect(set.staged['eth0-10']).toEqual({ kind: 'vlan', dhcp: true, vlan: { parent: 'eth0', id: 10 } })
   })
 

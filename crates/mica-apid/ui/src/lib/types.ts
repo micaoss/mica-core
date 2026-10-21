@@ -6,9 +6,15 @@ export interface TaskAccepted {
 export interface TaskRecord {
   id: string
   operation: string
+  /// `network.apply` or `settings.apply`.
+  kind: string
   dotPath: string
   source: string
   status: string
+  /// `saved`, `applying`, then `applied`, whatever the outcome.
+  phase: string
+  /// The interfaces a finished network apply added, changed or removed.
+  interfaces?: string[]
   enqueuedAt: string
   startedAt?: string
   finishedAt?: string
@@ -75,6 +81,14 @@ export interface BluetoothOverview {
   devices: AvailableFact & { entries?: BluetoothDevice[] }
   /// The passkey waiting for a decision, or null.
   pending: { address: string; passkey: number; since: number } | null
+}
+
+/// The channels an access point may use in one country.
+export interface WifiChannels {
+  countryCode: string
+  channels: number[]
+  /// Whether channel 0, the access point's own choice, is offered.
+  auto: boolean
 }
 
 export interface WifiAccessPoint {
@@ -219,6 +233,13 @@ export interface MqttOverview {
     }
     error?: string
   }
+}
+
+/// What a whole-map write would do, answered by `?dryRun=true`.
+export interface NetworkDryRun {
+  /// VLAN parents the write would declare, with the configuration they run.
+  adopted: string[]
+  warnings: string[]
 }
 
 export interface NetworkOverview {
@@ -490,6 +511,27 @@ export interface ObservedNetworkInterface {
   addresses: ObservedAddress[]
   dhcp: ObservedDhcp
   dns: (string | { address?: string })[]
+  /// False for a configured interface the device does not have.
+  present?: boolean
+  /// The DHCPv4 lease the interface holds.
+  lease?: AvailableFact & { server?: string; router?: string; remainingSeconds?: number }
+  linkDns?: { address: string; source?: string; provider?: string }[]
+  routes?: { dest: string; via?: string; metric?: number; source?: string; table?: string | number }[]
+  can?: AvailableFact & {
+    busState?: string
+    bitrate?: number
+    samplePoint?: number
+    txErrors?: number
+    rxErrors?: number
+    warningCount?: number
+    errorPassiveCount?: number
+    busOffCount?: number
+    rx?: { packets?: number; dropped?: number; overruns?: number; errors?: number }
+    tx?: { packets?: number; dropped?: number; errors?: number }
+  }
+  wireguard?: AvailableFact & {
+    peers?: { publicKey: string; latestHandshake?: number | null; rxBytes?: number; txBytes?: number; persistentKeepalive?: number | null }[]
+  }
   wifi?: AvailableFact & {
     state?: string
     associated?: boolean
@@ -503,6 +545,9 @@ export interface ObservedNetworkInterface {
 }
 
 export interface ObservedNetworkState {
+  /// The interface this request arrived through, `null` when none holds its
+  /// address, as behind a proxy.
+  session?: { interface: string | null; localAddress?: string | null }
   interfaces: AvailableFact & { count?: number; entries?: ObservedNetworkInterface[] }
   defaultRoutes: AvailableFact & {
     count?: number
@@ -536,18 +581,33 @@ export interface ObservedNetworkState {
       rssiDbm?: number
       linkSpeedMbps?: number
     }[]
+    association?: AvailableFact & { interface?: string; ssid?: string; bssid?: string; signalDbm?: number; txBitrate?: number; security?: string }
   }
   /// What is associated with THIS device's access point, as hostapd reports
   /// it. `wifi.associations` is the other direction: what this device joined.
   accessPoint: AvailableFact & {
+    running?: boolean
+    /// Why the access point is not running: `disabled`, `client_mode`,
+    /// `radio_blocked`, `country_unset`, `channel_invalid`, `driver_error`.
+    reason?: string | null
+    reasonDetail?: string
     entries?: {
       interface: string
       stationCount: number
-      stations: { mac: string; connectedSeconds?: number; signalDbm?: number; rxBytes?: number; txBytes?: number }[]
+      stations: { mac: string; connectedSeconds?: number; signalDbm?: number; rxBytes?: number; txBytes?: number; address?: string; hostname?: string }[]
     }[]
   }
   capabilities: {
-    wifi: { supported: boolean; interfaces: string[] }
+    wifi: {
+      supported: boolean
+      interfaces: string[]
+      blocked?: boolean
+      security?: string[]
+      bands?: string[]
+      acs?: boolean
+      apClientConcurrent?: boolean
+      channels?: number[]
+    }
     bluetooth: { supported: boolean; adapters: string[] }
     cellular: { supported: boolean; interfaces: string[] }
   }

@@ -147,7 +147,31 @@ describe('the network page', () => {
     await userEvent.click(within(review).getByRole('button', { name: 'Apply 1 change' }))
 
     expect(await screen.findByText(/The device configuration changed underneath these edits: eth1/)).toBeTruthy()
-    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
+    // The review's dry run writes nothing; the write itself never went out.
+    expect(fetch.mock.calls.some(([input, init]) => String(input) === '/api/v1/network' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
+  })
+
+  it('shows the parent a write takes over and marks each interface a refusal names', async () => {
+    stubFetch({
+      ...networkRoutes(),
+      'PUT /api/v1/network?dryRun=true': { adopted: ['eth2'], warnings: [], diff: [] },
+      'PUT /api/v1/network': () => jsonResponse({ error: {
+        code: 'vlan_parent_unsupported', message: 'the default configuration of eth2 cannot be taken over', path: 'network',
+        params: { parent: 'eth2', reason: '[Network] Bond=' },
+        details: [{ interface: 'wg1', field: 'vlan.parent', code: 'vlan_parent_unsupported', params: { parent: 'eth2', reason: '[Network] Bond=' } }],
+      } }, 422),
+    })
+    open('wireguard')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stage' }))
+    const bar = await screen.findByRole('region', { name: 'Pending network changes' })
+    await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
+    const review = await screen.findByRole('dialog')
+    expect(await within(review).findByText('eth2 is declared with the configuration it runs now, so it can carry the VLAN.')).toBeTruthy()
+    await userEvent.click(within(review).getByRole('switch'))
+    await userEvent.click(within(review).getByRole('button', { name: 'Apply 1 change' }))
+    expect(await within(review).findByText('The default configuration of eth2 cannot be taken over by mica ([Network] Bond=); configure eth2 first.')).toBeTruthy()
+    expect(within(review).getByText('Refused')).toBeTruthy()
   })
 
   it('summarises the device on the overview tab', async () => {
@@ -311,6 +335,16 @@ describe('the Wi-Fi tab', () => {
     expect(body).toMatchObject({ enabled: true, mode: 'ap' })
     expect((body.ap as Record<string, unknown>).psk).toBeUndefined()
     expect(body.ap).toMatchObject({ start: 'always', interface: 'wlan0', ssid: 'mica-lab', countryCode: 'DE', countryConfirmed: true, channel: 6, address: '192.168.4.1/24', security: 'wpa2-psk', dhcpServer: { poolStart: '192.168.4.100', poolEnd: '192.168.4.149', leaseSeconds: 3600 } })
+  })
+
+  it('holds the channel to what the device says the country allows', async () => {
+    stubFetch({ ...networkRoutes(), '/api/v1/wifi/channels?country=DE': { countryCode: 'DE', channels: [1, 2, 3, 4, 5], auto: true } })
+    open('wifi')
+    await screen.findByText('marina')
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!)
+    await userEvent.click(screen.getByRole('switch', { name: 'Wi-Fi' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Access point' }))
+    expect(await screen.findByText('The chosen country does not allow this channel.')).toBeTruthy()
   })
 
   it('asks before switching a running access point to the client, and lets go of the radio first', async () => {

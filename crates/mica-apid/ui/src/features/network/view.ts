@@ -13,8 +13,13 @@ export interface Observed {
   source?: string
   mac?: string
   mtu?: number
-  lease?: { server?: string; router?: string; lifetimeSeconds?: number }
+  lease?: { server?: string; router?: string; remainingSeconds?: number }
   dns: string[]
+  /// The CAN controller's state, as the kernel reports it.
+  can?: { busState?: string; bitrate?: number; txErrors?: number; rxErrors?: number; busOffCount?: number }
+  /// Seconds since each tunnel peer's latest handshake, `null` for a peer
+  /// that never completed one. Absent when the device did not say.
+  handshakeAges?: (number | null)[]
 }
 
 export interface IfaceView {
@@ -32,6 +37,8 @@ export interface WifiView {
   radio?: string
   mode: 'off' | 'client' | 'ap'
   apRunning: boolean
+  /// Why the access point is not running, as the device says.
+  apReason?: string
   apSsid?: string
   stations: number
   association?: { ssid?: string; bssid?: string; rssiDbm?: number; linkSpeedMbps?: number }
@@ -49,9 +56,14 @@ export interface NetView {
   wifi: WifiView
 }
 
-function observedOf(entry: ObservedNetworkInterface): Observed {
+/// A WireGuard peer whose latest handshake is older than this has no session.
+const HANDSHAKE_FRESH_SECONDS = 180
+
+function observedOf(entry: ObservedNetworkInterface, now: number): Observed {
   const ipv4 = entry.addresses.find((address) => (address.family === 'ipv4' || address.family === 'inet' || (address.address ?? '').includes('.')) && address.scope !== 'host' && address.address)
-  const lease = entry.dhcp?.lease
+  const lease = entry.lease?.available ? entry.lease : undefined
+  const can = entry.can?.available ? entry.can : undefined
+  const peers = entry.wireguard?.available ? entry.wireguard.peers ?? [] : undefined
   return {
     carrier: entry.link.carrier === true,
     operationalState: entry.link.operationalState,
@@ -59,8 +71,12 @@ function observedOf(entry: ObservedNetworkInterface): Observed {
     source: ipv4?.configSource,
     mac: entry.hardwareAddress,
     mtu: entry.mtu,
-    lease: lease ? { server: lease.server, router: lease.router, lifetimeSeconds: lease.lifetimeSeconds } : undefined,
-    dns: entry.dns.map((server) => typeof server === 'string' ? server : server.address ?? '').filter(Boolean),
+    lease: lease ? { server: lease.server, router: lease.router, remainingSeconds: lease.remainingSeconds } : undefined,
+    dns: entry.linkDns
+      ? entry.linkDns.map((server) => server.address)
+      : entry.dns.map((server) => typeof server === 'string' ? server : server.address ?? '').filter(Boolean),
+    can: can ? { busState: can.busState, bitrate: can.bitrate, txErrors: can.txErrors, rxErrors: can.rxErrors, busOffCount: can.busOffCount } : undefined,
+    handshakeAges: peers?.map((peer) => peer.latestHandshake ? Math.max(0, Math.floor(now / 1000) - peer.latestHandshake) : null),
   }
 }
 
@@ -76,15 +92,16 @@ const KIND_RANK: Record<ViewKind, number> = { physical: 0, bridge: 1, vlan: 2, w
 
 /// Join a map with what the device observes. Interfaces the device creates
 /// for itself (the loopback, container links) are left out unless declared.
-export function buildView(map: NetworkMap, status: ObservedNetworkState | undefined, wifi: WifiView): NetView {
+export function buildView(map: NetworkMap, status: ObservedNetworkState | undefined, wifi: WifiView, now = Date.now()): NetView {
   const radios = status?.capabilities.wifi.interfaces ?? []
   const entries = status?.interfaces.entries ?? []
   const ifaces: Record<string, IfaceView> = {}
   const index = new Map<string, number>()
   for (const entry of entries) {
+    if (entry.present === false) continue
     if (map[entry.name] === undefined && isHiddenInterface(entry.name, entry.kind ?? entry.type)) continue
     const kind = map[entry.name]?.kind ?? observedKind(entry, radios)
-    ifaces[entry.name] = { name: entry.name, kind, declared: map[entry.name] !== undefined, entry: map[entry.name] ?? defaultEntry(kind), obs: observedOf(entry) }
+    ifaces[entry.name] = { name: entry.name, kind, declared: map[entry.name] !== undefined, entry: map[entry.name] ?? defaultEntry(kind), obs: observedOf(entry, now) }
     index.set(entry.name, entry.index ?? Number.MAX_SAFE_INTEGER)
   }
   for (const [name, entry] of Object.entries(map)) {
@@ -159,28 +176,41 @@ export function computeStatus(view: NetView, name: string): IfaceStatus {
     case 'wireguard': {
       const peers = entry.wireguard?.peers.length ?? 0
       if (!peers) return status('neutral', 'noPeers')
-      return status('warning', 'started', { key: 'network.status.notes.peersUnknown', params: { count: peers } })
+      const ages = obs.handshakeAges
+      if (!ages) return status('warning', 'started', { key: 'network.status.notes.peersUnknown', params: { count: peers } })
+      const up = ages.filter((age) => age !== null && age <= HANDSHAKE_FRESH_SECONDS).length
+      if (up === 0) return status('warning', 'started', { key: 'network.status.notes.noHandshake' })
+      return status('success', 'connected', { key: 'network.status.notes.peersUp', params: { up, count: ages.length } })
     }
     case 'wifi': {
       const wifi = view.wifi
       if (wifi.radio !== undefined && wifi.radio !== name) return status('neutral', 'off')
       if (wifi.mode === 'off') return status('neutral', 'off')
       if (wifi.mode === 'ap') {
-        if (!wifi.apRunning) return status('danger', 'apDown')
+        if (!wifi.apRunning) return status('danger', 'apDown', wifi.apReason ? { key: `network.status.notes.apReason.${wifi.apReason}` } : undefined)
         return status('success', 'apRunning', { key: 'network.status.notes.ap', params: { ssid: wifi.apSsid ?? '', count: wifi.stations } })
       }
       if (!wifi.association) return status('danger', 'notConnected', { key: 'network.status.notes.searching' })
       return status('success', 'connected', { key: 'network.status.notes.joined', params: { ssid: wifi.association.ssid ?? '' } })
     }
-    case 'can':
-      return status('success', 'running', { key: 'network.status.notes.bitrateUnreported' })
+    case 'can': {
+      const can = obs.can
+      if (!can) return status('success', 'running', { key: 'network.status.notes.bitrateUnreported' })
+      const bitrate = { key: 'network.status.notes.bitrate', params: { kbps: (can.bitrate ?? 0) / 1000 } }
+      if (can.busState === 'bus-off') return status('danger', 'busOff', bitrate)
+      if (can.busState === 'error-passive' || can.busState === 'error-warning') return status('warning', 'busErrors', bitrate)
+      if (can.busState === 'stopped' || can.busState === 'sleeping') return status('neutral', 'off')
+      return status('success', 'running', bitrate)
+    }
   }
 }
 
 /// The interface the browser reached the console through: the one that holds
-/// the address the connection was accepted on. `null` when no interface does,
+/// the address the connection was accepted on, as the device answers it, or
+/// as found from the session's local address. `null` when no interface does,
 /// as behind a proxy, or when the device did not say.
 export function sessionInterface(status: ObservedNetworkState | undefined, localAddress: string | undefined): string | null {
+  if (status?.session) return status.session.interface
   if (!localAddress || !status) return null
   const found = (status.interfaces.entries ?? []).find((entry) => entry.addresses.some((address) => address.address === localAddress))
   return found?.name ?? null

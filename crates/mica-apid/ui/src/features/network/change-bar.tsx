@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Check, TriangleAlert } from 'lucide-react'
 import { ApiError, api, json } from '@/shared/lib/http'
-import type { Health, NetworkOverview, TaskAccepted, TaskRecord } from '@/lib/types'
+import type { Health, NetworkDryRun, NetworkOverview, TaskAccepted, TaskRecord } from '@/lib/types'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
@@ -15,6 +15,7 @@ import { Switch } from '@/shared/components/ui/switch'
 import { failureDetail } from '@/shared/feedback/toast'
 import { connectionState } from '@/features/shell/connection'
 import { applyStage, applyStages, stageState } from './apply-stage'
+import { networkRefusal, refusedInterfaces } from './errors'
 import { discardChangeSet, finishApplying, settleChangeSet, syncChangeSet, updateChangeSet } from './change-set'
 import { rebase, stageRevert, touchesSession, withFreshPeers, type Change, type ChangeOp, type NetworkMap } from './model'
 import { problemCount, stagedProblems } from './problems'
@@ -121,15 +122,25 @@ function ReviewDialog({ data, onClose }: { data: NetworkData; onClose: () => voi
   const [acknowledged, setAcknowledged] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
-  const [refused, setRefused] = useState<string>()
+  const [refused, setRefused] = useState<string[]>([])
   const set = data.set
   const touches = set ? touchesSession(data.pending, set, data.session) : false
+  // What the device would declare on the operator's behalf: a VLAN's parent
+  // nobody declared, taken over with the configuration it runs.
+  const version = data.network.data?.version
+  const preview = useQuery({
+    queryKey: ['network-dry-run', version, set?.staged],
+    queryFn: () => api<NetworkDryRun>('/api/v1/network?dryRun=true', json('PUT', { baseVersion: version, configured: set?.staged })),
+    enabled: version !== undefined && set !== undefined,
+    retry: false,
+  })
+  const adopted = preview.data?.adopted ?? []
 
   const apply = async () => {
     if (!set || !data.hostname) return
     setPending(true)
     setError(undefined)
-    setRefused(undefined)
+    setRefused([])
     try {
       // The device's map now, not the one this set was staged on: an entry it
       // changed meanwhile is a conflict, and peers added meanwhile are kept.
@@ -156,10 +167,11 @@ function ReviewDialog({ data, onClose }: { data: NetworkData; onClose: () => voi
         setError(t('network.review.moved'))
         return
       }
-      setError(failureDetail(failure, t('common.requestFailed')))
+      setError(networkRefusal(failure, t) ?? failureDetail(failure, t('common.requestFailed')))
       if (failure instanceof ApiError) {
-        const named = data.pending.find((change) => failure.path?.split('.').includes(change.name) || failure.message.includes(change.name))
-        setRefused(named?.name)
+        const named = refusedInterfaces(failure)
+        const guessed = data.pending.find((change) => failure.path?.split('.').includes(change.name) || failure.message.includes(change.name))
+        setRefused(named.length > 0 ? named : guessed ? [guessed.name] : [])
       }
     }
   }
@@ -182,14 +194,15 @@ function ReviewDialog({ data, onClose }: { data: NetworkData; onClose: () => voi
             </Callout>
           ) : null}
           {error ? <Callout tone="danger" title={t('network.review.refused')}>{error}</Callout> : null}
+          {adopted.map((name) => <Callout key={name} tone="accent" title={t('network.review.adopted', { name })} />)}
           <div className="grid gap-1 text-sm">
             {data.pending.map((change) => (
               <Fragment key={change.name}>
-                <div className={cn('mt-2 flex flex-wrap items-center gap-2 border-b pb-1.5 first:mt-0', refused === change.name && 'border-destructive')}>
+                <div className={cn('mt-2 flex flex-wrap items-center gap-2 border-b pb-1.5 first:mt-0', refused.includes(change.name) && 'border-destructive')}>
                   <OpPill op={change.op} />
                   <span className="font-mono font-medium">{change.name}</span>
                   <span className="text-muted-foreground">{kindLabel({ kind: change.kind, entry: set?.staged[change.name] ?? set?.base[change.name] ?? {} })}</span>
-                  {refused === change.name ? <StatusBadge tone="danger">{t('network.review.refusedHere')}</StatusBadge> : null}
+                  {refused.includes(change.name) ? <StatusBadge tone="danger">{t('network.review.refusedHere')}</StatusBadge> : null}
                   <span className="flex-1" />
                   <Button size="xs" variant="link" disabled={pending} onClick={() => updateChangeSet((current) => stageRevert(current, change.name))}>{t('network.review.revert')}</Button>
                 </div>

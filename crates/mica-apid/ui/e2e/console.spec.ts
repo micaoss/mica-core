@@ -82,7 +82,7 @@ test('stages an interface edit and applies it through the review dialog', async 
   const apply = dialog.getByRole('button', { name: 'Apply 1 change' })
   await expect(apply).toBeDisabled()
   await dialog.getByRole('switch').click()
-  const request = page.waitForRequest((candidate) => candidate.method() === 'PUT')
+  const request = page.waitForRequest((candidate) => candidate.method() === 'PUT' && !candidate.url().includes('dryRun'))
   await apply.click()
   const write = await request
   expect(new URL(write.url()).pathname).toBe('/api/v1/network')
@@ -107,13 +107,15 @@ test('captures each network page for review', async ({ page }, testInfo) => {
   for (const [name, path] of [
     ['overview', './network?tab=overview'],
     ['interfaces', './network'],
+    ['interface-eth0', './network/eth0'],
     ['interface-eth1', './network/eth1'],
+    ['interface-can0', './network/can0'],
     ['wifi', './network?tab=wifi'],
     ['dns', './network?tab=dns'],
     ['wireguard', './network?tab=wireguard&tunnel=wg0'],
   ] as const) {
     await page.goto(path)
-    await expect(page.getByRole('heading', { name: /Network|eth1/ }).first()).toBeVisible()
+    await expect(page.getByRole('heading', { name: /Network|eth0|eth1|can0/ }).first()).toBeVisible()
     await page.waitForLoadState('networkidle')
     await page.screenshot({ path: testInfo.outputPath(`network-${name}.png`), fullPage: true })
   }
@@ -146,6 +148,25 @@ test('captures each network page for review', async ({ page }, testInfo) => {
   const peer = page.getByRole('dialog', { name: 'Add peer' })
   await expect(peer).toHaveCSS('opacity', '1')
   await page.screenshot({ path: testInfo.outputPath('network-peer-add.png') })
+})
+
+test('captures the review of a VLAN that takes its parent over', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('./network')
+  await page.getByRole('button', { name: 'Add' }).click()
+  const wizard = page.getByRole('dialog')
+  await wizard.getByRole('button', { name: 'VLAN' }).click()
+  await wizard.getByRole('combobox').click()
+  await page.getByRole('option', { name: 'eth2' }).click()
+  await wizard.getByRole('textbox', { name: 'VLAN ID' }).fill('7')
+  await wizard.getByRole('button', { name: 'Stage' }).click()
+  await page.getByRole('button', { name: 'Review and apply' }).click()
+  const adopting = page.getByRole('dialog', { name: 'Review network changes' })
+  await expect(adopting.getByText('eth2 is declared with the configuration it runs now, so it can carry the VLAN.')).toBeVisible()
+  await expect(adopting).toHaveCSS('opacity', '1')
+  await page.screenshot({ path: testInfo.outputPath('network-review-adopt.png') })
 })
 
 test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
@@ -314,13 +335,25 @@ function payload(path: string, method: string): unknown {
 async function mockNetworkBench(page: Page) {
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()
-    const body = request.method() === 'GET' ? benchPayload(new URL(request.url()).pathname) : undefined
+    const url = new URL(request.url())
+    const body = request.method() === 'GET'
+      ? benchPayload(url.pathname)
+      : request.method() === 'PUT' && url.pathname === '/api/v1/network' && url.searchParams.get('dryRun') === 'true'
+        ? dryRun(request.postDataJSON() as { configured: Record<string, { vlan?: { parent: string } }> })
+        : undefined
     if (body === undefined) return route.fallback()
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
 }
 
 const PEER = { name: 'Harbour office', publicKey: 'cmVtb3RlUGVlcktleXJlbW90ZVBlZXJLZXlyZW1vdGU=', presharedKey: '<redacted>', allowedIps: ['10.10.0.1/32'], endpoint: 'vpn.example.eu:51820', persistentKeepalive: 25 }
+
+/// A dry run on the bench: each VLAN parent the map does not declare is
+/// taken over, as the device does with an image that gives it DHCP.
+function dryRun(write: { configured: Record<string, { vlan?: { parent: string } }> }) {
+  const parents = Object.values(write.configured).flatMap((entry) => entry.vlan ? [entry.vlan.parent] : [])
+  return { adopted: [...new Set(parents.filter((parent) => write.configured[parent] === undefined))], warnings: [], diff: [] }
+}
 
 function benchPayload(path: string): unknown {
   if (path === '/api/v1/network') return {
@@ -347,18 +380,22 @@ function benchPayload(path: string): unknown {
   if (path === '/api/v1/state/network') return { wg0: { publicKey: 'e2eDevicePublicKeye2eDevicePublicKeye2eDev0=' } }
   if (path === '/api/v1/wifi/client') return { enabled: true, interface: 'wlan0' }
   if (path === '/api/v1/wifi/ap') return { mode: 'off', interface: 'wlan0', ssid: 'mica-cm4', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60, dhcpServer: { poolStart: '192.168.4.2', poolEnd: '192.168.4.254' } }
+  if (path === '/api/v1/wifi/channels') return { countryCode: 'DE', channels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], auto: true }
   if (path === '/api/v1/wifi/client/networks') return [
     { ssid: 'marina-guest', psk: '<redacted>', hidden: false, priority: 10 },
     { ssid: 'fuel-dock', psk: '<redacted>', hidden: false, priority: 1, autoConnect: false },
   ]
   if (path === '/api/v1/network/status') return {
-    interfaces: { available: true, count: 5, entries: [
+    interfaces: { available: true, count: 6, entries: [
       {
         name: 'eth0', index: 2, hardwareAddress: '02:42:ac:11:00:02',
         link: { operationalState: 'routable', carrierState: 'carrier', carrier: true },
         addresses: [{ family: 'inet', address: '192.168.1.24', prefixLength: 24, scope: 'global', configSource: 'DHCPv4' }],
-        dhcp: { available: true, state: 'bound', lease: { server: '192.168.1.1', router: '192.168.1.1', lifetimeSeconds: 3480 } },
+        dhcp: { available: true, state: 'bound' },
+        lease: { available: true, server: '192.168.1.1', router: '192.168.1.1', remainingSeconds: 3480 },
         dns: ['192.168.1.1'],
+        linkDns: [{ address: '192.168.1.1', source: 'DHCPv4' }],
+        routes: [{ dest: '0.0.0.0/0', via: '192.168.1.1', metric: 1024, source: 'DHCPv4', table: 'main' }],
       },
       {
         name: 'eth1', index: 3, hardwareAddress: '02:42:ac:11:00:03',
@@ -373,8 +410,16 @@ function benchPayload(path: string): unknown {
         addresses: [{ family: 'inet', address: '10.20.0.31', prefixLength: 24, scope: 'global', configSource: 'DHCPv4' }],
         dhcp: { available: true }, dns: [],
       },
-      { name: 'wg0', index: 6, kind: 'wireguard', link: { operationalState: 'routable', carrier: true }, addresses: [{ family: 'inet', address: '10.10.0.2', prefixLength: 24, scope: 'global' }], dhcp: { available: false }, dns: [] },
+      {
+        name: 'wg0', index: 6, kind: 'wireguard', link: { operationalState: 'routable', carrier: true }, addresses: [{ family: 'inet', address: '10.10.0.2', prefixLength: 24, scope: 'global' }], dhcp: { available: false }, dns: [],
+        wireguard: { available: true, peers: [{ publicKey: PEER.publicKey, latestHandshake: Math.floor(Date.now() / 1000) - 42, rxBytes: 1_284_000, txBytes: 312_000, persistentKeepalive: 25 }] },
+      },
+      {
+        name: 'can0', index: 7, type: 'can', link: { operationalState: 'carrier', carrier: true }, addresses: [], dhcp: { available: false }, dns: [],
+        can: { available: true, busState: 'error-warning', bitrate: 250000, samplePoint: 0.875, txErrors: 96, rxErrors: 3, warningCount: 4, errorPassiveCount: 0, busOffCount: 0 },
+      },
     ] },
+    session: { interface: 'eth0', localAddress: '192.168.1.24' },
     defaultRoutes: { available: true, count: 1, entries: [{ family: 'inet', gateway: '192.168.1.1', interface: 'eth0', metric: 100 }] },
     dns: { available: true, linkServers: ['192.168.1.1'], resolverServers: ['127.0.0.53'], probe: { name: 'deb.debian.org', reachable: true, result: 'resolved' } },
     wifi: { available: true, associations: [{ interface: 'wlan0', associated: true, ssid: 'marina-guest', rssiDbm: -58 }] },
