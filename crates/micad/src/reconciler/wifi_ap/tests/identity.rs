@@ -170,10 +170,10 @@ pub(super) async fn an_unclaimed_device_with_a_code_uses_the_labelled_ssid_and_k
 
     let state = reconciler.apply(&settings_with(unset_ap())).await.unwrap();
 
-    assert_eq!(state["ssid"], json!("mica-4CT8"));
+    assert_eq!(state["ssid"], json!("mica-789Z"));
     assert_eq!(state["pskSource"], json!("derived"));
     let rendered = std::fs::read_to_string(&paths.config).unwrap();
-    assert!(rendered.contains("ssid=mica-4CT8\n"), "{rendered}");
+    assert!(rendered.contains("ssid=mica-789Z\n"), "{rendered}");
     assert!(
         rendered.contains("wpa_passphrase=U8A5TU7RT6A6E8TV\n"),
         "{rendered}"
@@ -195,7 +195,7 @@ pub(super) async fn a_claimed_device_never_uses_the_derived_key() {
 
     assert_eq!(
         state["ssid"],
-        json!("mica-4CT8"),
+        json!("mica-789Z"),
         "the SSID stays the label's"
     );
     assert_eq!(state["pskSource"], json!("generated"));
@@ -238,6 +238,6 @@ pub(super) async fn a_secret_others_can_read_derives_nothing() {
 
     let state = reconciler.apply(&settings_with(unset_ap())).await.unwrap();
 
-    assert_eq!(state["ssid"], json!("mica-4CT8"));
+    assert_eq!(state["ssid"], json!("mica-789Z"));
     assert_eq!(state["pskSource"], json!("generated"));
 }

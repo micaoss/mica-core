@@ -24,9 +24,10 @@ const ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const DATA_CHARS: usize = 10;
 /// Characters of a derived key.
 const KEY_CHARS: usize = 16;
-/// The code characters the default SSID ends in.
-const SSID_SUFFIX: std::ops::Range<usize> = 6..10;
+/// Characters of the default SSID's suffix.
+const SSID_CHARS: usize = 4;
 const CODE_DOMAIN: &[u8] = b"mica-device-code-v1";
+const SSID_DOMAIN: &[u8] = b"mica-ssid-v1";
 const KEY_DOMAIN: &[u8] = b"mica-ap-psk-v1";
 /// The largest source value read.
 const MAX_SOURCE_BYTES: u64 = 4096;
@@ -238,6 +239,19 @@ fn check_char(data: &[u8]) -> u8 {
     ALPHABET[((n - sum % n) % n) as usize]
 }
 
+/// The first `count` characters of the alphabet `digest` spells, 5 bits
+/// each, most significant bit first.
+fn spell(digest: &aws_lc_rs::digest::Digest, count: usize) -> Vec<u8> {
+    let bytes = digest.as_ref();
+    (0..count)
+        .map(|index| {
+            let bit = index * 5;
+            let window = u16::from_be_bytes([bytes[bit / 8], bytes[bit / 8 + 1]]);
+            ALPHABET[usize::from((window >> (11 - bit % 8)) & 0x1f)]
+        })
+        .collect()
+}
+
 /// The canonical code of `raw`, read from `source`.
 #[must_use]
 pub fn code_of(source: Source, raw: &str) -> String {
@@ -248,14 +262,7 @@ pub fn code_of(source: Source, raw: &str) -> String {
         b"\0",
         raw.as_bytes(),
     ]);
-    let bytes = digest.as_ref();
-    let mut data = Vec::with_capacity(DATA_CHARS + 1);
-    for index in 0..DATA_CHARS {
-        let bit = index * 5;
-        let window = u16::from_be_bytes([bytes[bit / 8], bytes[bit / 8 + 1]]);
-        let value = (window >> (11 - bit % 8)) & 0x1f;
-        data.push(ALPHABET[usize::from(value)]);
-    }
+    let mut data = spell(&digest, DATA_CHARS);
     data.push(check_char(&data));
     String::from_utf8(data).unwrap_or_default()
 }
@@ -286,10 +293,13 @@ pub fn parse_code(input: &str) -> Result<String, String> {
     Ok(code)
 }
 
-/// The default SSID of a device with `code`.
+/// The default SSID of a device with the canonical `code`: a hash of the
+/// code under its own domain, so the SSID repeats none of the code's
+/// characters.
 #[must_use]
 pub fn ssid_of(code: &str) -> String {
-    format!("mica-{}", &code[SSID_SUFFIX])
+    let suffix = spell(&sha256(&[SSID_DOMAIN, b"\0", code.as_bytes()]), SSID_CHARS);
+    format!("mica-{}", String::from_utf8(suffix).unwrap_or_default())
 }
 
 /// The default access-point key of `code` under `secret`.

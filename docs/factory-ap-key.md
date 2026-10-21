@@ -46,7 +46,17 @@ Readers drop dashes and spaces, upper-case the rest, and verify the check charac
 
 ## The SSID
 
-The default SSID is `mica-` followed by the code's characters at indices 6 to 9: `mica-4CT8`.
+1. `s = SHA-256("mica-ssid-v1" || 0x00 || canonical code)`.
+2. The first 20 bits of `s` become 4 characters of the same alphabet, as in the code.
+
+The default SSID is `mica-` followed by those 4 characters: `mica-789Z`. It repeats none of the
+code's characters, and the code alone still gives it, so a label tool needs nothing else.
+
+What the SSID still reveals: it is a public function of the code, so it keeps about 2^30 of the
+2^50 codes consistent with it. With the public secret, an attacker who captured a handshake must
+hash every code (2^50 SHA-256) to find those candidates before testing them against the
+handshake, rather than reading the candidates off the SSID. That raises the cost; it does not
+change the conclusion of "The consequence".
 
 ## The key
 
@@ -85,7 +95,8 @@ list.
   Nothing on the device prints the key or the secret.
 - `micad derive-ap-key --secret FILE CODE` runs on a host. It verifies `CODE` and prints the SSID
   and key under the secret in `FILE`, as `ssid=…` and `psk=…` lines. It does not check the file's
-  mode.
+  mode. A label tool needs only the printed code and the product's secret: the SSID comes from the
+  code alone, the key from the code and the secret.
 
 ## Test vectors
 
@@ -93,10 +104,10 @@ The secret is the 32 bytes `0x00, 0x01, …, 0x1f`. The raw values are invented.
 
 | Source | Raw value | Code | SSID | Key |
 | --- | --- | --- | --- | --- |
-| `emmc-cid` | `150100444a54443452a1b2c3d4e5f600` | `DFN4-L34C-T8N` | `mica-4CT8` | `U8A5TU7RT6A6E8TV` |
-| `dt-serial` | `a5f2c3d4e5f60718` | `LSZJ-2L3T-WFG` | `mica-3TWF` | `PNA6B6H4FP6VTCR7` |
-| `dmi-serial` | `MXQ1234567` | `Y9E3-49ET-BKD` | `mica-ETBK` | `ZYGL2RYLNSEMMJ6E` |
-| `dmi-uuid` | `4c4c4544-0042-3510-8051-b4c04f4e3332` | `LVVA-BBQD-8Y4` | `mica-QD8Y` | `S8QLYFJDZT7BFJ44` |
-| `mac` | `00:1a:2b:3c:4d:5e` | `RYP7-3EEM-S8X` | `mica-EMS8` | `WL2K6GAUJMRJWE6U` |
+| `emmc-cid` | `150100444a54443452a1b2c3d4e5f600` | `DFN4-L34C-T8N` | `mica-789Z` | `U8A5TU7RT6A6E8TV` |
+| `dt-serial` | `a5f2c3d4e5f60718` | `LSZJ-2L3T-WFG` | `mica-95SV` | `PNA6B6H4FP6VTCR7` |
+| `dmi-serial` | `MXQ1234567` | `Y9E3-49ET-BKD` | `mica-XE9C` | `ZYGL2RYLNSEMMJ6E` |
+| `dmi-uuid` | `4c4c4544-0042-3510-8051-b4c04f4e3332` | `LVVA-BBQD-8Y4` | `mica-2Y83` | `S8QLYFJDZT7BFJ44` |
+| `mac` | `00:1a:2b:3c:4d:5e` | `RYP7-3EEM-S8X` | `mica-VST3` | `WL2K6GAUJMRJWE6U` |
 
 `device_code::tests::the_documented_vectors_hold` checks this table.
