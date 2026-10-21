@@ -21,6 +21,7 @@ use serde_json::json;
 use super::Reconciler;
 use super::network::{NetworkReload, Networkd, NoReload};
 use super::systemd::{Systemd, UnitControl, is_active, is_enabled};
+use crate::device_code;
 use crate::fswrite::write_config_if_changed;
 use crate::identity;
 
@@ -127,6 +128,31 @@ pub struct WifiApReconciler<C: UnitControl, R: NetworkReload> {
     reloader: R,
     /// Whether hostapd can select a channel itself, for channel 0.
     acs: bool,
+    /// The root the device code and the product secret are read under;
+    /// `None` reads neither.
+    device_root: Option<PathBuf>,
+}
+
+/// Where the access point's key comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PskSource {
+    /// `wifi.ap.psk`.
+    Settings,
+    /// The device code under the product secret, while the device is
+    /// unclaimed (`docs/factory-ap-key.md`).
+    Derived,
+    /// The per-device key generated on STATE.
+    Generated,
+}
+
+impl PskSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Settings => "settings",
+            Self::Derived => "derived",
+            Self::Generated => "generated",
+        }
+    }
 }
 
 impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
@@ -149,6 +175,7 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
             control,
             reloader,
             acs: false,
+            device_root: None,
         }
     }
 
@@ -156,6 +183,13 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
     #[must_use]
     pub fn with_acs(mut self, acs: bool) -> Self {
         self.acs = acs;
+        self
+    }
+
+    /// Read the device code and the product secret under `root`.
+    #[must_use]
+    pub fn with_device_root(mut self, root: PathBuf) -> Self {
+        self.device_root = Some(root);
         self
     }
 }
@@ -200,6 +234,7 @@ impl<C: UnitControl> WifiApReconciler<C, NoReload> {
             control,
         )
         .with_acs(production_acs())
+        .with_device_root(PathBuf::from("/"))
     }
 }
 
@@ -242,6 +277,7 @@ impl WifiApReconciler<Systemd, Networkd> {
             Networkd,
         )
         .with_acs(production_acs())
+        .with_device_root(PathBuf::from("/"))
     }
 }
 
@@ -266,33 +302,61 @@ fn is_wifi_ap_managed(file_name: &str) -> bool {
 }
 
 impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
-    /// The SSID this device advertises, if one can be known.
-    ///
-    /// `wifi.ap.ssid` when the operator set one, otherwise derived from
-    /// `provisioning.deviceId`. `None` only on a device that has neither — an
-    /// unprovisioned tree — which is a hard error when the access point is
-    /// actually meant to run and merely unknown when it is not.
-    fn resolve_ssid(&self, settings: &Settings) -> Option<String> {
-        settings
-            .wifi
-            .ap
-            .ssid
-            .clone()
-            .or_else(|| settings.provisioning.device_id.as_deref().map(derived_ssid))
+    /// This device's code, if its board declares a source that has a value.
+    /// A board that declares none is not worth a warning; one whose source
+    /// has no value is.
+    fn device_code(&self) -> Option<String> {
+        let root = self.device_root.as_deref()?;
+        if !root.join(device_code::CONFIG_PATH).exists() {
+            return None;
+        }
+        match device_code::device_code(root) {
+            Ok(code) => Some(code.code),
+            Err(reason) => {
+                tracing::warn!(%reason, "this device has no device code");
+                None
+            }
+        }
     }
 
-    /// The pre-shared key the access point should use.
+    /// The SSID this device advertises, if one can be known.
     ///
-    /// `wifi.ap.psk` when the operator set one, otherwise the per-device key
-    /// generated on STATE at first boot. There is deliberately no constant
-    /// fallback: the signed rootfs is byte-identical on every device, so a
-    /// baked default would be one WiFi key for the entire fleet.
-    fn resolve_psk(&self, ap: &WifiApSettings) -> Result<String> {
-        if let Some(psk) = &ap.psk {
-            return Ok(psk.clone());
+    /// `wifi.ap.ssid` when the operator set one, otherwise derived from the
+    /// device code, or without one from `provisioning.deviceId`. `None` only
+    /// on a device that has none of them — an unprovisioned tree — which is a
+    /// hard error when the access point is actually meant to run and merely
+    /// unknown when it is not.
+    fn resolve_ssid(&self, settings: &Settings, code: Option<&str>) -> Option<String> {
+        settings.wifi.ap.ssid.clone().or_else(|| {
+            code.map(device_code::ssid_of)
+                .or_else(|| settings.provisioning.device_id.as_deref().map(derived_ssid))
+        })
+    }
+
+    /// The pre-shared key the access point should use, and where it came from.
+    ///
+    /// `wifi.ap.psk` when the operator set one. Otherwise, while the device is
+    /// unclaimed (no web administrator), the key derived from the device code
+    /// under the product secret, which the device's label prints. Otherwise
+    /// the per-device key generated on STATE at first boot. There is
+    /// deliberately no constant fallback: the signed rootfs is byte-identical
+    /// on every device, so a baked default would be one WiFi key for the
+    /// entire fleet.
+    fn resolve_psk(&self, settings: &Settings, code: Option<&str>) -> Result<(String, PskSource)> {
+        if let Some(psk) = &settings.wifi.ap.psk {
+            return Ok((psk.clone(), PskSource::Settings));
+        }
+        if let (Some(code), Some(root), None) =
+            (code, &self.device_root, &settings.access.web_admin)
+        {
+            match device_code::product_secret(root) {
+                Ok(secret) => return Ok((device_code::key_of(&secret, code), PskSource::Derived)),
+                Err(reason) => tracing::warn!(%reason, "no derived access-point key"),
+            }
         }
         identity::read_ap_psk(&self.state_dir)
             .context("read the per-device access-point key")?
+            .map(|psk| (psk, PskSource::Generated))
             .ok_or_else(|| {
                 anyhow!(
                     "wifi.ap.psk is unset and this device has no access-point key on STATE; \
@@ -430,8 +494,10 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
     }
 
     fn reads(&self) -> &'static [&'static str] {
-        // The clients are handed the global DNS servers while they are on.
-        &["dns"]
+        // The clients are handed the global DNS servers while they are on;
+        // the derived key holds only while no administrator has claimed the
+        // device.
+        &["dns", "access.webAdmin"]
     }
 
     async fn apply(&self, settings: &Settings) -> Result<serde_json::Value> {
@@ -442,7 +508,8 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
             None => unit_name(&ap.interface),
         };
         let config_path = self.config_dir.join(config_file_name(&ap.interface));
-        let ssid = self.resolve_ssid(settings);
+        let code = self.device_code();
+        let ssid = self.resolve_ssid(settings, code.as_deref());
         let up = ap.mode != ApMode::Off;
 
         // One radio cannot be a station and an access point at once. Reported,
@@ -470,13 +537,18 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
         // none — rendering unconditionally would make the default tree
         // (`mode: off`) fail on every reconcile.
         let mut config_changed = false;
+        let mut psk_source = None;
         if up {
             let ssid = ssid.as_deref().ok_or_else(|| {
                 anyhow!("wifi.ap.ssid is unset and this device has no identity to derive one from")
             })?;
             let psk = match ap.security {
                 ApSecurity::Open => None,
-                _ => Some(self.resolve_psk(ap)?),
+                _ => {
+                    let (psk, source) = self.resolve_psk(settings, code.as_deref())?;
+                    psk_source = Some(source.as_str());
+                    Some(psk)
+                }
             };
             let ap = WifiApSettings {
                 channel: resolve_channel(ap, self.acs),
@@ -521,7 +593,8 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
         };
 
         // Every value below is public: an SSID is broadcast over the air, and
-        // `secured` reports only whether a key exists. The key itself never
+        // `secured` reports only whether a key exists, `pskSource` only where it
+        // came from. The key itself never
         // leaves the 0600 configuration file — this tree is served over D-Bus.
         Ok(json!({
             "mode": mode_str(ap.mode),
@@ -529,6 +602,7 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
             "accessPoint": access_point.as_str(),
             "ssid": ssid,
             "ssidSource": ssid_source,
+            "pskSource": psk_source,
             "channel": ap.channel,
             "countryCode": ap.country_code,
             "address": ap.address,

@@ -57,6 +57,24 @@ The default SSID is `mica-` followed by the code's characters at indices 6 to 9:
 The secret is the whole file `/usr/share/mica/ap-secret` without one trailing newline: at least 32
 bytes. micad uses the file only if it is readable by its owner alone (no group or other bits).
 
+## When the key is used
+
+The access point's key is, in order:
+
+1. `wifi.ap.psk`, when it is set (`pskSource: "settings"`);
+2. the derived key, while the device is unclaimed, that is while it has no web administrator, and
+   it has a code and a usable secret (`"derived"`);
+3. the per-device key generated on STATE at first boot (`"generated"`).
+
+An open access point uses no key, and `pskSource` is `null`. Once an administrator exists, the
+derived key is never used. A configuration reset keeps the administrator and `wifi.ap.psk`. A
+factory reset clears both, which makes the derived key apply again. The default SSID is the
+code's whenever `wifi.ap.ssid` is unset; without a code, it comes from the device identifier.
+
+A board that declares a source whose value is unusable, or a product secret that is missing,
+short or readable by others, is logged by micad. The access point then uses the next key in the
+list.
+
 ## Tools
 
 - `micad device-code` prints this device's code and its source: `DFN4-L34C-T8N (emmc-cid)`.

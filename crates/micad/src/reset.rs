@@ -326,6 +326,10 @@ fn reseeded_settings(before: &Settings, tier: ResetTier) -> Settings {
         after.access.web_admin = before.access.web_admin.clone();
         after.access.claim = before.access.claim;
         after.access.api_tokens = before.access.api_tokens.clone();
+        // The access-point key set at the claim: without it a claimed device
+        // would fall back to a key nobody was shown
+        // (`docs/factory-ap-key.md`).
+        after.wifi.ap.psk = before.wifi.ap.psk.clone();
     }
     after
 }

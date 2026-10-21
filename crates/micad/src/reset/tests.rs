@@ -45,6 +45,7 @@ fn fielded_settings() -> Settings {
     };
     settings.access.ssh.enabled = true;
     settings.access.ssh.port = 2222;
+    settings.wifi.ap.psk = Some("claimkey-1234".to_string());
     settings.container.enabled = true;
     settings.time.timezone = "Europe/Berlin".to_string();
     settings
@@ -199,6 +200,7 @@ fn tier_one_reseeds_the_settings_and_keeps_the_management_credential() {
     );
     assert_eq!(settings.access.claim.unwrap().via, ClaimChannel::Setup);
     assert_eq!(settings.access.api_tokens.len(), 1);
+    assert_eq!(settings.wifi.ap.psk.as_deref(), Some("claimkey-1234"));
     assert_eq!(settings.access.device.generation, 3);
     assert_eq!(settings.provisioning.device_id.as_deref(), Some(DEVICE_ID));
     // Handed back to first-boot provisioning, which re-derives the
@@ -405,6 +407,7 @@ fn tier_three_returns_the_device_to_first_boot_and_keeps_its_identity() {
     assert_eq!(settings.access.web_admin, None);
     assert_eq!(settings.access.claim, None);
     assert!(settings.access.api_tokens.is_empty());
+    assert_eq!(settings.wifi.ap.psk, None);
     assert_eq!(settings.access.ssh, Default::default());
     assert!(!exists(&roots.system().join("apps/inventory")));
     assert!(!exists(&roots.system().join("ui/active")));

@@ -133,3 +133,111 @@ pub(super) async fn a_device_with_no_key_anywhere_refuses_rather_than_using_a_co
 }
 
 // ---- address and DHCP pool --------------------------------------------
+
+// ---- the device code ----------------------------------------------------
+
+/// A device root whose eMMC carries the first documented vector's CID, and
+/// whose product secret is `0x00..=0x1f`.
+fn device_root(dir: &Path) -> PathBuf {
+    let root = dir.join("root");
+    let mmc = root.join("sys/block/mmcblk0/device");
+    std::fs::create_dir_all(&mmc).unwrap();
+    std::fs::write(mmc.join("type"), "MMC\n").unwrap();
+    std::fs::write(mmc.join("cid"), "150100444a54443452a1b2c3d4e5f600\n").unwrap();
+    let conf = root.join(device_code::CONFIG_PATH);
+    std::fs::create_dir_all(conf.parent().unwrap()).unwrap();
+    std::fs::write(&conf, "source=emmc-cid\n").unwrap();
+    let secret = root.join(device_code::SECRET_PATH);
+    std::fs::write(&secret, (0u8..32).collect::<Vec<_>>()).unwrap();
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    root
+}
+
+fn unset_ap() -> WifiApSettings {
+    WifiApSettings {
+        ssid: None,
+        psk: None,
+        ..lab_ap()
+    }
+}
+
+#[tokio::test]
+pub(super) async fn an_unclaimed_device_with_a_code_uses_the_labelled_ssid_and_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
+    let reconciler = reconciler.with_device_root(device_root(dir.path()));
+    seed_ap_psk(&paths.state_dir, SECRET_PSK);
+
+    let state = reconciler.apply(&settings_with(unset_ap())).await.unwrap();
+
+    assert_eq!(state["ssid"], json!("mica-4CT8"));
+    assert_eq!(state["pskSource"], json!("derived"));
+    let rendered = std::fs::read_to_string(&paths.config).unwrap();
+    assert!(rendered.contains("ssid=mica-4CT8\n"), "{rendered}");
+    assert!(
+        rendered.contains("wpa_passphrase=U8A5TU7RT6A6E8TV\n"),
+        "{rendered}"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn a_claimed_device_never_uses_the_derived_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
+    let reconciler = reconciler.with_device_root(device_root(dir.path()));
+    seed_ap_psk(&paths.state_dir, SECRET_PSK);
+    let mut settings = settings_with(unset_ap());
+    settings.access.web_admin = Some(micad_settings::WebAdminSettings {
+        password_hash: "$argon2id$x".to_string(),
+    });
+
+    let state = reconciler.apply(&settings).await.unwrap();
+
+    assert_eq!(
+        state["ssid"],
+        json!("mica-4CT8"),
+        "the SSID stays the label's"
+    );
+    assert_eq!(state["pskSource"], json!("generated"));
+    let rendered = std::fs::read_to_string(&paths.config).unwrap();
+    assert!(
+        rendered.contains(&format!("wpa_passphrase={SECRET_PSK}\n")),
+        "{rendered}"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn a_set_key_wins_over_the_derived_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, _paths) = fixture(dir.path(), "inactive", "disabled");
+    let reconciler = reconciler.with_device_root(device_root(dir.path()));
+
+    let state = reconciler
+        .apply(&settings_with(WifiApSettings {
+            ssid: None,
+            ..lab_ap()
+        }))
+        .await
+        .unwrap();
+
+    assert_eq!(state["pskSource"], json!("settings"));
+}
+
+#[tokio::test]
+pub(super) async fn a_secret_others_can_read_derives_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
+    let root = device_root(dir.path());
+    std::fs::set_permissions(
+        root.join(device_code::SECRET_PATH),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    let reconciler = reconciler.with_device_root(root);
+    seed_ap_psk(&paths.state_dir, SECRET_PSK);
+
+    let state = reconciler.apply(&settings_with(unset_ap())).await.unwrap();
+
+    assert_eq!(state["ssid"], json!("mica-4CT8"));
+    assert_eq!(state["pskSource"], json!("generated"));
+}
