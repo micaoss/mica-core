@@ -5,10 +5,8 @@ BlueZ dropped the agent.
 <method name="Release">
 </method>
 <!--
-A legacy peer asked for a code to type.
-Answered with the device's own PIN, which is a setting and is displayed
-in the console: a headless appliance has no keypad to enter a
-peer-chosen code on, so the alternative is refusing every legacy peer.
+A legacy peer asked for a code to type. Refused: a fixed code is not
+offered, and a headless appliance has no keypad for a peer's.
 -->
 <method name="RequestPinCode">
 <arg name="device" type="o" direction="in"/>

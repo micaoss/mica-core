@@ -253,9 +253,10 @@ pub(super) const V1_WIFI_SCAN_PATH: &str = "/v1/wifi/client/scan";
 /// The Bluetooth resource: the adapter, its trust list and the pairing verbs.
 ///
 /// The verbs are POST-only for the reason the power actions are: nothing that
-/// merely follows a link should start a radio scan or pair with a device.
+/// merely follows a link should open the adapter or pair with a device.
 pub(super) const V1_BLUETOOTH_PATH: &str = "/v1/bluetooth";
-pub(super) const V1_BLUETOOTH_DISCOVERY_PATH: &str = "/v1/bluetooth/discovery";
+pub(super) const V1_BLUETOOTH_PAIR_WINDOW_PATH: &str = "/v1/bluetooth/pairing-window";
+pub(super) const V1_BLUETOOTH_PAIRING_REQUEST_ROUTE: &str = "/v1/bluetooth/pairing-requests/{mac}";
 pub(super) const V1_BLUETOOTH_DEVICE_ROUTE: &str = "/v1/bluetooth/devices/{address}";
 pub(super) const V1_BLUETOOTH_DEVICE_ACTION_ROUTE: &str =
     "/v1/bluetooth/devices/{address}/{action}";

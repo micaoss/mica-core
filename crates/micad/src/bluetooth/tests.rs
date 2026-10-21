@@ -53,6 +53,7 @@ fn the_two_sides_are_named_apart_and_never_merged() {
     );
     assert_eq!(value["devices"]["entries"][0]["rssi"], json!(-60));
     assert_eq!(value["adapter"]["discovering"], json!(true));
+    assert_eq!(value["adapter"]["name"], json!("mica"));
     assert_eq!(value["pin"], json!("421137"));
 }
 

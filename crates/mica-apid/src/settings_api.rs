@@ -120,15 +120,20 @@ pub trait SettingsApi: Send + Sync {
         anyhow::bail!("this build reads no device code")
     }
     /// The Bluetooth surface micad joins: the declared trust list, the
-    /// adapter, the devices BlueZ holds, the pairing code and whatever is
+    /// adapter, the devices BlueZ holds, the pairing window and whatever is
     /// waiting to be confirmed (`GetBluetooth`).
     ///
     /// Unavailable by default, like every other observation.
     async fn get_bluetooth(&self) -> anyhow::Result<Value> {
         anyhow::bail!("this build reads no Bluetooth adapter")
     }
-    /// Start or stop a Bluetooth scan (`SetBluetoothDiscovery`).
-    async fn set_bluetooth_discovery(&self, _on: bool) -> anyhow::Result<()> {
+    /// Open the pairing window, answering when it closes
+    /// (`OpenBluetoothPairWindow`).
+    async fn open_bluetooth_pair_window(&self) -> anyhow::Result<u64> {
+        anyhow::bail!("this build drives no Bluetooth adapter")
+    }
+    /// Close the pairing window (`CloseBluetoothPairWindow`).
+    async fn close_bluetooth_pair_window(&self) -> anyhow::Result<()> {
         anyhow::bail!("this build drives no Bluetooth adapter")
     }
     /// Pair with a device (`PairBluetoothDevice`).

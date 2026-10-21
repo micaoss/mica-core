@@ -87,8 +87,9 @@ pub trait BluetoothControl: Send + Sync {
         anyhow::bail!("this device has no Bluetooth adapter")
     }
 
-    /// Make the adapter answer scans, or stop answering them.
-    async fn set_discoverable(&self, _on: bool) -> Result<()> {
+    /// Open the adapter to pairing for [`PAIR_WINDOW`]: discoverable and
+    /// pairable, each with that timeout. Closed, it is neither.
+    async fn set_pair_window(&self, _open: bool) -> Result<()> {
         anyhow::bail!("this device has no Bluetooth adapter")
     }
 
@@ -170,6 +171,12 @@ trait Adapter1 {
     #[zbus(property)]
     fn set_discoverable(&self, value: bool) -> zbus::Result<()>;
     #[zbus(property)]
+    fn set_discoverable_timeout(&self, value: u32) -> zbus::Result<()>;
+    #[zbus(property)]
+    fn set_pairable(&self, value: bool) -> zbus::Result<()>;
+    #[zbus(property)]
+    fn set_pairable_timeout(&self, value: u32) -> zbus::Result<()>;
+    #[zbus(property)]
     fn discovering(&self) -> zbus::Result<bool>;
 }
 
@@ -195,7 +202,7 @@ trait AgentManager1 {
     fn request_default_agent(&self, agent: &zbus::ObjectPath<'_>) -> zbus::Result<()>;
 }
 
-/// Six random digits, for the pairing code a claimed device offers; `None`
+/// Six random digits, for the app code a claimed device offers; `None`
 /// when the system has no randomness to give, which leaves the default code.
 #[must_use]
 pub fn random_pairing_pin() -> Option<String> {
@@ -356,12 +363,21 @@ impl BluetoothControl for BlueZ {
             .await?)
     }
 
-    async fn set_discoverable(&self, on: bool) -> Result<()> {
+    async fn set_pair_window(&self, open: bool) -> Result<()> {
         let connection = Self::connection().await?;
-        Ok(Self::adapter_proxy(&connection)
-            .await?
-            .set_discoverable(on)
-            .await?)
+        let proxy = Self::adapter_proxy(&connection).await?;
+        // The timeouts first, so the adapter never stands open without one:
+        // should micad stop mid-window, BlueZ closes it by itself.
+        let timeout = if open {
+            u32::try_from(PAIR_WINDOW.as_secs()).unwrap_or(u32::MAX)
+        } else {
+            0
+        };
+        proxy.set_discoverable_timeout(timeout).await?;
+        proxy.set_pairable_timeout(timeout).await?;
+        proxy.set_pairable(open).await?;
+        proxy.set_discoverable(open).await?;
+        Ok(())
     }
 
     async fn set_alias(&self, alias: &str) -> Result<()> {
@@ -440,7 +456,7 @@ pub fn observed_json(
         Ok(adapter) => json!({
             "available": true,
             "address": adapter.address,
-            "alias": adapter.alias,
+            "name": adapter.alias,
             "powered": adapter.powered,
             "discoverable": adapter.discoverable,
             "discovering": adapter.discovering,
@@ -467,8 +483,8 @@ pub fn observed_json(
     };
     json!({
         "declared": declared,
-        // The code a legacy peer is answered with. Published because it has to
-        // be typed on the other device, which is the whole of what it is for.
+        // The code the phone app authenticates with (`mica-bled`). Published
+        // because somebody types it into the app.
         "pin": pin,
         "adapter": adapter,
         "devices": devices,

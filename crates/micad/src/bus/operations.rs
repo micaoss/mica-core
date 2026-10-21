@@ -235,24 +235,49 @@ impl MicadService {
             .map_err(SettingsFault::Fdo)?;
         let settings = self.inner.read().await.settings.clone();
         let pin = self.pairing_pin(&settings);
+        let devices = self
+            .bluetooth
+            .devices()
+            .await
+            .map_err(|err| format!("{err:#}"));
+        // A waiting device is named by what BlueZ calls it, which the agent
+        // that holds the request is never told.
+        let name_of = |address: &str| {
+            devices
+                .as_ref()
+                .ok()
+                .and_then(|devices| devices.iter().find(|device| device.address == address))
+                .map(|device| device.name.clone())
+                .unwrap_or_default()
+        };
+        let pending: Vec<Value> = self
+            .agent
+            .pending()
+            .await
+            .into_iter()
+            .map(|pending| {
+                serde_json::json!({
+                    "name": name_of(&pending.address),
+                    "mac": pending.address,
+                    "passkey": pending.passkey.map(|passkey| format!("{passkey:06}")),
+                    "since": pending.since,
+                })
+            })
+            .collect();
+        let window = self.agent.window().await;
         let mut value = crate::bluetooth::observed_json(
             &settings.bluetooth.devices,
             self.bluetooth
                 .adapter()
                 .await
                 .map_err(|err| format!("{err:#}")),
-            self.bluetooth
-                .devices()
-                .await
-                .map_err(|err| format!("{err:#}")),
+            devices.clone(),
             &pin,
         );
         value["enabled"] = serde_json::json!(settings.bluetooth.enabled);
-        value["discoverable"] = serde_json::json!(settings.bluetooth.discoverable);
-        // What the console renders its pairing dialog from. Absent when
-        // nothing is waiting, which is most of the time.
-        value["pending"] = match self.agent.pending().await {
-            Some(pending) => serde_json::to_value(pending).unwrap_or(Value::Null),
+        value["pending"] = Value::Array(pending);
+        value["pairWindow"] = match window {
+            Some(window) => serde_json::json!({ "expiresAt": window.expires_at }),
             None => Value::Null,
         };
         Ok(value.to_string())

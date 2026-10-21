@@ -177,8 +177,8 @@ pub struct MicadService {
     /// test all answer "this device has no Bluetooth adapter" rather than a
     /// list of devices nobody has.
     bluetooth: Arc<dyn BluetoothControl>,
-    /// The pairing agent's shared state: what is waiting for a confirmation,
-    /// and the code a legacy peer is answered with.
+    /// The pairing agent's shared state: the pairing window and what is
+    /// waiting in it for a confirmation.
     ///
     /// Shared with the `org.bluez.Agent1` object BlueZ calls, which is the
     /// whole reason it is here: the agent blocks on a decision that arrives
@@ -335,10 +335,8 @@ impl MicadService {
         }
     }
 
-    /// The pairing code this device answers a legacy peer with.
-    ///
-    /// Read here rather than stored, so the console and the agent cannot
-    /// disagree about what a peer will be told.
+    /// The phone app's code (`bluetooth.pin`), as the Bluetooth read
+    /// answers it.
     fn pairing_pin(&self, settings: &micad_settings::Settings) -> String {
         settings.bluetooth.pairing_pin().to_string()
     }

@@ -188,7 +188,7 @@ interface argument to point somewhere else.
 <arg type="s" direction="out"/>
 </method>
 <!--
-The declared Bluetooth trust list, what BlueZ reports, the pairing code
+The declared Bluetooth trust list, what BlueZ reports, the pairing window
 and whatever is waiting to be confirmed.
 -->
 <method name="GetBluetooth">
@@ -212,6 +212,19 @@ clears the second, and the reconciler then clears the first.
 -->
 <method name="PairBluetoothDevice">
 <arg name="address" type="s" direction="in"/>
+</method>
+<!--
+Open the pairing window for [`crate::bluetooth::PAIR_WINDOW`], or open
+it afresh; answers when it closes, in seconds since the epoch. Its
+timer closes it again, and refuses whatever is still waiting.
+-->
+<method name="OpenBluetoothPairWindow">
+<arg type="t" direction="out"/>
+</method>
+<!--
+Close the pairing window now, and refuse whatever is still waiting.
+-->
+<method name="CloseBluetoothPairWindow">
 </method>
 <!--
 Answer the passkey the agent is holding.

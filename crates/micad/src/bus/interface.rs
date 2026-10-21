@@ -422,7 +422,7 @@ impl MicadService {
         self.scan_wifi_now().await
     }
 
-    /// The declared Bluetooth trust list, what BlueZ reports, the pairing code
+    /// The declared Bluetooth trust list, what BlueZ reports, the pairing window
     /// and whatever is waiting to be confirmed.
     pub(super) async fn get_bluetooth(&self) -> Result<String, SettingsFault> {
         self.bluetooth_view().await
@@ -449,6 +449,39 @@ impl MicadService {
     /// clears the second, and the reconciler then clears the first.
     pub(super) async fn pair_bluetooth_device(&self, address: &str) -> fdo::Result<()> {
         self.pair_bluetooth_device_now(address).await
+    }
+
+    /// Open the pairing window for [`crate::bluetooth::PAIR_WINDOW`], or open
+    /// it afresh; answers when it closes, in seconds since the epoch. Its
+    /// timer closes it again, and refuses whatever is still waiting.
+    pub(super) async fn open_bluetooth_pair_window(&self) -> fdo::Result<u64> {
+        self.require_bluetooth().await?;
+        self.bluetooth
+            .set_pair_window(true)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("open the pairing window: {err:#}")))?;
+        let window = self.agent.open_window().await;
+        let agent = Arc::clone(&self.agent);
+        let bluetooth = Arc::clone(&self.bluetooth);
+        tokio::spawn(async move {
+            tokio::time::sleep(crate::bluetooth::PAIR_WINDOW).await;
+            if agent.expire(window).await
+                && let Err(err) = bluetooth.set_pair_window(false).await
+            {
+                tracing::warn!(error = %format!("{err:#}"), "bluetooth: the pairing window could not be closed");
+            }
+        });
+        Ok(window.expires_at)
+    }
+
+    /// Close the pairing window now, and refuse whatever is still waiting.
+    pub(super) async fn close_bluetooth_pair_window(&self) -> fdo::Result<()> {
+        self.require_feature(micad_settings::Feature::Bluetooth)?;
+        self.agent.close_window().await;
+        self.bluetooth
+            .set_pair_window(false)
+            .await
+            .map_err(|err| fdo::Error::Failed(format!("close the pairing window: {err:#}")))
     }
 
     /// Answer the passkey the agent is holding.

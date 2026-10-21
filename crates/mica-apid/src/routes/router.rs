@@ -264,8 +264,12 @@ pub(super) fn bluetooth_routes() -> Router<AppState> {
             get(api_v1_bluetooth_read).put(api_v1_bluetooth_write),
         )
         .route(
-            V1_BLUETOOTH_DISCOVERY_PATH,
-            post(api_v1_bluetooth_discovery),
+            V1_BLUETOOTH_PAIR_WINDOW_PATH,
+            post(api_v1_bluetooth_pair_window_open).delete(api_v1_bluetooth_pair_window_close),
+        )
+        .route(
+            V1_BLUETOOTH_PAIRING_REQUEST_ROUTE,
+            post(api_v1_bluetooth_pairing_request),
         )
         .route(
             V1_BLUETOOTH_DEVICE_ROUTE,

@@ -38,6 +38,10 @@ pub struct FakeSettings {
     pub(super) storage_status: std::sync::Mutex<Value>,
     /// What `get_system_info` answers; the shape micad's `info_json` serves.
     pub(super) system_info: std::sync::Mutex<Value>,
+    /// When the Bluetooth pairing window closes, while it is open.
+    pub(super) bluetooth_window: std::sync::Mutex<Option<u64>>,
+    /// The pairings waiting in it.
+    pub(super) bluetooth_pending: std::sync::Mutex<Vec<Value>>,
     /// What `get_telemetry` answers; the shape micad's `telemetry_json` serves.
     pub(super) telemetry: std::sync::Mutex<Value>,
     /// What `get_observed_network` answers; the shape micad's `observed_json`
@@ -113,6 +117,8 @@ impl FakeSettings {
                 "policy": {},
                 "lifecycle": {},
             })),
+            bluetooth_window: std::sync::Mutex::new(None),
+            bluetooth_pending: std::sync::Mutex::new(Vec::new()),
             system_info: std::sync::Mutex::new(serde_json::json!({
                 "machineId": { "available": true, "id": "0123456789abcdef0123456789abcdef" },
                 "board": { "available": false, "detail": "fake" },
@@ -617,21 +623,39 @@ impl SettingsApi for FakeSettings {
     async fn get_bluetooth(&self) -> anyhow::Result<Value> {
         // The shape micad answers, so a route test drives the document the
         // console actually reads.
+        let window = *self.bluetooth_window.lock().unwrap();
+        let pending: Vec<Value> = self.bluetooth_pending.lock().unwrap().clone();
         Ok(serde_json::json!({
             "enabled": true,
-            "discoverable": false,
             "pin": "421137",
             "declared": { "AA:BB:CC:DD:EE:01": { "name": "phone", "trusted": true, "blocked": false } },
-            "adapter": { "available": true, "address": "11:22:33:44:55:66", "alias": "edge-42", "powered": true, "discoverable": false, "discovering": false },
+            "adapter": { "available": true, "address": "11:22:33:44:55:66", "name": "edge-42", "powered": true, "discoverable": window.is_some(), "discovering": false },
             "devices": { "available": true, "entries": [
                 { "address": "AA:BB:CC:DD:EE:01", "name": "phone", "paired": true, "trusted": true, "blocked": false, "connected": false, "rssi": -55 },
             ] },
-            "pending": null,
+            "pending": pending,
+            "pairWindow": window.map(|expires_at| serde_json::json!({ "expiresAt": expires_at })),
         }))
     }
 
-    async fn set_bluetooth_discovery(&self, on: bool) -> anyhow::Result<()> {
-        self.update_call(&format!("bluetooth discovery {on}"))
+    /// Opens the window, and a phone asks to pair inside it at once.
+    async fn open_bluetooth_pair_window(&self) -> anyhow::Result<u64> {
+        self.update_call("bluetooth window open")?;
+        let expires_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |now| now.as_secs())
+            + 180;
+        *self.bluetooth_window.lock().unwrap() = Some(expires_at);
+        *self.bluetooth_pending.lock().unwrap() = vec![serde_json::json!({
+            "name": "Pixel 8", "mac": "AA:BB:CC:DD:EE:02", "passkey": "042137", "since": expires_at - 180,
+        })];
+        Ok(expires_at)
+    }
+
+    async fn close_bluetooth_pair_window(&self) -> anyhow::Result<()> {
+        *self.bluetooth_window.lock().unwrap() = None;
+        self.bluetooth_pending.lock().unwrap().clear();
+        self.update_call("bluetooth window close")
     }
 
     async fn pair_bluetooth_device(&self, address: &str) -> anyhow::Result<()> {
@@ -639,6 +663,10 @@ impl SettingsApi for FakeSettings {
     }
 
     async fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> anyhow::Result<()> {
+        self.bluetooth_pending
+            .lock()
+            .unwrap()
+            .retain(|pending| pending["mac"] != address);
         self.update_call(&format!("bluetooth confirm {address} {accept}"))
     }
 

@@ -21,7 +21,52 @@ pub(super) async fn the_bluetooth_read_names_each_side_and_the_pairing_code() {
     assert_eq!(value["declared"], serde_json::json!({}));
     // The default code, because the tree declares none.
     assert_eq!(value["pin"], serde_json::json!("000000"));
-    assert!(value["pending"].is_null());
+    assert_eq!(value["pending"], serde_json::json!([]));
+    assert!(value["pairWindow"].is_null());
+}
+
+/// The pairing window opens the adapter, shows what waits by name, MAC and
+/// six digits, and closing it refuses what still waits.
+#[tokio::test]
+pub(super) async fn the_pairing_window_opens_shows_and_closes() {
+    let (service, adapter, _dir) = service_with_bluetooth(true, true);
+    let expires = service.open_bluetooth_pair_window().await.expect("open");
+    let agent = Arc::clone(&service.agent);
+    let waiting = tokio::spawn(async move {
+        agent
+            .confirm("AA:BB:CC:DD:EE:01".to_string(), Some(42_137))
+            .await
+    });
+    while service.agent.pending().await.is_empty() {
+        tokio::task::yield_now().await;
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_str(&service.get_bluetooth().await.expect("read")).expect("JSON");
+    assert_eq!(value["pairWindow"]["expiresAt"], serde_json::json!(expires));
+    assert_eq!(value["pending"][0]["name"], serde_json::json!("phone"));
+    assert_eq!(
+        value["pending"][0]["mac"],
+        serde_json::json!("AA:BB:CC:DD:EE:01")
+    );
+    assert_eq!(value["pending"][0]["passkey"], serde_json::json!("042137"));
+
+    service.close_bluetooth_pair_window().await.expect("close");
+    assert!(!waiting.await.expect("agent"), "BlueZ is told no");
+    let calls = adapter.calls.lock().unwrap().clone();
+    assert!(calls.contains(&"pair window true".to_string()), "{calls:?}");
+    assert!(
+        calls.contains(&"pair window false".to_string()),
+        "{calls:?}"
+    );
+}
+
+/// Switched off, there is no window to open.
+#[tokio::test]
+pub(super) async fn a_switched_off_adapter_opens_no_window() {
+    let (service, _adapter, _dir) = service_with_bluetooth(false, true);
+    assert!(service.open_bluetooth_pair_window().await.is_err());
+    assert_eq!(service.agent.window().await, None);
 }
 
 /// Pairing records the device in the trust list, trusted: an operator who
@@ -132,13 +177,14 @@ pub(super) async fn removing_a_device_drops_the_declaration_and_the_keys() {
 #[tokio::test]
 pub(super) async fn an_accepted_peer_pairing_is_declared_trusted() {
     let (service, _adapter, _dir) = service_with_bluetooth(true, true);
+    service.agent.open_window().await;
     let agent = Arc::clone(&service.agent);
     let waiting = tokio::spawn(async move {
         agent
-            .confirm("AA:BB:CC:DD:EE:01".to_string(), 123_456)
+            .confirm("AA:BB:CC:DD:EE:01".to_string(), Some(123_456))
             .await
     });
-    while service.agent.pending().await.is_none() {
+    while service.agent.pending().await.is_empty() {
         tokio::task::yield_now().await;
     }
 
@@ -157,13 +203,14 @@ pub(super) async fn an_accepted_peer_pairing_is_declared_trusted() {
 #[tokio::test]
 pub(super) async fn a_refused_peer_pairing_declares_nothing() {
     let (service, _adapter, _dir) = service_with_bluetooth(true, true);
+    service.agent.open_window().await;
     let agent = Arc::clone(&service.agent);
     let waiting = tokio::spawn(async move {
         agent
-            .confirm("AA:BB:CC:DD:EE:01".to_string(), 123_456)
+            .confirm("AA:BB:CC:DD:EE:01".to_string(), Some(123_456))
             .await
     });
-    while service.agent.pending().await.is_none() {
+    while service.agent.pending().await.is_empty() {
         tokio::task::yield_now().await;
     }
 
@@ -237,11 +284,6 @@ pub(super) async fn the_claim_replaces_the_default_pairing_code_with_six_random_
     assert_eq!(pin.len(), 6, "{pin}");
     assert!(pin.bytes().all(|byte| byte.is_ascii_digit()), "{pin}");
     assert_ne!(pin, micad_settings::DEFAULT_PAIRING_PIN);
-    assert_eq!(
-        service.agent.pin().await,
-        pin,
-        "the agent answers the new code"
-    );
 
     // A later password change is not a claim: the code stays.
     service

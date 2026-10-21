@@ -262,16 +262,12 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
         if !adapter.powered {
             self.adapter.set_powered(true).await?;
         }
-        if adapter.discoverable != wanted.discoverable {
-            self.adapter.set_discoverable(wanted.discoverable).await?;
-        }
-        // An absent alias advertises the hostname: a device on the air should
-        // be recognisable as the device it is, and the hostname is the name
-        // its operator already chose.
-        let alias = wanted
-            .alias
-            .clone()
-            .unwrap_or_else(|| settings.hostname.clone());
+        // Whether it is discoverable and pairable is the pairing window's
+        // (`crate::bluetooth::Agent`), never a setting.
+        // The adapter advertises the hostname: a device on the air should be
+        // recognisable as the device it is, and the hostname is the name its
+        // operator already chose.
+        let alias = settings.hostname.clone();
         if adapter.alias != alias {
             self.adapter.set_alias(&alias).await?;
         }
@@ -283,7 +279,6 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
             "unit": self.unit,
             "address": adapter.address,
             "alias": alias,
-            "discoverable": wanted.discoverable,
             "declaredCount": wanted.devices.len(),
             "adjustedDevices": adjusted,
             "removedDevices": removed,

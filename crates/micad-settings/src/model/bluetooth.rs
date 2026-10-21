@@ -1,9 +1,12 @@
 //! Bluetooth settings: the adapter, the pairing PIN and trusted devices.
+//!
+//! The adapter is never discoverable or pairable by a setting: an operator
+//! opens a pairing window for three minutes instead (micad's `bluetooth`
+//! module), and the adapter advertises the hostname.
 
 use std::collections::BTreeMap;
 
-/// Bluetooth policy: whether the adapter runs, how it presents itself, and
-/// which devices it trusts.
+/// Bluetooth policy: whether the adapter runs and which devices it trusts.
 ///
 /// Every field is declared. What BlueZ currently sees -- which devices are in
 /// range, which are connected -- is observed and lives nowhere in this tree:
@@ -17,36 +20,46 @@ pub struct BluetoothSettings {
     /// On by default: a powered adapter that is not discoverable is seen by
     /// nobody, and a phone can pair as soon as the operator starts a pairing.
     pub enabled: bool,
-    /// Whether the adapter answers a scan.
+    /// The code `mica-bled` authenticates the phone app with.
     ///
-    /// Off by default: a device that is discoverable is one anybody in range
-    /// can see. Pairing turns it on for as long as the operator is pairing.
-    pub discoverable: bool,
-    /// The name the adapter advertises; absent advertises the hostname.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub alias: Option<String>,
-    /// The pairing code offered to a peer that asks for one.
-    ///
-    /// **Displayed, not hidden.** A legacy peer asks the device for a code and
-    /// somebody has to type it on the peer's keypad, so this value is shown in
-    /// the console by design and is not a secret. Absent is
-    /// [`DEFAULT_PAIRING_PIN`]: the code every unclaimed device offers, so a
-    /// phone can set one up over Bluetooth before it has an administrator.
+    /// **Displayed, not hidden**: somebody types it into the app. No Bluetooth
+    /// pairing is answered with it. Absent is [`DEFAULT_PAIRING_PIN`]: the
+    /// code every unclaimed device offers, so a phone can set one up before
+    /// it has an administrator.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pin: Option<String>,
     /// The devices this device has paired with, by address.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, PairedDevice>,
+    /// `discoverable` and `alias`, which earlier documents carry: read and
+    /// dropped at the next save.
+    #[serde(skip_serializing)]
+    pub discoverable: Retired,
+    #[serde(skip_serializing)]
+    pub alias: Retired,
+}
+
+/// A key an earlier schema had and this one does not: accepted with any
+/// value, so a document written before it was retired still loads, and never
+/// written again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Retired;
+
+impl<'de> serde::Deserialize<'de> for Retired {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer)?;
+        Ok(Self)
+    }
 }
 
 impl Default for BluetoothSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            discoverable: false,
-            alias: None,
             pin: None,
             devices: BTreeMap::new(),
+            discoverable: Retired,
+            alias: Retired,
         }
     }
 }
@@ -102,11 +115,6 @@ pub fn validate_pairing_pin(pin: &str) -> Result<(), String> {
 pub fn validate_bluetooth(settings: &BluetoothSettings) -> Result<(), String> {
     if let Some(pin) = &settings.pin {
         validate_pairing_pin(pin)?;
-    }
-    if let Some(alias) = &settings.alias
-        && (alias.is_empty() || alias.len() > 64)
-    {
-        return Err("a Bluetooth alias is 1 to 64 characters".to_string());
     }
     for address in settings.devices.keys() {
         if !is_bluetooth_address(address) {

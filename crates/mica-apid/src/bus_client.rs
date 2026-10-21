@@ -85,7 +85,8 @@ trait Micad {
     fn get_dns_probe(&self) -> zbus::Result<String>;
     fn probe_dns(&self) -> zbus::Result<String>;
     fn get_bluetooth(&self) -> zbus::Result<String>;
-    fn set_bluetooth_discovery(&self, on: bool) -> zbus::Result<()>;
+    fn open_bluetooth_pair_window(&self) -> zbus::Result<u64>;
+    fn close_bluetooth_pair_window(&self) -> zbus::Result<()>;
     fn pair_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
     fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> zbus::Result<()>;
     fn remove_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
@@ -446,19 +447,32 @@ impl SettingsApi for BusSettings {
             .await
     }
 
-    /// The Bluetooth trust list, the adapter, the devices and the code a
-    /// legacy peer is answered with.
+    /// The Bluetooth trust list, the adapter, the devices, the pairing
+    /// window and what waits in it.
     async fn get_bluetooth(&self) -> anyhow::Result<Value> {
         let proxy = self.proxy().await?;
         let json = self.call("GetBluetooth", proxy.get_bluetooth()).await?;
         Ok(serde_json::from_str(&json)?)
     }
 
-    /// Start or stop a scan.
-    async fn set_bluetooth_discovery(&self, on: bool) -> anyhow::Result<()> {
+    /// Open the pairing window.
+    async fn open_bluetooth_pair_window(&self) -> anyhow::Result<u64> {
         let proxy = self.proxy().await?;
-        self.call("SetBluetoothDiscovery", proxy.set_bluetooth_discovery(on))
-            .await
+        self.call(
+            "OpenBluetoothPairWindow",
+            proxy.open_bluetooth_pair_window(),
+        )
+        .await
+    }
+
+    /// Close the pairing window.
+    async fn close_bluetooth_pair_window(&self) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "CloseBluetoothPairWindow",
+            proxy.close_bluetooth_pair_window(),
+        )
+        .await
     }
 
     /// Pair with a device and record it in the trust list.

@@ -390,6 +390,14 @@ impl crate::bluetooth::BluetoothControl for MockBluetooth {
         Ok(())
     }
 
+    async fn set_pair_window(&self, open: bool) -> anyhow::Result<()> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("pair window {open}"));
+        Ok(())
+    }
+
     async fn pair(&self, address: &str) -> anyhow::Result<()> {
         self.calls
             .lock()

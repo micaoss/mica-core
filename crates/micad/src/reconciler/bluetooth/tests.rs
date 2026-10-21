@@ -46,8 +46,8 @@ impl BluetoothControl for MockAdapter {
         Ok(())
     }
 
-    async fn set_discoverable(&self, on: bool) -> Result<()> {
-        self.record(format!("discoverable {on}"));
+    async fn set_pair_window(&self, open: bool) -> Result<()> {
+        self.record(format!("pair window {open}"));
         Ok(())
     }
 

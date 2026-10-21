@@ -6,21 +6,32 @@ use std::time::Duration;
 
 use super::*;
 
-/// What a pairing is waiting for, and how the console answers it.
-///
-/// One at a time. BlueZ can only have one pairing in flight per adapter, and a
-/// queue of confirmations would be a queue of decisions an operator cannot
-/// tell apart.
+/// A pairing waiting for the console's answer.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Pending {
     /// The device asking.
     pub address: String,
-    /// The six digits BlueZ wants confirmed on both ends.
-    pub passkey: u32,
+    /// The six digits BlueZ wants compared on both ends; `None` for a peer
+    /// with no display, which has nothing to compare.
+    pub passkey: Option<u32>,
     /// Seconds since the epoch when the request arrived, so the console can
     /// show how long it has been waiting.
     pub since: u64,
 }
+
+/// The pairing window: while it is open the adapter is discoverable and
+/// pairable, and a request waits for the console; otherwise it is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Window {
+    /// Seconds since the epoch when it closes by itself.
+    pub expires_at: u64,
+    /// Which opening this is, so the timer of an earlier one cannot close a
+    /// later one.
+    generation: u64,
+}
+
+/// How long a pairing window stays open.
+pub const PAIR_WINDOW: Duration = Duration::from_secs(180);
 
 /// The pairing agent's shared state.
 ///
@@ -29,75 +40,99 @@ pub struct Pending {
 /// that arrives through a different door.
 #[derive(Default)]
 pub struct Agent {
-    pub(super) pending: tokio::sync::Mutex<Option<(Pending, tokio::sync::oneshot::Sender<bool>)>>,
-    /// The code a legacy peer is answered with, kept in step with the
-    /// settings tree by the reconciler's own pass.
-    pub(super) pin: tokio::sync::RwLock<String>,
+    pub(super) pending: tokio::sync::Mutex<Vec<(Pending, tokio::sync::oneshot::Sender<bool>)>>,
+    window: tokio::sync::Mutex<Option<Window>>,
+    openings: std::sync::atomic::AtomicU64,
+}
+
+fn now_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
 }
 
 impl Agent {
-    /// An agent answering `pin`.
-    #[cfg(test)]
-    pub fn with_pin(pin: String) -> Self {
-        Self {
-            pending: tokio::sync::Mutex::new(None),
-            pin: tokio::sync::RwLock::new(pin),
-        }
-    }
-
-    /// Replace the code a legacy peer is answered with.
-    pub async fn set_pin(&self, pin: String) {
-        *self.pin.write().await = pin;
-    }
-
-    /// The code, for the agent and for the console that displays it.
-    pub async fn pin(&self) -> String {
-        self.pin.read().await.clone()
-    }
-
-    /// What is waiting, if anything.
-    pub async fn pending(&self) -> Option<Pending> {
+    /// What is waiting, oldest first.
+    pub async fn pending(&self) -> Vec<Pending> {
         self.pending
             .lock()
             .await
-            .as_ref()
+            .iter()
             .map(|(pending, _)| pending.clone())
+            .collect()
     }
 
-    /// Answer the pending request. `false` when nothing is waiting or the
-    /// address does not match what is.
-    pub async fn answer(&self, address: &str, accept: bool) -> bool {
-        let mut slot = self.pending.lock().await;
-        let matches = slot
-            .as_ref()
-            .is_some_and(|(pending, _)| pending.address == address);
-        if !matches {
+    /// The open window, if any.
+    pub async fn window(&self) -> Option<Window> {
+        *self.window.lock().await
+    }
+
+    /// Open the window for [`PAIR_WINDOW`], or open it afresh.
+    pub async fn open_window(&self) -> Window {
+        let window = Window {
+            expires_at: now_seconds() + PAIR_WINDOW.as_secs(),
+            generation: self
+                .openings
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        };
+        *self.window.lock().await = Some(window);
+        window
+    }
+
+    /// Close the window, and refuse every request still waiting.
+    pub async fn close_window(&self) {
+        *self.window.lock().await = None;
+        for (_, reply) in self.pending.lock().await.drain(..) {
+            let _ = reply.send(false);
+        }
+    }
+
+    /// Close `window` when it is still the open one: what its timer does.
+    /// `false` when it was closed or opened afresh since.
+    pub async fn expire(&self, window: Window) -> bool {
+        if *self.window.lock().await != Some(window) {
             return false;
         }
-        let Some((_, reply)) = slot.take() else {
+        self.close_window().await;
+        true
+    }
+
+    /// Answer the request of `address`. `false` when none is waiting.
+    pub async fn answer(&self, address: &str, accept: bool) -> bool {
+        let mut pending = self.pending.lock().await;
+        let Some(index) = pending
+            .iter()
+            .position(|(pending, _)| pending.address.eq_ignore_ascii_case(address))
+        else {
             return false;
         };
+        let (_, reply) = pending.remove(index);
         reply.send(accept).is_ok()
     }
 
     /// Record a request and wait for the console, or for the bound.
     ///
-    /// A second request while one is pending is **refused**, not queued: two
-    /// passkeys on one screen is two decisions an operator cannot tell apart.
-    pub async fn confirm(&self, address: String, passkey: u32) -> bool {
+    /// Refused at once while the window is closed: nobody is looking. A second
+    /// request from a device already waiting is refused too, so one device is
+    /// one row.
+    pub async fn confirm(&self, address: String, passkey: Option<u32>) -> bool {
+        if self.window.lock().await.is_none() {
+            return false;
+        }
         let (reply, answer) = tokio::sync::oneshot::channel();
         {
-            let mut slot = self.pending.lock().await;
-            if slot.is_some() {
+            let mut pending = self.pending.lock().await;
+            if pending
+                .iter()
+                .any(|(pending, _)| pending.address == address)
+            {
                 return false;
             }
-            *slot = Some((
+            pending.push((
                 Pending {
-                    address,
+                    address: address.clone(),
                     passkey,
-                    since: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |since| since.as_secs()),
+                    since: now_seconds(),
                 },
                 reply,
             ));
@@ -107,9 +142,12 @@ impl Agent {
             .ok()
             .and_then(Result::ok)
             .unwrap_or(false);
-        // The slot is cleared whichever way it ended, including the timeout:
-        // a pending request nobody answered must not block the next one.
-        *self.pending.lock().await = None;
+        // Taken out whichever way it ended, including the timeout: a request
+        // nobody answered must not stay on the console.
+        self.pending
+            .lock()
+            .await
+            .retain(|(pending, _)| pending.address != address);
         accepted
     }
 }
@@ -132,22 +170,20 @@ impl PairingAgent {
         tracing::info!("bluetooth: the pairing agent was released");
     }
 
-    /// A legacy peer asked for a code to type.
-    ///
-    /// Answered with the device's own PIN, which is a setting and is displayed
-    /// in the console: a headless appliance has no keypad to enter a
-    /// peer-chosen code on, so the alternative is refusing every legacy peer.
-    pub(super) async fn request_pin_code(&self, device: zbus::ObjectPath<'_>) -> String {
-        let pin = self.state.pin().await;
-        tracing::info!(device = %device, "bluetooth: answering a PIN request");
-        pin
+    /// A legacy peer asked for a code to type. Refused: a fixed code is not
+    /// offered, and a headless appliance has no keypad for a peer's.
+    pub(super) fn request_pin_code(
+        &self,
+        device: zbus::ObjectPath<'_>,
+    ) -> zbus::fdo::Result<String> {
+        tracing::info!(device = %device, "bluetooth: refusing a PIN request");
+        Err(rejected("a fixed pairing code is not offered"))
     }
 
     /// The same, as a number.
-    pub(super) async fn request_passkey(&self, device: zbus::ObjectPath<'_>) -> u32 {
-        let pin = self.state.pin().await;
-        tracing::info!(device = %device, "bluetooth: answering a passkey request");
-        pin.parse().unwrap_or(0)
+    pub(super) fn request_passkey(&self, device: zbus::ObjectPath<'_>) -> zbus::fdo::Result<u32> {
+        tracing::info!(device = %device, "bluetooth: refusing a passkey request");
+        Err(rejected("a fixed pairing code is not offered"))
     }
 
     /// The peer is showing a code; nothing to decide.
@@ -167,12 +203,10 @@ impl PairingAgent {
         passkey: u32,
     ) -> zbus::fdo::Result<()> {
         let address = address_of(&device);
-        if self.state.confirm(address, passkey).await {
+        if self.state.confirm(address, Some(passkey)).await {
             Ok(())
         } else {
-            Err(zbus::fdo::Error::Failed(
-                "org.bluez.Error.Rejected: the pairing was not confirmed".to_string(),
-            ))
+            Err(rejected("the pairing was not confirmed"))
         }
     }
 
@@ -183,12 +217,10 @@ impl PairingAgent {
         device: zbus::ObjectPath<'_>,
     ) -> zbus::fdo::Result<()> {
         let address = address_of(&device);
-        if self.state.confirm(address, 0).await {
+        if self.state.confirm(address, None).await {
             Ok(())
         } else {
-            Err(zbus::fdo::Error::Failed(
-                "org.bluez.Error.Rejected: the pairing was not confirmed".to_string(),
-            ))
+            Err(rejected("the pairing was not confirmed"))
         }
     }
 
@@ -207,6 +239,11 @@ impl PairingAgent {
     pub(super) fn cancel(&self) {
         tracing::info!("bluetooth: the pairing request was cancelled");
     }
+}
+
+/// The refusal BlueZ passes on to the peer.
+fn rejected(why: &str) -> zbus::fdo::Error {
+    zbus::fdo::Error::Failed(format!("org.bluez.Error.Rejected: {why}"))
 }
 
 /// The address inside a BlueZ device object path.
@@ -229,8 +266,7 @@ pub const AGENT_PATH: &str = "/com/mica/bluetooth/agent";
 /// What the agent tells BlueZ it can do.
 ///
 /// `DisplayYesNo`: it can show a passkey and take a yes or no, which is the
-/// console's pairing dialog. It also answers a legacy PIN request, which no
-/// capability string covers.
+/// console's pairing dialog.
 pub const AGENT_CAPABILITY: &str = "DisplayYesNo";
 
 /// Register the agent with BlueZ and make it the default.
@@ -255,7 +291,7 @@ const BLUEZ_NAME: &str = "org.bluez";
 /// Once is not enough. Bluetooth is off until the settings turn it on, so
 /// bluetoothd usually starts long after micad does, and it forgets every agent
 /// when it restarts; a device with no agent answers no pairing at all.
-pub async fn keep_agent_registered(connection: zbus::Connection) {
+pub async fn keep_agent_registered(connection: zbus::Connection, agent: Arc<Agent>) {
     use std::future::poll_fn;
     use std::pin::pin;
     use zbus::export::futures_core::Stream;
@@ -273,7 +309,7 @@ pub async fn keep_agent_registered(connection: zbus::Connection) {
         zbus::MessageStream::for_match_rule(rule, &connection, None).await
     }
     .await;
-    register_and_report(&connection).await;
+    register_and_report(&connection, &agent).await;
     let stream = match stream {
         Ok(stream) => stream,
         Err(err) => {
@@ -292,14 +328,23 @@ pub async fn keep_agent_registered(connection: zbus::Connection) {
             continue;
         };
         if !new_owner.is_empty() {
-            register_and_report(&connection).await;
+            register_and_report(&connection, &agent).await;
         }
     }
 }
 
-async fn register_and_report(connection: &zbus::Connection) {
+async fn register_and_report(connection: &zbus::Connection, agent: &Agent) {
     match register_agent(connection).await {
-        Ok(()) => tracing::info!(path = AGENT_PATH, "Bluetooth pairing agent registered"),
+        Ok(()) => {
+            tracing::info!(path = AGENT_PATH, "Bluetooth pairing agent registered");
+            // A bluetoothd that starts is pairable by its own default; outside
+            // a window this device is neither pairable nor discoverable.
+            if agent.window().await.is_none()
+                && let Err(err) = BlueZ.set_pair_window(false).await
+            {
+                tracing::info!(error = %format!("{err:#}"), "bluetooth: the adapter could not be closed to pairing");
+            }
+        }
         Err(err) => {
             tracing::info!(error = %err, "no Bluetooth agent registered: bluetoothd did not answer");
         }

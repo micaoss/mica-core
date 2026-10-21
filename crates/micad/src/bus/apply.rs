@@ -87,8 +87,8 @@ impl MicadService {
                             .into(),
                 });
             }
-            // The claim seals the pairing code. Before it the code is the
-            // default one, which a setup over Bluetooth needs; once the
+            // The claim seals the app code (`bluetooth.pin`). Before it the
+            // code is the default one, which a setup over Bluetooth needs; once the
             // device has an administrator and Bluetooth is on it is six random
             // digits, written by the write that made both true: the claim, or
             // switching Bluetooth on after it. A declared code is somebody's
@@ -125,9 +125,8 @@ impl MicadService {
             inner.settings = candidate;
             sealed
         };
-        if let Some(pin) = sealed {
-            tracing::info!("the default Bluetooth pairing code was replaced");
-            self.agent.set_pin(pin).await;
+        if sealed.is_some() {
+            tracing::info!("the default Bluetooth app code was replaced");
         }
         // The write landed, so the document it reached now holds what this
         // build writes and parses as this build reads: its refusal is over, and
@@ -208,13 +207,6 @@ impl MicadService {
     /// lock and each live-state result is recorded under a short write lock;
     /// no data lock is held while a reconciler waits on another process.
     pub(super) async fn apply_subtree(&self, path: &str) -> Vec<String> {
-        // The agent learns the pairing code here, which is where the settings
-        // that carry it have just changed. Anywhere else and the console would
-        // be able to show one code while a peer is told another.
-        if path.is_empty() || path.starts_with("bluetooth") {
-            let settings = self.inner.read().await.settings.clone();
-            self.agent.set_pin(self.pairing_pin(&settings)).await;
-        }
         reconcile_subtree(&self.reconcilers, &self.inner, &self.refusals, path).await
     }
 
@@ -232,8 +224,6 @@ impl MicadService {
     pub async fn apply_startup(&self) -> DeferredApply {
         {
             let _apply = self.apply_lock.lock().await;
-            let settings = self.inner.read().await.settings.clone();
-            self.agent.set_pin(self.pairing_pin(&settings)).await;
             reconcile_matching(&self.reconcilers, &self.inner, &self.refusals, "", |name| {
                 !DEFERRED.contains(&name)
             })

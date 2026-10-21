@@ -511,12 +511,12 @@
         "tags": [
           "resources"
         ],
-        "summary": "Read the Bluetooth surface: the trust list, the adapter, the devices, the\npairing code and whatever is waiting to be confirmed.",
+        "summary": "Read the Bluetooth surface: the trust list, the adapter, the devices, the\npairing window and whatever is waiting to be confirmed.",
         "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_read",
         "responses": {
           "200": {
-            "description": "`declared`, `adapter`, `devices`, `pin` and `pending`, each named apart",
+            "description": "`enabled`, `declared`, `adapter` (`name`, `address`, `powered`, `discoverable`), `devices`, `pending` (`name`, `mac`, `passkey`), `pairWindow` (`expiresAt`, or null) and `pin` (the phone app's code), each named apart",
             "content": {
               "application/json": {
                 "schema": {
@@ -561,8 +561,8 @@
         "tags": [
           "resources"
         ],
-        "summary": "Configure the adapter.",
-        "description": "**The trust list is not here.** Devices arrive by pairing and leave by\nbeing removed; a route that replaced the whole list would let a client\ndeclare a device it never paired with, which the adapter would then have\nno keys for.\n\nServed only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "summary": "Switch the adapter on or off.",
+        "description": "**The trust list is not here.** Devices arrive by pairing and leave by\nbeing removed; a route that replaced the whole list would let a client\ndeclare a device it never paired with, which the adapter would then have\nno keys for. Nor is discoverability, the name or a pairing code: the\nadapter is discoverable only while a pairing window is open, advertises\nthe hostname, and offers no fixed code.\n\nServed only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_write",
         "requestBody": {
           "content": {
@@ -576,7 +576,7 @@
         },
         "responses": {
           "202": {
-            "description": "The adapter settings were written and the reconcile queued; the body carries the task id",
+            "description": "The switch was written and the reconcile queued; the body carries the task id",
             "content": {
               "application/json": {
                 "schema": {
@@ -626,7 +626,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, the alias is empty or longer than 64 characters, or the pairing code is not six digits or is the default `000000` (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "The body carries `discoverable`, `alias`, `pairingCode` or `pin` (`not_supported`, params `field`), or is not this shape (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -769,8 +769,8 @@
         "tags": [
           "actions"
         ],
-        "summary": "Pair with a device, or answer the confirmation a pairing is waiting on.",
-        "description": "Two verbs on one path because they are two halves of one exchange: `pair`\nstarts it, and `confirm` answers the passkey BlueZ asked about in the\nmiddle of it.\n\nServed only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "summary": "Pair with a device this device started the pairing with.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
         "operationId": "api_v1_bluetooth_device_action",
         "parameters": [
           {
@@ -785,27 +785,16 @@
           {
             "name": "action",
             "in": "path",
-            "description": "`pair` or `confirm`",
+            "description": "`pair`",
             "required": true,
             "schema": {
               "type": "string"
             }
           }
         ],
-        "requestBody": {
-          "description": "`confirm` only: whether the passkey matched",
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PairingAnswer"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
-            "description": "The pairing was started, or the confirmation was answered"
+            "description": "The pairing was started"
           },
           "401": {
             "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
@@ -848,7 +837,7 @@
             }
           },
           "422": {
-            "description": "The address is not a Bluetooth address, or no confirmation is waiting for it (`settings_rejected`)",
+            "description": "The address is not a Bluetooth address (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -890,19 +879,30 @@
         }
       }
     },
-    "/api/v1/bluetooth/discovery": {
+    "/api/v1/bluetooth/pairing-requests/{mac}": {
       "post": {
         "tags": [
           "actions"
         ],
-        "summary": "Start or stop a Bluetooth scan.",
+        "summary": "Answer a pairing waiting in `pending`: `accept` when the six digits match\nwhat the other device shows. An accepted device joins the trust list.",
         "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
-        "operationId": "api_v1_bluetooth_discovery",
+        "operationId": "api_v1_bluetooth_pairing_request",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "description": "The waiting device's address, `AA:BB:CC:DD:EE:FF`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DiscoveryRequest"
+                "$ref": "#/components/schemas/PairingAnswer"
               }
             }
           },
@@ -910,7 +910,7 @@
         },
         "responses": {
           "204": {
-            "description": "The adapter was told to start or stop scanning"
+            "description": "The pairing was answered"
           },
           "400": {
             "description": "The body is not JSON (`request_invalid`)",
@@ -963,7 +963,162 @@
             }
           },
           "500": {
+            "description": "No pairing of this address is waiting (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bluetooth/pairing-window": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Open the pairing window: for 180 seconds the adapter is discoverable and\npairable, and a pairing waits in `pending` for the console. Opening it\nagain restarts the 180 seconds.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "operationId": "api_v1_bluetooth_pair_window_open",
+        "responses": {
+          "200": {
+            "description": "The window is open until `expiresAt`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairWindow"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
             "description": "Bluetooth is switched off, this device has no adapter, or BlueZ refused (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Close the pairing window now; whatever still waits is refused.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "operationId": "api_v1_bluetooth_pair_window_close",
+        "responses": {
+          "204": {
+            "description": "The window is closed"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "BlueZ refused (`micad_failed`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9990,33 +10145,14 @@
       },
       "BluetoothAdapterSettings": {
         "type": "object",
-        "description": "The adapter's own settings: whether it runs, whether it answers scans, the\nname it advertises and the code a legacy peer is told.",
+        "description": "The adapter's one setting: whether it runs.",
         "required": [
-          "enabled",
-          "discoverable"
+          "powered"
         ],
         "properties": {
-          "alias": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The name it advertises; absent advertises the hostname."
-          },
-          "discoverable": {
-            "type": "boolean",
-            "description": "Whether the adapter answers a scan."
-          },
-          "enabled": {
+          "powered": {
             "type": "boolean",
             "description": "Whether `bluetooth.service` runs and the adapter is powered."
-          },
-          "pin": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The pairing code offered to a peer that asks for one: six digits, not\nthe default `000000`. Absent keeps the stored one. **Not a secret**: it\nis displayed, because somebody has to type it on the other device."
           }
         },
         "additionalProperties": false
@@ -10430,20 +10566,6 @@
             "maxLength": 64,
             "minLength": 64,
             "pattern": "^[0-9a-f]{64}$"
-          }
-        },
-        "additionalProperties": false
-      },
-      "DiscoveryRequest": {
-        "type": "object",
-        "description": "Whether a scan should be running.",
-        "required": [
-          "on"
-        ],
-        "properties": {
-          "on": {
-            "type": "boolean",
-            "description": "`true` starts a scan, `false` stops it."
           }
         },
         "additionalProperties": false
@@ -11204,6 +11326,21 @@
           }
         }
       },
+      "PairWindow": {
+        "type": "object",
+        "description": "When the pairing window closes by itself.",
+        "required": [
+          "expiresAt"
+        ],
+        "properties": {
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since the epoch.",
+            "minimum": 0
+          }
+        }
+      },
       "PairingAnswer": {
         "type": "object",
         "description": "The device's answer to a pending pairing confirmation.",
@@ -11213,7 +11350,7 @@
         "properties": {
           "accept": {
             "type": "boolean",
-            "description": "Whether the passkey matched what the peer is showing."
+            "description": "Whether the six digits match what the peer is showing."
           }
         },
         "additionalProperties": false

@@ -3,18 +3,38 @@
 use micad_settings::Settings;
 
 /// A device that declares nothing Bluetooth writes the document its schema
-/// default produces: the switch on, nothing discoverable, no devices.
+/// default produces: the switch on, no devices.
 #[test]
-pub(super) fn bluetooth_defaults_are_on_and_undiscoverable() {
+pub(super) fn bluetooth_defaults_are_on() {
     let settings = Settings::default();
 
     assert!(settings.bluetooth.enabled);
-    assert!(!settings.bluetooth.discoverable);
     assert!(settings.bluetooth.pin.is_none());
     assert!(settings.bluetooth.devices.is_empty());
     assert_eq!(
         serde_json::to_value(&settings.bluetooth).unwrap(),
-        serde_json::json!({ "enabled": true, "discoverable": false })
+        serde_json::json!({ "enabled": true })
+    );
+}
+
+/// A document from before the pairing window still loads; the keys it no
+/// longer has are dropped when it is next written.
+#[test]
+pub(super) fn retired_bluetooth_keys_load_and_are_not_written_again() {
+    let bluetooth: micad_settings::BluetoothSettings = serde_json::from_value(serde_json::json!({
+        "enabled": true, "discoverable": true, "alias": "deck", "pin": "421137",
+    }))
+    .expect("an earlier document loads");
+    assert_eq!(
+        serde_json::to_value(&bluetooth).unwrap(),
+        serde_json::json!({ "enabled": true, "pin": "421137" })
+    );
+    assert!(
+        serde_json::from_value::<micad_settings::BluetoothSettings>(
+            serde_json::json!({ "scan": true })
+        )
+        .is_err(),
+        "an unknown key is still refused"
     );
 }
 

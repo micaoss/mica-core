@@ -306,9 +306,6 @@ async fn serve() -> anyhow::Result<()> {
     }
     state.insert("meta".to_string(), meta.to_json());
 
-    // Read before the tree is handed to the service: the agent answers a
-    // legacy peer with the declared code, or with the default one.
-    let settings_pin = settings.bluetooth.pairing_pin().to_string();
     let mut pairing_agent: Option<Arc<bluetooth::Agent>> = None;
 
     let mut service = bus::MicadService::new(
@@ -440,11 +437,8 @@ async fn serve() -> anyhow::Result<()> {
         } else {
             // Not once: bluetoothd starts when the settings turn Bluetooth on,
             // and forgets its agents whenever it restarts.
-            tokio::spawn(bluetooth::keep_agent_registered(connection.clone()));
+            tokio::spawn(bluetooth::keep_agent_registered(connection.clone(), agent));
         }
-        // The agent answers with whatever the settings say; the reconciler
-        // keeps it in step from here on.
-        agent.set_pin(settings_pin).await;
     }
     // The service scan, started before the well-known name is claimed so that
     // its NameOwnerChanged subscription is in place before anything can react
