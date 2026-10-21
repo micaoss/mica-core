@@ -227,6 +227,7 @@ directions, because `SettingsChanged` carries setting values.
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so setup and BLE provisioning cannot both claim it), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
+| Apps | `GetApps`, `GetApp`, `InstallApp`, `RollbackApp`, `RemoveApp`, `CheckAppUpdate`, `UpdateApp`, `StartApp`, `StopApp`, `RestartApp`, `GetAppLog` (section 3.11) |
 | Containers and Bluetooth | `CheckContainerProject`, `CheckContainerProjectIn`, `StartContainer`, `StopContainer`, `RestartContainer`, `SetBluetoothDiscovery` (no API route serves it), `OpenBluetoothPairWindow`, `CloseBluetoothPairWindow`, `PairBluetoothDevice`, `ConfirmBluetoothPairing` (an accepted pairing is declared untrusted), `SetBluetoothDeviceFlag` (a declared device's `trusted` or `blocked`), `RemoveBluetoothDevice` |
 
 A value the tree refuses is `org.freedesktop.DBus.Error.InvalidArgs`.
@@ -286,7 +287,8 @@ absence is reported with its reason rather than as a healthy reading:
 - **Power, reset and recovery.** Reboot and power-off are recorded with their caller before they
   run. A staged reset applies one tier: `configuration`, `application-data` or `full-factory`
   (which keeps identity). `application-data` and `full-factory` also clear DATA/state
-  `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10), and
+  `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10) and remove
+  the record of the image's app seeds (section 3.11), and
   refuse to run while `/run/docker.pid` names a live dockerd, whose storage they would clear
   under it. A board-declared physical recovery action at boot maps to a tier. A
   transient root password lives in `/etc/shadow` until the next boot and in no setting.
@@ -474,7 +476,7 @@ The applied state is `available`, each applied service's `enabled` (and `error`)
 **Bus.** `GetUnits` answers `init`, `available` (the root has `mica-unit`) and `units`: each
 service declared or in `mica-unit`'s directory, with `declared`, `managed` (declared for this
 init), `installed`, `enabled` (linked), the init's `active` state and, for one of the other init,
-`refused`. `StartUnit`, `StopUnit` and `RestartUnit` take an installed service, managed or not,
+`refused`, and `app`, the app it is part of (section 3.11). `StartUnit`, `StopUnit` and `RestartUnit` take an installed service, managed or not,
 through systemd's manager or `rc-service`; what they do lasts until the next boot or the next
 change of `enabled`. `GetUnitLog` answers its newest lines as `GetLog` answers a service's: the
 journal of the unit under systemd, and under OpenRC the RAM log's lines tagged with the script's
@@ -501,6 +503,116 @@ report it; exit 0 done, 1 failed, 2 misused.
 
 **A reset** of application data empties `services.units` and clears the directories
 `mica-unit` keeps them in, DATA/state `systemd-units` and `openrc-local`.
+
+### 3.11 Apps
+
+An app is software the user installs as one bundle: its files, its units for either init, a
+first-run hook and where its newer versions are announced. micad unpacks it under
+`/mica/apps/<name>/<version>`, keeps its units through `mica-unit` as it keeps the user's services
+(3.10), and gives it `/srv/apps/<name>` (root's, `0700`) for its data, which stays across versions.
+`docs/apps/tailscale.md` builds one.
+
+**The bundle** is a gzip tar of at most 256 MiB, unpacking to at most 1 GiB and 20 000 members:
+`mica-app.json` at its top, and `files/`, `units/systemd/`, `units/openrc/` and `hooks/`. Each
+member is checked as it is unpacked: a path that leaves the bundle or lies elsewhere, a member
+under a link, a link pointing outside, a setuid or setgid mode, a member that is not a file, a
+directory or a symbolic link, or one there twice refuses it. The manifest:
+
+| Field | Meaning |
+| --- | --- |
+| `schemaVersion` | `1` |
+| `name` | 1 to 32 of `[a-z0-9-]`, not starting with `-` |
+| `version` | A version in dpkg's order, at most 64 characters |
+| `arch` | Some of `amd64`, `arm64`, `armhf`, or `all`; the device's must be among them |
+| `description` | Optional |
+| `units` | At most 16 `{"systemd"?, "openrc"?, "enable"}`, each naming its file in `units/<init>/`; a bundle with units has one for the device's init. `enable` starts it at boot and at install |
+| `env` | At most 64 upper-case variables outside `APP_`, without quotes, backslashes, `$`, backquotes or control characters |
+| `firstRun` | Optional, an executable file in `hooks/` |
+| `update` | Optional `{"url", "auto"}`: an `https` version file, and whether a newer version installs on its own |
+| `seedPolicy` | `follow-image` (default) or `once`, below |
+
+A unit is refused when the root ships its name, `services.units` declares it, another app has it,
+or a hand installed it with `mica-unit`. At most 16 apps are installed.
+
+**Install and upgrade.** A bundle is checked before it is taken: its manifest, its units and what
+is installed, so a broken one is refused with every rule it breaks and nothing changes. The
+version installed is refused unless asked again (`reinstall`); any other version of an installed
+app upgrades it. It is then unpacked into a hidden directory beside its place, after a check
+that the filesystem has room for what it unpacks to, flushed and renamed into place. The switch
+stops the units the running version has, installs the new version's (and an OpenRC script's `conf.d`, `units/openrc/conf.d/<name>`),
+removes those it no longer ships, points `/mica/apps/<name>/current` at the version in one
+rename, and writes `/mica/apps/<name>/app.env`: `APP_NAME`, `APP_VERSION`, `APP_DIR` (`current`),
+`APP_DATA` and the manifest's `env`, which the units read. The first-run hook runs once per
+version, as root in the version's directory with only `PATH` and that environment, for at most
+300 s; its output is kept in `first-run.log` beside `app.env` and sent to syslog tagged
+`mica-app-<name>`. Then each unit is enabled or disabled as the manifest says and the enabled ones
+are started; one left `failed` fails the install. A failed upgrade switches back to the version
+that ran; a failed first install leaves nothing. micad keeps the current and the previous
+version, and deletes older ones.
+
+**Rollback** switches to the previous version, which becomes the kept one. **Remove** stops and
+removes the units and every version; `purge` deletes `/srv/apps/<name>` too. Start, stop and
+restart act on the app's units until the next boot.
+
+**Seeds.** An image may carry apps in `/usr/share/mica/apps/<name>.tar.gz`. At every boot each
+seed is taken by one rule, recorded in `/var/lib/mica/seeded-apps.json`:
+
+- not recorded: installed, or recorded `skipped` when the user installed that app already;
+- recorded with its sha256: nothing, so what the user did with the app since stays;
+- recorded with another sha256: under `once`, nothing; under `follow-image`, installed only while
+  the app is exactly the version that was seeded and the seed is newer;
+- a seed that fails is recorded `failed` and tried at one more boot.
+
+**Updates.** The version file is `{"name", "version", "bundles": {"<arch>": {"url", "sha256",
+"size"}}}`, `url` relative to the file or absolute and `https`. micad reads it every 24 h and on
+demand, and records what it offers; an update fetches the bundle for the device's arch, checks its
+size and sha256, and upgrades. A version that failed is not offered again. With `auto` the daily
+check updates on its own.
+
+**Bus.** Each change is a task of kind `app.apply` (`GetTask`), one at a time:
+
+| Member | Does |
+| --- | --- |
+| `GetApps`, `GetApp(name)` | `{available, arch, apps}`, and one of them: each app's `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `last` (the last flow's `action`, `outcome` `ok` or `failed`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` |
+| `InstallApp(path, reinstall, upgrade)` | Install the bundle at `path`; `upgrade` refuses an app not installed |
+| `RollbackApp(name)`, `RemoveApp(name, purge)`, `CheckAppUpdate(name)`, `UpdateApp(name)` | The flows above |
+| `StartApp`, `StopApp`, `RestartApp(name)` | The verb on its units, at once |
+| `GetAppLog(name)` | Each unit's newest lines, as `GetUnitLog`, and the first-run output |
+
+A broken bundle is `com.mica.micad1.Error.AppInvalid`, its description JSON `{"message",
+"details": [{"rule", "detail"}]}`; a flow while another runs is `AppBusy`; the installed version
+again is `AppInstalled`; an unknown app is `NotFound`. `GetUnits` names the app a unit is part
+of as `app`, and a `services.units` write naming an app's unit is refused (`unit_taken`).
+
+**On the device: `micad app`.**
+
+| Command | Does |
+| --- | --- |
+| `install <file> [--reinstall]` | Install or upgrade the app in a bundle |
+| `upgrade <file>` | The same, refused when the app is not installed |
+| `update <name>` | Fetch the newer version its update URL offers, and upgrade |
+| `check [name]` | Read its update URL now; every app with one, without a name |
+| `rollback <name>` | Switch to the previous version |
+| `remove <name> [--purge]` | Stop it and delete it; `--purge` its data too |
+| `list`, `status <name>` | Every app; one |
+| `logs <name> [--tail N]` | Its units' newest lines and its first-run output (200 unless asked) |
+
+The changes wait for their task unless `--detach`; exit 0 done, 1 failed, 2 misused. `micad unit`
+lists an app's units as the app's and refuses to change them.
+
+**API.** `GET /api/v1/apps` is `GetApps` and `GET /api/v1/apps/{name}` `GetApp`.
+`POST /api/v1/apps` takes a bundle as `application/octet-stream` (`?reinstall=true`), written to
+`/mica/apps/.incoming` and installed as a task: a broken bundle is 422 `app_invalid` with each
+rule in `rules`, one that cannot be installed here 422 `app_refused`, a flow running or the
+installed version 409 `app_busy` or `app_installed`, above 256 MiB 413 `app_too_large`.
+`DELETE /api/v1/apps/{name}` (`?purge=true`) removes; `POST /api/v1/apps/{name}/{action}`
+is `rollback`, `check` or `update` (a task) or `start`, `stop` or `restart`; `GET
+/api/v1/apps/{name}/logs` is the log, each line scrubbed of secrets. The console lists the apps
+on its services page, with the upload, and gives each its own page.
+
+**A reset** of application data or a full-factory reset clears `/mica/apps` and `/srv`, with the
+apps' data, and removes the seed record, so the image's seeds are installed again at the next
+boot.
 
 ## 4. mica-apid
 
@@ -563,8 +675,8 @@ liveness; `/_ui/` is the built-in console from `mica-apid-ui` (404 without the p
 the active custom console bundle or a redirect to `/_ui/`.
 
 **The API**, by group: session, setup and password; API tokens; settings, state and tasks;
-network, Wi-Fi, containers, the user's services (`/units`, section 3.10), Bluetooth, MQTT and
-SSH keys; observation (time, storage, system
+network, Wi-Fi, containers, the user's services (`/units`, section 3.10), apps (`/apps`, section
+3.11), Bluetooth, MQTT and SSH keys; observation (time, storage, system
 information, telemetry, service logs at `/system/logs/{source}`, network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
 fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,

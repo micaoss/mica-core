@@ -491,6 +491,48 @@ pub(crate) mod tests {
         );
     }
 
+    /// `docs/apps/tailscale`, laid out as its `pack.sh` lays it out, with
+    /// stand-ins for Tailscale's binaries.
+    #[test]
+    fn the_tailscale_example_is_a_good_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("tailscale.tar.gz");
+        write_bundle(
+            &archive,
+            &[
+                Member::File(
+                    "mica-app.json",
+                    include_bytes!("../../../../docs/apps/tailscale/mica-app.json"),
+                    0o644,
+                ),
+                Member::Dir("files"),
+                Member::File("files/tailscale", b"", 0o755),
+                Member::File("files/tailscaled", b"", 0o755),
+                Member::File(
+                    "units/systemd/tailscaled.service",
+                    include_bytes!("../../../../docs/apps/tailscale/tailscaled.service"),
+                    0o644,
+                ),
+                Member::File(
+                    "units/openrc/tailscaled",
+                    include_bytes!("../../../../docs/apps/tailscale/tailscaled.openrc"),
+                    0o644,
+                ),
+                Member::File(
+                    "hooks/first-run",
+                    include_bytes!("../../../../docs/apps/tailscale/first-run"),
+                    0o755,
+                ),
+            ],
+        );
+        for init in [Init::Systemd, Init::Openrc] {
+            let dest = dir.path().join(init.as_str());
+            let unpacked = unpack(&archive, &dest, init, "arm64")
+                .unwrap_or_else(|err| panic!("docs/apps/tailscale under {}: {err}", init.as_str()));
+            assert_eq!(unpacked.manifest.name, "tailscale");
+        }
+    }
+
     #[test]
     fn every_member_outside_the_rules_is_named() {
         let dir = tempfile::tempdir().unwrap();

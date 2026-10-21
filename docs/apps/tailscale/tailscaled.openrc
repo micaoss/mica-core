@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+
+description="Tailscale node agent"
+supervisor=supervise-daemon
+command=/mica/apps/tailscale/current/files/tailscaled
+command_args="--state=/srv/apps/tailscale/tailscaled.state --socket=/run/tailscale/tailscaled.sock --port=41641"
+
+depend() {
+	need net
+}
+
+start_pre() {
+	checkpath -d -m 0755 /run/tailscale
+}

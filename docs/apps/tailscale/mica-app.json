@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "tailscale",
+  "version": "1.104.2",
+  "arch": ["arm64"],
+  "description": "Tailscale node: reach this device over the tailnet",
+  "units": [
+    { "systemd": "tailscaled.service", "openrc": "tailscaled", "enable": true }
+  ],
+  "env": {
+    "TS_SOCKET": "/run/tailscale/tailscaled.sock"
+  },
+  "firstRun": "hooks/first-run",
+  "seedPolicy": "follow-image"
+}

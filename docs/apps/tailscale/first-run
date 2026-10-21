@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs once per version, as root, before tailscaled starts.
+set -eu
+echo "tailscale $APP_VERSION: state in $APP_DATA"
+"$APP_DIR/files/tailscale" version
