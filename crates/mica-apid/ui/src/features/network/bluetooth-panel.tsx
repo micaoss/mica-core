@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { Bluetooth, Plus, Trash2 } from 'lucide-react'
+import { Ban, Bluetooth, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import type { BluetoothOverview, TaskAccepted } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
@@ -13,19 +13,28 @@ import { ToggleField } from '@/shared/components/form-field'
 import { StatusBadge } from '@/shared/components/status-badge'
 import { Button } from '@/shared/components/ui/button'
 import { Switch } from '@/shared/components/ui/switch'
-import { failureDetail } from '@/shared/feedback/toast'
+import { failureDetail, notifyFailure, notifySuccess } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
-import { bluetoothRows, remaining, type BluetoothRow } from './bluetooth'
+import { BleProvisioningPanel } from './ble-provisioning-panel'
+import { bluetoothRows, provisioningQuery, remaining, useClock, type BluetoothRow } from './bluetooth'
+import { EditBar } from './change-bar'
 
 type Pending = BluetoothOverview['pending'][number]
+type Flag = 'trust' | 'untrust' | 'block' | 'unblock'
 
-/// The adapter, the devices it is paired with, and the pairing window.
+interface Draft {
+  powered: boolean
+  autoWhenOffline: boolean
+}
+
+/// The configuration, the adapter, BLE provisioning, the devices it is paired
+/// with, and the pairing window.
 ///
 /// The adapter is never discoverable by a setting: "Allow new devices" opens
 /// it for three minutes, and a phone that pairs inside them shows up under
 /// "Pairing requests" with the six digits both ends display. The window closes
 /// on the device, whether or not this page is open.
-export function BluetoothPanel() {
+export function BluetoothPanel({ onEditing }: { onEditing?: (editing: boolean) => void }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   // While the window is open the page polls faster: a request has to appear
@@ -41,10 +50,33 @@ export function BluetoothPanel() {
   const rows = bluetoothRows(overview)
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['bluetooth'] })
 
-  const power = useMutationFeedback<TaskAccepted, boolean>({
-    mutationFn: (powered) => api<TaskAccepted>('/api/v1/bluetooth', json('PUT', { powered })),
-    success: t('network.bluetooth.saved'),
-    failure: t('network.bluetooth.save'),
+  const provisioning = useQuery(provisioningQuery)
+  const [draft, setDraft] = useState<Draft>()
+  const [confirming, setConfirming] = useState(false)
+  useEffect(() => { onEditing?.(draft !== undefined); return () => onEditing?.(false) }, [draft, onEditing])
+  const autoWhenOffline = provisioning.data?.autoWhenOffline ?? true
+  const dirty = draft !== undefined && (draft.powered !== overview?.enabled || draft.autoWhenOffline !== autoWhenOffline)
+  const send = async () => {
+    if (!draft) return
+    try {
+      if (draft.powered !== overview?.enabled) await api<TaskAccepted>('/api/v1/bluetooth', json('PUT', { powered: draft.powered }))
+      if (draft.autoWhenOffline !== autoWhenOffline) {
+        await api<TaskAccepted>('/api/v1/bluetooth/provisioning/settings', json('PUT', { autoWhenOffline: draft.autoWhenOffline }))
+      }
+      setDraft(undefined)
+    } finally {
+      invalidate()
+      void queryClient.invalidateQueries({ queryKey: provisioningQuery.queryKey })
+    }
+  }
+  const askOrSave = () => {
+    if (draft && !draft.autoWhenOffline && autoWhenOffline) setConfirming(true)
+    else void send().then(() => notifySuccess(t('network.bluetooth.saved')), (error: unknown) => notifyFailure(t('network.bluetooth.save'), failureDetail(error, t('common.requestFailed'))))
+  }
+  const flag = useMutationFeedback<void, { address: string; action: Flag }>({
+    mutationFn: ({ address, action }) => api<void>(`/api/v1/bluetooth/devices/${encodeURIComponent(address)}/${action}`, { method: 'POST' }),
+    success: (_data, { address }) => t('network.bluetooth.flagSaved', { address }),
+    failure: t('network.bluetooth.flagFailed'),
     onSuccess: invalidate,
   })
   const openWindow = useMutationFeedback<{ expiresAt: number }, void>({
@@ -85,12 +117,33 @@ export function BluetoothPanel() {
       {bluetooth.error ? <Callout tone="danger" title={failureDetail(bluetooth.error, t('common.requestFailed'))} /> : null}
       {overview?.adapter.available === false ? <Callout tone="warning" title={overview.adapter.detail ?? t('network.bluetooth.noAdapter')} /> : null}
 
-      <Panel title={t('network.bluetooth.title')} description={t('network.bluetooth.copy')} action={<Bluetooth className="size-5 text-muted-foreground" />}>
-        <ToggleField
-          title={t('network.bluetooth.enabled')}
-          description={t('network.bluetooth.enabledCopy')}
-          control={<Switch checked={overview?.enabled ?? false} disabled={!overview || power.isPending} onCheckedChange={(value) => power.mutate(value)} aria-label={t('network.bluetooth.enabled')} />}
-        />
+      <Panel
+        title={t('network.bluetooth.config')}
+        description={draft ? t('network.bluetooth.editHint') : t('network.bluetooth.copy')}
+        className={draft ? 'ring-2 ring-primary/40' : undefined}
+        action={draft ? <Bluetooth className="size-5 text-muted-foreground" /> : (
+          <Button size="sm" disabled={!overview || !provisioning.data} onClick={() => setDraft({ powered: overview?.enabled ?? true, autoWhenOffline })}>{t('network.bluetooth.edit')}</Button>
+        )}
+      >
+        {draft ? (
+          <>
+            <ToggleField
+              title={t('network.bluetooth.enabled')}
+              description={t('network.bluetooth.enabledCopy')}
+              control={<Switch checked={draft.powered} onCheckedChange={(powered) => setDraft({ ...draft, powered })} aria-label={t('network.bluetooth.enabled')} />}
+            />
+            <ToggleField
+              title={t('network.bluetooth.autoOffline')}
+              description={t('network.bluetooth.autoOfflineCopy')}
+              control={<Switch checked={draft.autoWhenOffline} onCheckedChange={(value) => setDraft({ ...draft, autoWhenOffline: value })} aria-label={t('network.bluetooth.autoOffline')} />}
+            />
+          </>
+        ) : (
+          <FactList facts={[
+            { id: 'enabled', label: t('network.bluetooth.enabled'), value: overview ? t(overview.enabled ? 'network.bluetooth.on' : 'network.bluetooth.off') : '—' },
+            { id: 'auto', label: t('network.bluetooth.autoOffline'), value: provisioning.data ? t(autoWhenOffline ? 'network.bluetooth.on' : 'network.bluetooth.off') : '—' },
+          ]} />
+        )}
       </Panel>
 
       {overview?.adapter.available ? (
@@ -104,9 +157,11 @@ export function BluetoothPanel() {
         </Panel>
       ) : null}
 
+      <BleProvisioningPanel />
+
       <CollectionPanel
-        title={t('network.bluetooth.devices')}
-        description={window ? undefined : t('network.bluetooth.windowCopy')}
+        title={t('network.bluetooth.devices', { count: rows.length })}
+        description={window ? t('network.bluetooth.devicesCopy') : `${t('network.bluetooth.devicesCopy')} ${t('network.bluetooth.windowCopy')}`}
         action={window ? (
           <span className="flex items-center gap-2">
             <span className="text-sm text-warning" data-testid="pair-window">{t('network.bluetooth.allowing', { left })}</span>
@@ -139,6 +194,21 @@ export function BluetoothPanel() {
               </span>
             ) },
             { id: 'actions', header: '', align: 'end', cell: (row) => (
+              <span className="flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={flag.isPending}
+                onClick={() => flag.mutate({ address: row.address, action: row.trusted ? 'untrust' : 'trust' })}
+              ><ShieldCheck />{t(row.trusted ? 'network.bluetooth.untrust' : 'network.bluetooth.trust')}</Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={flag.isPending}
+                onClick={() => flag.mutate({ address: row.address, action: row.blocked ? 'unblock' : 'block' })}
+              ><Ban />{t(row.blocked ? 'network.bluetooth.unblock' : 'network.bluetooth.block')}</Button>
               <ConfirmDialog
                 trigger={<Button type="button" size="icon-sm" variant="destructive" aria-label={t('network.bluetooth.remove', { address: row.address })}><Trash2 /></Button>}
                 title={t('network.bluetooth.remove', { address: row.address })}
@@ -148,6 +218,7 @@ export function BluetoothPanel() {
                 failure={t('network.bluetooth.remove', { address: row.address })}
                 onConfirm={() => remove.mutateAsync(row.address)}
               />
+              </span>
             ) },
           ]}
         />
@@ -178,18 +249,21 @@ export function BluetoothPanel() {
           ]}
         />
       </CollectionPanel>
+
+      {draft ? (
+        <EditBar what={t('network.bluetooth.config')} dirty={dirty} errors={0} onCancel={() => setDraft(undefined)} onDone={askOrSave} doneLabel={t('common.actions.save')} />
+      ) : null}
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        tone="danger"
+        title={t('network.bluetooth.autoOfflineOff')}
+        description={t('network.bluetooth.autoOfflineOffCopy')}
+        confirmLabel={t('common.actions.save')}
+        success={t('network.bluetooth.saved')}
+        failure={t('network.bluetooth.save')}
+        onConfirm={send}
+      />
     </div>
   )
-}
-
-/// The time now, ticking every second while `running`.
-function useClock(running: boolean) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!running) return
-    setNow(Date.now())
-    const timer = globalThis.setInterval(() => setNow(Date.now()), 1_000)
-    return () => globalThis.clearInterval(timer)
-  }, [running])
-  return now
 }

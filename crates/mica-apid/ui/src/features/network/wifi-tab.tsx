@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/shared/components/ui/switch'
 import { failureDetail, notifyFailure, notifySuccess } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
+import { provisioningQuery } from './bluetooth'
 import { EditBar } from './change-bar'
 import { inSubnet, intToIp, ipToInt, isIPv4, overlaps, parseCidr, sameEntry, type IfaceEntry } from './model'
 import { countryName, ELSEWHERE, EUROPE } from './regulatory'
@@ -67,6 +68,10 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
   const [draft, setDraft] = useState<Draft>()
   const [confirming, setConfirming] = useState(false)
   useEffect(() => { onEditing(draft !== undefined); return () => onEditing(false) }, [draft, onEditing])
+  // A BLE provisioning session holds the radio: the device refuses Wi-Fi
+  // writes (423) until it ends.
+  const provisioning = useQuery({ ...provisioningQuery, enabled: data.serves('bluetooth'), refetchInterval: 5_000 })
+  const locked = provisioning.data?.wifiLocked === true
 
   const start = () => setDraft({
     enabled: wifi.mode !== 'off',
@@ -134,18 +139,19 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
 
   return (
     <>
+      {locked ? <Callout tone="warning" title={t('network.wifi.locked')} /> : null}
       <PageSection title={t('network.wifi.state')}>
         <Panel><StateFacts data={data} /></Panel>
       </PageSection>
 
-      {listMode === 'client' ? <ClientLists data={data} /> : null}
+      {listMode === 'client' ? <ClientLists data={data} locked={locked} /> : null}
       {listMode === 'ap' && wifi.mode === 'ap' ? <Stations data={data} /> : null}
 
       <PageSection title={t('network.wifi.config')} description={draft ? t('network.wifi.editHint') : t('network.wifi.configCopy', { radio: radio || '—' })}>
         <Panel className={draft ? 'ring-2 ring-primary/40' : undefined}>
           {draft ? <ConfigForm draft={draft} setDraft={setDraft} errors={errors} current={wifi.mode} allowed={allowed} /> : (
             <>
-              <div><Button size="sm" disabled={!radio} onClick={start}>{t('network.detail.edit')}</Button></div>
+              <div><Button size="sm" disabled={!radio || locked} onClick={start}>{t('network.detail.edit')}</Button></div>
               <ConfigView data={data} />
             </>
           )}
@@ -441,7 +447,7 @@ function withoutAddressing(entry: IfaceEntry): IfaceEntry {
 }
 
 /// The client's saved networks and the radio's scan.
-function ClientLists({ data }: { data: NetworkData }) {
+function ClientLists({ data, locked }: { data: NetworkData; locked: boolean }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const networks = useQuery({ queryKey: ['wifi-networks'], queryFn: () => api<WifiNetwork[]>('/api/v1/wifi/client/networks') })
@@ -484,7 +490,7 @@ function ClientLists({ data }: { data: NetworkData }) {
     <>
       <PageSection title={t('network.wifi.savedNetworks')} description={t('network.wifi.savedCopy')}>
         {networks.error ? <Callout tone="danger" title={failureDetail(networks.error, t('common.requestFailed'))} /> : null}
-        <CollectionPanel action={<Button size="sm" variant="outline" onClick={() => open({ ssid: '', existing: false, secured: true })}><Plus />{t('network.wifi.add')}</Button>} title={t('network.wifi.savedNetworks')}>
+        <CollectionPanel action={<Button size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: '', existing: false, secured: true })}><Plus />{t('network.wifi.add')}</Button>} title={t('network.wifi.savedNetworks')}>
           <DataTable<WifiNetwork>
             rows={networks.data ? [...networks.data].sort((left, right) => right.priority - left.priority) : undefined}
             rowKey={(entry) => entry.ssid}
@@ -497,9 +503,9 @@ function ClientLists({ data }: { data: NetworkData }) {
               { id: 'auto', header: t('network.wifi.autoConnect'), cell: (entry) => t(entry.autoConnect === false ? 'network.values.off' : 'network.values.on') },
               { id: 'actions', header: '', align: 'end', cell: (entry) => (
                 <span className="flex justify-end gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={() => open({ ssid: entry.ssid, existing: true, secured: Boolean(entry.psk) }, entry)}>{t('common.actions.edit')}</Button>
+                  <Button type="button" size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: entry.ssid, existing: true, secured: Boolean(entry.psk) }, entry)}>{t('common.actions.edit')}</Button>
                   <ConfirmDialog
-                    trigger={<Button type="button" size="sm" variant="destructive" aria-label={t('network.wifi.removeNamed', { name: entry.ssid })}><Trash2 /></Button>}
+                    trigger={<Button type="button" size="sm" variant="destructive" disabled={locked} aria-label={t('network.wifi.removeNamed', { name: entry.ssid })}><Trash2 /></Button>}
                     title={t('network.wifi.removeNamed', { name: entry.ssid })}
                     description={t('network.wifi.removeCopy')}
                     confirmLabel={t('network.wifi.remove')}
@@ -535,7 +541,7 @@ function ClientLists({ data }: { data: NetworkData }) {
                   { id: 'actions', header: '', align: 'end', cell: (network) => {
                     const security = scanSecurity(network.best.flags)
                     const saved = networks.data?.some((each) => each.ssid === network.ssid)
-                    return saved || security === 'eap' || security === 'wep' ? null : <Button type="button" size="sm" variant="outline" onClick={() => open({ ssid: network.ssid, existing: false, secured: security !== 'open' })}>{t('network.wifi.connect')}</Button>
+                    return saved || security === 'eap' || security === 'wep' ? null : <Button type="button" size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: network.ssid, existing: false, secured: security !== 'open' })}>{t('network.wifi.connect')}</Button>
                   } },
                 ]}
               />

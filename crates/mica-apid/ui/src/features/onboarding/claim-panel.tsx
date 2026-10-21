@@ -41,7 +41,7 @@ export function ClaimPanel() {
         {claim.isPending ? t('access.claim.checking') : t(claimed ? 'access.claim.claimed' : 'access.claim.unclaimed')}
       </StatusDot>
       <FactList facts={[
-        value?.via ? { id: 'via', label: t('access.claim.via'), value: t(value.via === 'setup' ? 'access.claim.viaSetup' : 'access.claim.viaDocument') } : undefined,
+        value?.via ? { id: 'via', label: t('access.claim.via'), value: t(value.via === 'setup' ? 'access.claim.viaSetup' : value.via === 'ble' ? 'access.claim.viaBle' : 'access.claim.viaDocument') } : undefined,
         value?.at ? { id: 'at', label: t('access.claim.at'), value: t('common.deviceClock', { time: formatDeviceClock(value.at, activeI18n.resolvedLanguage ?? 'en') }) } : undefined,
       ]} />
       {value?.rotationRequired ? (

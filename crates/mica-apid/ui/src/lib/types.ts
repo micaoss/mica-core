@@ -81,6 +81,27 @@ export interface BluetoothOverview {
   pairWindow: { expiresAt: number } | null
 }
 
+/// What opened a BLE provisioning window.
+export type BleTrigger = 'unclaimed' | 'boot' | 'offline' | 'manual'
+
+/// `GET /api/v1/bluetooth/provisioning`.
+export interface BleProvisioning {
+  state: 'off' | 'waiting' | 'connected' | 'done'
+  trigger: BleTrigger | null
+  /// Seconds since the epoch; null while `offline` waits for the route.
+  expiresAt: number | null
+  /// The manual window's eight digits.
+  code?: string
+  autoWhenOffline: boolean
+  /// Whether the administrator password works over Bluetooth.
+  verifierReady: boolean
+  lockedUntil: number | null
+  /// A session holds Wi-Fi: its writes answer 423.
+  wifiLocked: boolean
+  /// Newest first.
+  history: { at: number; trigger: BleTrigger; outcome: string }[]
+}
+
 /// The channels an access point may use in one country.
 export interface WifiChannels {
   countryCode: string

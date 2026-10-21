@@ -169,7 +169,7 @@ test('captures the review of a VLAN that takes its parent over', async ({ page }
   await page.screenshot({ path: testInfo.outputPath('network-review-adopt.png') })
 })
 
-test('captures the device code, the claim key and the pairing window', async ({ page }, testInfo) => {
+test('captures the device code, the claim key, BLE provisioning and the pairing window', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
   await page.setViewportSize({ width: 1440, height: 1000 })
   // The information tab reads more than the shared mocks answer.
@@ -189,9 +189,35 @@ test('captures the device code, the claim key and the pairing window', async ({ 
   // Bluetooth: closed, then open with a phone waiting on the six digits.
   let open = false
   const declared = { 'AA:BB:CC:DD:EE:01': { name: 'Bridge tablet', trusted: true, blocked: false } }
+  // BLE provisioning: off with its history, then a manual window with its code.
+  let manual = false
+  let verifierReady = false
+  const history = [
+    { at: 1_792_051_200, trigger: 'boot', outcome: 'wifi-connected' },
+    { at: 1_791_964_800, trigger: 'offline', outcome: 'auth-failed' },
+    { at: 1_791_878_400, trigger: 'unclaimed', outcome: 'claimed' },
+  ]
   await page.route('**/api/v1/bluetooth**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
+    if (path === '/api/v1/bluetooth/provisioning') {
+      if (request.method() === 'POST') manual = true
+      if (request.method() === 'DELETE') {
+        manual = false
+        return route.fulfill({ status: 204 })
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        state: manual ? 'waiting' : 'off',
+        trigger: manual ? 'manual' : null,
+        expiresAt: manual ? Math.floor(Date.now() / 1000) + 600 : null,
+        ...(manual ? { code: '20481337' } : {}),
+        autoWhenOffline: true,
+        verifierReady,
+        lockedUntil: null,
+        wifiLocked: false,
+        history,
+      }) })
+    }
     if (path === '/api/v1/bluetooth/pairing-window') {
       open = request.method() === 'POST'
       return route.fulfill(open
@@ -208,14 +234,44 @@ test('captures the device code, the claim key and the pairing window', async ({ 
     }) })
   })
   // Tall enough for every panel: a full-page capture puts the fixed status bar over the requests.
-  await page.setViewportSize({ width: 1440, height: 1250 })
+  await page.setViewportSize({ width: 1440, height: 2000 })
   await page.goto('./network?tab=bluetooth')
   await expect(page.getByText(/cannot normally be discovered/)).toBeVisible()
+  await expect(page.getByText(/Sign in to the console once/)).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('bluetooth-verifier-missing.png') })
+  verifierReady = true
+  await page.reload()
+  await expect(page.getByText('setup-test.micaos.dev')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('bluetooth.png') })
+  await page.getByRole('button', { name: 'Edit configuration' }).click()
+  await page.getByRole('switch', { name: 'Provisioning when offline' }).click()
+  await page.screenshot({ path: testInfo.outputPath('bluetooth-config-edit.png') })
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await page.getByRole('button', { name: 'Open provisioning' }).click()
+  await expect(page.getByTestId('provisioning-code')).toHaveText('2048 1337')
+  await page.screenshot({ path: testInfo.outputPath('bluetooth-provisioning.png') })
+  await page.getByRole('button', { name: 'Close provisioning' }).click()
+  await expect(page.getByRole('button', { name: 'Open provisioning' })).toBeVisible()
   await page.getByRole('button', { name: 'Allow new devices' }).click()
   await expect(page.getByText('042137')).toBeVisible()
   await expect(page.getByTestId('pair-window')).toContainText('Allowing pairing')
   await page.screenshot({ path: testInfo.outputPath('bluetooth-window.png') })
+
+  // A provisioning session holds the radio: the Wi-Fi page is locked.
+  await page.unroute('**/api/v1/bluetooth**')
+  await page.route('**/api/v1/bluetooth/provisioning', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    state: 'connected', trigger: 'boot', expiresAt: Math.floor(Date.now() / 1000) + 420, autoWhenOffline: true, verifierReady: true, lockedUntil: null, wifiLocked: true, history,
+  }) }))
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('./network?tab=wifi')
+  await expect(page.getByText('Bluetooth provisioning in progress; the Wi-Fi configuration is locked.')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('wifi-locked.png') })
+
+  // A device claimed over Bluetooth names the channel.
+  await page.route('**/api/v1/claim', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'claimed', via: 'ble', at: 1_791_878_400, rotationRequired: false }) }))
+  await page.goto('./access')
+  await expect(page.getByText('Bluetooth provisioning')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('access-claim-ble.png') })
 
   // The claim: an optional key, and a generated one shown once.
   await page.route('**/api/v1/session', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'setup' }) }))

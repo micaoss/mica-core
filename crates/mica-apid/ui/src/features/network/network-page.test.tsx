@@ -284,6 +284,14 @@ describe('the Wi-Fi tab', () => {
     expect((await screen.findAllByText('Network marina removed.')).length).toBeGreaterThan(0)
   })
 
+  it('locks the Wi-Fi configuration while a Bluetooth provisioning session holds the radio', async () => {
+    stubFetch({ ...networkRoutes(), '/api/v1/bluetooth/provisioning': { state: 'connected', trigger: 'boot', expiresAt: null, autoWhenOffline: true, verifierReady: true, lockedUntil: null, wifiLocked: true, history: [] } })
+    open('wifi')
+    expect(await screen.findByText('Bluetooth provisioning in progress; the Wi-Fi configuration is locked.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove marina' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getAllByRole('button', { name: 'Edit' }).every((button) => button.hasAttribute('disabled'))).toBe(true)
+  })
+
   it('does not scan while the client is off', async () => {
     stubFetch(networkRoutes())
     open('wifi')

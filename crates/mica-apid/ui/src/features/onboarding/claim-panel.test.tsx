@@ -19,6 +19,13 @@ describe('the device claim', () => {
     expect(screen.getByText(/UTC$/)).toBeTruthy()
   })
 
+  it('names Bluetooth provisioning as a claim channel', async () => {
+    stubFetch({ '/api/v1/claim': { state: 'claimed', via: 'ble', at: 1_756_000_000, rotationRequired: false } satisfies ClaimStatus })
+    renderPanel(<ClaimPanel />)
+
+    expect(await screen.findByText('Bluetooth provisioning')).toBeTruthy()
+  })
+
   it('says nothing about a rotation for a device claimed through setup', async () => {
     stubFetch({ '/api/v1/claim': { state: 'claimed', via: 'setup', rotationRequired: false } satisfies ClaimStatus })
     renderPanel(<ClaimPanel />)
