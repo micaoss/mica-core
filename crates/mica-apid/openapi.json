@@ -8547,7 +8547,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, the mode is not `client` or `ap`, a role's configuration comes without its mode, the access point or the addressing is one its own route refuses, or the body carries the redaction sentinel (`validation_failed`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)",
+            "description": "The body is not this shape, the mode is not `client` or `ap`, a role's configuration comes without its mode, the access point or the addressing is one its own route refuses, or the body carries the redaction sentinel (`validation_failed`); an access-point pool its own route refuses (`pool_out_of_subnet`, `pool_order`, `pool_contains_address`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -8719,7 +8719,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, the mode or the security is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, the pool or the lease is one the DHCP server cannot serve, or the body carries the redaction sentinel (`validation_failed`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)",
+            "description": "The body is not this shape, the mode or the security is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, the lease is one the DHCP server cannot serve, or the body carries the redaction sentinel (`validation_failed`); a pool outside the subnet (`pool_out_of_subnet`), ending before it starts (`pool_order`) or holding the access point's address (`pool_contains_address`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9461,25 +9461,30 @@
   },
   "components": {
     "schemas": {
-      "AccessPointPool": {
+      "AccessPointDhcp": {
         "type": "object",
-        "description": "The access point's DHCP pool.",
+        "description": "The access point's DHCP server.",
         "required": [
-          "offset",
-          "size"
+          "poolStart",
+          "poolEnd"
         ],
         "properties": {
-          "offset": {
-            "type": "integer",
+          "leaseSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
-            "description": "The first address handed out, as an offset from the subnet address.",
+            "description": "The lease time in seconds, at least 60; absent leaves the DHCP\nserver's default.",
             "minimum": 0
           },
-          "size": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many addresses the pool holds.",
-            "minimum": 0
+          "poolEnd": {
+            "type": "string",
+            "description": "The last address handed out. The pool holds neither the access\npoint's own address, the subnet address nor the broadcast address."
+          },
+          "poolStart": {
+            "type": "string",
+            "description": "The first address handed out, inside the subnet of `address`."
           }
         },
         "additionalProperties": false
@@ -11780,6 +11785,17 @@
             "type": "string",
             "description": "The regulatory domain the radio is configured for."
           },
+          "dhcpServer": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccessPointDhcp",
+                "description": "The DHCP server clients get their addresses from. A read carries it\nwhenever `address` is valid; absent on a write is every address after\nthe access point's own and the server's default lease."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "graceSeconds": {
             "type": "integer",
             "format": "int32",
@@ -11796,29 +11812,9 @@
             "type": "string",
             "description": "The wireless interface it runs on."
           },
-          "leaseSeconds": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "The DHCP lease time in seconds, at least 60; absent leaves the DHCP\nserver's default.",
-            "minimum": 0
-          },
           "mode": {
             "type": "string",
             "description": "`off`, `provisioning` (only while no uplink works) or `always`."
-          },
-          "pool": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AccessPointPool",
-                "description": "The DHCP pool, as an offset into the subnet of `address` and a count;\nabsent is every address after the access point's own. It holds at\nleast one address and neither the access point's own, the subnet\naddress nor the broadcast address."
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "psk": {
             "type": [
@@ -11875,6 +11871,16 @@
             ],
             "description": "`true` confirms a `countryCode` other than the stored one."
           },
+          "dhcpServer": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccessPointDhcp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "graceSeconds": {
             "type": "integer",
             "format": "int32",
@@ -11887,24 +11893,6 @@
           },
           "interface": {
             "type": "string"
-          },
-          "leaseSeconds": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "minimum": 0
-          },
-          "pool": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AccessPointPool"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "psk": {
             "type": [

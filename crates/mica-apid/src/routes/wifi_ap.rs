@@ -39,30 +39,161 @@ pub(crate) struct WifiAccessPoint {
     /// rather than a raw PMK) or `open`; absent is `wpa2-psk`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) security: Option<String>,
-    /// The DHCP pool, as an offset into the subnet of `address` and a count;
-    /// absent is every address after the access point's own. It holds at
-    /// least one address and neither the access point's own, the subnet
-    /// address nor the broadcast address.
+    /// The DHCP server clients get their addresses from. A read carries it
+    /// whenever `address` is valid; absent on a write is every address after
+    /// the access point's own and the server's default lease.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) pool: Option<AccessPointPool>,
-    /// The DHCP lease time in seconds, at least 60; absent leaves the DHCP
-    /// server's default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) lease_seconds: Option<u32>,
+    pub(super) dhcp_server: Option<AccessPointDhcp>,
     /// Write-only: `true` confirms a `countryCode` other than the stored one;
     /// without it such a write is 422 `wifi_country_unconfirmed`.
     #[serde(default, skip_serializing)]
     pub(super) country_confirmed: Option<bool>,
 }
 
-/// The access point's DHCP pool.
+/// The access point's DHCP server.
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct AccessPointPool {
-    /// The first address handed out, as an offset from the subnet address.
-    pub(super) offset: u32,
-    /// How many addresses the pool holds.
-    pub(super) size: u32,
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AccessPointDhcp {
+    /// The first address handed out, inside the subnet of `address`.
+    pub(super) pool_start: String,
+    /// The last address handed out. The pool holds neither the access
+    /// point's own address, the subnet address nor the broadcast address.
+    pub(super) pool_end: String,
+    /// The lease time in seconds, at least 60; absent leaves the DHCP
+    /// server's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) lease_seconds: Option<u32>,
+}
+
+/// An IPv4 CIDR as its address, subnet address and broadcast address.
+fn subnet_of(cidr: &str) -> Option<(u32, u32, u32)> {
+    let (address, prefix) = cidr.split_once('/')?;
+    let address = u32::from(address.parse::<std::net::Ipv4Addr>().ok()?);
+    let prefix = prefix.parse::<u32>().ok().filter(|prefix| *prefix <= 32)?;
+    let mask = u32::MAX.checked_shl(32 - prefix).unwrap_or(0);
+    Some((address, address & mask, (address & mask) | !mask))
+}
+
+/// The pool micad serves when none is stored: every address after the access
+/// point's own, up to the one before the broadcast address.
+fn derived_pool(address: u32, broadcast: u32) -> Option<(u32, u32)> {
+    (address.checked_add(1)? < broadcast).then(|| (address + 1, broadcast - 1))
+}
+
+/// The stored pool and lease beside `address`, as a read shows them.
+fn dhcp_document(address: &str, pool: &Value, lease: Option<u32>) -> Option<AccessPointDhcp> {
+    let (own, net, broadcast) = subnet_of(address)?;
+    let offset = pool.get("offset").and_then(Value::as_u64);
+    let size = pool.get("size").and_then(Value::as_u64);
+    let (start, end) = match (offset, size) {
+        (Some(offset), Some(size)) if size > 0 => {
+            let start = u32::try_from(u64::from(net) + offset).ok()?;
+            (start, u32::try_from(u64::from(start) + size - 1).ok()?)
+        }
+        _ => derived_pool(own, broadcast)?,
+    };
+    Some(AccessPointDhcp {
+        pool_start: std::net::Ipv4Addr::from(start).to_string(),
+        pool_end: std::net::Ipv4Addr::from(end).to_string(),
+        lease_seconds: lease,
+    })
+}
+
+/// The pool a write names, as the stored offset and size: `None` when it is
+/// the derived pool, so it keeps following the address.
+fn stored_pool(address: &str, dhcp: &AccessPointDhcp) -> Result<Option<(u32, u32)>, Box<Response>> {
+    let refusal = |error: ApiError| {
+        Box::new(api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.at(WIFI_AP_PATH),
+        ))
+    };
+    let Some((own, net, broadcast)) = subnet_of(address) else {
+        return Ok(None);
+    };
+    let parse = |text: &str| {
+        text.parse::<std::net::Ipv4Addr>()
+            .map(u32::from)
+            .map_err(|_| {
+                refusal(ApiError::apid(
+                    "validation_failed",
+                    format!("{text:?} is not an IPv4 address"),
+                ))
+            })
+    };
+    let (start, end) = (parse(&dhcp.pool_start)?, parse(&dhcp.pool_end)?);
+    let refused = |code: &'static str, message: String| {
+        Err(refusal(ApiError::apid(code, message).with_params(
+            serde_json::json!({ "poolStart": dhcp.pool_start, "poolEnd": dhcp.pool_end }),
+        )))
+    };
+    if [start, end].iter().any(|ip| *ip <= net || *ip >= broadcast) {
+        return refused(
+            "pool_out_of_subnet",
+            format!("the pool lies inside {address}, without its subnet and broadcast addresses"),
+        );
+    }
+    if start > end {
+        return refused("pool_order", "the pool ends before it starts".to_string());
+    }
+    if (start..=end).contains(&own) {
+        return refused(
+            "pool_contains_address",
+            format!(
+                "the pool cannot hold the access point's own address {}",
+                std::net::Ipv4Addr::from(own)
+            ),
+        );
+    }
+    if derived_pool(own, broadcast) == Some((start, end)) {
+        return Ok(None);
+    }
+    Ok(Some((start - net, end - start + 1)))
+}
+
+/// The stored access point as a read shows it: the pool and lease as
+/// `dhcpServer`.
+fn ap_document(mut stored: Value) -> Value {
+    let Some(object) = stored.as_object_mut() else {
+        return stored;
+    };
+    let pool = object.remove("pool").unwrap_or(Value::Null);
+    let lease = object
+        .remove("leaseSeconds")
+        .and_then(|lease| lease.as_u64())
+        .and_then(|lease| u32::try_from(lease).ok());
+    let address = object
+        .get("address")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if let Some(dhcp) = dhcp_document(address, &pool, lease)
+        && let Ok(value) = serde_json::to_value(dhcp)
+    {
+        object.insert("dhcpServer".to_string(), value);
+    }
+    stored
+}
+
+/// The access point as `wifi.ap` stores it: the pool as an offset and a count
+/// into the subnet, and the lease beside it.
+fn stored_form(requested: &WifiAccessPoint) -> Result<Value, Box<Response>> {
+    let mut value = encode(requested)?;
+    if let Some(object) = value.as_object_mut() {
+        object.remove("dhcpServer");
+        if let Some(dhcp) = &requested.dhcp_server {
+            let pool = stored_pool(&requested.address, dhcp)?;
+            if let Some((offset, size)) = pool {
+                object.insert(
+                    "pool".to_string(),
+                    serde_json::json!({ "offset": offset, "size": size }),
+                );
+            }
+            if let Some(lease) = dhcp.lease_seconds {
+                object.insert("leaseSeconds".to_string(), lease.into());
+            }
+        }
+    }
+    Ok(value)
 }
 
 /// Read the access-point configuration, with its key redacted.
@@ -89,7 +220,10 @@ pub(crate) async fn api_v1_wifi_ap_read(
     };
     // Through the same redactor every other read uses: the key is `psk`, the
     // one name `SECRET_FIELDS` carries for exactly this pair of fields.
-    api_response(StatusCode::OK, redact::redact(stored, WIFI_AP_PATH))
+    api_response(
+        StatusCode::OK,
+        ap_document(redact::redact(stored, WIFI_AP_PATH)),
+    )
 }
 
 /// Configure the access point: switch it on, name it, key it, place it.
@@ -111,7 +245,7 @@ pub(crate) async fn api_v1_wifi_ap_read(
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
-        (status = 422, description = "The body is not this shape, the mode or the security is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, the pool or the lease is one the DHCP server cannot serve, or the body carries the redaction sentinel (`validation_failed`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, the mode or the security is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, the lease is one the DHCP server cannot serve, or the body carries the redaction sentinel (`validation_failed`); a pool outside the subnet (`pool_out_of_subnet`), ending before it starts (`pool_order`) or holding the access point's address (`pool_contains_address`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "The stored subtree could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -209,7 +343,7 @@ async fn stored_access_point(
     }
     // The model's own rules for what this struct carries as plain values: the
     // security name and the pool against the address.
-    let value = encode(&requested)?;
+    let value = stored_form(&requested)?;
     if let Err(message) = serde_json::from_value::<micad_settings::WifiApSettings>(value)
         .map_err(|err| err.to_string())
         .and_then(|ap| micad_settings::validate_ap_pool(&ap))
@@ -250,8 +384,7 @@ async fn stored_access_point(
             .and_then(Value::as_str)
             .map(str::to_string);
     }
-    // Infallible: a struct of scalars.
-    encode(&requested)
+    stored_form(&requested)
 }
 
 /// The radio's role.
@@ -306,9 +439,7 @@ pub(crate) struct WifiApConfig {
     #[serde(default)]
     pub(super) security: Option<String>,
     #[serde(default)]
-    pub(super) pool: Option<AccessPointPool>,
-    #[serde(default)]
-    pub(super) lease_seconds: Option<u32>,
+    pub(super) dhcp_server: Option<AccessPointDhcp>,
 }
 
 /// The station's part of the role write.
@@ -374,7 +505,7 @@ pub(crate) async fn api_v1_wifi_read(
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 409, description = "The write carries the radio's addressing while a network task has not finished (`busy`)", body = ApiError),
-        (status = 422, description = "The body is not this shape, the mode is not `client` or `ap`, a role's configuration comes without its mode, the access point or the addressing is one its own route refuses, or the body carries the redaction sentinel (`validation_failed`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, the mode is not `client` or `ap`, a role's configuration comes without its mode, the access point or the addressing is one its own route refuses, or the body carries the redaction sentinel (`validation_failed`); an access-point pool its own route refuses (`pool_out_of_subnet`, `pool_order`, `pool_contains_address`); a new country without `countryConfirmed: true` (`wifi_country_unconfirmed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -438,8 +569,7 @@ pub(crate) async fn api_v1_wifi_write(
             hold_down_seconds: ap.hold_down_seconds,
             grace_seconds: ap.grace_seconds,
             security: ap.security,
-            pool: ap.pool,
-            lease_seconds: ap.lease_seconds,
+            dhcp_server: ap.dhcp_server,
             country_confirmed: ap.country_confirmed,
         };
         match stored_access_point(&state, requested).await {

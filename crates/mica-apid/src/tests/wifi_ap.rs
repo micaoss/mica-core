@@ -66,7 +66,8 @@ pub(super) async fn the_access_point_reads_redacted_and_keeps_its_key_through_a_
     );
 }
 
-// Security, pool and lease are stored as sent.
+// Security, pool and lease are stored as sent, the pool as an offset and a
+// count, and read back as addresses.
 #[tokio::test]
 pub(super) async fn the_access_point_takes_its_security_pool_and_lease() {
     let (router, fake) = test_app(ap_tree());
@@ -85,8 +86,7 @@ pub(super) async fn the_access_point_takes_its_security_pool_and_lease() {
             "holdDownSeconds": 120,
             "graceSeconds": 60,
             "security": "wpa2-wpa3",
-            "pool": { "offset": 100, "size": 50 },
-            "leaseSeconds": 3600,
+            "dhcpServer": { "poolStart": "192.168.4.100", "poolEnd": "192.168.4.149", "leaseSeconds": 3600 },
         }),
         Some(&cookie),
         Some(&csrf),
@@ -98,6 +98,81 @@ pub(super) async fn the_access_point_takes_its_security_pool_and_lease() {
     assert_eq!(stored["security"], json!("wpa2-wpa3"));
     assert_eq!(stored["pool"], json!({ "offset": 100, "size": 50 }));
     assert_eq!(stored["leaseSeconds"], json!(3600));
+    let read = body_json(get(&router, WIFI_AP_API, Some(&cookie)).await).await;
+    assert_eq!(
+        read["dhcpServer"],
+        json!({ "poolStart": "192.168.4.100", "poolEnd": "192.168.4.149", "leaseSeconds": 3600 })
+    );
+    assert!(read.get("pool").is_none(), "{read}");
+}
+
+// With no pool stored, the read names the one micad serves, and writing that
+// pool back stores none, so it keeps following the address.
+#[tokio::test]
+pub(super) async fn the_derived_pool_reads_as_addresses_and_stays_derived() {
+    let (router, fake) = test_app(ap_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+    let mut read = body_json(get(&router, WIFI_AP_API, Some(&cookie)).await).await;
+    assert_eq!(
+        read["dhcpServer"],
+        json!({ "poolStart": "192.168.4.2", "poolEnd": "192.168.4.254" })
+    );
+
+    read.as_object_mut().unwrap().remove("psk");
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_AP_API,
+        read,
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let stored = fake.get_settings("wifi.ap").await.unwrap();
+    assert!(stored.get("pool").is_none(), "{stored}");
+    assert!(stored.get("dhcpServer").is_none(), "{stored}");
+}
+
+// A pool the DHCP server cannot serve is refused by what is wrong with it.
+#[tokio::test]
+pub(super) async fn a_pool_is_refused_by_its_own_code() {
+    let (router, fake) = test_app(ap_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+    for (start, end, code) in [
+        ("192.168.5.10", "192.168.5.20", "pool_out_of_subnet"),
+        ("192.168.4.10", "192.168.4.255", "pool_out_of_subnet"),
+        ("192.168.4.20", "192.168.4.10", "pool_order"),
+        ("192.168.4.1", "192.168.4.10", "pool_contains_address"),
+        ("192.168.4.x", "192.168.4.10", "validation_failed"),
+    ] {
+        let body = json!({
+            "mode": "always",
+            "interface": "wlan0",
+            "channel": 11,
+            "countryCode": "DE",
+            "address": "192.168.4.1/24",
+            "holdDownSeconds": 120,
+            "graceSeconds": 60,
+            "dhcpServer": { "poolStart": start, "poolEnd": end },
+        });
+        let response = json_request(
+            &router,
+            "PUT",
+            WIFI_AP_API,
+            body,
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{start}-{end}"
+        );
+        assert_eq!(envelope(response).await["code"], code, "{start}-{end}");
+    }
+    assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
 }
 
 // The refusals: a mode that is not one of the three, an interface that is not
@@ -120,8 +195,8 @@ pub(super) async fn an_access_point_the_device_would_refuse_is_refused_here() {
         json!({ "psk": "<redacted>" }),
         json!({ "psk": "short" }),
         json!({ "security": "wep" }),
-        json!({ "pool": { "offset": 1, "size": 10 } }),
-        json!({ "leaseSeconds": 30 }),
+        json!({ "pool": { "offset": 100, "size": 10 } }),
+        json!({ "dhcpServer": { "poolStart": "192.168.4.100", "poolEnd": "192.168.4.149", "leaseSeconds": 30 } }),
     ] {
         let (router, fake) = test_app(ap_tree());
         let (cookie, csrf) = mqtt_session(&router).await;
