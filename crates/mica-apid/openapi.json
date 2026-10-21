@@ -3602,6 +3602,138 @@
         }
       }
     },
+    "/api/v1/settings": {
+      "patch": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Write several settings by dot-path at once.",
+        "description": "The body maps each dot-path to its value. Every path is one the settings\n`PUT` writes and every value has that path's shape; then micad writes them\nall in one step, validates the result once and applies it as one task, so\nthe Wi-Fi role can switch from station to access point with one request.\nNothing is written unless all of them are.\n\nAnswers **202** with the queued task id. Takes a bearer token.",
+        "operationId": "api_v1_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Every value was persisted and one reconciliation of them was queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A dot-path names no root the settings schema has (`settings_not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A dot-path exists and is not one the settings `PUT` writes (`settings_read_only`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not an object of 1 to 16 paths, carries the redaction sentinel, or a value is the wrong shape for its setting (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed to write (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/settings/{path}": {
       "get": {
         "tags": [
@@ -3709,13 +3841,13 @@
           "resources"
         ],
         "summary": "Write one scalar setting by dot-path.",
-        "description": "Accepts ten paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`,\n`time.timezone`, `bluetooth.pin` (six digits, not `000000`), `dns.global`\n(at most three IPv4 servers, kept while switched off) and\n`dns.staticRecords` (at most 100 records). Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
+        "description": "Accepts eleven paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,\n`time.ntp.servers`,\n`time.timezone`, `bluetooth.pin` (six digits, not `000000`), `dns.global`\n(at most three IPv4 servers, kept while switched off) and\n`dns.staticRecords` (at most 100 records). Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
         "operationId": "api_v1_settings_write",
         "parameters": [
           {
             "name": "path",
             "in": "path",
-            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` or `dns.staticRecords`",
+            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` or `dns.staticRecords`",
             "required": true,
             "schema": {
               "type": "string"
@@ -9769,7 +9901,7 @@
         }
       },
       "ResourceValue": {
-        "description": "The body of a resource `GET`: the value at the dot-path, as micad holds it.\n\nAny JSON value: a dot-path can name a subtree, an array or a scalar.\n\nSecrets are replaced by the string `\"<redacted>\"`, which a client can\nreceive anywhere inside the body. Every field named `psk`, `passwordHash`,\n`password_hash`, `hash` or `privateKey` carries the sentinel instead of its\nvalue, at any depth and inside arrays, and so does the whole body when the\ndot-path names one of those fields directly.\n\nThe sentinel is read-only: writing it back is refused at **422** rather\nthan stored, because storing it would destroy the credential."
+        "description": "The body of a resource `GET`: the value at the dot-path, as micad holds it.\n\nAny JSON value: a dot-path can name a subtree, an array or a scalar.\n\nSecrets are replaced by the string `\"<redacted>\"`, which a client can\nreceive anywhere inside the body. Every field named `psk`, `passwordHash`,\n`password_hash`, `hash`, `privateKey` or `presharedKey` carries the\nsentinel instead of its value, at any depth and inside arrays, and so does the whole body when the\ndot-path names one of those fields directly.\n\nThe sentinel is read-only: writing it back is refused at **422** rather\nthan stored, because storing it would destroy the credential."
       },
       "RollbackResponse": {
         "type": "object",
@@ -9828,8 +9960,16 @@
           }
         }
       },
+      "SettingsPatch": {
+        "type": "object",
+        "description": "The body of a settings `PATCH`: dot-paths and the value each takes.",
+        "additionalProperties": {},
+        "propertyNames": {
+          "type": "string"
+        }
+      },
       "SettingsWrite": {
-        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname`,\n`time.timezone` and `bluetooth.pin`, `true` or `false` for the four\nswitches, a JSON array of server strings for `time.ntp.servers`, a\n`{ enabled, servers }` object for `dns.global` and an array of\n`{ hostname, address, comment? }` for `dns.staticRecords`. Anything else is\n**422**."
+        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname`,\n`time.timezone` and `bluetooth.pin`, `off`, `provisioning` or `always` for\n`wifi.ap.mode`, `true` or `false` for the four switches, a JSON array of server strings for `time.ntp.servers`, a\n`{ enabled, servers }` object for `dns.global` and an array of\n`{ hostname, address, comment? }` for `dns.staticRecords`. Anything else is\n**422**."
       },
       "SetupRequest": {
         "type": "object",

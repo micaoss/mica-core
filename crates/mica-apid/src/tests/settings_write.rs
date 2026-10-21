@@ -232,7 +232,6 @@ pub(super) async fn every_dot_path_outside_the_allowlist_is_refused_with_409() {
         "wifi.client.interface",
         "wifi.client.networks",
         "wifi.ap",
-        "wifi.ap.mode",
         "container",
         "mqtt",
         "mqtt.listen.port",
@@ -608,4 +607,57 @@ pub(super) async fn a_dns_value_the_rule_refuses_is_a_422() {
         );
     }
     assert!(fake.set_paths().is_empty());
+}
+
+// Several paths in one request are one bus write and one task.
+#[tokio::test]
+pub(super) async fn a_patch_writes_several_paths_as_one_task() {
+    let (tree, token) = with_token(writable_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+
+    let response = bearer_json(
+        &router,
+        "PATCH",
+        "/api/v1/settings",
+        &token,
+        r#"{"wifi.client.enabled":false,"wifi.ap.mode":"always"}"#,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert!(body_json(response).await["taskId"].is_string());
+    assert_eq!(fake.set_paths(), ["wifi.ap.mode", "wifi.client.enabled"]);
+    let stored = fake.get_settings("wifi").await.unwrap();
+    assert_eq!(stored["ap"]["mode"], json!("always"));
+    assert_eq!(stored["client"]["enabled"], json!(false));
+}
+
+// One path the route does not write, or one value of the wrong shape,
+// refuses the whole request before anything is written.
+#[tokio::test]
+pub(super) async fn a_patch_with_one_bad_path_writes_nothing() {
+    let (tree, token) = with_token(writable_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+
+    for (body, status) in [
+        (
+            r#"{"wifi.client.enabled":false,"network.eth0":{}}"#,
+            StatusCode::CONFLICT,
+        ),
+        (
+            r#"{"wifi.client.enabled":false,"wifi.ap.mode":"sometimes"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (r#"{"netwrok.eth0":true}"#, StatusCode::NOT_FOUND),
+        ("{}", StatusCode::UNPROCESSABLE_ENTITY),
+        ("[]", StatusCode::UNPROCESSABLE_ENTITY),
+        (
+            r#"{"wifi.ap.mode":"<redacted>"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let response = bearer_json(&router, "PATCH", "/api/v1/settings", &token, body).await;
+        assert_eq!(response.status(), status, "{body}");
+    }
+    assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
 }

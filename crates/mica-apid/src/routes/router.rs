@@ -5,8 +5,8 @@ use axum::extract::OriginalUri;
 use axum::http::{Method, StatusCode};
 use axum::response::Response;
 use axum::routing::delete;
-use axum::routing::put;
 use axum::routing::{get, post};
+use axum::routing::{patch, put};
 
 use super::*;
 
@@ -64,6 +64,7 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
             V1_SETTINGS_ROUTE,
             get(api_v1_settings).put(api_v1_settings_write),
         )
+        .route(V1_SETTINGS_PATH, patch(api_v1_settings_patch))
         .route(V1_STATE_ROUTE, get(api_v1_state))
         .route(V1_WEB_PATH, get(api_v1_web_read).put(api_v1_web_write))
         .route(

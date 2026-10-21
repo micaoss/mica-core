@@ -16,6 +16,16 @@ reconcile, and return its task id.
 <arg type="s" direction="out"/>
 </method>
 <!--
+Parse each of `values_json`, persist it at the matching dot-path of
+`paths` as one atomic write, enqueue one reconcile of what they share,
+and return its task id.
+-->
+<method name="SetSettingsMany">
+<arg name="paths" type="as" direction="in"/>
+<arg name="values_json" type="as" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
 JSON-encoded task record for `id`.
 -->
 <method name="GetTask">
@@ -362,8 +372,9 @@ its new public key.
 <arg type="s" direction="out"/>
 </method>
 <!--
-Emitted after a successful `SetSettings` with the changed dot-path and
-its new JSON-encoded value.
+Emitted after a successful `SetSettings`, and once per path of a
+`SetSettingsMany`, with the changed dot-path and its new JSON-encoded
+value.
 -->
 <signal name="SettingsChanged">
 <arg name="path" type="s"/>

@@ -25,6 +25,30 @@ pub(super) fn read_uptime_seconds() -> Option<u64> {
     (secs.is_finite() && secs >= 0.0).then_some(secs as u64)
 }
 
+/// The longest dot-path every one of `paths` lies under; `""`, the whole
+/// tree, when they share no first segment.
+pub(super) fn shared_path(paths: &[String]) -> String {
+    let mut shared: Option<Vec<String>> = None;
+    for path in paths {
+        let segments = micad_settings::path_segments(path).unwrap_or_default();
+        shared = Some(match shared {
+            None => segments,
+            Some(prefix) => prefix
+                .into_iter()
+                .zip(segments)
+                .take_while(|(a, b)| a == b)
+                .map(|(a, _)| a)
+                .collect(),
+        });
+    }
+    shared
+        .unwrap_or_default()
+        .iter()
+        .map(|segment| micad_settings::quote_path_segment(segment))
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 #[zbus::interface(name = "com.mica.micad1")]
 impl MicadService {
     /// JSON-encoded settings value at dot-path `path` (`""` = whole tree).
@@ -58,6 +82,49 @@ impl MicadService {
             })?;
         let task = self
             .enqueue_apply(&emitter, "settings-write", path, sender_of(&header))
+            .await;
+        Ok(task.id)
+    }
+
+    /// Parse each of `values_json`, persist it at the matching dot-path of
+    /// `paths` as one atomic write, enqueue one reconcile of what they share,
+    /// and return its task id.
+    pub(super) async fn set_settings_many(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        paths: Vec<String>,
+        values_json: Vec<String>,
+    ) -> Result<String, SettingsFault> {
+        if paths.is_empty() || paths.len() != values_json.len() {
+            return Err(SettingsFault::Fdo(fdo::Error::InvalidArgs(
+                "SetSettingsMany takes one value per path, and at least one".to_string(),
+            )));
+        }
+        let mut writes = Vec::with_capacity(paths.len());
+        for (path, value_json) in paths.iter().zip(&values_json) {
+            let value: Value = serde_json::from_str(value_json).map_err(|err| {
+                SettingsFault::Fdo(fdo::Error::InvalidArgs(format!(
+                    "invalid JSON value for `{path}`: {err}"
+                )))
+            })?;
+            writes.push((path.clone(), value));
+        }
+        self.persist_settings(&writes).await.map_err(to_bus_error)?;
+        for (path, value_json) in paths.iter().zip(&values_json) {
+            Self::settings_changed(&emitter, path, value_json)
+                .await
+                .map_err(|err| {
+                    SettingsFault::Fdo(fdo::Error::Failed(format!("emit SettingsChanged: {err}")))
+                })?;
+        }
+        let task = self
+            .enqueue_apply(
+                &emitter,
+                "settings-write",
+                &shared_path(&paths),
+                sender_of(&header),
+            )
             .await;
         Ok(task.id)
     }
@@ -654,8 +721,9 @@ impl MicadService {
         self.rotate_wireguard_key_now(iface).await
     }
 
-    /// Emitted after a successful `SetSettings` with the changed dot-path and
-    /// its new JSON-encoded value.
+    /// Emitted after a successful `SetSettings`, and once per path of a
+    /// `SetSettingsMany`, with the changed dot-path and its new JSON-encoded
+    /// value.
     #[zbus(signal)]
     pub(super) async fn settings_changed(
         emitter: &SignalEmitter<'_>,

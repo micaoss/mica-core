@@ -19,8 +19,8 @@ use super::*;
 ///
 /// Secrets are replaced by the string `"<redacted>"`, which a client can
 /// receive anywhere inside the body. Every field named `psk`, `passwordHash`,
-/// `password_hash`, `hash` or `privateKey` carries the sentinel instead of its
-/// value, at any depth and inside arrays, and so does the whole body when the
+/// `password_hash`, `hash`, `privateKey` or `presharedKey` carries the
+/// sentinel instead of its value, at any depth and inside arrays, and so does the whole body when the
 /// dot-path names one of those fields directly.
 ///
 /// The sentinel is read-only: writing it back is refused at **422** rather
@@ -97,6 +97,9 @@ pub(super) enum ScalarShape {
     /// A JSON string [`micad_settings::validate_pairing_pin`] accepts, other
     /// than the default code, which only a reset returns to.
     PairingPin,
+    /// One of the access point's three modes, `off`, `provisioning` or
+    /// `always`.
+    ApMode,
     /// A `dns.global` object, held to [`micad_settings::validate_dns`]; micad
     /// adds the rule against the interfaces' own addresses.
     GlobalDns,
@@ -119,12 +122,13 @@ pub(super) enum ScalarShape {
 /// undeclared `wg9` writes a physical-kind `network.wg9` carrying a WireGuard
 /// block. Every path this list does not carry is refused by
 /// [`settings_write_refusal`] before any bus call is made.
-pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 10] = [
+pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 11] = [
     ("hostname", ScalarShape::Hostname),
     ("access.ssh.enabled", ScalarShape::Flag),
     ("container.enabled", ScalarShape::Flag),
     ("mqtt.enabled", ScalarShape::Flag),
     ("wifi.client.enabled", ScalarShape::Flag),
+    ("wifi.ap.mode", ScalarShape::ApMode),
     ("time.ntp.servers", ScalarShape::NtpServers),
     ("time.timezone", ScalarShape::Timezone),
     ("bluetooth.pin", ScalarShape::PairingPin),
@@ -139,7 +143,7 @@ pub(super) const SETTINGS_COLLECTION: &str = "settings";
 /// The sentence a refusal carries when nothing more specific is true of the
 /// path: it is a real part of the tree, and this route is not how it is
 /// written.
-pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` and `dns.staticRecords` and no other dot-path; every other subtree is written through its own resource route";
+pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` and `dns.staticRecords` and no other dot-path; every other subtree is written through its own resource route";
 
 /// The shape `path` is written with, when this route writes it at all.
 pub(super) fn writable_shape(path: &str) -> Option<ScalarShape> {
@@ -199,6 +203,15 @@ pub(super) fn check_scalar(shape: ScalarShape, value: &Value) -> Result<(), Stri
             }
             Ok(())
         }
+        ScalarShape::ApMode => matches!(
+            value.as_str(),
+            Some("off" | "provisioning" | "always")
+        )
+        .then_some(())
+        .ok_or_else(|| {
+            "the access point runs `off`, `provisioning` (only while no uplink works) or `always`"
+                .to_string()
+        }),
         ScalarShape::GlobalDns => {
             let global: micad_settings::GlobalDns = serde_json::from_value(value.clone())
                 .map_err(|err| format!("this setting is `{{ enabled, servers }}`: {err}"))?;
@@ -299,8 +312,8 @@ pub(super) fn settings_write_refusal(path: &str) -> Response {
 ///
 /// The schema is wide because the dot-path decides what is acceptable. What
 /// is actually accepted is narrow: a JSON string for `hostname`,
-/// `time.timezone` and `bluetooth.pin`, `true` or `false` for the four
-/// switches, a JSON array of server strings for `time.ntp.servers`, a
+/// `time.timezone` and `bluetooth.pin`, `off`, `provisioning` or `always` for
+/// `wifi.ap.mode`, `true` or `false` for the four switches, a JSON array of server strings for `time.ntp.servers`, a
 /// `{ enabled, servers }` object for `dns.global` and an array of
 /// `{ hostname, address, comment? }` for `dns.staticRecords`. Anything else is
 /// **422**.
@@ -312,8 +325,9 @@ pub(crate) struct SettingsWrite(pub(super) Value);
 // which would invite a client to trust the echo over its own GET.
 /// Write one scalar setting by dot-path.
 ///
-/// Accepts ten paths and no others: `hostname`, `access.ssh.enabled`,
-/// `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`,
+/// Accepts eleven paths and no others: `hostname`, `access.ssh.enabled`,
+/// `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,
+/// `time.ntp.servers`,
 /// `time.timezone`, `bluetooth.pin` (six digits, not `000000`), `dns.global`
 /// (at most three IPv4 servers, kept while switched off) and
 /// `dns.staticRecords` (at most 100 records). Any other path is refused.
@@ -324,7 +338,7 @@ pub(crate) struct SettingsWrite(pub(super) Value);
     path = V1_SETTINGS_DOC,
     context_path = API,
     tag = "resources",
-    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` or `dns.staticRecords`")),
+    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` or `dns.staticRecords`")),
     request_body = SettingsWrite,
     responses(
         (status = 202, description = "The value was persisted and its scoped reconciliation was queued", body = TaskAccepted),
@@ -394,6 +408,96 @@ pub(crate) async fn api_v1_settings_write(
     // form path already relies on. The token routes invalidate by hand because
     // a revocation must bite on the very next request; nothing here is a
     // credential.
+    api_response(StatusCode::ACCEPTED, TaskAccepted { task_id })
+}
+
+/// The most paths one `PATCH /api/v1/settings` writes.
+pub(super) const MAX_PATCH_PATHS: usize = 16;
+
+/// The body of a settings `PATCH`: dot-paths and the value each takes.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(transparent)]
+pub(crate) struct SettingsPatch(pub(super) std::collections::BTreeMap<String, Value>);
+
+/// Write several settings by dot-path at once.
+///
+/// The body maps each dot-path to its value. Every path is one the settings
+/// `PUT` writes and every value has that path's shape; then micad writes them
+/// all in one step, validates the result once and applies it as one task, so
+/// the Wi-Fi role can switch from station to access point with one request.
+/// Nothing is written unless all of them are.
+///
+/// Answers **202** with the queued task id. Takes a bearer token.
+#[utoipa::path(
+    patch,
+    path = V1_SETTINGS_PATH,
+    context_path = API,
+    tag = "resources",
+    request_body = SettingsPatch,
+    responses(
+        (status = 202, description = "Every value was persisted and one reconciliation of them was queued", body = TaskAccepted),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 404, description = "A dot-path names no root the settings schema has (`settings_not_found`)", body = ApiError),
+        (status = 409, description = "A dot-path exists and is not one the settings `PUT` writes (`settings_read_only`)", body = ApiError),
+        (status = 422, description = "The body is not an object of 1 to 16 paths, carries the redaction sentinel, or a value is the wrong shape for its setting (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_settings_patch(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Source(source): Source,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let refuse = |message: String| {
+        api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid("validation_failed", message).at(SETTINGS_COLLECTION),
+        )
+    };
+    let Json(value) = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            return api_response(
+                StatusCode::BAD_REQUEST,
+                ApiError::apid("request_invalid", rejection.body_text()).at(SETTINGS_COLLECTION),
+            );
+        }
+    };
+    if redact::carries_sentinel(&value) {
+        return refuse(format!(
+            "the body carries `{}`, which is what a read substitutes for a secret and never a value to write",
+            redact::REDACTED
+        ));
+    }
+    let Ok(SettingsPatch(writes)) = serde_json::from_value::<SettingsPatch>(value) else {
+        return refuse("the body is an object mapping each dot-path to its value".to_string());
+    };
+    if writes.is_empty() || writes.len() > MAX_PATCH_PATHS {
+        return refuse(format!("the body names 1 to {MAX_PATCH_PATHS} dot-paths"));
+    }
+    for (path, value) in &writes {
+        let Some(shape) = writable_shape(path) else {
+            return settings_write_refusal(path);
+        };
+        if let Err(message) = check_scalar(shape, value) {
+            return api_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiError::apid("validation_failed", message).at(path),
+            );
+        }
+    }
+    let writes: Vec<(String, Value)> = writes.into_iter().collect();
+    let task_id = match state.api.set_settings_many(&writes).await {
+        Ok(task_id) => task_id,
+        Err(err) => return bus_api_error(&err, None),
+    };
+    state.audit.record("settings-write", "accepted", &source);
     api_response(StatusCode::ACCEPTED, TaskAccepted { task_id })
 }
 

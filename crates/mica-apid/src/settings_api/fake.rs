@@ -380,6 +380,14 @@ impl SettingsApi for FakeSettings {
         Ok(self.completed_task("settings-write", path))
     }
 
+    async fn set_settings_many(&self, writes: &[(String, Value)]) -> anyhow::Result<String> {
+        let mut task = String::new();
+        for (path, value) in writes {
+            task = self.set_settings(path, value).await?;
+        }
+        Ok(task)
+    }
+
     async fn container_action(&self, name: &str, action: &str) -> anyhow::Result<()> {
         self.container_calls
             .lock()

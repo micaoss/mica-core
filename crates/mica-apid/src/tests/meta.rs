@@ -130,12 +130,9 @@ pub(super) async fn every_other_api_path_has_one_answer_in_every_mode() {
     // `/api/v1/ssh/authorized-keys` is a served collection, not on this list;
     // the test that holds its answers is
     // `the_ssh_key_collection_lists_adds_and_removes`.
-    const UNDECLARED: [&str; 4] = [
-        "/api/v1/settings",
-        "/api/v1/settings/",
-        "/api/v1/state",
-        "/api/v1/state/",
-    ];
+    // `/api/v1/settings` is the batch write, so its `GET` is the router's
+    // 405 rather than this 404.
+    const UNDECLARED: [&str; 3] = ["/api/v1/settings/", "/api/v1/state", "/api/v1/state/"];
 
     let (router, _) = test_app(configured_tree("hunter2secret"));
     let cookie = login(&router, "hunter2secret").await;

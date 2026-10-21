@@ -22,13 +22,28 @@ impl MicadService {
         path: &str,
         value: Value,
     ) -> Result<(), SettingsError> {
+        self.persist_settings(&[(path.to_string(), value)]).await
+    }
+
+    /// Validate and atomically persist every `(path, value)` in `writes`, in
+    /// order, as one write: all of them land or none does.
+    ///
+    /// # Errors
+    pub(super) async fn persist_settings(
+        &self,
+        writes: &[(String, Value)],
+    ) -> Result<(), SettingsError> {
+        // The path a refusal of the write as a whole names.
+        let path = writes.first().map_or("", |(path, _)| path.as_str());
         // A path inside a feature the product does not carry is refused before
         // its value is read, so the answer is the same whatever was sent.
-        if let Some(feature) = self.features.refuses(path) {
-            return Err(SettingsError::NotServed {
-                path: path.to_string(),
-                feature,
-            });
+        for (path, _) in writes {
+            if let Some(feature) = self.features.refuses(path) {
+                return Err(SettingsError::NotServed {
+                    path: path.clone(),
+                    feature,
+                });
+            }
         }
         // **A refused document keeps its bytes unless this write is the one
         // that repairs it**. A refused subtree sits at
@@ -42,15 +57,17 @@ impl MicadService {
             .read()
             .await
             .iter()
-            .filter(|refusal| !refusal_covers(refusal, path))
+            .filter(|refusal| !writes.iter().any(|(path, _)| refusal_covers(refusal, path)))
             .map(|refusal| refusal.document.clone())
             .collect();
         // Run before the tree's lock is taken, since it runs a process.
-        let checked = self.check_written_projects(path, &value).await?;
+        let checked = self.check_written_projects(writes).await?;
         let sealed = {
             let mut inner = self.inner.write().await;
             let mut candidate = inner.settings.clone();
-            candidate.set(path, value)?;
+            for (path, value) in writes {
+                candidate.set(path, value.clone())?;
+            }
             self.user_units
                 .check_written(&inner.settings.services, &candidate.services)
                 .map_err(|message| SettingsError::Validation {
@@ -115,7 +132,8 @@ impl MicadService {
         let repaired = {
             let mut refusals = self.refusals.write().await;
             let before = refusals.len();
-            refusals.retain(|refusal| !refusal_covers(refusal, path));
+            refusals
+                .retain(|refusal| !writes.iter().any(|(path, _)| refusal_covers(refusal, path)));
             before != refusals.len()
         };
         if repaired {
@@ -129,13 +147,15 @@ impl MicadService {
     /// is left to the tree to refuse.
     async fn check_written_projects(
         &self,
-        path: &str,
-        value: &Value,
+        writes: &[(String, Value)],
     ) -> Result<std::collections::BTreeMap<String, (String, Option<String>)>, SettingsError> {
+        let path = writes.first().map_or("", |(path, _)| path.as_str());
         let current = self.inner.read().await.settings.clone();
         let mut candidate = current.clone();
-        if candidate.set(path, value.clone()).is_err() {
-            return Ok(std::collections::BTreeMap::new());
+        for (path, value) in writes {
+            if candidate.set(path, value.clone()).is_err() {
+                return Ok(std::collections::BTreeMap::new());
+            }
         }
         // On docker nothing is declared to micad; taking projects away is
         // still a write, since it declares none.

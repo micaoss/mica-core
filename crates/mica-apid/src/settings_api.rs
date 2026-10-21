@@ -52,6 +52,10 @@ pub trait SettingsApi: Send + Sync {
     /// Persist `value` at dot-path `path`, enqueue its apply and return the
     /// task id.
     async fn set_settings(&self, path: &str, value: &Value) -> anyhow::Result<String>;
+    /// Write every `(path, value)` as one write, answering its task id.
+    async fn set_settings_many(&self, _writes: &[(String, Value)]) -> anyhow::Result<String> {
+        anyhow::bail!("set_settings_many is not wired up in this settings api")
+    }
     /// Task record by id.
     async fn get_task(&self, id: &str) -> anyhow::Result<TaskRecord> {
         Err(TaskNotFound(id.to_string()).into())

@@ -65,6 +65,7 @@ impl MicadCallTimeout {
 trait Micad {
     fn get_settings(&self, path: &str) -> zbus::Result<String>;
     fn set_settings(&self, path: &str, value_json: &str) -> zbus::Result<String>;
+    fn set_settings_many(&self, paths: &[&str], values_json: &[&str]) -> zbus::Result<String>;
     fn get_task(&self, id: &str) -> zbus::Result<String>;
     fn get_state(&self, path: &str) -> zbus::Result<String>;
     fn get_network_state(&self) -> zbus::Result<String>;
@@ -324,6 +325,15 @@ impl SettingsApi for BusSettings {
     async fn set_settings(&self, path: &str, value: &Value) -> anyhow::Result<String> {
         let proxy = self.proxy().await?;
         self.call("SetSettings", proxy.set_settings(path, &value.to_string()))
+            .await
+    }
+
+    async fn set_settings_many(&self, writes: &[(String, Value)]) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        let paths: Vec<&str> = writes.iter().map(|(path, _)| path.as_str()).collect();
+        let values: Vec<String> = writes.iter().map(|(_, value)| value.to_string()).collect();
+        let values: Vec<&str> = values.iter().map(String::as_str).collect();
+        self.call("SetSettingsMany", proxy.set_settings_many(&paths, &values))
             .await
     }
 

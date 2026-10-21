@@ -89,20 +89,20 @@ pub(super) fn header_value(response: &Response<axum::body::Body>, name: HeaderNa
 #[tokio::test]
 pub(super) async fn a_bundle_cannot_shadow_the_reserved_api_subtree() {
     const VERSIONS_BYTES: &str = "BUNDLE-SHADOWS-API-VERSIONS";
-    const SETTINGS_BYTES: &str = "BUNDLE-SHADOWS-API-V1-SETTINGS";
+    const STATE_BYTES: &str = "BUNDLE-SHADOWS-API-V1-STATE";
 
     let bundle = install_bundle(&[
         ("index.html", "<!doctype html><title>custom</title>"),
         ("decoy.txt", "the bundle is reachable"),
         ("api/versions", VERSIONS_BYTES),
-        ("api/v1/settings", SETTINGS_BYTES),
+        ("api/v1/state", STATE_BYTES),
     ]);
 
     // The files are in the installed tree, not merely in the staged one.
     let listed = installed_files(bundle.path());
     assert!(
         listed.contains(&"api/versions".to_string())
-            && listed.contains(&"api/v1/settings".to_string()),
+            && listed.contains(&"api/v1/state".to_string()),
         "the installed bundle must actually contain the shadowing files: {listed:?}"
     );
 
@@ -126,7 +126,7 @@ pub(super) async fn a_bundle_cannot_shadow_the_reserved_api_subtree() {
     );
     assert_eq!(body, VERSIONS_BODY);
 
-    for (path, bytes) in [("/api/v1/settings", SETTINGS_BYTES)] {
+    for (path, bytes) in [("/api/v1/state", STATE_BYTES)] {
         let response = request(&router, "GET", path, Some(&cookie), Some(BROWSER_ACCEPT)).await;
         let status = response.status();
         let content_type = header_value(&response, CONTENT_TYPE);
@@ -232,7 +232,7 @@ pub(super) async fn the_api_reservation_answers_every_shape_with_the_envelope() 
         ("GET", "/api/"),
         ("GET", "/api/v1"),
         ("GET", "/api/versions/extra"),
-        ("GET", "/api/v1/settings"),
+        ("GET", "/api/v1/state"),
         // `/api/v1/actions/reboot` was here until it was declared, and
         // its prefix and trailing-slash spelling take its place for the reason
         // the WiFi collection's did: neither is a route this router serves, so
@@ -247,7 +247,7 @@ pub(super) async fn the_api_reservation_answers_every_shape_with_the_envelope() 
         // resources beside them.
         ("GET", "/api/v1/wifi/"),
         ("GET", "/api/v1/wifi/client/networks/"),
-        ("POST", "/api/v1/settings"),
+        ("POST", "/api/v1/state"),
     ] {
         let response = request(&router, method, path, Some(&cookie), Some(BROWSER_ACCEPT)).await;
         assert_eq!(

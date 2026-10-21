@@ -44,6 +44,8 @@ pub(super) const V1_CHANGE_PASSWORD_PATH: &str = "/v1/actions/change-password";
 #[cfg(test)]
 pub(super) const V1_SETTINGS_PREFIX: &str = "/v1/settings/";
 pub(super) const V1_SETTINGS_ROUTE: &str = "/v1/settings/{*path}";
+/// The settings root itself, which takes a `PATCH` of several dot-paths.
+pub(super) const V1_SETTINGS_PATH: &str = "/v1/settings";
 pub(super) const V1_SETTINGS_DOC: &str = "/v1/settings/{path}";
 #[cfg(test)]
 pub(super) const V1_STATE_PREFIX: &str = "/v1/state/";

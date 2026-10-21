@@ -387,3 +387,60 @@ pub(super) fn only_the_reconcilers_that_start_no_service_run_before_the_name() {
         }
     }
 }
+
+/// Several paths are one write: every value lands, or a refused one leaves
+/// the tree as it was.
+#[tokio::test]
+pub(super) async fn several_paths_land_together_or_not_at_all() {
+    let (service, _calls, _dir) = service_with_mock();
+
+    service
+        .persist_settings(&[
+            ("wifi.client.enabled".to_string(), serde_json::json!(false)),
+            ("wifi.ap.mode".to_string(), serde_json::json!("always")),
+        ])
+        .await
+        .expect("both land");
+    let settings = service.inner.read().await.settings.clone();
+    assert!(!settings.wifi.client.enabled);
+    assert_eq!(settings.wifi.ap.mode, micad_settings::ApMode::Always);
+
+    let error = service
+        .persist_settings(&[
+            ("wifi.client.enabled".to_string(), serde_json::json!(true)),
+            ("wifi.ap.mode".to_string(), serde_json::json!("sometimes")),
+        ])
+        .await
+        .expect_err("the second value is not a mode");
+    assert!(format!("{error}").contains("wifi.ap.mode"), "{error}");
+    let settings = service.inner.read().await.settings.clone();
+    assert!(
+        !settings.wifi.client.enabled,
+        "the first value landed alone"
+    );
+}
+
+/// The task of a write to several paths applies what they share.
+#[test]
+pub(super) fn several_paths_apply_the_subtree_they_share() {
+    use super::super::interface::shared_path;
+    let paths = |paths: &[&str]| {
+        paths
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        shared_path(&paths(&["wifi.client.enabled", "wifi.ap.mode"])),
+        "wifi"
+    );
+    assert_eq!(shared_path(&paths(&["dns.global"])), "dns.global");
+    assert_eq!(shared_path(&paths(&["wifi.ap.mode", "network.wlan0"])), "");
+    assert_eq!(
+        shared_path(&paths(&[
+            "services.units.\"a.service\".enabled",
+            "services.units.\"a.service\".text"
+        ])),
+        "services.units.\"a.service\""
+    );
+}
