@@ -1,6 +1,8 @@
 //! The RFC 9383 vector and the vectors of `docs/ble-provisioning.md`.
 
+mod engine;
 mod store;
+mod window;
 
 use std::num::NonZeroU32;
 

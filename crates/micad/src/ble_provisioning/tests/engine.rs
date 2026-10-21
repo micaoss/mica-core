@@ -1,0 +1,814 @@
+//! The engine against a phone that speaks protocol 1, with a fake device,
+//! radio and clock.
+
+use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use aws_lc_rs::{agreement, digest};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use serde_json::{Value, json};
+use tokio::sync::{mpsc, oneshot};
+
+use super::super::channel::{self, Reassembly, Records};
+use super::super::engine::*;
+use super::super::spake2plus::{self, Transcript, prover, scalar};
+use super::super::store::{Lockout, Store, make_record};
+use super::super::*;
+
+const PHONE: &str = "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_01";
+const OTHER: &str = "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_02";
+const PASSWORD: &str = "harbour-pw-1";
+
+#[derive(Default)]
+struct FakeDevice {
+    facts: Mutex<Facts>,
+    calls: Mutex<Vec<String>>,
+    /// `await_wifi`'s answer; `None` waits until released.
+    wifi: Mutex<Option<Result<String, &'static str>>>,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl Device for FakeDevice {
+    async fn facts(&self) -> Facts {
+        self.facts.lock().unwrap().clone()
+    }
+    async fn status(&self) -> Value {
+        json!({ "wifiMode": "ap", "connected": false, "ssid": null, "ip": null })
+    }
+    async fn scan(&self) -> Result<Vec<Value>, &'static str> {
+        Err("ap_active")
+    }
+    async fn wifi_snapshot(&self) -> Value {
+        json!({ "mode": "ap" })
+    }
+    async fn join_wifi(&self, ssid: &str, _psk: &str, _hidden: bool) -> Result<bool, &'static str> {
+        self.calls.lock().unwrap().push(format!("join {ssid}"));
+        Ok(true)
+    }
+    async fn await_wifi(&self, _ssid: &str) -> Result<String, &'static str> {
+        loop {
+            let answer = self.wifi.lock().unwrap().clone();
+            if let Some(answer) = answer {
+                return answer;
+            }
+            self.release.notified().await;
+        }
+    }
+    async fn restore_wifi(&self, snapshot: Value, remove: Vec<String>) {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("restore {snapshot} remove {remove:?}"));
+    }
+    async fn claim(&self, staged: &StagedClaim) -> Result<Option<String>, &'static str> {
+        let mut facts = self.facts.lock().unwrap();
+        if facts.claimed {
+            return Err("already_claimed");
+        }
+        facts.claimed = true;
+        if let Some(name) = &staged.hostname {
+            facts.hostname.clone_from(name);
+        }
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("claim {}", staged.password));
+        Ok(staged.ap_psk.is_none().then(|| "GENERATED".to_string()))
+    }
+}
+
+#[derive(Default)]
+struct FakeRadio {
+    notified: Mutex<Vec<(Notify, Vec<u8>)>>,
+    advertised: Mutex<Vec<Option<String>>>,
+    disconnected: Mutex<Vec<String>>,
+    held: AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl Radio for FakeRadio {
+    async fn advertise(&self, name: Option<&str>) {
+        self.advertised
+            .lock()
+            .unwrap()
+            .push(name.map(str::to_string));
+    }
+    async fn hold(&self, on: bool) {
+        self.held.store(on, Ordering::SeqCst);
+    }
+    async fn notify(&self, characteristic: Notify, fragment: Vec<u8>) {
+        self.notified
+            .lock()
+            .unwrap()
+            .push((characteristic, fragment));
+    }
+    async fn disconnect(&self, device: &str) {
+        self.disconnected.lock().unwrap().push(device.to_string());
+    }
+}
+
+#[derive(Default)]
+struct FakeClock {
+    uptime: AtomicU64,
+    unix: AtomicU64,
+}
+
+impl Clock for FakeClock {
+    fn uptime(&self) -> u64 {
+        self.uptime.load(Ordering::SeqCst)
+    }
+    fn unix(&self) -> u64 {
+        self.unix.load(Ordering::SeqCst)
+    }
+}
+
+/// The phone's half of a session.
+#[derive(Default)]
+struct Phone {
+    session_in: Reassembly,
+    event_in: Reassembly,
+    to_device: Option<Records>,
+    from_device: Option<Records>,
+    next_id: u64,
+}
+
+struct Bench {
+    engine: Engine,
+    rx: mpsc::UnboundedReceiver<Input>,
+    device: Arc<FakeDevice>,
+    radio: Arc<FakeRadio>,
+    clock: Arc<FakeClock>,
+    store: Store,
+    audit: Arc<Mutex<Vec<String>>>,
+    wifi_locked: Arc<AtomicBool>,
+    phone: Phone,
+    _dir: tempfile::TempDir,
+}
+
+impl Bench {
+    async fn new(claimed: bool) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let facts = Facts {
+            claimed,
+            hostname: "mica-a4e2e69e".into(),
+            model: "mica cx3576".into(),
+            auto_when_offline: true,
+            has_wifi: true,
+        };
+        let device = Arc::new(FakeDevice::default());
+        *device.facts.lock().unwrap() = facts.clone();
+        let radio = Arc::new(FakeRadio::default());
+        let clock = Arc::new(FakeClock::default());
+        clock.uptime.store(5, Ordering::SeqCst);
+        clock.unix.store(1_800_000_000, Ordering::SeqCst);
+        let audit = Arc::new(Mutex::new(Vec::new()));
+        let lines = Arc::clone(&audit);
+        let wifi_locked = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::unbounded_channel();
+        let parts = Parts {
+            device: device.clone(),
+            radio: radio.clone(),
+            clock: clock.clone(),
+            store: store.clone(),
+            audit: Arc::new(move |event: &str, outcome: &str| {
+                lines.lock().unwrap().push(format!("{event} {outcome}"));
+            }),
+            wifi_locked: Arc::clone(&wifi_locked),
+        };
+        let mut bench = Self {
+            engine: Engine::new(parts, facts, tx),
+            rx,
+            device,
+            radio,
+            clock,
+            store,
+            audit,
+            wifi_locked,
+            phone: Phone::default(),
+            _dir: dir,
+        };
+        bench.engine.handle(Input::Tick).await;
+        bench
+    }
+
+    fn advance(&self, seconds: u64) {
+        self.clock.uptime.fetch_add(seconds, Ordering::SeqCst);
+        self.clock.unix.fetch_add(seconds, Ordering::SeqCst);
+    }
+
+    async fn tick(&mut self, seconds: u64) {
+        self.advance(seconds);
+        self.engine.handle(Input::Tick).await;
+    }
+
+    /// Let spawned operations finish and feed back what they sent.
+    async fn pump(&mut self) {
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+            while let Ok(input) = self.rx.try_recv() {
+                self.engine.handle(input).await;
+            }
+        }
+    }
+
+    async fn read_info(&mut self, phone: &str) -> Result<Value, Refused> {
+        let (reply, answer) = oneshot::channel();
+        self.engine
+            .handle(Input::Read {
+                device: phone.into(),
+                mtu: Some(185),
+                reply,
+            })
+            .await;
+        answer
+            .await
+            .unwrap()
+            .map(|bytes| serde_json::from_slice(&bytes).unwrap())
+    }
+
+    async fn write(
+        &mut self,
+        phone: &str,
+        characteristic: Written,
+        message: &[u8],
+    ) -> Result<(), Refused> {
+        for fragment in channel::fragments(message, 182) {
+            let (reply, answer) = oneshot::channel();
+            self.engine
+                .handle(Input::Write {
+                    device: phone.into(),
+                    mtu: Some(185),
+                    characteristic,
+                    value: fragment,
+                    reply,
+                })
+                .await;
+            answer.await.unwrap()?;
+        }
+        Ok(())
+    }
+
+    /// Every message notified since the last call, on `characteristic`,
+    /// joined.
+    fn take(&mut self, characteristic: Notify) -> Vec<Vec<u8>> {
+        let notified: Vec<_> = std::mem::take(&mut *self.radio.notified.lock().unwrap());
+        let mut messages = Vec::new();
+        for (on, fragment) in notified {
+            assert!(fragment.len() <= 182, "a fragment fits the MTU");
+            let joiner = match on {
+                Notify::Session => &mut self.phone.session_in,
+                Notify::Event => &mut self.phone.event_in,
+            };
+            if let Some(message) = joiner.push(&fragment).unwrap()
+                && on == characteristic
+            {
+                messages.push(message);
+            }
+        }
+        messages
+    }
+
+    async fn session(&mut self, message: Value) -> Value {
+        self.write(PHONE, Written::Session, message.to_string().as_bytes())
+            .await
+            .unwrap();
+        let mut replies = self.take(Notify::Session);
+        assert_eq!(replies.len(), 1, "one answer");
+        serde_json::from_slice(&replies.remove(0)).unwrap()
+    }
+
+    /// Send `command` and answer the events it produced.
+    async fn command(&mut self, mut command: Value) -> Vec<Value> {
+        self.phone.next_id += 1;
+        command["id"] = json!(self.phone.next_id);
+        let record = self
+            .phone
+            .to_device
+            .as_mut()
+            .unwrap()
+            .seal(command.to_string().as_bytes())
+            .unwrap();
+        self.write(PHONE, Written::Command, &record).await.unwrap();
+        self.pump().await;
+        self.events()
+    }
+
+    fn events(&mut self) -> Vec<Value> {
+        let records = self.take(Notify::Event);
+        records
+            .iter()
+            .map(|record| {
+                let plaintext = self
+                    .phone
+                    .from_device
+                    .as_mut()
+                    .unwrap()
+                    .open(record)
+                    .unwrap();
+                serde_json::from_slice(&plaintext).unwrap()
+            })
+            .collect()
+    }
+
+    /// Authenticate with `none`.
+    async fn start_none(&mut self) {
+        let key = agreement::PrivateKey::generate(&agreement::X25519).unwrap();
+        let public = key.compute_public_key().unwrap();
+        let ready = self
+            .session(json!({ "t": "start", "auth": "none", "pub": BASE64.encode(public.as_ref()) }))
+            .await;
+        assert_eq!(ready["t"], "ready", "{ready}");
+        let device = BASE64.decode(ready["pub"].as_str().unwrap()).unwrap();
+        let keys = agreement::agree(
+            &key,
+            agreement::UnparsedPublicKey::new(&agreement::X25519, &device),
+            (),
+            |secret| {
+                let mut salt = b"mica-provisioning/1 none".to_vec();
+                salt.extend_from_slice(public.as_ref());
+                salt.extend_from_slice(&device);
+                let salt = digest::digest(&digest::SHA256, &salt);
+                Ok(channel::session_keys(salt.as_ref(), secret).unwrap())
+            },
+        )
+        .unwrap();
+        self.keys(&keys);
+    }
+
+    fn keys(&mut self, keys: &channel::SessionKeys) {
+        self.phone.to_device = Some(Records::new(&keys.phone_to_device).unwrap());
+        self.phone.from_device = Some(Records::new(&keys.device_to_phone).unwrap());
+    }
+
+    /// Run SPAKE2+ with `pw` up to the device's share; the phone's keys.
+    async fn exchange(&mut self, auth: &str, pw: &str) -> Result<spake2plus::Keys, Value> {
+        let params = self.session(json!({ "t": "start", "auth": auth })).await;
+        if params["t"] != "params" {
+            return Err(params);
+        }
+        let salt = BASE64.decode(params["salt"].as_str().unwrap()).unwrap();
+        let iterations = u32::try_from(params["iterations"].as_u64().unwrap()).unwrap();
+        let (w0, w1) = spake2plus::derive(
+            pw.as_bytes(),
+            &salt,
+            NonZeroU32::new(iterations).unwrap(),
+            ID_PROVER,
+            ID_VERIFIER,
+        );
+        let x = scalar(&[0x42; 32]);
+        let share = self
+            .session(json!({ "t": "share", "shareP": BASE64.encode(prover::share(&w0, &x)) }))
+            .await;
+        let share_v = BASE64.decode(share["shareV"].as_str().unwrap()).unwrap();
+        let t = Transcript {
+            context: if auth == "temp-code" {
+                CONTEXT_TEMP_CODE
+            } else {
+                CONTEXT_PASSWORD
+            },
+            id_prover: ID_PROVER,
+            id_verifier: ID_VERIFIER,
+        };
+        let keys = prover::finish(&t, &w0, &w1, &x, &share_v).unwrap();
+        let confirm_v = BASE64.decode(share["confirmV"].as_str().unwrap()).unwrap();
+        Ok(spake2plus::Keys {
+            confirm_v: confirm_v.try_into().unwrap(),
+            ..keys
+        })
+    }
+
+    /// Authenticate with SPAKE2+; the device's last session message.
+    async fn authenticate(&mut self, auth: &str, pw: &str) -> Value {
+        let keys = match self.exchange(auth, pw).await {
+            Ok(keys) => keys,
+            Err(refusal) => return refusal,
+        };
+        let reply = self
+            .session(json!({ "t": "confirm", "confirmP": BASE64.encode(keys.confirm_p) }))
+            .await;
+        if reply["t"] == "ready" {
+            self.keys(&channel::session_keys(&[], &keys.shared).unwrap());
+        }
+        reply
+    }
+
+    fn set_verifier(&self, pw: &str) {
+        self.store
+            .set_verifier(&make_record(pw.as_bytes(), 1000).unwrap())
+            .unwrap();
+    }
+
+    fn calls(&self) -> Vec<String> {
+        self.device.calls.lock().unwrap().clone()
+    }
+
+    fn last_advert(&self) -> Option<String> {
+        self.radio
+            .advertised
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .flatten()
+    }
+}
+
+#[tokio::test]
+async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
+    let mut bench = Bench::new(false).await;
+    assert_eq!(bench.last_advert().as_deref(), Some("mica-a4e2e69e"));
+    assert!(bench.radio.held.load(Ordering::SeqCst));
+
+    let info = bench.read_info(PHONE).await.unwrap();
+    assert_eq!(info["protocol"], 1);
+    assert_eq!(info["claimed"], false);
+    assert_eq!(info["auth"], "none");
+    assert_eq!(info["maxWrite"], 182);
+    assert_eq!(bench.last_advert(), None, "one phone at a time");
+
+    bench.start_none().await;
+    let staged = bench
+        .command(json!({ "op": "claim", "password": PASSWORD, "hostname": "deck-7" }))
+        .await;
+    assert_eq!(staged, vec![json!({ "id": 1, "event": "claimStaged" })]);
+    assert!(bench.wifi_locked.load(Ordering::SeqCst));
+
+    *bench.device.wifi.lock().unwrap() = Some(Ok("192.168.1.40".into()));
+    let events = bench
+        .command(
+            json!({ "op": "setWifi", "ssid": "Harbour", "psk": "sea-breeze-77", "hidden": false }),
+        )
+        .await;
+    assert_eq!(events[0], json!({ "id": 2, "event": "connecting" }));
+    assert_eq!(
+        events[1],
+        json!({ "id": 2, "event": "connected", "ip": "192.168.1.40", "hostname": "deck-7" })
+    );
+
+    let finished = bench.command(json!({ "op": "finish" })).await;
+    assert_eq!(
+        finished,
+        vec![
+            json!({ "id": 3, "event": "finished", "claimed": true, "hostname": "deck-7", "apPsk": "GENERATED" })
+        ]
+    );
+    assert_eq!(bench.calls(), vec!["join Harbour", "claim harbour-pw-1"]);
+    assert_eq!(*bench.radio.disconnected.lock().unwrap(), vec![PHONE]);
+    assert!(!bench.wifi_locked.load(Ordering::SeqCst));
+    bench.tick(1).await;
+    assert_eq!(bench.last_advert(), None, "finish closes the window");
+    let history = bench.store.history();
+    assert_eq!(history.len(), 1);
+    assert_eq!(
+        (history[0].trigger.as_str(), history[0].outcome.as_str()),
+        ("unclaimed", "claimed")
+    );
+}
+
+#[tokio::test]
+async fn wi_fi_needs_a_staged_claim_and_a_disconnect_drops_it() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    let refused = bench
+        .command(json!({ "op": "setWifi", "ssid": "Harbour", "psk": "", "hidden": false }))
+        .await;
+    assert_eq!(
+        refused,
+        vec![json!({ "id": 1, "event": "failed", "reason": "not_claimed" })]
+    );
+
+    bench
+        .command(json!({ "op": "claim", "password": PASSWORD }))
+        .await;
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    bench.phone = Phone::default();
+    bench.start_none().await;
+    let finish = bench.command(json!({ "op": "finish" })).await;
+    assert_eq!(
+        finish,
+        vec![json!({ "id": 1, "event": "failed", "reason": "not_claimed" })]
+    );
+}
+
+#[tokio::test]
+async fn claim_values_are_checked() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    for (command, reason) in [
+        (
+            json!({ "op": "claim", "password": "short" }),
+            "invalid_password",
+        ),
+        (
+            json!({ "op": "claim", "password": PASSWORD, "hostname": "-deck" }),
+            "invalid_hostname",
+        ),
+        (
+            json!({ "op": "claim", "password": PASSWORD, "apPsk": "short" }),
+            "invalid_ap_psk",
+        ),
+        (json!({ "op": "claim" }), "bad_request"),
+        (json!({ "op": "reboot" }), "unknown_op"),
+    ] {
+        let events = bench.command(command).await;
+        assert_eq!(events[0]["reason"], reason, "{events:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_unfinished_unclaimed_session_undoes_its_wi_fi_after_two_minutes_away() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    bench
+        .command(json!({ "op": "claim", "password": PASSWORD }))
+        .await;
+    *bench.device.wifi.lock().unwrap() = Some(Ok("192.168.1.40".into()));
+    bench
+        .command(
+            json!({ "op": "setWifi", "ssid": "Harbour", "psk": "sea-breeze-77", "hidden": false }),
+        )
+        .await;
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    assert!(
+        bench.wifi_locked.load(Ordering::SeqCst),
+        "held while the phone may return"
+    );
+    bench.tick(119).await;
+    bench.pump().await;
+    assert_eq!(bench.calls(), vec!["join Harbour"]);
+    bench.tick(1).await;
+    bench.pump().await;
+    assert_eq!(
+        bench.calls().last().unwrap(),
+        r#"restore {"mode":"ap"} remove ["Harbour"]"#
+    );
+    assert!(!bench.wifi_locked.load(Ordering::SeqCst));
+    assert_eq!(bench.store.history()[0].outcome, "wifi-connected");
+}
+
+#[tokio::test]
+async fn a_claimed_session_that_never_connected_restores_the_mode_and_keeps_its_network() {
+    let mut bench = Bench::new(true).await;
+    bench.set_verifier(PASSWORD);
+    assert_eq!(bench.authenticate("password", PASSWORD).await["t"], "ready");
+    *bench.device.wifi.lock().unwrap() = Some(Err("wrong_password"));
+    let events = bench
+        .command(
+            json!({ "op": "setWifi", "ssid": "Harbour", "psk": "sea-breeze-77", "hidden": false }),
+        )
+        .await;
+    assert_eq!(events[1]["reason"], "wrong_password");
+    let finished = bench.command(json!({ "op": "finish" })).await;
+    assert_eq!(finished[0]["event"], "finished");
+    bench.pump().await;
+    assert_eq!(
+        bench.calls().last().unwrap(),
+        r#"restore {"mode":"ap"} remove []"#
+    );
+    assert_eq!(bench.store.history()[0].outcome, "finished");
+}
+
+#[tokio::test]
+async fn a_long_connect_does_not_count_as_idle_but_silence_does() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    bench
+        .command(json!({ "op": "claim", "password": PASSWORD }))
+        .await;
+    let events = bench
+        .command(json!({ "op": "setWifi", "ssid": "Harbour", "psk": "", "hidden": false }))
+        .await;
+    assert_eq!(events, vec![json!({ "id": 2, "event": "connecting" })]);
+    bench.tick(300).await;
+    assert!(bench.radio.disconnected.lock().unwrap().is_empty());
+
+    *bench.device.wifi.lock().unwrap() = Some(Ok("10.0.0.9".into()));
+    bench.device.release.notify_waiters();
+    bench.pump().await;
+    assert_eq!(bench.events()[0]["event"], "connected");
+    bench.tick(119).await;
+    assert!(bench.radio.disconnected.lock().unwrap().is_empty());
+    bench.tick(1).await;
+    assert_eq!(
+        bench.events(),
+        vec![json!({ "event": "closing", "reason": "idle" })]
+    );
+    assert_eq!(*bench.radio.disconnected.lock().unwrap(), vec![PHONE]);
+}
+
+#[tokio::test]
+async fn a_second_phone_is_refused_while_one_is_connected() {
+    let mut bench = Bench::new(false).await;
+    bench.read_info(PHONE).await.unwrap();
+    assert_eq!(bench.read_info(OTHER).await, Err(Refused::Busy));
+    assert_eq!(
+        bench.write(OTHER, Written::Session, b"{}").await,
+        Err(Refused::Busy)
+    );
+}
+
+#[tokio::test]
+async fn a_closed_window_accepts_no_phone() {
+    let mut bench = Bench::new(false).await;
+    bench.tick(600).await;
+    assert_eq!(bench.last_advert(), None);
+    assert!(!bench.radio.held.load(Ordering::SeqCst));
+    assert_eq!(bench.read_info(PHONE).await, Err(Refused::Closed));
+}
+
+#[tokio::test]
+async fn a_claim_elsewhere_ends_the_unauthenticated_session() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    bench
+        .command(json!({ "op": "claim", "password": PASSWORD }))
+        .await;
+    bench.device.facts.lock().unwrap().claimed = true;
+    bench.engine.handle(Input::ClaimedElsewhere).await;
+    assert_eq!(
+        bench.events(),
+        vec![json!({ "event": "closing", "reason": "claimed_elsewhere" })]
+    );
+    assert_eq!(*bench.radio.disconnected.lock().unwrap(), vec![PHONE]);
+    assert_eq!(bench.last_advert(), None);
+}
+
+#[tokio::test]
+async fn a_claimed_device_without_a_verifier_says_password_unavailable() {
+    let mut bench = Bench::new(true).await;
+    assert_eq!(
+        bench.read_info(PHONE).await.unwrap()["auth"],
+        "password-unavailable"
+    );
+    let refused = bench
+        .session(json!({ "t": "start", "auth": "password" }))
+        .await;
+    assert_eq!(
+        refused,
+        json!({ "t": "error", "reason": "password_unavailable" })
+    );
+    let refused = bench.session(json!({ "t": "start", "auth": "none" })).await;
+    assert_eq!(refused["reason"], "unsupported_auth");
+}
+
+#[tokio::test]
+async fn wrong_passwords_count_down_and_the_fifth_locks() {
+    let mut bench = Bench::new(true).await;
+    bench.set_verifier(PASSWORD);
+    for left in (1..=4).rev() {
+        let refused = bench.authenticate("password", "wrong-password").await;
+        assert_eq!(
+            refused,
+            json!({ "t": "error", "reason": "auth_failed", "attemptsLeft": left })
+        );
+    }
+    let locked = bench.authenticate("password", "wrong-password").await;
+    assert_eq!(
+        locked,
+        json!({ "t": "error", "reason": "locked", "retryAfter": 600 })
+    );
+    // Even the right password waits, and the device stops advertising.
+    let locked = bench.authenticate("password", PASSWORD).await;
+    assert_eq!(locked["reason"], "locked");
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    assert_eq!(bench.last_advert(), None);
+    let audit = bench.audit.lock().unwrap().clone();
+    assert_eq!(
+        audit
+            .iter()
+            .filter(|line| *line == "ble-auth failed")
+            .count(),
+        5
+    );
+    assert_eq!(bench.store.history()[0].outcome, "auth-failed");
+}
+
+#[tokio::test]
+async fn a_phone_that_stops_after_the_share_has_used_an_attempt() {
+    let mut bench = Bench::new(true).await;
+    bench.set_verifier(PASSWORD);
+    bench.exchange("password", "anything").await.unwrap();
+    assert_eq!(
+        bench.store.lockout().failures,
+        1,
+        "counted before the answer"
+    );
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    assert_eq!(bench.store.lockout().failures, 1);
+    assert!(
+        bench
+            .audit
+            .lock()
+            .unwrap()
+            .contains(&"ble-auth failed".to_string())
+    );
+}
+
+#[tokio::test]
+async fn the_right_password_takes_its_charge_back() {
+    let mut bench = Bench::new(true).await;
+    bench.set_verifier(PASSWORD);
+    let mut lockout = Lockout::default();
+    for _ in 0..4 {
+        lockout.charge(1);
+    }
+    bench.store.set_lockout(&lockout).unwrap();
+    assert_eq!(bench.authenticate("password", PASSWORD).await["t"], "ready");
+    assert_eq!(bench.store.lockout(), Lockout::default());
+    let status = bench.command(json!({ "op": "getStatus" })).await;
+    assert_eq!(status[0]["event"], "status");
+    assert_eq!(status[0]["wifiMode"], "ap");
+    let refused = bench
+        .command(json!({ "op": "claim", "password": PASSWORD }))
+        .await;
+    assert_eq!(refused[0]["reason"], "not_allowed");
+}
+
+#[tokio::test]
+async fn a_manual_window_takes_its_code_and_a_lockout_voids_it() {
+    let mut bench = Bench::new(true).await;
+    bench.tick(600).await;
+    assert_eq!(bench.last_advert(), None);
+    let (reply, answer) = oneshot::channel();
+    bench
+        .engine
+        .handle(Input::OpenManual {
+            seconds: 300,
+            code: "40718263".into(),
+            record: make_record(b"40718263", 1000).unwrap(),
+            reply,
+        })
+        .await;
+    answer.await.unwrap().unwrap();
+    assert_eq!(bench.last_advert().as_deref(), Some("mica-a4e2e69e"));
+    let (reply, status) = oneshot::channel();
+    bench.engine.handle(Input::Status { reply }).await;
+    let status = status.await.unwrap();
+    assert_eq!(status["state"], "waiting");
+    assert_eq!(status["trigger"], "manual");
+    assert_eq!(status["code"], "40718263");
+    assert_eq!(status["expiresAt"], json!(1_800_000_000 + 600 + 300));
+
+    assert_eq!(bench.read_info(PHONE).await.unwrap()["auth"], "temp-code");
+    assert_eq!(
+        bench.authenticate("temp-code", "40718263").await["t"],
+        "ready"
+    );
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    bench.phone = Phone::default();
+
+    for _ in 0..5 {
+        bench.authenticate("temp-code", "00000000").await;
+    }
+    let (reply, status) = oneshot::channel();
+    bench.engine.handle(Input::Status { reply }).await;
+    let status = status.await.unwrap();
+    assert_eq!(status["state"], "connected");
+    assert!(status["code"].is_null(), "the code is void");
+    assert_eq!(status["lockedUntil"], json!(1_800_000_000 + 600 + 600));
+}
+
+#[tokio::test]
+async fn offline_opens_after_the_route_has_been_gone_for_two_minutes() {
+    let mut bench = Bench::new(true).await;
+    bench.set_verifier(PASSWORD);
+    bench.engine.handle(Input::Route(true)).await;
+    bench.tick(700).await;
+    assert_eq!(bench.last_advert(), None);
+    bench.engine.handle(Input::Route(false)).await;
+    bench.tick(119).await;
+    assert_eq!(bench.last_advert(), None);
+    bench.tick(1).await;
+    assert_eq!(bench.last_advert().as_deref(), Some("mica-a4e2e69e"));
+    bench.engine.handle(Input::Route(true)).await;
+    assert_eq!(bench.last_advert(), None);
+}

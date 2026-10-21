@@ -2,9 +2,11 @@
 //! the Wi-Fi network to join over BLE and, on an unclaimed device, claims it.
 
 pub mod channel;
+pub mod engine;
 pub mod runtime;
 pub mod spake2plus;
 pub mod store;
+pub mod window;
 
 /// `info.protocol`.
 pub const PROTOCOL: u32 = 1;
