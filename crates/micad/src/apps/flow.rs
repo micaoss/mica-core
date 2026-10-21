@@ -22,6 +22,13 @@ const ENV_FILE: &str = "app.env";
 /// The `ActiveState` of a unit that did not start.
 const FAILED_STATE: &str = "failed";
 
+/// The groups a device node may not have for an app's own user to be given it:
+/// each of these reaches every disk, the memory, the terminals or the
+/// accounts.
+const DENIED_GROUPS: [&str; 8] = [
+    "disk", "kmem", "shadow", "sudo", "wheel", "adm", "tty", "utmp",
+];
+
 /// What an install asks for besides the bundle.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct InstallOptions {
@@ -49,6 +56,7 @@ impl Apps {
         let mut problems = manifest::check_fields(&manifest, self.init(), &self.arch);
         if problems.is_empty() {
             problems.extend(self.unit_problems(&manifest, services).await?);
+            problems.extend(self.device_problems(&manifest)?);
         }
         let record = self.read_record();
         match record.apps.get(&manifest.name) {
@@ -397,6 +405,39 @@ impl Apps {
         }
     }
 
+    /// The devices of `manifest` an app's own user may not be given: a node
+    /// that is not a character device, or one whose group reaches past it,
+    /// since that group becomes the app's.
+    fn device_problems(&self, manifest: &Manifest) -> Result<Vec<Problem>, AppError> {
+        let root = self.root()?;
+        let mut problems = Vec::new();
+        for device in &manifest.privileges.devices {
+            let Ok(meta) = std::fs::metadata(root.join(device.trim_start_matches('/'))) else {
+                continue;
+            };
+            if let Some(why) = self.device_refusal(&meta) {
+                problems.push(Problem::new(
+                    "device",
+                    format!("{device} {why}; an app that needs it runs as root"),
+                ));
+            }
+        }
+        Ok(problems)
+    }
+
+    /// Why a node of `meta` may not be an app's own user's, if it may not.
+    fn device_refusal(&self, meta: &std::fs::Metadata) -> Option<String> {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        if !meta.file_type().is_char_device() {
+            return Some("is not a character device".into());
+        }
+        let groups = self
+            .root()
+            .ok()
+            .and_then(|root| std::fs::read_to_string(root.join("etc/group")).ok());
+        group_refusal(meta.gid(), groups.as_deref())
+    }
+
     /// Who `manifest`'s processes run as: nobody for a root app, else the
     /// app's own uid, kept in `record` or given there now.
     fn account(
@@ -426,6 +467,7 @@ impl Apps {
             .devices
             .iter()
             .filter_map(|device| std::fs::metadata(root.join(device.trim_start_matches('/'))).ok())
+            .filter(|meta| self.device_refusal(meta).is_none())
             .map(|meta| meta.gid())
             .filter(|gid| *gid != 0)
             .collect();
@@ -881,4 +923,30 @@ async fn send_to_log(logger: &str, tag: &str, log: &[u8]) {
         let _ = stdin.write_all(log).await;
     }
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait()).await;
+}
+
+/// Why a node of group `gid` may not be an app's own user's, given the root's
+/// `/etc/group`: its group is one of [`DENIED_GROUPS`], or has no name there.
+/// Group 0 is never given, so it is never refused.
+pub(super) fn group_refusal(gid: u32, groups: Option<&str>) -> Option<String> {
+    if gid == 0 {
+        return None;
+    }
+    let id = gid.to_string();
+    let name = groups.and_then(|text| {
+        text.lines().find_map(|line| {
+            let mut fields = line.split(':');
+            let name = fields.next()?;
+            (fields.nth(1)? == id).then_some(name)
+        })
+    });
+    match name {
+        None => Some(format!(
+            "belongs to gid {gid}, which has no name in /etc/group"
+        )),
+        Some(name) if DENIED_GROUPS.contains(&name) => Some(format!(
+            "belongs to group {name}, which reaches past the app"
+        )),
+        Some(_) => None,
+    }
 }

@@ -53,6 +53,19 @@ pub fn setpriv_args(account: &Account) -> Vec<String> {
     ]
 }
 
+/// `value`, refused when it carries what a unit file or a shell would read
+/// as more than text. The manifest's rules refuse these already; a unit is
+/// never written past them.
+fn plain(value: &str) -> anyhow::Result<&str> {
+    anyhow::ensure!(
+        !value
+            .chars()
+            .any(|c| matches!(c, '"' | '\'' | '\\' | '`' | '$') || c.is_control()),
+        "{value:?} is not plain text"
+    );
+    Ok(value)
+}
+
 /// What a service of `app` runs: setpriv, then its file and arguments with
 /// `vars` expanded.
 fn command(
@@ -86,6 +99,14 @@ pub fn unit(
     vars: &BTreeMap<String, String>,
 ) -> anyhow::Result<String> {
     let args = command(service, account, vars)?;
+    for value in args
+        .iter()
+        .chain(vars.keys())
+        .chain(vars.values())
+        .chain(devices)
+    {
+        plain(value)?;
+    }
     let data = vars.get("APP_DATA").context("APP_DATA")?;
     let app_dir = format!("/mica/apps/{app}");
     Ok(match init {
@@ -249,6 +270,15 @@ mod tests {
             "WantedBy=multi-user.target",
         ] {
             assert!(text.lines().any(|l| l == line), "{line}\n{text}");
+        }
+    }
+
+    #[test]
+    fn a_value_that_is_not_plain_is_never_written() {
+        let (service, account, mut vars) = tailscaled();
+        vars.insert("TS_SOCKET".into(), "/x\"; touch /pwn; \"".into());
+        for init in [Init::Systemd, Init::Openrc] {
+            assert!(unit(init, "tailscale", &service, &account, &[], &vars).is_err());
         }
     }
 

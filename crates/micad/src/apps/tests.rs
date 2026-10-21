@@ -610,6 +610,67 @@ async fn an_app_runs_as_its_own_user() {
     assert_eq!(view["privileges"]["uid"], json!(null));
 }
 
+/// A device whose group reaches past it, or a node that is not a character
+/// device, is refused: its group would be the app's.
+#[tokio::test]
+async fn a_device_that_reaches_past_the_app_is_refused() {
+    use std::os::unix::fs::MetadataExt;
+    let rig = Rig::new(Init::Systemd);
+    std::fs::create_dir_all(rig.path("dev")).unwrap();
+    std::fs::write(rig.path("dev/sdz"), "").unwrap();
+    let gid = std::fs::metadata(rig.path("dev/sdz")).unwrap().gid();
+    std::fs::create_dir_all(rig.path("etc")).unwrap();
+    std::fs::write(rig.path("etc/group"), format!("disk:x:{gid}:\n")).unwrap();
+    let own = json!({
+        "privileges": { "devices": ["/dev/sdz"] },
+        "services": [{ "name": "demo", "exec": ["files/run"] }],
+    });
+    let err = rig
+        .apps
+        .admit(
+            &rig.bundle("demo", "1.0", own, None),
+            InstallOptions::default(),
+            &ServicesSettings::default(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(rules(err), ["device"]);
+}
+
+#[tokio::test]
+async fn a_character_device_of_group_0_is_given() {
+    let rig = Rig::new(Init::Systemd);
+    std::fs::create_dir_all(rig.path("dev")).unwrap();
+    std::os::unix::fs::symlink("/dev/null", rig.path("dev/null")).unwrap();
+    let own = json!({
+        "privileges": { "devices": ["/dev/null"] },
+        "services": [{ "name": "demo", "exec": ["files/run"] }],
+    });
+    rig.apps
+        .admit(
+            &rig.bundle("demo", "1.0", own, None),
+            InstallOptions::default(),
+            &ServicesSettings::default(),
+        )
+        .await
+        .unwrap();
+}
+
+#[test]
+fn a_group_that_reaches_past_the_app_or_has_no_name_is_refused() {
+    let groups = "root:x:0:\ndisk:x:6:\nwheel:x:10:\ndialout:x:20:\n";
+    assert_eq!(flow::group_refusal(0, None), None);
+    assert_eq!(flow::group_refusal(20, Some(groups)), None);
+    for (gid, text) in [
+        (6, Some(groups)),
+        (10, Some(groups)),
+        (44, Some(groups)),
+        (20, None),
+    ] {
+        assert!(flow::group_refusal(gid, text).is_some(), "{gid}");
+    }
+}
+
 /// Under OpenRC the service is a script micad writes, under supervise-daemon.
 #[tokio::test]
 async fn an_openrc_app_of_its_own_user_gets_a_written_script() {

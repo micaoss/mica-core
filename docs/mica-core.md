@@ -551,7 +551,9 @@ account or group of the root has, and keeps it in `/mica/apps/apps.json` through
 purge. The root's accounts are read-only, so it has no name there: micad shows it as
 `mica-app-<name>`, and `ps` the number. `/srv/apps/<name>` is the app's, and is given back to root
 should a later version run as root. Each service runs through `setpriv` as that uid, with no
-supplementary groups but those of its devices' nodes, its bounding, inheritable and ambient
+supplementary groups but those of its devices' nodes (a node that is not a character device, or
+one of group `disk`, `kmem`, `shadow`, `sudo`, `wheel`, `adm`, `tty` or `utmp`, or of a gid with no
+name in `/etc/group`, refuses the bundle: an app that needs one runs as root), its bounding, inheritable and ambient
 capabilities only the ones it declares, and no new privileges. Under systemd its unit runs it in a
 sandbox besides: `ProtectSystem=strict` with `/srv/apps/<name>` alone writable, `PrivateTmp`,
 `ProtectHome`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectControlGroups`,
@@ -561,7 +563,8 @@ before it runs the service (`CAP_SETUID`, `CAP_SETGID`, `CAP_SETPCAP`). Under Op
 runs it under `supervise-daemon` through the same `setpriv`; OpenRC has no namespaces, so there
 the uid, the capabilities and the files' own permissions are all that confine it: it writes only
 its data, its own processes' files and what is world-writable (`/tmp`), reads what is
-world-readable, and opens a device whose node lets its uid or group. The first-run hook of an app
+world-readable, and opens a device whose node lets its uid or group, so a device's group gives it
+every node of that group. The first-run hook of an app
 of its own user runs as it too, with no capabilities and `HOME` its data.
 
 **Install and upgrade.** A bundle is checked before it is taken: its manifest, its units and what
