@@ -1,433 +1,299 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { jsonResponse, renderRoute, stubFetch } from '@/shared/testing/panel'
+import { jsonResponse, renderParamRoute, stubFetch } from '@/shared/testing/panel'
+import { accessPoint, configured, networkRoutes, observed } from '@/shared/testing/network'
+import { resetChangeSet, updateChangeSet } from './change-set'
+import { stageSet } from './model'
 import { NetworkPage } from './network-page'
-
-const routes = {
-  '/api/v1/network': {
-    configured: { eth0: { dhcp: true }, wg0: { kind: 'wireguard', dhcp: false, static: { address: '10.10.0.2/24', dns: [] }, wireguard: { listenPort: 51820, peers: [] } } },
-    configuredCount: 2,
-    observed: { available: true, interfaceCount: 2, interfaces: [{ index: 2, name: 'eth0', kind: 'ether', operationalState: 'routable', addresses: ['192.168.1.24/24'] }] },
-  },
-  '/api/v1/network/status': {
-    interfaces: { available: true, count: 0, entries: [] },
-    defaultRoutes: { available: true, count: 0, entries: [] },
-    dns: { available: true, linkServers: [], resolverServers: [] },
-    wifi: { available: true, associations: [] },
-    capabilities: { wifi: { supported: false, interfaces: [] }, bluetooth: { supported: false, adapters: [] }, cellular: { supported: false, interfaces: [] } },
-  },
-  '/api/v1/wifi/client': { enabled: true, interface: 'wlan0' },
-  '/api/v1/wifi/ap': {
-    mode: 'provisioning',
-    interface: 'wlan0',
-    ssid: 'mica-lab',
-    psk: '<redacted>',
-    channel: 11,
-    countryCode: 'DE',
-    address: '192.168.4.1/24',
-    holdDownSeconds: 120,
-    graceSeconds: 60,
-  },
-  '/api/v1/state/network': {},
-  '/api/v1/wifi/client/networks': [{ ssid: 'workshop', psk: 'x', hidden: false, priority: 10 }],
-}
 
 afterEach(() => {
   cleanup()
+  resetChangeSet()
+  sessionStorage.clear()
   vi.unstubAllGlobals()
 })
 
+const open = (tab?: string) => renderParamRoute(<NetworkPage />, '/network', tab ? `/network?tab=${tab}` : '/network')
+
+const bodyOf = (fetch: ReturnType<typeof stubFetch>, method: string, path: string) => {
+  const call = fetch.mock.calls.find(([input, init]) => String(input) === path && (init as RequestInit | undefined)?.method === method)
+  return call ? JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown> : undefined
+}
+
 describe('the network page', () => {
-  it('shows no Wi-Fi or Bluetooth tab on a device that does not serve them', async () => {
-    stubFetch({ ...routes, '/api/v1/meta': { api: 'v1', features: ['containers', 'mqtt'] } })
-    renderRoute(<NetworkPage />)
+  it('shows only the tabs the device serves', async () => {
+    stubFetch({ ...networkRoutes(), '/api/v1/meta': { api: 'v1', features: [], init: 'systemd' } })
+    open()
     await screen.findByRole('tab', { name: 'Interfaces' })
-    await waitFor(() => expect(screen.queryByRole('tab', { name: 'Bluetooth' })).toBeNull())
-    expect(screen.queryByRole('tab', { name: 'Known Wi-Fi' })).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'Wi-Fi' })).toBeNull())
+    expect(screen.queryByRole('tab', { name: 'Bluetooth' })).toBeNull()
     expect(screen.getByRole('tab', { name: 'WireGuard' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Overview' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'DNS' })).toBeTruthy()
   })
 
-  it('shows every tab while the device has not said otherwise', async () => {
-    stubFetch(routes)
-    renderRoute(<NetworkPage />)
-    expect(await screen.findByRole('tab', { name: 'Known Wi-Fi' })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: 'Bluetooth' })).toBeTruthy()
+  it('offers no tunnels and no new interfaces on OpenRC', async () => {
+    stubFetch({ ...networkRoutes(), '/api/v1/meta': { api: 'v1', features: ['wifi'], init: 'openrc' } })
+    open()
+    await screen.findByRole('link', { name: 'eth0' })
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'WireGuard' })).toBeNull())
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
   })
 
-  it('gives each interface one link and no second navigation behind it', async () => {
-    // The row has no onClick of its own: the link is the one navigation, so a
-    // click on the name navigates once and the keyboard reaches it.
-    stubFetch(routes)
-    renderRoute(<NetworkPage />)
-
-    const link = await screen.findByRole('link', { name: /eth0/ })
-    expect(link.getAttribute('href')).toContain('/network/eth0')
-    const row = link.closest('tr')!
-    expect(within(row).getAllByRole('link')).toHaveLength(1)
+  it('groups the interfaces by role and leaves the loopback out', async () => {
+    stubFetch(networkRoutes())
+    open()
+    const ports = await screen.findByRole('region', { name: 'Ethernet ports' })
+    expect(within(ports).getAllByRole('link').map((card) => card.getAttribute('aria-label'))).toEqual(['eth0', 'eth1', 'eth2'])
+    expect(within(within(ports).getByRole('link', { name: 'eth0' })).getByText('Exit')).toBeTruthy()
+    expect(within(within(ports).getByRole('link', { name: 'eth2' })).getAllByText('No cable').length).toBeGreaterThan(0)
+    expect(screen.getByRole('region', { name: 'Wireless' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Tunnels' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Field buses' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'lo' })).toBeNull()
   })
 
-  /// A controller the kernel has and the settings do not name is listed with
-  /// a link to its page, where it is declared (`interface-detail`).
-  it('lists an undeclared CAN controller with the page that declares it', async () => {
-    stubFetch({
+  it('stages a tunnel, reviews it, and writes the whole map in one request', async () => {
+    const fetch = stubFetch({
+      ...networkRoutes(),
+      'PUT /api/v1/network': () => jsonResponse({ taskId: 't1' }),
+      '/api/v1/tasks/t1': { id: 't1', operation: 'network', dotPath: 'network', source: 'api', status: 'finished', outcome: 'succeeded', enqueuedAt: '', foldedCount: 0 },
+      '/api/v1/health': { apid: 'ok', micad: 'ok' },
+    })
+    open('wireguard')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    const wizard = await screen.findByRole('dialog')
+    await userEvent.click(within(wizard).getByRole('button', { name: 'Stage' }))
+
+    const bar = await screen.findByRole('region', { name: 'Pending network changes' })
+    expect(within(bar).getByText('1 pending changes')).toBeTruthy()
+    await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
+
+    const review = await screen.findByRole('dialog')
+    expect(within(review).getByText('wg1')).toBeTruthy()
+    // Where the browser came from is not known here, so the write asks first.
+    const apply = within(review).getByRole('button', { name: 'Apply 1 changes' })
+    expect(apply.hasAttribute('disabled')).toBe(true)
+    await userEvent.click(within(review).getByRole('switch'))
+    await userEvent.click(apply)
+
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/network')).toBeTruthy())
+    expect(bodyOf(fetch, 'PUT', '/api/v1/network')).toEqual({ ...configured(), wg1: { kind: 'wireguard', static: { address: '10.2.0.1/24' }, wireguard: { listenPort: 51821, peers: [] } } })
+    expect(await screen.findByText('The device reports the interfaces reconciled.')).toBeTruthy()
+  })
+
+  it('reports a change the device made underneath the staged edits instead of overwriting it', async () => {
+    let reads = 0
+    const routes = networkRoutes()
+    const fetch = stubFetch({
       ...routes,
-      '/api/v1/network': {
-        ...routes['/api/v1/network'],
-        observed: { available: true, interfaceCount: 2, interfaces: [
-          { index: 2, name: 'eth0', kind: 'ether', operationalState: 'routable', addresses: ['192.168.1.24/24'] },
-          { index: 3, name: 'can0', type: 'can', operationalState: 'off', addresses: [] },
-        ] },
+      '/api/v1/network': () => {
+        reads += 1
+        const map = configured()
+        if (reads > 1) map.eth1 = { dhcp: true }
+        return jsonResponse({ ...(routes['/api/v1/network'] as object), configured: map })
       },
     })
-    renderRoute(<NetworkPage />)
+    open()
+    await screen.findByRole('link', { name: 'eth1' })
+    act(() => updateChangeSet((set) => stageSet(set, 'eth1', 'physical', (entry) => ({ ...entry, static: { address: '192.168.20.1/24' } }))))
+    const bar = await screen.findByRole('region', { name: 'Pending network changes' })
+    await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
+    const review = await screen.findByRole('dialog')
+    await userEvent.click(within(review).getByRole('switch'))
+    await userEvent.click(within(review).getByRole('button', { name: 'Apply 1 changes' }))
 
-    const link = await screen.findByRole('link', { name: /can0/ })
-    expect(link.getAttribute('href')).toContain('/network/can0')
+    expect(await screen.findByText(/The device configuration changed underneath these edits: eth1/)).toBeTruthy()
+    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
   })
 
-  it('closes the Wi-Fi removal confirmation and names the network', async () => {
-    stubFetch({ ...routes, 'DELETE /api/v1/wifi/client/networks/workshop': () => new Response(null, { status: 204 }) })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Remove workshop' }))
-    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove workshop' }))
-
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    expect((await screen.findAllByText('Network workshop removed.')).length).toBeGreaterThan(0)
+  it('summarises the device on the overview tab', async () => {
+    stubFetch(networkRoutes())
+    open('overview')
+    expect(await screen.findByText('Online')).toBeTruthy()
+    expect(screen.getByText('via 192.168.1.1')).toBeTruthy()
+    expect(screen.getByText('Uplink eth0')).toBeTruthy()
   })
 
-  /// The operator was never shown the key, so an empty password box means
-  /// "keep it" and the request must carry no `psk` at all.
-  it('edits a stored network without sending a key it never showed', async () => {
-    const fetch = stubFetch({ ...routes, 'PUT /api/v1/wifi/client/networks/workshop': () => jsonResponse({ ssid: 'workshop', psk: '<redacted>', hidden: true, priority: 3 }) })
-    renderRoute(<NetworkPage />)
+  it('shows what the device resolves with on the DNS tab and checks again on request', async () => {
+    const fetch = stubFetch(networkRoutes())
+    open('dns')
+    expect(await screen.findByText('Resolves')).toBeTruthy()
+    expect(screen.getByText('example.org')).toBeTruthy()
+    const before = fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/network/status').length
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    await waitFor(() => expect(fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/network/status').length).toBeGreaterThan(before))
+  })
+})
 
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+describe('the Wi-Fi tab', () => {
+  it('edits a saved network without sending a key it never showed', async () => {
+    const fetch = stubFetch({ ...networkRoutes(), 'PUT /api/v1/wifi/client/networks/marina': () => jsonResponse({ ssid: 'marina', psk: '<redacted>', hidden: false, priority: 3 }) })
+    open('wifi')
+    await screen.findByText('marina')
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' })[0])
     const dialog = await screen.findByRole('dialog')
     const priority = within(dialog).getByLabelText('Priority')
     await userEvent.clear(priority)
     await userEvent.type(priority, '3')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
 
-    const call = await waitFor(() => {
-      const found = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
-      expect(found).toBeTruthy()
-      return found
-    })
-    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ ssid: 'workshop', hidden: false, priority: 3 })
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi/client/networks/marina')).toEqual({ ssid: 'marina', hidden: false, priority: 3 }))
   })
 
-  /// A scan is a POST: it sweeps every channel and briefly costs the station
-  /// its link, so it happens when an operator asks for it.
-  it('scans on request and offers to connect to what it found', async () => {
-    const fetch = stubFetch({
-      ...routes,
-      'POST /api/v1/wifi/client/scan': () => jsonResponse({
-        available: true,
-        interface: 'wlan0',
-        networks: [{ ssid: 'lab-5g', bssid: 'aa:bb:cc:dd:ee:01', signalDbm: -42, flags: '[WPA2-PSK-CCMP][ESS]' }],
-      }),
-    })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    expect(fetch.mock.calls.some(([path]) => String(path) === '/api/v1/wifi/client/scan')).toBe(false)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Scan' }))
-
-    expect(await screen.findByText('lab-5g')).toBeTruthy()
-    expect(screen.getByText('-42 dBm')).toBeTruthy()
-    // Connecting is adding the network: the device joins what it is told to
-    // join, and the dialog opens with the name already filled in.
-    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
-    // By name: a toast is a dialog too, and the success toast from the scan is
-    // still on screen.
-    const dialog = await screen.findByRole('dialog', { name: 'Add Wi-Fi network' })
-    expect((within(dialog).getByLabelText('SSID') as HTMLInputElement).value).toBe('lab-5g')
+  it('removes a saved network behind a confirmation', async () => {
+    stubFetch({ ...networkRoutes(), 'DELETE /api/v1/wifi/client/networks/marina': () => new Response(null, { status: 204 }) })
+    open('wifi')
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove marina' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect((await screen.findAllByText('Network marina removed.')).length).toBeGreaterThan(0)
   })
 
-  /// The client joins WPA2 and WPA3 with a passphrase and nothing else: a
-  /// WPA3 network is not "open", and an 802.1X or WEP one cannot be joined.
-  it('names each network\'s security and offers only what the client can join', async () => {
-    stubFetch({
-      ...routes,
-      'POST /api/v1/wifi/client/scan': () => jsonResponse({
-        available: true,
-        interface: 'wlan0',
-        networks: [
-          { ssid: 'wpa3', bssid: 'aa:00:00:00:00:01', signalDbm: -40, flags: '[WPA2-SAE-CCMP][ESS]' },
-          { ssid: 'corp', bssid: 'aa:00:00:00:00:02', signalDbm: -50, flags: '[WPA2-EAP-CCMP][ESS]' },
-          { ssid: 'old', bssid: 'aa:00:00:00:00:03', signalDbm: -60, flags: '[WEP][ESS]' },
-          { ssid: 'cafe', bssid: 'aa:00:00:00:00:04', signalDbm: -70, flags: '[ESS]' },
-        ],
-      }),
-    })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Scan' }))
-    const row = (ssid: string) => within(screen.getByText(ssid).closest('tr')!)
-    await screen.findByText('wpa3')
-    expect(row('wpa3').getByText('WPA3-SAE')).toBeTruthy()
-    expect(row('corp').getByText('WPA-Enterprise · not supported')).toBeTruthy()
-    expect(row('old').getByText('WEP · not supported')).toBeTruthy()
-    expect(row('cafe').getByText('Open network')).toBeTruthy()
-    expect(row('corp').getByRole('button', { name: 'Connect' }).hasAttribute('disabled')).toBe(true)
-    expect(row('old').getByRole('button', { name: 'Connect' }).hasAttribute('disabled')).toBe(true)
-
-    // A network that needs a key is not added without one.
-    await userEvent.click(row('wpa3').getByRole('button', { name: 'Connect' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Add Wi-Fi network' })
-    expect(within(dialog).getByLabelText('Password').hasAttribute('required')).toBe(true)
+  it('does not scan while the client is off', async () => {
+    stubFetch(networkRoutes())
+    open('wifi')
+    expect(await screen.findByText('The Wi-Fi client is off. Turn it on to scan.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Scan' }).hasAttribute('disabled')).toBe(true)
   })
 
-  /// A mesh answers with one SSID from many access points: the list shows the
-  /// network once, at its strongest, and opens to each access point.
-  it('shows a network once with its access points behind it', async () => {
-    stubFetch({
-      ...routes,
-      'POST /api/v1/wifi/client/scan': () => jsonResponse({
-        available: true,
-        interface: 'wlan0',
-        networks: [
-          { ssid: 'mesh', bssid: 'aa:00:00:00:00:01', signalDbm: -71, frequencyMhz: 2437, flags: '[WPA2-PSK-CCMP][ESS]' },
-          { ssid: 'cafe', bssid: 'bb:00:00:00:00:01', signalDbm: -50, frequencyMhz: 2412, flags: '[ESS]' },
-          { ssid: 'mesh', bssid: 'aa:00:00:00:00:02', signalDbm: -44, frequencyMhz: 5180, flags: '[WPA2-PSK-CCMP][ESS]' },
-        ],
-      }),
-    })
-    renderRoute(<NetworkPage />)
+  it('starts the access point without sending its stored key', async () => {
+    const fetch = stubFetch({ ...networkRoutes(), 'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'ap' }) })
+    open('wifi')
+    await screen.findByText('marina')
+    // The saved network's row comes first; the radio's own card is last.
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!)
+    const config = screen.getByRole('switch', { name: 'Wi-Fi' })
+    await userEvent.click(config)
+    await userEvent.click(screen.getByRole('button', { name: 'Access point' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'The device operates in this country' }))
+    await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
 
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Scan' }))
-    const mesh = await screen.findByRole('button', { name: /^mesh/ })
-    expect(mesh.textContent).toBe('mesh · 2 access points')
-    const row = mesh.closest('tr')!
-    expect(within(row).getByText('-44 dBm')).toBeTruthy()
-    expect(within(row).getByText('5 GHz, 2.4 GHz')).toBeTruthy()
-    expect(screen.getAllByRole('button', { name: 'Connect' })).toHaveLength(2)
-    expect(mesh.getAttribute('aria-expanded')).toBe('false')
-
-    await userEvent.click(mesh)
-    const list = within(row).getByRole('list', { name: 'Access points of mesh' })
-    expect(within(list).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-      'aa:00:00:00:00:02 · 5 GHz · -44 dBm',
-      'aa:00:00:00:00:01 · 2.4 GHz · -71 dBm',
-    ])
-  })
-
-  /// The access point is configured from the same tab, and its key is never
-  /// shown: the field is empty and an empty field keeps the stored one.
-  it('configures the access point without ever showing its key', async () => {
-    const fetch = stubFetch({
-      ...routes,
-      '/api/v1/wifi/client': { enabled: false, interface: 'wlan0' },
-      'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'task-2' }, 202),
-    })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    const key = await screen.findByLabelText(/Pre-shared key/)
-    expect((key as HTMLInputElement).value).toBe('')
-    await userEvent.click(screen.getByRole('button', { name: 'Save access point' }))
-
-    const call = await waitFor(() => {
-      // The PUT, not the GET the panel read its values with.
-      const found = fetch.mock.calls.find(([path, init]) =>
-        String(path) === '/api/v1/wifi/ap' && (init as RequestInit | undefined)?.method === 'PUT')
-      expect(found).toBeTruthy()
-      return found
-    })
-    const body = JSON.parse(String((call?.[1] as RequestInit).body))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi/ap')).toBeTruthy())
+    const body = bodyOf(fetch, 'PUT', '/api/v1/wifi/ap')!
     expect(body.psk).toBeUndefined()
-    expect(body.mode).toBe('provisioning')
+    expect(body).toMatchObject({ mode: 'always', interface: 'wlan0', ssid: 'mica-lab', countryCode: 'DE', channel: 6, address: '192.168.4.1/24' })
+    expect(fetch.mock.calls.some(([input, init]) => String(input) === '/api/v1/wifi/client' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
   })
 
-  /// One radio carries one role: starting the access point where the station
-  /// runs asks first, and switches the station off before the access point.
-  it('asks before starting the access point on the station radio', async () => {
+  it('asks before switching a running access point to the client, and lets go of the radio first', async () => {
     const fetch = stubFetch({
-      ...routes,
-      'PUT /api/v1/wifi/client': () => jsonResponse({ taskId: 'task-1' }, 202),
-      'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'task-2' }, 202),
+      ...networkRoutes(),
+      '/api/v1/wifi/ap': accessPoint('always'),
+      'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'ap' }),
+      'PUT /api/v1/wifi/client': () => jsonResponse({ taskId: 'client' }),
     })
-    renderRoute(<NetworkPage />)
+    open('wifi')
+    expect(await screen.findByText('No clients are connected.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Client' }))
+    await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
 
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    await screen.findByLabelText(/Pre-shared key/)
-    await userEvent.click(screen.getByRole('button', { name: 'Save access point' }))
-    const dialog = await screen.findByRole('alertdialog', { name: 'Switch off the Wi-Fi client?' })
-    const puts = () => fetch.mock.calls
-      .filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
-      .map(([path, init]) => [String(path), JSON.parse(String((init as RequestInit).body))])
-    expect(puts()).toEqual([])
+    const confirm = await screen.findByRole('alertdialog')
+    expect(within(confirm).getByText('Switch to client?')).toBeTruthy()
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Switch and save' }))
 
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Switch off the client and save' }))
-
-    await waitFor(() => expect(puts().map(([path]) => path)).toEqual(['/api/v1/wifi/client', '/api/v1/wifi/ap']))
-    expect(puts()[0][1]).toEqual({ enabled: false, interface: 'wlan0' })
-    expect(puts()[1][1].mode).toBe('provisioning')
-  })
-
-  it('asks before switching the station on where the access point runs', async () => {
-    const fetch = stubFetch({
-      ...routes,
-      '/api/v1/wifi/client': { enabled: false, interface: 'wlan0' },
-      'PUT /api/v1/wifi/client': () => jsonResponse({ taskId: 'task-1' }, 202),
-      'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'task-2' }, 202),
-    })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    await screen.findByLabelText(/Pre-shared key/)
-    await userEvent.click(await screen.findByRole('switch', { name: 'Wi-Fi client' }))
-    const dialog = await screen.findByRole('alertdialog', { name: 'Switch off the access point?' })
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Switch off the access point' }))
-
-    const puts = () => fetch.mock.calls
-      .filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
-      .map(([path, init]) => [String(path), JSON.parse(String((init as RequestInit).body))])
-    await waitFor(() => expect(puts().map(([path]) => path)).toEqual(['/api/v1/wifi/ap', '/api/v1/wifi/client']))
-    expect(puts()[0][1].mode).toBe('off')
-    expect(puts()[0][1].psk).toBeUndefined()
-    expect(puts()[1][1]).toEqual({ enabled: true, interface: 'wlan0' })
-  })
-
-  it('says the access point holds the radio when a scan cannot run', async () => {
-    stubFetch({
-      ...routes,
-      'POST /api/v1/wifi/client/scan': () => jsonResponse({
-        available: false,
-        interface: 'wlan0',
-        reason: 'access-point',
-        detail: 'the access point is using wlan0; switch it off to scan',
-      }),
-    })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Scan' }))
-
-    expect(await screen.findByText('The access point is using wlan0. Switch it off to scan.')).toBeTruthy()
-  })
-
-  it('reports the Wi-Fi client switch', async () => {
-    stubFetch({ ...routes, 'PUT /api/v1/wifi/client': () => jsonResponse({ taskId: 'task-1' }, 202) })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('tab', { name: 'Known Wi-Fi' }))
-    await userEvent.click(await screen.findByRole('switch', { name: 'Wi-Fi client' }))
-
-    expect((await screen.findAllByText('Wi-Fi client disabled.')).length).toBeGreaterThan(0)
-  })
-
-  it('keeps the add-interface dialog reachable when static addressing expands it', async () => {
-    stubFetch(routes)
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Static' }))
-
-    const dialog = await screen.findByRole('dialog')
-    // Header and footer stay outside the scroll region, so both are present
-    // however tall the body grows.
-    expect(within(dialog).getByText('Add network interface')).toBeTruthy()
-    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeTruthy()
-    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy()
-    expect(within(dialog).getByLabelText('Address')).toBeTruthy()
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi/client')).toEqual({ enabled: true, interface: 'wlan0' }))
+    const order = fetch.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT').map(([input]) => String(input))
+    expect(order).toEqual(['/api/v1/wifi/ap', '/api/v1/wifi/client'])
+    expect(bodyOf(fetch, 'PUT', '/api/v1/wifi/ap')).toMatchObject({ mode: 'off' })
   })
 })
 
-describe('the add-interface dialog', () => {
-  it.each([
-    ['VLAN', ['Parent interface', 'VLAN ID']],
-    ['Bridge', ['Bridge ports']],
-    ['WireGuard', ['Listen port']],
-    ['CAN', ['Bit rate (bit/s)', 'Restart after bus-off (ms)']],
-  ])('asks only for what a %s interface needs', async (kind, fields) => {
-    stubFetch(routes)
-    renderRoute(<NetworkPage />)
+describe('the Wi-Fi tab as a client', () => {
+  const joined = () => {
+    const status = observed({ wifi: { available: true, associations: [{ interface: 'wlan0', associated: true, ssid: 'marina', rssiDbm: -52 }] } })
+    return { ...networkRoutes(configured(), status), '/api/v1/wifi/client': { enabled: true, interface: 'wlan0' } }
+  }
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Interface kind' }))
-    await userEvent.click(await screen.findByRole('option', { name: kind }))
-
-    for (const field of fields) {
-      expect(within(await screen.findByRole('dialog')).getByLabelText(field)).toBeTruthy()
-    }
-  })
-
-  it('sends the typed interface and reports it', async () => {
-    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth1': () => jsonResponse({ taskId: 'task-1' }, 202) })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.type(within(dialog).getByLabelText('Interface name'), 'eth1')
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
-
-    expect((await screen.findAllByText('Interface eth1 saved.')).length).toBeGreaterThan(0)
-    const put = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')!
-    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ dhcp: true })
-  })
-
-  /// A PUT on a declared name would replace that entry, so the dialog that
-  /// adds refuses a name the device already declares.
-  it('refuses a name that is already declared', async () => {
-    const fetch = stubFetch(routes)
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.type(within(dialog).getByLabelText('Interface name'), 'eth0')
-
-    expect(within(dialog).getByText(/eth0 is already declared/)).toBeTruthy()
-    expect(within(dialog).getByRole('button', { name: 'Add' }).hasAttribute('disabled')).toBe(true)
-    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
-  })
-
-  /// A link that only carries other traffic -- a future bridge port, a VLAN
-  /// parent -- is declared with no addressing at all.
-  it('declares an interface with no addressing', async () => {
-    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/eth1': () => jsonResponse({ taskId: 'task-1' }, 202) })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.type(within(dialog).getByLabelText('Interface name'), 'eth1')
-    await userEvent.click(within(dialog).getByRole('button', { name: 'No address' }))
-    expect(within(dialog).queryByLabelText('Address')).toBeNull()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
-
-    expect((await screen.findAllByText('Interface eth1 saved.')).length).toBeGreaterThan(0)
-    const put = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')!
-    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ dhcp: false })
-  })
-
-  /// A CAN controller is declared with its bit timing alone: no DHCP switch,
-  /// no addressing, and FD off unless switched on.
-  it('declares a CAN controller with its bit timing alone', async () => {
-    const fetch = stubFetch({ ...routes, 'PUT /api/v1/network/can0': () => jsonResponse({ taskId: 'task-2' }, 202) })
-    renderRoute(<NetworkPage />)
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
-    const dialog = await screen.findByRole('dialog')
-    await userEvent.type(within(dialog).getByLabelText('Interface name'), 'can0')
-    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Interface kind' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'CAN' }))
-    expect(within(dialog).queryByRole('switch')).toBeNull()
-    expect(within(dialog).queryByLabelText('Data bit rate (bit/s)')).toBeNull()
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
-
-    expect((await screen.findAllByText('Interface can0 saved.')).length).toBeGreaterThan(0)
-    const put = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')!
-    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({
-      kind: 'can',
-      can: { bitrate: 250000, restartMs: 100, fd: false },
+  it('shows the network it joined and connects to one it found', async () => {
+    const fetch = stubFetch({
+      ...joined(),
+      'POST /api/v1/wifi/client/scan': () => jsonResponse({ available: true, interface: 'wlan0', networks: [
+        { ssid: 'harbour', bssid: '02:00:00:00:01:01', signalDbm: -60, frequencyMhz: 2437, flags: '[WPA2-PSK-CCMP][ESS]' },
+        { ssid: 'harbour', bssid: '02:00:00:00:01:02', signalDbm: -70, frequencyMhz: 5180, flags: '[WPA2-PSK-CCMP][ESS]' },
+        { ssid: 'office', bssid: '02:00:00:00:01:03', signalDbm: -80, frequencyMhz: 2412, flags: '[WPA2-EAP-CCMP][ESS]' },
+      ] }),
+      'POST /api/v1/wifi/client/networks': () => jsonResponse({ ssid: 'harbour', psk: '<redacted>', hidden: false, priority: 0 }),
     })
+    open('wifi')
+    expect(await screen.findByText('-52 dBm')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Scan' }))
+    expect(await screen.findByText('harbour')).toBeTruthy()
+    expect(screen.getByText('2.4 GHz / 5 GHz')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Connect' })).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add network' })
+    await userEvent.type(within(dialog).getByLabelText('Password'), 'short')
+    expect(within(dialog).getAllByText('8 to 63 characters.').length).toBeGreaterThan(0)
+    await userEvent.type(within(dialog).getByLabelText('Password'), '-enough')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodyOf(fetch, 'POST', '/api/v1/wifi/client/networks')).toEqual({ ssid: 'harbour', psk: 'short-enough', hidden: false, priority: 0 }))
+  })
+
+  it('stages nothing and asks before turning the radio off', async () => {
+    const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi/client': () => jsonResponse({ taskId: 'off' }) })
+    open('wifi')
+    await screen.findByText('-52 dBm')
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!)
+    await userEvent.click(screen.getByRole('switch', { name: 'Wi-Fi' }))
+    await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
+    const confirm = await screen.findByRole('alertdialog')
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Turn off' }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi/client')).toEqual({ enabled: false, interface: 'wlan0' }))
+  })
+
+  it('writes the radio\'s own addressing as an interface', async () => {
+    const fetch = stubFetch({ ...joined(), 'PUT /api/v1/network/wlan0': () => jsonResponse({ taskId: 'w' }) })
+    open('wifi')
+    await screen.findByText('-52 dBm')
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!)
+    await userEvent.click(screen.getByRole('button', { name: 'Static' }))
+    await userEvent.type(screen.getByLabelText('Address'), '192.168.30.5/24')
+    await userEvent.type(screen.getByLabelText('Gateway'), '10.0.0.1')
+    const bar = screen.getByRole('region', { name: /Editing/ })
+    expect(await screen.findByText('The gateway is outside this subnet.')).toBeTruthy()
+    expect(within(bar).getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
+    await userEvent.clear(screen.getByLabelText('Gateway'))
+    await userEvent.type(screen.getByLabelText('Gateway'), '192.168.30.1')
+    await userEvent.click(within(bar).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/network/wlan0')).toEqual({ dhcp: false, static: { address: '192.168.30.5/24', gateway: '192.168.30.1', dns: [] } }))
+  })
+})
+
+describe('the Wi-Fi tab as an access point', () => {
+  it('lists the connected stations and refuses an unconfirmed country or a long SSID', async () => {
+    const status = observed({ accessPoint: { available: true, entries: [{ interface: 'wlan0', stationCount: 1, stations: [{ mac: '02:00:00:00:02:01', signalDbm: -48, connectedSeconds: 600, rxBytes: 2_500_000, txBytes: 1_200 }] }] } })
+    stubFetch({ ...networkRoutes(configured(), status), '/api/v1/wifi/ap': accessPoint('always') })
+    open('wifi')
+    expect(await screen.findByText('02:00:00:00:02:01')).toBeTruthy()
+    expect(screen.getByText('10 min')).toBeTruthy()
+    expect(screen.getByText('2.5 MB / 1 KB')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    const ssid = screen.getByLabelText('SSID')
+    await userEvent.clear(ssid)
+    await userEvent.type(ssid, 'x'.repeat(33))
+    expect(await screen.findByText('An SSID is at most 32 bytes.')).toBeTruthy()
+    expect(screen.getByText('Confirm the country the device operates in.')).toBeTruthy()
+    const bar = screen.getByRole('region', { name: /Editing/ })
+    expect(within(bar).getByText('2 problems to fix')).toBeTruthy()
+  })
+})
+
+describe('the add-interface wizard', () => {
+  it('names a VLAN after its parent and refuses an ID out of range', async () => {
+    stubFetch(networkRoutes())
+    open()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    const wizard = await screen.findByRole('dialog')
+    await userEvent.click(within(wizard).getByRole('button', { name: 'VLAN' }))
+    const id = within(wizard).getByLabelText('VLAN ID')
+    await userEvent.type(id, '5000')
+    expect(within(wizard).getByText('A VLAN ID is 1 to 4094.')).toBeTruthy()
+    expect(within(wizard).getByRole('button', { name: 'Stage' }).hasAttribute('disabled')).toBe(true)
+    await userEvent.clear(id)
+    await userEvent.type(id, '20')
+    expect((within(wizard).getByLabelText('Name') as HTMLInputElement).value).toBe('eth0-20')
   })
 })

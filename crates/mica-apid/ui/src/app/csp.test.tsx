@@ -6,6 +6,7 @@ import { AppProviders } from '@/app/providers'
 import { queryClient } from '@/app/query-client'
 import { routeTree } from '@/app/routeTree.gen'
 import { stubFetch } from '@/shared/testing/panel'
+import { configured, networkRoutes, observed } from '@/shared/testing/network'
 
 /// What apid's policy (`style-src 'self'; script-src 'self'`) refuses in the
 /// console: a `<style>` element, a `<script>` without a source, and a
@@ -55,22 +56,20 @@ function watch() {
 
 const network = {
   configured: {
+    ...configured(),
     eth0: { kind: 'physical', dhcp: true },
     can0: { kind: 'can', dhcp: false, can: { bitrate: 250000, restartMs: 100, fd: false } },
   },
-  configuredCount: 2,
-  observed: {
-    available: true,
-    interfaceCount: 3,
-    interfaces: [
-      { index: 2, name: 'eth0', type: 'ether' },
-      { index: 3, name: 'can0', type: 'can' },
-      { index: 4, name: 'can1', type: 'can' },
-    ],
-  },
+  configuredCount: 4,
+  observed: { available: true, interfaceCount: 0, interfaces: [] },
 }
 
+const status = observed()
+status.interfaces.entries!.push({ name: 'can1', index: 8, type: 'can', link: { carrier: true }, addresses: [], dhcp: { available: false }, dns: [] })
+
 const routes = {
+  ...networkRoutes(),
+  '/api/v1/network/status': status,
   '/api/v1/session': { state: 'authenticated', csrfToken: 'csrf' },
   '/api/v1/health': { apid: 'ok', micad: 'ok', checkedAt: 1 },
   '/api/v1/settings/hostname': 'mica-test',
@@ -87,7 +86,24 @@ const routes = {
 
 /// Every page of the generated route tree, the undeclared CAN controller's
 /// included.
-const PAGES = ['/', '/network', '/network/eth0', '/network/can0', '/network/can1', '/services', '/services/units/my-service', '/access', '/system', '/system/ui']
+const PAGES = [
+  '/',
+  '/network',
+  '/network?tab=overview',
+  '/network?tab=wifi',
+  '/network?tab=dns',
+  '/network?tab=wireguard',
+  '/network?tab=wireguard&tunnel=wg0',
+  '/network?tab=bluetooth',
+  '/network/eth0',
+  '/network/can0',
+  '/network/can1',
+  '/services',
+  '/services/units/my-service',
+  '/access',
+  '/system',
+  '/system/ui',
+]
 
 beforeEach(() => {
   vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({

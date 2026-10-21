@@ -19,6 +19,8 @@ acess = "acess"
 alwys = "alwys"
 hiden = "hiden"
 abd = "abd"
+# Bosnia and Herzegovina's ISO 3166 code, in the regulatory country list.
+BA = "BA"
 
 [default.extend-identifiers]
 # O_WRONLY.

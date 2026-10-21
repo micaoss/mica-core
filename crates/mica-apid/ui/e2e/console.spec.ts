@@ -40,14 +40,14 @@ test('writes real time settings', async ({ page, isMobile }) => {
   await expect(page.getByText('Change applied.')).toBeVisible()
 })
 
-test('reads the observed network beside the desired configuration', async ({ page, isMobile }) => {
+test('summarises the network on its overview', async ({ page, isMobile }) => {
+  await mockNetworkBench(page)
   test.skip(isMobile, 'desktop network workflow')
-  await page.goto('./network')
+  await page.goto('./network?tab=overview')
 
-  await expect(page.getByText(/Observed state only/)).toBeVisible()
-  await expect(page.getByText('192.168.1.24/24 \u00b7 DHCPv4')).toBeVisible()
-  await expect(page.getByText('Cellular')).toBeVisible()
-  await expect(page.getByText('unsupported').first()).toBeVisible()
+  await expect(page.getByText('Online')).toBeVisible()
+  await expect(page.getByText('Uplink eth0')).toBeVisible()
+  await expect(page.getByText('via 192.168.1.1')).toBeVisible()
 })
 
 test('restores Chinese and dark appearance preferences', async ({ page, isMobile }) => {
@@ -63,35 +63,66 @@ test('restores Chinese and dark appearance preferences', async ({ page, isMobile
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
 })
 
-test('applies a typed interface edit through the review dialog', async ({ page, isMobile }) => {
+test('stages an interface edit and applies it through the review dialog', async ({ page, isMobile }) => {
+  await mockNetworkBench(page)
   test.skip(isMobile, 'desktop network editor contract')
   await page.goto('./network')
   await page.getByRole('link', { name: 'eth0' }).click()
 
   await expect(page.getByRole('heading', { name: 'eth0' })).toBeVisible()
-  // The mode control is the registry's toggle group: single-select buttons
-  // carrying aria-pressed.
-  await page.getByRole('button', { name: 'Static', exact: true }).click()
-  await page.getByRole('textbox', { name: 'Address / prefix' }).fill('192.168.1.24/24')
-  await page.getByRole('button', { name: 'Review and save' }).click()
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.getByRole('button', { name: 'Static' }).click()
+  await page.getByRole('textbox', { name: 'Address' }).fill('192.168.1.24/24')
+  await page.getByRole('button', { name: 'Done' }).click()
+  await page.getByRole('button', { name: 'Review and apply' }).click()
 
-  await expect(page.getByRole('dialog')).toContainText('this browser did not arrive on eth0')
+  const dialog = page.getByRole('dialog', { name: 'Review network changes' })
+  await expect(dialog).toContainText('This browser reached the device on eth0')
+  const apply = dialog.getByRole('button', { name: 'Apply 1 changes' })
+  await expect(apply).toBeDisabled()
+  await dialog.getByRole('switch').click()
   const request = page.waitForRequest((candidate) => candidate.method() === 'PUT')
-  await page.getByRole('button', { name: 'Apply', exact: true }).click()
-  const interfaceRequest = await request
-  expect(new URL(interfaceRequest.url()).pathname).toBe('/api/v1/network/eth0')
-  expect(interfaceRequest.postDataJSON()).toMatchObject({ dhcp: false, static: { address: '192.168.1.24/24' } })
-  await expect(page.getByText('Applying the change')).toBeVisible()
+  await apply.click()
+  const write = await request
+  expect(new URL(write.url()).pathname).toBe('/api/v1/network')
+  expect(write.postDataJSON()).toMatchObject({ eth0: { dhcp: false, static: { address: '192.168.1.24/24' } }, wg0: { kind: 'wireguard' } })
+  await expect(page.getByText('The device reports the interfaces reconciled.')).toBeVisible()
 })
 
 test('shows the new WireGuard public key after rotation', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the API response contract')
-  await page.goto('./network')
-  await page.getByRole('tab', { name: 'WireGuard' }).click()
+  await page.goto('./network?tab=wireguard&tunnel=wg0')
   await page.getByRole('button', { name: 'Rotate key' }).click()
-  await page.getByRole('button', { name: 'Rotate key' }).last().click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Rotate key' }).click()
 
-  await expect(page.getByText('rotated-e2e-public-key=')).toBeVisible()
+  await expect(page.getByText('rotated-e2e-public-key=').first()).toBeVisible()
+})
+
+test('captures each network page for review', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  for (const [name, path] of [
+    ['overview', './network?tab=overview'],
+    ['interfaces', './network'],
+    ['interface-eth1', './network/eth1'],
+    ['wifi', './network?tab=wifi'],
+    ['dns', './network?tab=dns'],
+    ['wireguard', './network?tab=wireguard&tunnel=wg0'],
+  ] as const) {
+    await page.goto(path)
+    await expect(page.getByRole('heading', { name: /Network|eth1/ }).first()).toBeVisible()
+    await page.waitForLoadState('networkidle')
+    await page.screenshot({ path: testInfo.outputPath(`network-${name}.png`), fullPage: true })
+  }
+  await page.goto('./network/eth1')
+  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.getByRole('textbox', { name: 'Pool start' }).fill('192.168.10.50')
+  await page.getByRole('button', { name: 'Done' }).click()
+  await page.getByRole('button', { name: 'Review and apply' }).click()
+  await expect(page.getByRole('dialog', { name: 'Review network changes' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('network-review.png') })
 })
 
 test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
@@ -105,21 +136,21 @@ test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
 })
 
 test('keeps a tall dialog inside a short appliance screen', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the geometry')
   // A 1024x600 panel is a normal appliance display. The dialog is height
   // bounded and scrolls inside, so at 520px its title and both footer buttons
   // stay on screen.
   await page.setViewportSize({ width: 1024, height: 520 })
   await page.goto('./network')
-  await page.getByRole('button', { name: 'Add interface' }).click()
-  await page.getByRole('button', { name: 'Static' }).click()
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
 
   const dialog = page.locator('[data-slot=dialog-content]')
   const box = (await dialog.boundingBox())!
   expect(box.y).toBeGreaterThanOrEqual(0)
   expect(box.y + box.height).toBeLessThanOrEqual(520)
-  await expect(page.getByRole('heading', { name: 'Add network interface' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Add an interface' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Stage' })).toBeVisible()
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expect(dialog).toHaveCount(0)
 })
@@ -198,9 +229,9 @@ function payload(path: string, method: string): unknown {
     if (path === '/api/v1/actions/wireguard/wg0/rotate-key') return { publicKey: 'rotated-e2e-public-key=' }
     return { taskId: 'task-e2e' }
   }
-  if (path === '/api/v1/session') return { state: 'authenticated', csrfToken: 'e2e-csrf' }
+  if (path === '/api/v1/session') return { state: 'authenticated', csrfToken: 'e2e-csrf', localAddress: '192.168.1.24' }
   if (path === '/api/v1/health') return { apid: 'ok', micad: 'ok', checkedAt: 183900 }
-  if (path === '/api/v1/meta') return { api: 'v1', settingsSchemaVersion: 1, daemon: 'micad 0.0.1' }
+  if (path === '/api/v1/meta') return { api: 'v1', settingsSchemaVersion: 1, daemon: 'micad 0.0.1', init: 'systemd' }
   if (path === '/api/v1/system/info') return {
     machineId: { available: true, id: '4f2e9c1a7b3d4e5f' },
     board: { available: true, model: 'mica-cm4 rev 2', source: 'device-tree' },
@@ -252,4 +283,66 @@ function payload(path: string, method: string): unknown {
   }
   if (path === '/api/v1/ui/bundles') return { bundles: [], retentionLimit: 32 }
   return {}
+}
+
+/// A bench device for the network pages: an uplink, a LAN with a DHCP server,
+/// an unplugged port, a joined radio and a tunnel with one peer. Registered
+/// after the device mock, so its answers take precedence.
+async function mockNetworkBench(page: Page) {
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request()
+    const body = request.method() === 'GET' ? benchPayload(new URL(request.url()).pathname) : undefined
+    if (body === undefined) return route.fallback()
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  })
+}
+
+const PEER = { publicKey: 'cmVtb3RlUGVlcktleXJlbW90ZVBlZXJLZXlyZW1vdGU=', allowedIps: ['10.10.0.1/32'], endpoint: 'vpn.example.eu:51820', persistentKeepalive: 25 }
+
+function benchPayload(path: string): unknown {
+  if (path === '/api/v1/network') return {
+    configured: {
+      eth0: { dhcp: true },
+      eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, dhcpServer: { poolOffset: 100, poolSize: 50 } },
+      wg0: { kind: 'wireguard', dhcp: false, static: { address: '10.10.0.2/24', dns: [] }, wireguard: { listenPort: 51820, peers: [PEER] } },
+    },
+    configuredCount: 3,
+    observed: { available: true, interfaceCount: 0, interfaces: [] },
+  }
+  if (path === '/api/v1/network/wg0/peers') return [PEER]
+  if (path === '/api/v1/state/network') return { wg0: { publicKey: 'e2eDevicePublicKeye2eDevicePublicKeye2eDev0=' } }
+  if (path === '/api/v1/wifi/client') return { enabled: true, interface: 'wlan0' }
+  if (path === '/api/v1/wifi/ap') return { mode: 'off', interface: 'wlan0', ssid: 'mica-cm4', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60 }
+  if (path === '/api/v1/wifi/client/networks') return [{ ssid: 'marina-guest', psk: '<redacted>', hidden: false, priority: 10 }]
+  if (path === '/api/v1/network/status') return {
+    interfaces: { available: true, count: 5, entries: [
+      {
+        name: 'eth0', index: 2, hardwareAddress: '02:42:ac:11:00:02',
+        link: { operationalState: 'routable', carrierState: 'carrier', carrier: true },
+        addresses: [{ family: 'inet', address: '192.168.1.24', prefixLength: 24, scope: 'global', configSource: 'DHCPv4' }],
+        dhcp: { available: true, state: 'bound', lease: { server: '192.168.1.1', router: '192.168.1.1', lifetimeSeconds: 3480 } },
+        dns: ['192.168.1.1'],
+      },
+      {
+        name: 'eth1', index: 3, hardwareAddress: '02:42:ac:11:00:03',
+        link: { operationalState: 'routable', carrierState: 'carrier', carrier: true },
+        addresses: [{ family: 'inet', address: '192.168.10.1', prefixLength: 24, scope: 'global', configSource: 'static' }],
+        dhcp: { available: false }, dns: [],
+      },
+      { name: 'eth2', index: 4, link: { operationalState: 'no-carrier', carrier: false }, addresses: [], dhcp: { available: false }, dns: [] },
+      {
+        name: 'wlan0', index: 5, type: 'wlan',
+        link: { operationalState: 'routable', carrier: true },
+        addresses: [{ family: 'inet', address: '10.20.0.31', prefixLength: 24, scope: 'global', configSource: 'DHCPv4' }],
+        dhcp: { available: true }, dns: [],
+      },
+      { name: 'wg0', index: 6, kind: 'wireguard', link: { operationalState: 'routable', carrier: true }, addresses: [{ family: 'inet', address: '10.10.0.2', prefixLength: 24, scope: 'global' }], dhcp: { available: false }, dns: [] },
+    ] },
+    defaultRoutes: { available: true, count: 1, entries: [{ family: 'inet', gateway: '192.168.1.1', interface: 'eth0', metric: 100 }] },
+    dns: { available: true, linkServers: ['192.168.1.1'], resolverServers: ['127.0.0.53'], probe: { name: 'deb.debian.org', reachable: true, result: 'resolved' } },
+    wifi: { available: true, associations: [{ interface: 'wlan0', associated: true, ssid: 'marina-guest', rssiDbm: -58 }] },
+    accessPoint: { available: true, entries: [] },
+    capabilities: { wifi: { supported: true, interfaces: ['wlan0'] }, bluetooth: { supported: false, adapters: [] }, cellular: { supported: false, interfaces: [] } },
+  }
+  return undefined
 }

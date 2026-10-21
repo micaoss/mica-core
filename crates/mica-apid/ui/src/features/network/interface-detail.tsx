@@ -1,527 +1,577 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { Check, ChevronLeft } from 'lucide-react'
-import { api, json } from '@/shared/lib/http'
-import type { Health, NetworkOverview, ObservedNetworkInterface, ObservedNetworkState, TaskAccepted, TaskRecord } from '@/lib/types'
+import { ChevronLeft, Plus, X } from 'lucide-react'
+import { cn } from '@/shared/lib/utils'
+import { Callout } from '@/shared/components/callout'
 import { FactList } from '@/shared/components/fact-list'
-import { FormDialog } from '@/shared/components/form-dialog'
 import { FormField } from '@/shared/components/form-field'
-import { Page, PageHeader, PageSection } from '@/shared/components/page'
+import { Page, PageSection } from '@/shared/components/page'
 import { Panel } from '@/shared/components/panel'
 import { SegmentedControl } from '@/shared/components/segmented-control'
-import { StatusBadge } from '@/shared/components/status-badge'
 import { Button, buttonVariants } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
-import { Spinner } from '@/shared/components/ui/spinner'
-import { connectionState } from '@/features/shell/connection'
-import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select'
-import { networkRows, physicalInterfaces } from '@/lib/network'
-import { applyStage, applyStages, stageState } from './apply-stage'
-import { ObservedInterfaceFacts } from './observed-network-panel'
-import { bridgeMembership, isSessionInterface } from './interface-facts'
+import { Switch } from '@/shared/components/ui/switch'
+import { notifySuccess } from '@/shared/feedback/toast'
+import { ChangeBar, EditBar } from './change-bar'
+import { updateChangeSet } from './change-set'
+import {
+  bridgeOf, defaultPool, overlaps, poolFromRange, poolRange, stageRemove, stageRevert, stageSet, vlansOn,
+  type ChangeSet, type IfaceEntry,
+} from './model'
+import { Led, StatusLine, Tag, useKindLabel } from './parts'
+import { useNetwork, type NetworkData } from './use-network'
+import { addressBook, validateEntry, type Problem, type Problems } from './validate'
+import { computeStatus, exitOf } from './view'
 
-interface StaticRoute { destination: string; gateway?: string; metric?: number }
-/// `dns` is absent when no server is announced: the device does not write an
-/// empty list.
-interface DhcpServer { poolOffset: number; poolSize: number; dns?: string[]; leaseSeconds?: number }
-
-/// A CAN controller's parameters; no restart delay restarts nothing, and no FD is FD off.
-interface CanConfig { bitrate: number; restartMs?: number; fd?: boolean; dataBitrate?: number }
-
-interface InterfaceConfig {
-  kind?: 'physical' | 'vlan' | 'bridge' | 'wireguard' | 'can'
-  dhcp?: boolean
-  static?: { address: string; gateway?: string; dns?: string[] }
-  /// A DHCP entry's own servers, used instead of the lease's.
-  dns?: string[]
-  vlan?: { parent: string; id: number }
-  bridge?: { ports: string[] }
-  wireguard?: { listenPort?: number; peers: unknown[] }
-  can?: CanConfig
-  routes?: StaticRoute[]
-  dhcpServer?: DhcpServer
-}
-
-/// How a link is addressed: by its DHCP client, by a static address, or not
-/// at all -- a bridge port, or a link that only carries other traffic.
-type Addressing = 'dhcp' | 'static' | 'none'
-
-const changeKey = { dhcp: 'changeDhcp', static: 'changeStatic', none: 'changeNone' } as const
-
-/// An entry nobody declared yet takes DHCP, the device's own default.
-function declaredAddressing(configured: InterfaceConfig | undefined): Addressing {
-  if (configured === undefined || configured.dhcp) return 'dhcp'
-  return configured.static ? 'static' : 'none'
-}
-
+/// One interface: what the device observes on it, and its configuration,
+/// edited into the staged change set. Nothing here writes to the device.
 export function InterfaceDetailPage() {
   const { name } = useParams({ from: '/network_/$name' })
+  const data = useNetwork()
   const { t } = useTranslation()
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const network = useQuery({ queryKey: ['network'], queryFn: () => api<NetworkOverview>('/api/v1/network'), refetchInterval: 10_000 })
-  const status = useQuery({ queryKey: ['observed-network'], queryFn: () => api<ObservedNetworkState>('/api/v1/network/status'), refetchInterval: 15_000, retry: false })
-  const configuredMap = (network.data?.configured ?? {}) as Record<string, InterfaceConfig>
-  const configured = configuredMap[name]
-  const observed = status.data?.interfaces.entries?.find((entry) => entry.name === name)
-  const bridge = bridgeMembership(configuredMap, name)
+  const [snapshot, setSnapshot] = useState<ChangeSet>()
+  const editing = snapshot !== undefined && data.set !== undefined
+  const iface = data.staged.ifaces[name]
 
-  const [mode, setMode] = useState<Addressing | undefined>()
-  const [address, setAddress] = useState<string | undefined>()
-  const [gateway, setGateway] = useState<string | undefined>()
-  const [dns, setDns] = useState<string | undefined>()
-  const [parent, setParent] = useState<string | undefined>()
-  const [vlanId, setVlanId] = useState<string | undefined>()
-  const [ports, setPorts] = useState<string[] | undefined>()
-  const [listenPort, setListenPort] = useState<string | undefined>()
-  const [routes, setRoutes] = useState<StaticRoute[] | undefined>()
-  const [server, setServer] = useState<DhcpServer | undefined>()
-  const [bitrate, setBitrate] = useState<string | undefined>()
-  const [restartMs, setRestartMs] = useState<string | undefined>()
-  const [fd, setFd] = useState<'on' | 'off' | undefined>()
-  const [dataBitrate, setDataBitrate] = useState<string | undefined>()
-  const [review, setReview] = useState(false)
-  const [taskId, setTaskId] = useState<string>()
-
-  // A controller nobody declared yet is a CAN interface when the device
-  // observes one.
-  const kind = configured?.kind ?? (configured === undefined && observed?.type === 'can' ? 'can' : 'physical')
-  const bitrateValue = bitrate ?? (configured?.can?.bitrate ?? 250000).toString()
-  const restartValue = restartMs ?? configured?.can?.restartMs?.toString() ?? ''
-  const fdValue = fd ?? (configured?.can?.fd ? 'on' : 'off')
-  const dataBitrateValue = dataBitrate ?? (configured?.can?.dataBitrate ?? 2000000).toString()
-  // A tunnel has no DHCP client: its addressing is the address on the link.
-  // A bridge port has none at all: the bridge carries it.
-  const modeValue: Addressing = kind === 'wireguard' ? 'static' : bridge !== undefined ? 'none' : mode ?? declaredAddressing(configured)
-  const useDhcp = modeValue === 'dhcp'
-  const addressValue = address ?? configured?.static?.address ?? ''
-  const gatewayValue = gateway ?? configured?.static?.gateway ?? ''
-  const dnsValue = dns ?? (useDhcp ? configured?.dns : configured?.static?.dns)?.join(', ') ?? ''
-  const wireless = new Set((network.data?.observed.interfaces ?? []).filter((iface) => iface.type === 'wlan').map((iface) => iface.name))
-  const candidates = physicalInterfaces(networkRows(configuredMap, network.data?.observed.interfaces))
-    .filter((candidate) => candidate !== name)
-  // A station cannot be bridged and the access point has an address of its
-  // own, so a radio is never offered as a port.
-  const portCandidates = candidates.filter((candidate) => !wireless.has(candidate))
-  const parentValue = parent ?? configured?.vlan?.parent ?? candidates[0] ?? ''
-  const vlanIdValue = vlanId ?? (configured?.vlan?.id ?? 100).toString()
-  const portsValue = ports ?? configured?.bridge?.ports ?? []
-  const listenPortValue = listenPort ?? (configured?.wireguard?.listenPort ?? 51820).toString()
-  const routeRows = routes ?? configured?.routes ?? []
-  const serverRow = server ?? configured?.dhcpServer
-  // A server needs a subnet of its own to hand addresses out of, and a port
-  // has no addressing at all. Both are the device's rules, stated here so the
-  // form does not offer what the device would refuse.
-  const canServe = modeValue === 'static' && addressValue !== '' && bridge === undefined
-  // The ports this save would have to strip of their addressing, or declare
-  // for the first time, before the device accepts the bridge.
-  const claimedPorts = kind === 'bridge'
-    ? portsValue.filter((port) => configuredMap[port] === undefined || configuredMap[port].dhcp || configuredMap[port].static !== undefined)
-    : []
-
-  const save = useMutation({
-    mutationFn: () => {
-      if (kind === 'can') {
-        // Its block alone: the device refuses any addressing on a CAN entry.
-        const can: CanConfig = { bitrate: Number(bitrateValue) }
-        if (restartValue !== '') can.restartMs = Number(restartValue)
-        can.fd = fdValue === 'on'
-        if (fdValue === 'on') can.dataBitrate = Number(dataBitrateValue)
-        return api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(name)}`, json('PUT', { kind: 'can', can }))
-      }
-      const value: InterfaceConfig = { ...configured, dhcp: useDhcp }
-      delete value.dns
-      if (useDhcp) {
-        delete value.static
-        // Absent and empty are the same thing to the device.
-        if (splitList(dnsValue).length > 0) value.dns = splitList(dnsValue)
-      } else if (modeValue === 'none') {
-        delete value.static
-      } else {
-        value.static = {
-          address: addressValue,
-          // A tunnel declares neither: where its traffic goes is each peer's
-          // allowed IPs, and micad refuses an entry that claims otherwise.
-          ...(gatewayValue && kind !== 'wireguard' ? { gateway: gatewayValue } : {}),
-          dns: kind === 'wireguard' ? [] : splitList(dnsValue),
-        }
-      }
-      if (kind === 'vlan') value.vlan = { parent: parentValue, id: Number(vlanIdValue) }
-      if (kind === 'bridge') value.bridge = { ports: portsValue }
-      if (kind === 'wireguard') {
-        value.wireguard = { ...configured?.wireguard, listenPort: Number(listenPortValue), peers: configured?.wireguard?.peers ?? [] }
-      }
-      // Absent and empty are the same thing to the device, and an entry that
-      // declares neither is byte-identical to one written before either
-      // existed.
-      if (routeRows.length > 0) value.routes = routeRows
-      else delete value.routes
-      if (serverRow && canServe) value.dhcpServer = serverRow
-      else delete value.dhcpServer
-      // A bridge takes only declared interfaces with no addressing of their
-      // own, so the ports it gains are declared that way in the same write:
-      // two writes would leave a moment where neither map is legal.
-      if (claimedPorts.length > 0) {
-        const map: Record<string, InterfaceConfig> = { ...configuredMap, [name]: value }
-        for (const port of claimedPorts) map[port] = portEntry(configuredMap[port])
-        return api<TaskAccepted>('/api/v1/network', json('PUT', map))
-      }
-      return api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(name)}`, json('PUT', value))
-    },
-    onSuccess: (accepted) => {
-      setReview(false)
-      setTaskId(accepted.taskId)
-      void queryClient.invalidateQueries({ queryKey: ['network'] })
-    },
-  })
-
-  const remove = useMutation({
-    mutationFn: () => api<void>(`/api/v1/network/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['network'] })
-      void navigate({ to: '/network' })
-    },
-  })
-
-  const reset = () => {
-    setMode(undefined); setAddress(undefined); setGateway(undefined); setDns(undefined)
-    setParent(undefined); setVlanId(undefined); setPorts(undefined); setListenPort(undefined)
-    setRoutes(undefined); setServer(undefined)
-    setBitrate(undefined); setRestartMs(undefined); setFd(undefined); setDataBitrate(undefined)
+  if (!iface) {
+    return (
+      <Page>
+        <Back />
+        <Callout tone={data.network.isPending ? 'neutral' : 'warning'} title={data.network.isPending ? t('common.states.pending') : t('network.detail.unknown', { name })} />
+        <ChangeBar data={data} />
+      </Page>
+    )
   }
-  const submit = (event: FormEvent) => { event.preventDefault(); setReview(true) }
-  const link = observed?.link
-  const online = link?.carrier === true
-  const onSession = isSessionInterface((observed?.addresses ?? []).map(formatAddress), window.location.hostname)
+
+  const start = () => setSnapshot(data.set)
+  const cancel = () => { if (snapshot) updateChangeSet(() => snapshot); setSnapshot(undefined) }
+  const dirty = editing && JSON.stringify(snapshot?.staged) !== JSON.stringify(data.set?.staged)
+  const done = () => { setSnapshot(undefined); if (dirty) notifySuccess(t('network.edit.staged')) }
 
   return (
     <Page>
-      <PageHeader
-        title={name}
-        back={<Link to="/network" className={buttonVariants({ variant: 'outline', size: 'sm' })}><ChevronLeft aria-hidden="true" />{t('network.title')} / {t('network.tabs.interfaces')}</Link>}
-        action={(
-          <>
-            <StatusBadge>{kindLabel(configured, observed, t)}</StatusBadge>
-            <StatusBadge tone={online ? 'success' : 'danger'}>{link?.operationalState ?? t('network.notObserved')}</StatusBadge>
-          </>
-        )}
-      />
-
-      {taskId ? <ApplyStrip taskId={taskId} onDismiss={() => setTaskId(undefined)} /> : null}
-
-      <PageSection title={t('network.detail.overview')}>
-        <Panel>
-          <FactList facts={[
-            { id: 'mac', label: t('network.detail.mac'), value: observed?.hardwareAddress ?? t('common.notAvailable'), mono: true },
-            { id: 'mtu', label: t('network.detail.mtu'), value: observed?.mtu ?? t('common.notAvailable'), mono: true },
-            { id: 'bridge', label: t('network.detail.memberOf'), value: bridge ?? t('network.detail.noBridge'), mono: true },
-            { id: 'link', label: t('network.detail.link'), value: <span className={online ? undefined : 'text-destructive'}>{link?.carrierState ?? t('common.notAvailable')}</span> },
-          ]} />
-        </Panel>
-      </PageSection>
-
-      <PageSection title={t('network.observed.title')} description={t('network.detail.observedCopy')}>
-        <Panel>
-          {observed
-            ? <ObservedInterfaceFacts value={observed} />
-            : <p className="py-4 text-center text-sm text-muted-foreground">{t('network.notObserved')}</p>}
-        </Panel>
-      </PageSection>
-
-      {kind === 'can' ? (
-        <PageSection title={t('network.can.title')} description={t('network.can.copy')}>
-          <Panel>
-            <form className="grid gap-4" onSubmit={submit}>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label={t('network.can.bitrate')} hint={t('network.can.bitrateHint')}>
-                  {(id) => <Input id={id} type="number" min={1} max={1000000} value={bitrateValue} onChange={(event) => setBitrate(event.target.value)} required />}
-                </FormField>
-                <FormField label={t('network.can.restart')} hint={t('network.can.restartHint')}>
-                  {(id) => <Input id={id} type="number" min={0} max={60000} value={restartValue} onChange={(event) => setRestartMs(event.target.value)} />}
-                </FormField>
-              </div>
-              <FormField label={t('network.can.fd')}>
-                {() => (
-                  <SegmentedControl<'on' | 'off'>
-                    label={t('network.can.fd')}
-                    value={fdValue}
-                    onValueChange={setFd}
-                    segments={[
-                      { value: 'on', label: t('network.can.fdOn') },
-                      { value: 'off', label: t('network.can.fdOff') },
-                    ]}
-                  />
-                )}
-              </FormField>
-              {fdValue === 'on' ? (
-                <FormField label={t('network.can.dataBitrate')} hint={t('network.can.dataBitrateHint')}>
-                  {(id) => <Input id={id} type="number" min={1} max={8000000} value={dataBitrateValue} onChange={(event) => setDataBitrate(event.target.value)} required />}
-                </FormField>
-              ) : null}
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={reset}>{t('common.actions.cancel')}</Button>
-                <Button type="submit">{t('network.detail.save')}</Button>
-              </div>
-            </form>
-          </Panel>
-        </PageSection>
-      ) : (
-      <PageSection title={t('network.detail.addressing')}>
-        <Panel>
-          <form className="grid gap-4" onSubmit={submit}>
-            {kind === 'wireguard' ? (
-              <p className="text-sm text-muted-foreground">{t('network.editor.tunnelAddressing')}</p>
-            ) : bridge !== undefined ? (
-              <p className="text-sm text-muted-foreground">{t('network.detail.portNote', { bridge })}</p>
-            ) : (
-              <FormField label={t('network.detail.mode')}>
-                {() => (
-                  <SegmentedControl<Addressing>
-                    label={t('network.detail.mode')}
-                    value={modeValue}
-                    onValueChange={setMode}
-                    segments={[
-                      { value: 'dhcp', label: 'DHCP' },
-                      { value: 'static', label: t('network.detail.static') },
-                      { value: 'none', label: t('network.detail.none') },
-                    ]}
-                  />
-                )}
-              </FormField>
-            )}
-            {modeValue === 'none' ? (
-              bridge === undefined ? <p className="text-sm text-muted-foreground">{t('network.detail.noneNote')}</p> : null
-            ) : useDhcp ? (
-              <>
-                <p className="text-sm text-muted-foreground">{t('network.detail.dhcpNote')}</p>
-                <FormField label={t('network.detail.dns')} hint={t('network.detail.dhcpDnsHint')}>
-                  {(id) => <Input id={id} className="font-mono" value={dnsValue} onChange={(event) => setDns(event.target.value)} placeholder="1.1.1.1, 9.9.9.9" />}
-                </FormField>
-              </>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label={t('network.detail.address')}>
-                  {(id) => <Input id={id} className="font-mono" value={addressValue} onChange={(event) => setAddress(event.target.value)} placeholder="10.0.0.2/24" required />}
-                </FormField>
-                {kind === 'wireguard' ? null : (
-                  <>
-                    <FormField label={t('network.detail.gateway')}>
-                      {(id) => <Input id={id} className="font-mono" value={gatewayValue} onChange={(event) => setGateway(event.target.value)} placeholder="10.0.0.1" />}
-                    </FormField>
-                    <FormField className="sm:col-span-2" label={t('network.detail.dns')}>
-                      {(id) => <Input id={id} className="font-mono" value={dnsValue} onChange={(event) => setDns(event.target.value)} placeholder="10.0.0.1, 1.1.1.1" />}
-                    </FormField>
-                  </>
-                )}
-              </div>
-            )}
-            {kind === 'vlan' ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label={t('network.editor.parent')}>
-                  {(id) => (
-                    <Select value={parentValue} onValueChange={(value) => setParent(String(value))}>
-                      <SelectTrigger id={id} aria-label={t('network.editor.parent')}><SelectValue /></SelectTrigger>
-                      <SelectContent>{candidates.map((candidate) => <SelectItem value={candidate} key={candidate}>{candidate}</SelectItem>)}</SelectContent>
-                    </Select>
-                  )}
-                </FormField>
-                <FormField label={t('network.editor.vlanId')}>
-                  {(id) => <Input id={id} type="number" min={1} max={4094} value={vlanIdValue} onChange={(event) => setVlanId(event.target.value)} required />}
-                </FormField>
-              </div>
-            ) : null}
-            {kind === 'bridge' ? (
-              <FormField label={t('network.editor.ports')} hint={t('network.editor.portsHint')}>
-                {(id) => (
-                  <div id={id} role="group" aria-label={t('network.editor.ports')} className="grid gap-2 sm:grid-cols-2">
-                    {portCandidates.map((candidate) => (
-                      <label key={candidate} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          className="size-4 accent-primary"
-                          checked={portsValue.includes(candidate)}
-                          onChange={(event) => setPorts(event.target.checked ? [...portsValue, candidate] : portsValue.filter((port) => port !== candidate))}
-                        />
-                        <span className="font-mono">{candidate}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </FormField>
-            ) : null}
-            {kind === 'wireguard' ? (
-              <FormField label={t('network.editor.listenPort')} hint={t('network.editor.tunnelAddressing')}>
-                {(id) => <Input id={id} type="number" min={1} max={65535} value={listenPortValue} onChange={(event) => setListenPort(event.target.value)} />}
-              </FormField>
-            ) : null}
-            {bridge === undefined ? (
-              <fieldset className="grid gap-3">
-                <legend className="text-sm font-medium">{t('network.routes.title')}</legend>
-                <p className="text-sm text-muted-foreground">{t('network.routes.copy')}</p>
-                {routeRows.length === 0 ? <p className="text-sm text-muted-foreground">{t('network.routes.empty')}</p> : null}
-                {routeRows.map((route, index) => (
-                  <div className="grid items-end gap-3 sm:grid-cols-[1fr_1fr_auto_auto]" key={index}>
-                    <FormField label={t('network.routes.destination')}>
-                      {(id) => <Input id={id} className="font-mono" value={route.destination} placeholder="10.20.0.0/16" onChange={(event) => setRoutes(routeRows.map((row, at) => at === index ? { ...row, destination: event.target.value } : row))} required />}
-                    </FormField>
-                    <FormField label={t('network.routes.via')}>
-                      {(id) => <Input id={id} className="font-mono" value={route.gateway ?? ''} placeholder={t('network.routes.onLink')} onChange={(event) => setRoutes(routeRows.map((row, at) => at === index ? { ...row, gateway: event.target.value || undefined } : row))} />}
-                    </FormField>
-                    <FormField label={t('network.routes.metric')}>
-                      {(id) => <Input id={id} className="sm:w-24" type="number" min={0} value={route.metric ?? ''} onChange={(event) => setRoutes(routeRows.map((row, at) => at === index ? { ...row, metric: event.target.value === '' ? undefined : Number(event.target.value) } : row))} />}
-                    </FormField>
-                    <Button type="button" variant="outline" onClick={() => setRoutes(routeRows.filter((_, at) => at !== index))}>{t('common.actions.delete')}</Button>
-                  </div>
-                ))}
-                <Button className="justify-self-start" type="button" variant="secondary" onClick={() => setRoutes([...routeRows, { destination: '' }])}>{t('network.routes.add')}</Button>
-              </fieldset>
-            ) : null}
-            {canServe ? (
-              <fieldset className="grid gap-3">
-                <legend className="text-sm font-medium">{t('network.dhcpServer.title')}</legend>
-                <p className="text-sm text-muted-foreground">{t('network.dhcpServer.copy')}</p>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-primary"
-                    checked={serverRow !== undefined}
-                    onChange={(event) => setServer(event.target.checked ? { poolOffset: 100, poolSize: 50, dns: [] } : undefined)}
-                  />
-                  {t('network.dhcpServer.enable')}
-                </label>
-                {serverRow ? (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <FormField label={t('network.dhcpServer.poolOffset')} hint={t('network.dhcpServer.poolHint')}>
-                      {(id) => <Input id={id} type="number" min={1} value={serverRow.poolOffset} onChange={(event) => setServer({ ...serverRow, poolOffset: Number(event.target.value) })} required />}
-                    </FormField>
-                    <FormField label={t('network.dhcpServer.poolSize')}>
-                      {(id) => <Input id={id} type="number" min={1} value={serverRow.poolSize} onChange={(event) => setServer({ ...serverRow, poolSize: Number(event.target.value) })} required />}
-                    </FormField>
-                    <FormField label={t('network.dhcpServer.dns')} hint={t('network.dhcpServer.dnsHint')}>
-                      {(id) => <Input id={id} className="font-mono" value={(serverRow.dns ?? []).join(', ')} onChange={(event) => setServer({ ...serverRow, dns: splitList(event.target.value) })} />}
-                    </FormField>
-                    <FormField label={t('network.dhcpServer.lease')}>
-                      {(id) => <Input id={id} type="number" min={1} value={serverRow.leaseSeconds ?? ''} onChange={(event) => setServer({ ...serverRow, leaseSeconds: event.target.value === '' ? undefined : Number(event.target.value) })} />}
-                    </FormField>
-                  </div>
-                ) : null}
-              </fieldset>
-            ) : bridge === undefined && kind !== 'wireguard' ? (
-              <fieldset className="grid gap-1">
-                <legend className="text-sm font-medium">{t('network.dhcpServer.title')}</legend>
-                <p className="text-sm text-muted-foreground">{t('network.dhcpServer.needsStatic')}</p>
-              </fieldset>
-            ) : null}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={reset}>{t('common.actions.cancel')}</Button>
-              <Button type="submit">{t('network.detail.save')}</Button>
-            </div>
-          </form>
-        </Panel>
-      </PageSection>
-      )}
-
-      <PageSection title={t('network.detail.danger')} tone="danger">
-        <Panel className="border-destructive">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <p className="max-w-xl text-sm text-muted-foreground">{t('network.detail.dangerCopy', { name })}</p>
-            <ConfirmDialog
-              trigger={<Button type="button" size="sm" variant="destructive">{t('network.editor.delete')}</Button>}
-              title={t('network.editor.delete')}
-              description={t('network.editor.deleteCopy', { name })}
-              confirmLabel={t('network.editor.delete')}
-              success={t('network.detail.deleted', { name })}
-              failure={t('network.editor.delete')}
-              onConfirm={() => remove.mutateAsync()}
-            />
-          </div>
-        </Panel>
-      </PageSection>
-
-      <FormDialog
-        open={review}
-        onOpenChange={(next) => { if (!next) setReview(false) }}
-        title={t('network.review.title')}
-        submitLabel={t('network.review.apply')}
-        success={t('network.review.applied', { name })}
-        failure={t('network.detail.save')}
-        onSubmit={() => save.mutateAsync()}
-      >
-        <FactList facts={[
-          { id: 'change', label: t('network.review.change'), value: kind === 'can' ? t('network.can.change', { bitrate: bitrateValue }) : t(`network.detail.${changeKey[modeValue]}`, { address: addressValue }), mono: true },
-          { id: 'affects', label: t('network.review.affects'), value: bridge ? t('network.review.affectsBridge', { name, bridge }) : name },
-          ...(claimedPorts.length > 0 ? [{ id: 'ports', label: t('network.review.ports'), value: <span className="text-destructive">{t('network.review.portsCopy', { ports: claimedPorts.join(', ') })}</span> }] : []),
-          { id: 'session', label: t('network.review.session'), value: (
-            <span className={onSession ? 'text-destructive' : 'text-success'}>
-              {t(onSession ? 'network.review.sessionOn' : 'network.review.sessionOff', { name })}
-            </span>
-          ) },
-          { id: 'recover', label: t('network.review.recover'), value: t('network.review.recoverCopy') },
-        ]} />
-      </FormDialog>
+      <Header data={data} name={name} editing={editing} />
+      <Body key={name} data={data} name={name} editing={editing} onEdit={start} />
+      {editing ? <EditFooter data={data} name={name} dirty={dirty} onCancel={cancel} onDone={done} /> : <ChangeBar data={data} />}
     </Page>
   )
 }
 
-function ApplyStrip({ taskId, onDismiss }: { taskId: string; onDismiss: () => void }) {
+function Back() {
   const { t } = useTranslation()
-  const health = useQuery({ queryKey: ['shell-health'], queryFn: () => api<Health>('/api/v1/health'), refetchInterval: 5_000 })
-  const task = useQuery({
-    queryKey: ['task', taskId],
-    queryFn: () => api<TaskRecord>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
-    refetchInterval: (query) => query.state.data?.status === 'finished' ? false : 1_000,
-  })
-  const connection = connectionState({ isError: health.isError, failureCount: health.failureCount, micad: health.data?.micad })
-  const stage = applyStage(task.data, connection)
-  const settled = stage === 'applied' || stage === 'failed'
+  return <Link to="/network" className={buttonVariants({ variant: 'outline', size: 'sm' })}><ChevronLeft aria-hidden="true" />{t('network.title')} / {t('network.tabs.interfaces')}</Link>
+}
+
+function EditFooter({ data, name, dirty, onCancel, onDone }: { data: NetworkData; name: string; dirty: boolean; onCancel: () => void; onDone: () => void }) {
+  const problems = useProblems(data, name)
+  return <EditBar what={name} dirty={dirty} errors={Object.keys(problems).length} onCancel={onCancel} onDone={onDone} />
+}
+
+function useProblems(data: NetworkData, name: string): Problems {
+  const view = data.staged
+  const iface = view.ifaces[name]
+  const observed = Object.fromEntries(view.order.map((each) => [each, view.ifaces[each].obs?.address]))
+  return validateEntry(name, iface.kind, view.map[name], view.map, addressBook(view.map, observed), bridgeOf(view.map, name) !== undefined)
+}
+
+function Header({ data, name, editing }: { data: NetworkData; name: string; editing: boolean }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const kindLabel = useKindLabel()
+  const iface = data.staged.ifaces[name]
+  const status = computeStatus(data.applied, name)
+  const map = data.staged.map
+  const bridge = bridgeOf(map, name)
+  const vlans = vlansOn(map, name)
+  const pending = data.pending.find((change) => change.name === name)
+  const editable = iface.kind !== 'wifi' && iface.kind !== 'wireguard'
   return (
-    <Panel className="gap-3" contentClassName="gap-3">
-      <div role="status" aria-live="polite" className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <strong className="text-sm font-medium">{t('network.apply.title')}</strong>
-          {settled ? <StatusBadge tone={stage === 'applied' ? 'success' : 'danger'}>{t(`network.apply.${stage}`)}</StatusBadge> : null}
-        </div>
-        <div className="flex flex-wrap gap-5 text-sm">
-          {applyStages.map((step) => {
-            const state = stageState(step, stage)
-            return (
-              <span key={step} className={state === 'done' ? 'flex items-center gap-2 text-success' : state === 'active' ? 'flex items-center gap-2 font-semibold text-foreground' : 'flex items-center gap-2 text-muted-foreground'}>
-                {state === 'done' ? <Check className="size-3.5" aria-hidden="true" /> : state === 'active' ? <Spinner className="size-3.5" /> : null}
-                {t(`network.apply.steps.${step}`)}
-              </span>
-            )
-          })}
-        </div>
-        <p className="text-sm text-muted-foreground">{t(`network.apply.body.${stage}`)}</p>
+    <header className="grid gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Back />
+        <Select value={name} onValueChange={(value) => void navigate({ to: '/network/$name', params: { name: String(value) } })}>
+          <SelectTrigger size="sm" className="w-40 font-mono" aria-label={t('network.detail.switch')}><SelectValue /></SelectTrigger>
+          <SelectContent>{data.staged.order.map((each) => <SelectItem key={each} value={each}>{each}</SelectItem>)}</SelectContent>
+        </Select>
       </div>
-      {settled ? <Button className="justify-self-start" size="sm" variant="outline" onClick={onDismiss}>{t('network.apply.dismiss')}</Button> : null}
-    </Panel>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Led tone={status.tone} className="size-2.5" />
+        <h1 className="font-mono text-xl font-semibold tracking-tight">{name}</h1>
+        <span className="text-sm text-muted-foreground">{kindLabel(iface)}</span>
+        {exitOf(data.applied) === name ? <Tag tone="exit">{t('network.tags.exit')}</Tag> : null}
+        {data.session === name ? <Tag tone="info">{t('network.tags.session')}</Tag> : null}
+        {editable && !(data.applied.ifaces[name]?.declared ?? true) ? <Tag>{t('network.tags.imageDefault')}</Tag> : null}
+        {bridge ? <Tag>{t('network.detail.portOf')} <Link className="font-mono text-primary" to="/network/$name" params={{ name: bridge }}>{bridge}</Link></Tag> : null}
+        {iface.kind === 'vlan' && iface.entry.vlan ? <Tag>{t('network.detail.on')} <Link className="font-mono text-primary" to="/network/$name" params={{ name: iface.entry.vlan.parent }}>{iface.entry.vlan.parent}</Link></Tag> : null}
+        {vlans.map((vlan) => <Tag key={vlan}>VLAN <Link className="font-mono text-primary" to="/network/$name" params={{ name: vlan }}>{vlan}</Link></Tag>)}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusLine status={status} />
+        <span className="flex-1" />
+        {editing ? <Tag tone="info">{t('network.detail.editing')}</Tag> : null}
+        {!editing && pending ? (
+          <Tag tone="pending">
+            {t(pending.op === 'create' ? 'network.tags.pendingCreate' : 'network.tags.pendingChanges')}
+            <button type="button" className="ms-1 text-primary hover:underline" onClick={() => updateChangeSet((set) => stageRevert(set, name))}>{t('network.review.revert')}</button>
+          </Tag>
+        ) : null}
+      </div>
+    </header>
   )
 }
 
-function formatAddress(address: { address?: string; prefixLength?: number }) {
-  return `${address.address ?? ''}${address.prefixLength === undefined ? '' : `/${address.prefixLength}`}`
+function Body({ data, name, editing, onEdit }: { data: NetworkData; name: string; editing: boolean; onEdit: () => void }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const iface = data.staged.ifaces[name]
+  const applied = data.applied.ifaces[name]
+  const map = data.staged.map
+  const bridge = bridgeOf(map, name)
+  const vlans = vlansOn(map, name)
+  const editable = iface.kind !== 'wifi' && iface.kind !== 'wireguard'
+  const blockers = [...(vlans.length ? [t('network.detail.blockVlans', { vlans: vlans.join(', ') })] : []), ...(bridge ? [t('network.detail.blockBridge', { bridge })] : [])]
+  const physical = iface.kind === 'physical' || iface.kind === 'can'
+
+  return (
+    <>
+      {data.session === name ? <Callout tone="neutral" title={t('network.detail.sessionTitle', { name })}>{t('network.detail.sessionCopy')}</Callout> : null}
+      {applied ? <Observation data={data} name={name} /> : null}
+      {!editable ? (
+        <PageSection title={t('network.detail.config')}>
+          <Panel>
+            <Button className="justify-self-start" variant="outline" onClick={() => void navigate({ to: '/network', search: iface.kind === 'wifi' ? { tab: 'wifi' } : { tab: 'wireguard', tunnel: name } })}>
+              {t(iface.kind === 'wifi' ? 'network.detail.onWifi' : 'network.detail.onWireguard')}
+            </Button>
+          </Panel>
+        </PageSection>
+      ) : (
+        <PageSection title={t('network.detail.config')} description={editing ? t('network.detail.editHint') : undefined}>
+          <Panel className={editing ? 'ring-2 ring-primary/40' : undefined}>
+            {editing ? <ConfigForm data={data} name={name} /> : <ConfigView data={data} name={name} onEdit={onEdit} />}
+          </Panel>
+        </PageSection>
+      )}
+      {editable && !editing && (!physical || iface.declared) ? (
+        <PageSection title={t(physical ? 'network.detail.restore' : 'network.detail.delete')} tone="danger">
+          <Panel>
+            <p className="text-sm text-muted-foreground">
+              {physical ? t('network.detail.restoreCopy') : iface.kind === 'bridge' && iface.entry.bridge?.ports.length ? t('network.detail.deleteBridgeCopy', { ports: iface.entry.bridge.ports.join(', ') }) : t('network.detail.deleteCopy')}
+            </p>
+            {blockers.length ? <p className="text-sm text-destructive">{t('network.detail.blocked', { reasons: blockers.join('; ') })}</p> : null}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={blockers.length > 0}
+                onClick={() => {
+                  updateChangeSet((set) => stageRemove(set, name, iface.kind))
+                  if (!physical) void navigate({ to: '/network' })
+                }}
+              >
+                {physical ? t('network.detail.restore') : t('network.detail.deleteNamed', { name })}
+              </Button>
+              <span className="text-sm text-muted-foreground">{t('network.detail.stagedHint')}</span>
+            </div>
+          </Panel>
+        </PageSection>
+      ) : null}
+    </>
+  )
 }
 
-function kindLabel(configured: InterfaceConfig | undefined, observed: ObservedNetworkInterface | undefined, t: ReturnType<typeof useTranslation>['t']) {
-  const kind = configured?.kind ?? observed?.kind ?? observed?.type
-  return kind ? t(`network.kinds.${kind}`, { defaultValue: kind }) : t('common.notAvailable')
+function Observation({ data, name }: { data: NetworkData; name: string }) {
+  const { t } = useTranslation()
+  const iface = data.applied.ifaces[name]
+  const obs = iface.obs
+  const entry = iface.entry
+  const map = data.applied.map
+  const link = !obs
+    ? t('network.list.missing')
+    : iface.kind === 'bridge'
+      ? t('network.status.notes.portsUp', { up: (entry.bridge?.ports ?? []).filter((port) => data.applied.ifaces[port]?.obs?.carrier).length, count: entry.bridge?.ports.length ?? 0 })
+      : iface.kind === 'vlan'
+        ? t(data.applied.ifaces[entry.vlan?.parent ?? '']?.obs?.carrier ? 'network.detail.parentUp' : 'network.detail.parentDown')
+        : t(obs.carrier ? 'network.list.linkUp' : 'network.list.noCable')
+  const gateway = obs?.lease?.router ?? (!entry.dhcp && obs?.address ? entry.static?.gateway : undefined)
+  const facts = iface.kind === 'can'
+    ? [
+        { id: 'state', label: t('network.fields.state'), value: obs?.operationalState ?? '—' },
+        { id: 'bitrate', label: t('network.fields.bitrate'), value: t('network.status.notes.bitrateUnreported') },
+      ]
+    : [
+        { id: 'link', label: t('network.fields.link'), value: link },
+        { id: 'address', label: t('network.fields.address'), value: obs?.address ? <span><span className="font-mono">{obs.address}</span> <span className="text-muted-foreground">{obs.source}</span></span> : '—' },
+        { id: 'gateway', label: t('network.fields.gateway'), value: gateway ?? '—', mono: true },
+        { id: 'dns', label: t('network.fields.dns'), value: obs?.dns.length ? obs.dns.join(', ') : '—', mono: true },
+        obs?.lease?.lifetimeSeconds !== undefined && { id: 'lease', label: t('network.fields.leaseLeft'), value: t('network.values.seconds', { count: obs.lease.lifetimeSeconds }) },
+        { id: 'mac', label: t('network.fields.mac'), value: obs?.mac ?? '—', mono: true },
+        bridgeOf(map, name) && { id: 'bridge', label: t('network.list.memberOf'), value: bridgeOf(map, name), mono: true },
+      ]
+  return (
+    <PageSection title={t('network.detail.observed')}>
+      <Panel><FactList facts={facts} /></Panel>
+    </PageSection>
+  )
 }
 
-/// What an interface is once a bridge claims it: declared, with no addressing
-/// of its own. Its kind and its VLAN block stay.
-function portEntry(current: InterfaceConfig | undefined): InterfaceConfig {
-  const entry: InterfaceConfig = { ...current, dhcp: false }
-  delete entry.static
-  delete entry.dns
-  delete entry.dhcpServer
-  delete entry.routes
-  return entry
+const mono = (value: ReactNode) => <span className="font-mono">{value}</span>
+
+function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; onEdit: () => void }) {
+  const { t } = useTranslation()
+  const iface = data.staged.ifaces[name]
+  const entry = iface.entry
+  const map = data.staged.map
+  const bridge = bridgeOf(map, name)
+  const server = !entry.dhcp && entry.static && entry.dhcpServer ? entry.dhcpServer : undefined
+  const range = server ? poolRange(entry.static?.address, server) : undefined
+  return (
+    <div className="grid gap-5">
+      <Button className="justify-self-start" size="sm" onClick={onEdit}>{t('network.detail.edit')}</Button>
+      {iface.kind === 'can' ? (
+        <Group title={t('network.can.title')}>
+          <FactList facts={[
+            { id: 'bitrate', label: t('network.fields.bitrate'), value: entry.can ? `${entry.can.bitrate}` : t('network.values.notSet'), mono: true },
+            { id: 'restart', label: t('network.fields.restart'), value: entry.can?.restartMs ? `${entry.can.restartMs} ms` : t('network.values.never') },
+            { id: 'fd', label: t('network.fields.fd'), value: t(entry.can?.fd ? 'network.values.on' : 'network.values.off') },
+            entry.can?.fd && { id: 'data', label: t('network.fields.dataBitrate'), value: entry.can.dataBitrate ?? '—', mono: true },
+          ]} />
+        </Group>
+      ) : bridge ? (
+        <Group title={t('network.detail.addressing')}>
+          <p className="text-sm text-muted-foreground">{t('network.detail.portNote', { bridge })}</p>
+        </Group>
+      ) : (
+        <>
+          <Group title={t('network.detail.preset')}>
+            <strong className="text-sm">{t(entry.dhcp ? 'network.presets.dhcp' : entry.static ? 'network.presets.static' : 'network.values.noAddress')}</strong>
+          </Group>
+          <Group title={t(entry.dhcp ? 'network.fields.dns' : 'network.detail.addressAndDns')}>
+            <FactList facts={entry.dhcp
+              ? [{ id: 'dns', label: t('network.fields.dns'), value: entry.dns?.length ? mono(entry.dns.join(', ')) : t('network.detail.leaseDns') }]
+              : [
+                  { id: 'address', label: t('network.fields.address'), value: mono(entry.static?.address || t('network.values.notSet')) },
+                  { id: 'gateway', label: t('network.fields.gateway'), value: mono(entry.static?.gateway || t('network.values.none')) },
+                  { id: 'dns', label: t('network.fields.dns'), value: mono(entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none')) },
+                ]} />
+          </Group>
+          {!entry.dhcp && entry.static && !data.openrc ? (
+            <Group title={t('network.fields.dhcpServer')}>
+              <FactList facts={server ? [
+                { id: 'state', label: t('network.fields.state'), value: t('network.values.on') },
+                { id: 'range', label: t('network.fields.poolRange'), value: mono(range ? `${range.start} – ${range.end}` : '—') },
+                { id: 'lease', label: t('network.fields.lease'), value: server.leaseSeconds ? t('network.values.seconds', { count: server.leaseSeconds }) : t('network.values.automatic') },
+                { id: 'dns', label: t('network.fields.serverDns'), value: server.dns?.length ? mono(server.dns.join(', ')) : t('network.values.uplinkDns') },
+              ] : [{ id: 'state', label: t('network.fields.state'), value: t('network.values.off') }]} />
+            </Group>
+          ) : null}
+        </>
+      )}
+      {iface.kind === 'bridge' ? (
+        <Group title={t('network.detail.portsCount', { count: entry.bridge?.ports.length ?? 0 })}>
+          {entry.bridge?.ports.length ? (
+            <div className="flex flex-wrap gap-3">
+              {entry.bridge.ports.map((port) => {
+                const status = computeStatus(data.applied, port)
+                return <span key={port} className="flex items-center gap-1.5 text-sm"><Led tone={status.tone} /><Link className="font-mono font-medium text-primary" to="/network/$name" params={{ name: port }}>{port}</Link><span className="text-muted-foreground">{t(`network.status.${status.label}`)}</span></span>
+              })}
+            </div>
+          ) : <p className="text-sm text-muted-foreground">{t('network.detail.noPorts')}</p>}
+        </Group>
+      ) : null}
+      {iface.kind === 'vlan' && entry.vlan ? (
+        <Group title="VLAN">
+          <FactList facts={[
+            { id: 'parent', label: t('network.fields.parent'), value: <Link className="font-mono text-primary" to="/network/$name" params={{ name: entry.vlan.parent }}>{entry.vlan.parent}</Link> },
+            { id: 'id', label: t('network.fields.vlanId'), value: entry.vlan.id, mono: true },
+          ]} />
+        </Group>
+      ) : null}
+      {!bridge && iface.kind !== 'can' && !data.openrc ? (
+        <Group title={t('network.fields.routes')}>
+          {entry.routes?.length ? <div className="grid gap-1 font-mono text-sm">{entry.routes.map((route) => <span key={`${route.destination}-${route.gateway ?? ''}`}>{route.destination} → {route.gateway || t('network.values.onLink')}</span>)}</div> : <p className="text-sm text-muted-foreground">{t('network.values.none')}</p>}
+        </Group>
+      ) : null}
+    </div>
+  )
 }
 
-function splitList(value: string) {
-  return value.split(',').map((item) => item.trim()).filter(Boolean)
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="grid gap-2">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+const splitList = (text: string) => text.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean)
+
+/// Several addresses typed into one box. The box keeps what was typed; the
+/// entry gets the parsed list, invalid items included, so validation names them.
+function ListInput({ id, values, onChange, placeholder, invalid }: { id: string; values: string[] | undefined; onChange: (values: string[]) => void; placeholder?: string; invalid?: boolean }) {
+  const [text, setText] = useState((values ?? []).join(', '))
+  const shown = splitList(text).join(',') === (values ?? []).join(',') ? text : (values ?? []).join(', ')
+  return <Input id={id} className="font-mono" value={shown} placeholder={placeholder} aria-invalid={invalid} onChange={(event) => { setText(event.target.value); onChange(splitList(event.target.value)) }} />
+}
+
+function ProblemText({ problem }: { problem?: Problem }) {
+  const { t } = useTranslation()
+  return problem ? <span className="text-destructive">{t(problem.key, problem.params)}</span> : null
+}
+
+function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
+  const { t } = useTranslation()
+  const iface = data.staged.ifaces[name]
+  const applied = data.applied.ifaces[name]
+  const entry = iface.entry
+  const map = data.staged.map
+  const bridge = bridgeOf(map, name)
+  const problems = useProblems(data, name)
+  const set = (change: (entry: IfaceEntry) => IfaceEntry) => updateChangeSet((current) => stageSet(current, name, iface.kind, change))
+  const [customDns, setCustomDns] = useState(Boolean(entry.dns?.length))
+
+  if (iface.kind === 'can') return <CanForm data={data} name={name} problems={problems} />
+  if (bridge) {
+    return (
+      <Group title={t('network.detail.addressing')}>
+        <p className="text-sm text-muted-foreground">{t('network.detail.portNote', { bridge })}</p>
+        <Button className="justify-self-start" size="sm" variant="outline" onClick={() => updateChangeSet((current) => stageSet(current, bridge, 'bridge', (each) => ({ ...each, bridge: { ports: (each.bridge?.ports ?? []).filter((port) => port !== name) } })))}>
+          {t('network.detail.leaveBridge', { bridge })}
+        </Button>
+      </Group>
+    )
+  }
+
+  const toDhcp = () => set((current) => {
+    const next: IfaceEntry = { ...current, dhcp: true }
+    delete next.static
+    delete next.dhcpServer
+    delete next.dns
+    return next
+  })
+  const toStatic = () => set((current) => {
+    const next: IfaceEntry = { ...current, dhcp: false, static: { address: current.static?.address || suggestSubnet(data), ...(current.static?.gateway ? { gateway: current.static.gateway } : {}), dns: current.dns ?? current.static?.dns ?? [] } }
+    delete next.dns
+    return next
+  })
+  const lease = applied?.obs
+  const canServe = !entry.dhcp && entry.static !== undefined && !data.openrc
+  const pool = entry.static?.address ? defaultPool(entry.static.address) : undefined
+  const candidates = data.staged.order.filter((each) => data.staged.ifaces[each].kind === 'physical' && each !== name)
+
+  return (
+    <div className="grid gap-6">
+      <Group title={t('network.detail.preset')}>
+        <SegmentedControl<'dhcp' | 'static'>
+          label={t('network.detail.preset')}
+          value={entry.dhcp ? 'dhcp' : 'static'}
+          onValueChange={(preset) => (preset === 'dhcp' ? toDhcp : toStatic)()}
+          segments={(['dhcp', 'static'] as const).map((preset) => ({ value: preset, label: t(`network.presets.${preset}`) }))}
+        />
+        <p className="text-sm text-muted-foreground">{t(`network.presets.${entry.dhcp ? 'dhcp' : 'static'}Copy`)}</p>
+      </Group>
+
+      {entry.dhcp ? (
+        <Group title={t('network.fields.dns')}>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span className="grid gap-0.5"><span className="font-medium">{t('network.fields.customDns')}</span><span className="text-muted-foreground">{t('network.detail.customDnsHint')}</span></span>
+            <Switch checked={customDns} onCheckedChange={(on) => { setCustomDns(on); if (!on) set((current) => ({ ...current, dns: [] })) }} aria-label={t('network.fields.customDns')} />
+          </label>
+          {customDns ? (
+            <FormField label={t('network.fields.dns')} hint={problems.dns ? <ProblemText problem={problems.dns} /> : t('network.detail.listHint')}>
+              {(id) => <ListInput id={id} values={entry.dns} placeholder="9.9.9.9, 1.1.1.1" invalid={Boolean(problems.dns)} onChange={(dns) => set((current) => ({ ...current, dns }))} />}
+            </FormField>
+          ) : null}
+        </Group>
+      ) : (
+        <Group title={t('network.detail.addressAndDns')}>
+          <FormField label={t('network.fields.address')} hint={problems.address ? <ProblemText problem={problems.address} /> : t('network.detail.cidrHint')}>
+            {(id) => <Input id={id} className="font-mono" value={entry.static?.address ?? ''} placeholder="192.168.10.1/24" aria-invalid={Boolean(problems.address)} onChange={(event) => set((current) => ({ ...current, static: { ...current.static, address: event.target.value.trim() } }))} />}
+          </FormField>
+          {lease?.address && /dhcp/i.test(lease.source ?? '') && !entry.static?.address ? (
+            <Button className="justify-self-start" size="sm" variant="link" onClick={() => set((current) => ({ ...current, static: { address: lease.address ?? '', ...(lease.lease?.router ? { gateway: lease.lease.router } : {}), dns: lease.dns } }))}>
+              {t('network.detail.useLease', { address: lease.address })}
+            </Button>
+          ) : null}
+          <FormField label={t('network.fields.gateway')} hint={problems.gateway ? <ProblemText problem={problems.gateway} /> : t('network.detail.gatewayHint')}>
+            {(id) => <Input id={id} className="font-mono" value={entry.static?.gateway ?? ''} placeholder={t('network.values.none')} aria-invalid={Boolean(problems.gateway)} onChange={(event) => set((current) => { const value = event.target.value.trim(); const next = { ...current, static: { address: current.static?.address ?? '', ...current.static } }; if (value) next.static.gateway = value; else delete next.static.gateway; return next })} />}
+          </FormField>
+          <FormField label={t('network.fields.dns')} hint={problems.dns ? <ProblemText problem={problems.dns} /> : t('network.detail.listHint')}>
+            {(id) => <ListInput id={id} values={entry.static?.dns} placeholder={t('network.detail.optional')} invalid={Boolean(problems.dns)} onChange={(dns) => set((current) => ({ ...current, static: { address: current.static?.address ?? '', ...current.static, dns } }))} />}
+          </FormField>
+        </Group>
+      )}
+
+      {canServe ? <DhcpServerForm data={data} name={name} problems={problems} pool={pool} /> : null}
+
+      {iface.kind === 'bridge' ? (
+        <Group title={t('network.detail.portsCount', { count: entry.bridge?.ports.length ?? 0 })}>
+          <div role="group" aria-label={t('network.fields.ports')} className="grid gap-2 sm:grid-cols-2">
+            {candidates.map((port) => {
+              const other = bridgeOf(map, port)
+              const elsewhere = other !== undefined && other !== name
+              const on = entry.bridge?.ports.includes(port) ?? false
+              const status = computeStatus(data.applied, port)
+              return (
+                <label key={port} className={cn('flex items-center gap-2 rounded-lg border p-2 text-sm', on && 'border-primary', elsewhere && 'opacity-55')}>
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-primary"
+                    checked={on}
+                    disabled={elsewhere}
+                    onChange={(event) => set((current) => ({ ...current, bridge: { ports: event.target.checked ? [...(current.bridge?.ports ?? []), port] : (current.bridge?.ports ?? []).filter((each) => each !== port) } }))}
+                  />
+                  <span className="font-mono font-medium">{port}</span>
+                  <Led tone={status.tone} />
+                  <span className="text-muted-foreground">{elsewhere ? t('network.detail.inOther', { bridge: other }) : t(`network.status.${status.label}`)}</span>
+                </label>
+              )
+            })}
+          </div>
+          <p className="text-sm text-muted-foreground">{t('network.detail.portsHint')}</p>
+          {(entry.bridge?.ports ?? []).map((port) => port === data.session
+            ? <p key={port} className="text-sm text-destructive">{t('network.detail.portIsSession', { port })}</p>
+            : !(data.set?.base[name]?.bridge?.ports ?? []).includes(port) && data.staged.ifaces[port]?.obs?.address
+              ? <p key={port} className="text-sm text-muted-foreground">{t('network.detail.portLosesAddress', { port })}</p>
+              : null)}
+        </Group>
+      ) : null}
+
+      {iface.kind === 'vlan' && entry.vlan ? (
+        <Group title="VLAN">
+          <FormField label={t('network.fields.parent')} hint={t('network.detail.vlanRebuild')}>
+            {(id) => (
+              <Select value={entry.vlan?.parent ?? ''} onValueChange={(value) => set((current) => ({ ...current, vlan: { id: current.vlan?.id ?? 0, parent: String(value) } }))}>
+                <SelectTrigger id={id} className="w-48 font-mono"><SelectValue /></SelectTrigger>
+                <SelectContent>{data.staged.order.filter((each) => ['physical', 'bridge'].includes(data.staged.ifaces[each].kind) && !bridgeOf(map, each)).map((each) => <SelectItem key={each} value={each}>{each}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+          </FormField>
+          <FormField label={t('network.fields.vlanId')} hint={problems.vlanId ? <ProblemText problem={problems.vlanId} /> : undefined}>
+            {(id) => <Input id={id} className="w-32 font-mono" inputMode="numeric" value={entry.vlan?.id ?? ''} aria-invalid={Boolean(problems.vlanId)} onChange={(event) => set((current) => ({ ...current, vlan: { parent: current.vlan?.parent ?? '', id: Number(event.target.value.replace(/\D/g, '')) || 0 } }))} />}
+          </FormField>
+        </Group>
+      ) : null}
+
+      {!data.openrc ? <RoutesForm data={data} name={name} problems={problems} /> : null}
+    </div>
+  )
+}
+
+/// A subnet for an interface switched to static: the first 192.168.<n>.1/24
+/// that no interface uses.
+function suggestSubnet(data: NetworkData): string {
+  const used = data.staged.order
+    .map((name) => data.staged.ifaces[name].obs?.address ?? (!data.staged.map[name]?.dhcp ? data.staged.map[name]?.static?.address : undefined))
+    .filter((address): address is string => Boolean(address))
+  for (let third = 10; third < 250; third += 10) {
+    const candidate = `192.168.${third}.1/24`
+    if (!used.some((address) => overlaps(candidate, address))) return candidate
+  }
+  return '192.168.200.1/24'
+}
+
+function DhcpServerForm({ data, name, problems, pool }: { data: NetworkData; name: string; problems: Problems; pool?: { poolOffset: number; poolSize: number } }) {
+  const { t } = useTranslation()
+  const iface = data.staged.ifaces[name]
+  const entry = iface.entry
+  const address = entry.static?.address
+  const server = entry.dhcpServer
+  const range = server ? poolRange(address, server) : undefined
+  const [start, setStart] = useState(range?.start ?? '')
+  const [end, setEnd] = useState(range?.end ?? '')
+  const set = (change: (entry: IfaceEntry) => IfaceEntry) => updateChangeSet((current) => stageSet(current, name, iface.kind, change))
+  const typed = poolFromRange(address, start, end)
+  const local = server && (start || end) && !typed ? t('network.problems.poolSubnet') : undefined
+  const typeRange = (nextStart: string, nextEnd: string) => {
+    setStart(nextStart); setEnd(nextEnd)
+    const parsed = poolFromRange(address, nextStart, nextEnd)
+    if (parsed) set((current) => ({ ...current, dhcpServer: { ...(current.dhcpServer ?? { poolOffset: 0, poolSize: 0 }), ...parsed } }))
+  }
+  const toggle = (on: boolean) => {
+    if (!on) { set((current) => { const next = { ...current }; delete next.dhcpServer; return next }); return }
+    if (!pool) return
+    const range = poolRange(address, pool)
+    setStart(range?.start ?? ''); setEnd(range?.end ?? '')
+    set((current) => ({ ...current, dhcpServer: { ...pool } }))
+  }
+  return (
+    <Group title={t('network.fields.dhcpServer')}>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="grid gap-0.5"><span className="font-medium">{t('network.detail.serverOn')}</span><span className="text-muted-foreground">{t(pool ? 'network.detail.serverHint' : 'network.detail.serverNeedsAddress')}</span></span>
+        <Switch checked={server !== undefined} disabled={!pool && server === undefined} onCheckedChange={toggle} aria-label={t('network.detail.serverOn')} />
+      </label>
+      {server ? (
+        <>
+          <FormField label={t('network.fields.poolRange')} hint={local || problems.pool ? <span className="text-destructive">{local ?? t(problems.pool?.key ?? '', problems.pool?.params)}</span> : undefined}>
+            {(id) => (
+              <div className="flex items-center gap-2">
+                <Input id={id} className="font-mono" value={start} aria-label={t('network.detail.poolStart')} onChange={(event) => typeRange(event.target.value.trim(), end)} />
+                <span>–</span>
+                <Input className="font-mono" value={end} aria-label={t('network.detail.poolEnd')} onChange={(event) => typeRange(start, event.target.value.trim())} />
+              </div>
+            )}
+          </FormField>
+          <FormField label={t('network.fields.leaseSeconds')} hint={problems.lease ? <ProblemText problem={problems.lease} /> : undefined}>
+            {(id) => <Input id={id} className="w-32 font-mono" inputMode="numeric" value={server.leaseSeconds ?? ''} placeholder={t('network.values.automatic')} onChange={(event) => set((current) => { const digits = event.target.value.replace(/\D/g, ''); const next = { ...current, dhcpServer: { ...(current.dhcpServer ?? server) } }; if (digits) next.dhcpServer.leaseSeconds = Number(digits); else delete next.dhcpServer.leaseSeconds; return next })} />}
+          </FormField>
+          <FormField label={t('network.fields.serverDns')} hint={problems.serverDns ? <ProblemText problem={problems.serverDns} /> : t('network.detail.serverDnsHint')}>
+            {(id) => <ListInput id={id} values={server.dns} placeholder={t('network.detail.optional')} invalid={Boolean(problems.serverDns)} onChange={(dns) => set((current) => ({ ...current, dhcpServer: { ...(current.dhcpServer ?? server), dns } }))} />}
+          </FormField>
+        </>
+      ) : null}
+    </Group>
+  )
+}
+
+function RoutesForm({ data, name, problems }: { data: NetworkData; name: string; problems: Problems }) {
+  const { t } = useTranslation()
+  const iface = data.staged.ifaces[name]
+  const routes = iface.entry.routes ?? []
+  const set = (next: NonNullable<IfaceEntry['routes']>) => updateChangeSet((current) => stageSet(current, name, iface.kind, (entry) => ({ ...entry, routes: next })))
+  return (
+    <Group title={t('network.fields.routes')}>
+      {routes.map((route, index) => (
+        <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+          <Input className="font-mono" aria-label={t('network.detail.routeDestination')} value={route.destination} placeholder="10.20.0.0/16" onChange={(event) => set(routes.map((row, at) => at === index ? { ...row, destination: event.target.value.trim() } : row))} />
+          <Input className="font-mono" aria-label={t('network.detail.routeVia')} value={route.gateway ?? ''} placeholder={t('network.detail.routeOnLink')} onChange={(event) => set(routes.map((row, at) => { if (at !== index) return row; const next = { ...row }; const value = event.target.value.trim(); if (value) next.gateway = value; else delete next.gateway; return next }))} />
+          <Button size="icon-sm" variant="ghost" aria-label={t('common.actions.delete')} onClick={() => set(routes.filter((_, at) => at !== index))}><X /></Button>
+        </div>
+      ))}
+      {problems.routes ? <ProblemText problem={problems.routes} /> : routes.length ? <p className="text-sm text-muted-foreground">{t('network.detail.routesHint')}</p> : null}
+      <Button className="justify-self-start" size="sm" variant="outline" onClick={() => set([...routes, { destination: '' }])}><Plus />{t('network.detail.addRoute')}</Button>
+    </Group>
+  )
+}
+
+function CanForm({ data, name, problems }: { data: NetworkData; name: string; problems: Problems }) {
+  const { t } = useTranslation()
+  const iface = data.staged.ifaces[name]
+  const can = iface.entry.can ?? { bitrate: 0 }
+  const set = (change: (can: NonNullable<IfaceEntry['can']>) => NonNullable<IfaceEntry['can']>) => updateChangeSet((current) => stageSet(current, name, 'can', (entry) => ({ ...entry, kind: 'can', can: change({ ...(entry.can ?? { bitrate: 0 }) }) })))
+  const digits = (text: string) => text.replace(/\D/g, '')
+  return (
+    <Group title={t('network.can.title')}>
+      <p className="text-sm text-muted-foreground">{t('network.can.copy')}</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <FormField label={t('network.fields.bitrate')} hint={problems.bitrate ? <ProblemText problem={problems.bitrate} /> : t('network.can.bitrateHint')}>
+          {(id) => <Input id={id} className="font-mono" inputMode="numeric" value={can.bitrate || ''} aria-invalid={Boolean(problems.bitrate)} onChange={(event) => set((current) => ({ ...current, bitrate: Number(digits(event.target.value)) }))} />}
+        </FormField>
+        <FormField label={t('network.fields.restart')} hint={t('network.can.restartHint')}>
+          {(id) => <Input id={id} className="font-mono" inputMode="numeric" value={can.restartMs ?? ''} onChange={(event) => set((current) => { const next = { ...current }; if (digits(event.target.value)) next.restartMs = Number(digits(event.target.value)); else delete next.restartMs; return next })} />}
+        </FormField>
+      </div>
+      <FormField label={t('network.fields.fd')}>
+        {() => <SegmentedControl<'on' | 'off'> label={t('network.fields.fd')} value={can.fd ? 'on' : 'off'} onValueChange={(value) => set((current) => { const next = { ...current, fd: value === 'on' }; if (value === 'on') next.dataBitrate = current.dataBitrate ?? 2_000_000; else delete next.dataBitrate; return next })} segments={[{ value: 'on', label: t('network.values.on') }, { value: 'off', label: t('network.values.off') }]} />}
+      </FormField>
+      {can.fd ? (
+        <FormField label={t('network.fields.dataBitrate')} hint={t('network.can.dataBitrateHint')}>
+          {(id) => <Input id={id} className="font-mono" inputMode="numeric" value={can.dataBitrate ?? ''} onChange={(event) => set((current) => ({ ...current, dataBitrate: Number(digits(event.target.value)) || undefined }))} />}
+        </FormField>
+      ) : null}
+      {data.session === name ? <p className="text-sm text-destructive">{t('network.detail.sessionCopy')}</p> : null}
+    </Group>
+  )
 }

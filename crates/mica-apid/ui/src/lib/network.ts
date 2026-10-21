@@ -1,32 +1,4 @@
-import type { ObservedAddress, ObservedInterface, ObservedNetworkInterface, ObservedNetworkState } from './types'
-
-export interface NetworkRow {
-  name: string
-  configured?: Record<string, unknown>
-  observed?: ObservedInterface
-}
-
-export function networkRows(
-  configured: Record<string, unknown> = {},
-  observed: ObservedInterface[] = [],
-): NetworkRow[] {
-  const rows = new Map<string, NetworkRow>()
-  for (const [name, value] of Object.entries(configured)) {
-    rows.set(name, {
-      name,
-      configured: value && typeof value === 'object' ? value as Record<string, unknown> : {},
-    })
-  }
-  for (const iface of observed) {
-    const name = iface.name ?? `#${iface.index ?? 'unknown'}`
-    rows.set(name, { ...rows.get(name), name, observed: iface })
-  }
-  return [...rows.values()].sort((left, right) => {
-    const leftIndex = left.observed?.index ?? Number.MAX_SAFE_INTEGER
-    const rightIndex = right.observed?.index ?? Number.MAX_SAFE_INTEGER
-    return leftIndex - rightIndex || left.name.localeCompare(right.name)
-  })
-}
+import type { ObservedAddress, ObservedNetworkInterface, ObservedNetworkState } from './types'
 
 /// Interfaces the list hides unless they were declared here.
 ///
@@ -45,34 +17,9 @@ function isLoopbackName(name: string) {
   return name === 'lo' || /^lo\d+$/.test(name)
 }
 
-function isHidden(row: NetworkRow) {
-  const kind = row.observed?.kind ?? row.observed?.type
+export function isHiddenInterface(name: string, kind: string | undefined) {
   if (kind && HIDDEN_KINDS.includes(kind)) return true
-  return isLoopbackName(row.name) || HIDDEN_PREFIXES.some((prefix) => row.name.startsWith(prefix))
-}
-
-/// The rows an operator came to the page for: everything declared, plus the
-/// physical and wireless links the device actually has.
-export function visibleNetworkRows(rows: NetworkRow[]): NetworkRow[] {
-  return rows.filter((row) => row.configured !== undefined || !isHidden(row))
-}
-
-/// The interfaces a VLAN can sit on and a bridge can take as a port: the links
-/// the kernel already has. A VLAN, a bridge or a tunnel is not one of them --
-/// networkd builds those, and naming one as a parent is how a VLAN ends up on
-/// a device that does not exist yet.
-export function physicalInterfaces(rows: NetworkRow[]): string[] {
-  return rows
-    .filter((row) => !isHidden(row))
-    .filter((row) => {
-      const declared = row.configured?.kind as string | undefined
-      if (declared !== undefined) return declared === 'physical'
-      const observed = row.observed?.kind
-      // networkd reports no `Kind` for a NIC it did not create; a `Kind` of
-      // `bridge`, `vlan` or `wireguard` is one it did.
-      return observed === undefined
-    })
-    .map((row) => row.name)
+  return isLoopbackName(name) || HIDDEN_PREFIXES.some((prefix) => name.startsWith(prefix))
 }
 
 export interface Uplink {
@@ -113,86 +60,4 @@ export function selectUplink(state?: ObservedNetworkState): Uplink | undefined {
     address: globalAddress(chosen.addresses),
     operationalState: chosen.link.operationalState,
   }
-}
-
-interface ConfiguredSummaryLabels {
-  notConfigured: string
-  physical: string
-  dhcp: string
-  static: string
-  noAddressing: string
-  format: (kind: string, method: string) => string
-}
-
-const englishSummaryLabels: ConfiguredSummaryLabels = {
-  notConfigured: 'Not configured',
-  physical: 'physical',
-  dhcp: 'DHCP',
-  static: 'Static',
-  noAddressing: 'No addressing',
-  format: (kind, method) => `${kind} · ${method}`,
-}
-
-export function configuredSummary(
-  configured?: Record<string, unknown>,
-  labels: ConfiguredSummaryLabels = englishSummaryLabels,
-) {
-  if (!configured) return labels.notConfigured
-  const kind = typeof configured.kind === 'string' ? configured.kind : labels.physical
-  const method = configured.dhcp === true
-    ? labels.dhcp
-    : configured.static && typeof configured.static === 'object'
-      ? labels.static
-      : labels.noAddressing
-  return labels.format(kind, method)
-}
-
-/// An address as networkd prints it: its bytes, four or sixteen of them.
-function addressText(bytes: unknown[]): string | undefined {
-  if (!bytes.every((byte) => typeof byte === 'number')) return undefined
-  const octets = bytes as number[]
-  if (octets.length === 4) return octets.join('.')
-  if (octets.length !== 16) return undefined
-  const groups = Array.from({ length: 8 }, (_, at) => (octets[at * 2] << 8) | octets[at * 2 + 1])
-  // RFC 5952: the longest run of two or more zero groups becomes `::`.
-  let start = -1
-  let length = 0
-  for (let at = 0; at < 8; at++) {
-    let run = 0
-    while (at + run < 8 && groups[at + run] === 0) run++
-    if (run > length) { start = at; length = run }
-    if (run > 0) at += run - 1
-  }
-  const hex = (part: number[]) => part.map((group) => group.toString(16)).join(':')
-  if (length < 2) return hex(groups)
-  return `${hex(groups.slice(0, start))}::${hex(groups.slice(start + length))}`
-}
-
-/// Whether an address is one the device can be reached at from elsewhere:
-/// not loopback and not link-local, in either family.
-function isReachable(text: string): boolean {
-  const lower = text.toLowerCase()
-  if (lower.includes(':')) return lower !== '::1' && !/^fe[89ab]/.test(lower)
-  return !lower.startsWith('127.') && !lower.startsWith('169.254.')
-}
-
-/// The addresses the interface list shows for one interface: every address a
-/// peer could use, spelled the way an operator types it. networkd reports each
-/// as bytes and reports the link-local ones too; neither belongs in a list.
-export function listedAddresses(items: unknown[] | undefined): string {
-  const listed: string[] = []
-  for (const item of items ?? []) {
-    let text: string | undefined
-    let prefix: unknown
-    if (typeof item === 'string') text = item
-    else if (item && typeof item === 'object') {
-      const value = item as Record<string, unknown>
-      const address = value.Address ?? value.address
-      prefix = value.PrefixLength ?? value.prefixLength
-      text = Array.isArray(address) ? addressText(address) : typeof address === 'string' ? address : undefined
-    }
-    if (!text || !isReachable(text)) continue
-    listed.push(prefix === undefined ? text : `${text}/${String(prefix)}`)
-  }
-  return listed.length > 0 ? listed.join(', ') : '—'
 }

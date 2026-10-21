@@ -3,6 +3,8 @@ export type SessionState = 'setup' | 'unauthenticated' | 'authenticated'
 export interface SessionStatus {
   state: SessionState
   csrfToken?: string
+  /// The device address this browser's connection arrived on.
+  localAddress?: string
 }
 
 /// A refused Compose file's problem, by service and field.
