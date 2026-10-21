@@ -455,7 +455,7 @@ export const zhCN: Translation = {
       recordLimit: '{{count}} / {{max}} 条',
       records: '静态解析记录',
       recordsCopy: '把域名直接解析到指定 IP，不经过 DNS 服务器；立即生效，不重载网络',
-      recordSaved: '{{name}} 已保存',
+      recordSaved: '{{name}} 已生效，未重载网络',
       remove: '删除',
       removeCopy: '删除后立即失效。',
       removed: '{{name}} 已删除',

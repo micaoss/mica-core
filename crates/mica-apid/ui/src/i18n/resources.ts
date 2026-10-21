@@ -532,7 +532,7 @@ export const en = {
       recordLimit: '{{count}} / {{max}} records',
       records: 'Static records',
       recordsCopy: 'Resolve a name straight to an address, without asking a server. Takes effect at once, without reloading the network.',
-      recordSaved: '{{name}} saved',
+      recordSaved: '{{name}} is in effect; the network was not reloaded',
       remove: 'Delete',
       removeCopy: 'The name stops resolving at once.',
       removed: '{{name}} deleted',

@@ -6,6 +6,7 @@ import { cn } from '@/shared/lib/utils'
 import type { StatusTone } from '@/shared/components/status-badge'
 import { DataTable } from '@/shared/components/data-table'
 import { Button } from '@/shared/components/ui/button'
+import { dnsLinks, ProbeText, useDns } from './dns-tab'
 import { bridgeOf, vlansOn } from './model'
 import { Led, TEXT, useKindLabel, useStatusText } from './parts'
 import type { NetworkData } from './use-network'
@@ -34,10 +35,9 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
   const up = uplink ? status(uplink) : undefined
   const wifi = view.wifi
   const wifiSummary = wifi.mode === 'off' ? t('network.overview.wifiOff') : wifi.mode === 'ap' ? t('network.overview.wifiAp', { count: wifi.stations }) : wifi.association ? t('network.overview.wifiJoined', { ssid: wifi.association.ssid ?? '' }) : t('network.overview.wifiSearching')
-  const dnsGroups = view.order
-    .map((name) => ({ name, servers: view.ifaces[name].obs?.dns ?? [], entry: view.ifaces[name].entry }))
-    .filter((group) => group.servers.length > 0)
-  const probe = data.status.data?.dns.probe
+  const dns = useDns()
+  const globalDns = dns.data?.mode === 'global'
+  const dnsGroups = dnsLinks(data, dns.data).filter((link) => link.servers.length > 0)
 
   return (
     <div className="grid gap-4">
@@ -102,11 +102,15 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="DNS" action={<Button size="xs" variant="link" onClick={() => onTab('dns')}>{t('network.overview.dnsLink')}</Button>}>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-            <dt className="text-muted-foreground">{t('network.dns.mode')}</dt><dd>{t('network.dns.perInterface')}</dd>
+            <dt className="text-muted-foreground">{t('network.dns.mode')}</dt><dd>{t(globalDns ? 'network.dns.globalMode' : 'network.dns.perInterface')}</dd>
             <dt className="text-muted-foreground">{t('network.dns.servers')}</dt>
-            <dd className="grid gap-0.5">{dnsGroups.length ? dnsGroups.map((group) => <span key={group.name} className="font-mono text-[0.8125rem]">{group.name}: {group.servers.join(', ')} <span className="font-sans text-muted-foreground">({t(`network.dns.sources.${dnsSource(group.entry)}`)})</span></span>) : <span className="text-muted-foreground">{t('network.values.none')}</span>}</dd>
+            <dd className="grid gap-0.5">{globalDns
+              ? (dns.data?.effective.global ?? []).map((server) => <span key={server} className="font-mono text-[0.8125rem]">{server}</span>)
+              : dnsGroups.length ? dnsGroups.map((group) => <span key={group.name} className="font-mono text-[0.8125rem]">{group.name}: {group.servers.join(', ')} <span className="font-sans text-muted-foreground">({t(`network.dns.sources.${group.source}`)})</span></span>) : <span className="text-muted-foreground">{t('network.values.none')}</span>}</dd>
             <dt className="text-muted-foreground">{t('network.dns.probe')}</dt>
-            <dd>{probe ? <span className={probe.reachable ? 'text-success' : 'text-destructive'}>{t(probe.reachable ? 'network.dns.resolves' : 'network.dns.unreachable')}</span> : '—'}</dd>
+            <dd><ProbeText probe={dns.data?.probe} /></dd>
+            <dt className="text-muted-foreground">{t('network.dns.records')}</dt>
+            <dd>{t('network.dns.recordCount', { count: dns.data?.staticRecords.length ?? 0 })}</dd>
           </dl>
         </Card>
         <Card title={t('network.overview.wifiTitle')} action={<Button size="xs" variant="link" onClick={() => onTab('wifi')}>{t('network.overview.wifiLink')}</Button>}>
@@ -167,10 +171,6 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
       </div>
     </div>
   )
-}
-
-export function dnsSource(entry: { dhcp?: boolean; dns?: string[] }) {
-  return entry.dhcp ? entry.dns?.length ? 'custom' : 'dhcp' : 'static'
 }
 
 function Node({ tone, icon, title, value, onClick }: { tone: StatusTone; icon: ReactNode; title: string; value: ReactNode; onClick?: () => void }) {

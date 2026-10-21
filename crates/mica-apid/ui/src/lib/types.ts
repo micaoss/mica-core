@@ -97,16 +97,21 @@ export interface WifiAccessPoint {
   leaseSeconds?: number
 }
 
-export interface StaticRecord { hostname: string; address: string; comment?: string }
+export interface StaticRecord { id: string; hostname: string; address: string; comment?: string }
 
-/// The `dns` settings subtree: the global servers, kept while switched off,
-/// and the names the device resolves itself.
-export interface DnsSettings {
+/// `GET /api/v1/dns`: the global servers, where lookups go, the static
+/// records and the last resolution check.
+export interface DnsDocument {
   global: { enabled: boolean; servers: string[] }
-  staticRecords?: StaticRecord[]
+  mode: 'global' | 'interface'
+  effective: { global?: string[]; links?: { name: string; servers: string[]; source: 'dhcp' | 'custom' | 'static' }[] }
+  staticRecords: StaticRecord[]
+  probe: DnsProbe | null
 }
 
-export interface DnsTestResult { server: string; reachable: boolean; ms: number | null }
+export interface DnsProbe { ok: boolean; name: string; latencyMs: number | null; checkedAt: string; detail?: string }
+
+export interface DnsTestResult { server: string; reachable: boolean; latencyMs: number | null }
 
 export interface WifiScan {
   available: boolean

@@ -128,7 +128,7 @@ test('captures each network page for review', async ({ page }, testInfo) => {
   await expect(review).toHaveCSS('opacity', '1')
   await page.screenshot({ path: testInfo.outputPath('network-review.png') })
 
-  await page.route('**/api/v1/dns/test', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ server: '9.9.9.9', reachable: true, ms: 18 }, { server: '149.112.112.112', reachable: false, ms: null }]) }))
+  await page.route('**/api/v1/dns/test', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ server: '9.9.9.9', reachable: true, latencyMs: 18 }, { server: '149.112.112.112', reachable: false, latencyMs: null }]) }))
   await page.goto('./network?tab=dns')
   await page.getByRole('button', { name: 'Edit' }).first().click()
   await page.getByRole('button', { name: 'Test servers' }).click()
@@ -333,12 +333,15 @@ function benchPayload(path: string): unknown {
     revision: 'e2e-revision',
     observed: { available: true, interfaceCount: 0, interfaces: [] },
   }
-  if (path === '/api/v1/settings/dns') return {
+  if (path === '/api/v1/dns') return {
     global: { enabled: true, servers: ['9.9.9.9', '149.112.112.112'] },
+    mode: 'global',
+    effective: { global: ['9.9.9.9', '149.112.112.112'] },
     staticRecords: [
-      { hostname: 'nas.lan', address: '192.168.10.20', comment: 'Chart server' },
-      { hostname: 'plotter', address: '192.168.10.30' },
+      { id: 'a1f3c2d4', hostname: 'nas.lan', address: '192.168.10.20', comment: 'Chart server' },
+      { id: 'b7e9d0a1', hostname: 'plotter', address: '192.168.10.30' },
     ],
+    probe: { ok: true, name: '0.debian.pool.ntp.org', latencyMs: 24, checkedAt: '2026-10-21T08:00:00Z' },
   }
   if (path === '/api/v1/network/wg0/peers') return [PEER]
   if (path === '/api/v1/state/network') return { wg0: { publicKey: 'e2eDevicePublicKeye2eDevicePublicKeye2eDev0=' } }

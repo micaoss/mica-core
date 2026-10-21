@@ -117,20 +117,20 @@ describe('the network page', () => {
   })
 
   it('shows what the device resolves with on the DNS tab and checks again on request', async () => {
-    const fetch = stubFetch(networkRoutes())
+    const fetch = stubFetch({ ...networkRoutes(), 'POST /api/v1/dns/probe': () => jsonResponse({ ok: false, name: 'example.org', latencyMs: null, checkedAt: '2026-10-21T08:01:00Z' }) })
     open('dns')
-    expect(await screen.findByText('Resolves')).toBeTruthy()
+    expect(await screen.findByText('Resolves · 18 ms')).toBeTruthy()
     expect(screen.getByText('example.org')).toBeTruthy()
-    const before = fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/network/status').length
+    expect(screen.getByText('(static)')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
-    await waitFor(() => expect(fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/network/status').length).toBeGreaterThan(before))
+    await waitFor(() => expect(fetch.mock.calls.some(([input, init]) => String(input) === '/api/v1/dns/probe' && init?.method === 'POST')).toBe(true))
   })
 
   it('tests the global servers and turns them on after a confirmation', async () => {
     const fetch = stubFetch({
       ...networkRoutes(),
-      'POST /api/v1/dns/test': () => jsonResponse([{ server: '9.9.9.9', reachable: true, ms: 14 }, { server: '1.1.1.1', reachable: false, ms: null }]),
-      'PUT /api/v1/settings/dns.global': () => jsonResponse({ taskId: 't1' }, 202),
+      'POST /api/v1/dns/test': () => jsonResponse([{ server: '9.9.9.9', reachable: true, latencyMs: 14 }, { server: '1.1.1.1', reachable: false, latencyMs: null }]),
+      'PUT /api/v1/dns/global': () => jsonResponse({ taskId: 't1' }, 202),
     })
     open('dns')
     await screen.findByText('nas.lan')
@@ -146,7 +146,7 @@ describe('the network page', () => {
     const dialog = await screen.findByRole('alertdialog')
     expect(within(dialog).getByText('Unreachable in the test: 1.1.1.1. You can still save.')).toBeTruthy()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/settings/dns.global')).toEqual({ enabled: true, servers: ['9.9.9.9', '1.1.1.1'] }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/dns/global')).toEqual({ enabled: true, servers: ['9.9.9.9', '1.1.1.1'] }))
   })
 
   it('refuses a server the device cannot ask', async () => {
@@ -160,8 +160,13 @@ describe('the network page', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true)
   })
 
-  it('adds a static record as one write of the whole list', async () => {
-    const fetch = stubFetch({ ...networkRoutes(), 'PUT /api/v1/settings/dns.staticRecords': () => jsonResponse({ taskId: 't1' }, 202) })
+  it('adds, edits and removes a static record by its id', async () => {
+    const fetch = stubFetch({
+      ...networkRoutes(),
+      'POST /api/v1/dns/static-records': () => jsonResponse({ id: 'r2', hostname: 'printer.lan', address: '192.168.1.30' }, 201),
+      'PUT /api/v1/dns/static-records/r1': () => jsonResponse({ id: 'r1', hostname: 'nas.lan', address: '192.168.1.21' }),
+      'DELETE /api/v1/dns/static-records/r1': () => new Response(null, { status: 204 }),
+    })
     open('dns')
     await screen.findByText('nas.lan')
     await userEvent.click(screen.getByRole('button', { name: 'Add record' }))
@@ -172,10 +177,19 @@ describe('the network page', () => {
     await userEvent.type(within(dialog).getByLabelText('Name'), 'Printer.lan')
     await userEvent.type(within(dialog).getByLabelText('IPv4 address'), '192.168.1.30')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/settings/dns.staticRecords')).toEqual([
-      { hostname: 'nas.lan', address: '192.168.1.20', comment: 'Storage' },
-      { hostname: 'printer.lan', address: '192.168.1.30' },
-    ]))
+    await waitFor(() => expect(bodyOf(fetch, 'POST', '/api/v1/dns/static-records')).toEqual({ hostname: 'printer.lan', address: '192.168.1.30' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add record' })).toBeNull())
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!)
+    const edit = await screen.findByRole('dialog', { name: 'Edit record' })
+    await userEvent.clear(within(edit).getByLabelText('IPv4 address'))
+    await userEvent.type(within(edit).getByLabelText('IPv4 address'), '192.168.1.21')
+    await userEvent.click(within(edit).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/dns/static-records/r1')).toEqual({ hostname: 'nas.lan', address: '192.168.1.21', comment: 'Storage' }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete nas.lan?' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(fetch.mock.calls.some(([input, init]) => String(input) === '/api/v1/dns/static-records/r1' && init?.method === 'DELETE')).toBe(true))
   })
 })
 

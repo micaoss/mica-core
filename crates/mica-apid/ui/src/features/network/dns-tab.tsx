@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
-import type { DnsSettings, DnsTestResult, StaticRecord, TaskAccepted } from '@/lib/types'
+import type { DnsDocument, DnsProbe, DnsTestResult, StaticRecord, TaskAccepted } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { DataTable } from '@/shared/components/data-table'
@@ -20,7 +20,6 @@ import { Switch } from '@/shared/components/ui/switch'
 import { failureDetail, notifyFailure, notifySuccess } from '@/shared/feedback/toast'
 import { EditBar } from './change-bar'
 import { isIPv4 } from './model'
-import { dnsSource } from './overview-tab'
 import type { NetworkData } from './use-network'
 
 const MAX_SERVERS = 3
@@ -36,7 +35,7 @@ interface GlobalDraft { enabled: boolean; servers: string[] }
 export function DnsTab({ data, onEditing }: { data: NetworkData; onEditing: (editing: boolean) => void }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const dns = useQuery({ queryKey: ['settings', 'dns'], queryFn: () => api<DnsSettings>('/api/v1/settings/dns') })
+  const dns = useDns()
   const global = dns.data?.global ?? { enabled: false, servers: [] }
   const records = dns.data?.staticRecords ?? []
   const [draft, setDraft] = useState<GlobalDraft>()
@@ -83,10 +82,10 @@ export function DnsTab({ data, onEditing }: { data: NetworkData; onEditing: (edi
     if (!draft) return
     const value = { enabled: draft.enabled, servers: draft.enabled ? servers : global.servers }
     try {
-      await api<TaskAccepted>('/api/v1/settings/dns.global', json('PUT', value))
+      await api<TaskAccepted>('/api/v1/dns/global', json('PUT', value))
       cancel()
     } finally {
-      void queryClient.invalidateQueries({ queryKey: ['settings', 'dns'] })
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
       void queryClient.invalidateQueries({ queryKey: ['observed-network'] })
     }
   }
@@ -95,18 +94,26 @@ export function DnsTab({ data, onEditing }: { data: NetworkData; onEditing: (edi
     if (turningOn || turningOff || (draft?.enabled && unreachable.length)) setConfirming(true)
     else void saveGlobal().then(() => notifySuccess(saved), (error: unknown) => notifyFailure(t('network.dns.saveFailed'), failureDetail(error, t('common.requestFailed'))))
   }
-  const writeRecords = async (next: StaticRecord[]) => {
+  // Each record is written on its own, by id, and takes effect at once.
+  const writeRecord = async (record: Omit<StaticRecord, 'id'>, id?: string) => {
     try {
-      await api<TaskAccepted>('/api/v1/settings/dns.staticRecords', json('PUT', next))
+      await api<StaticRecord>(id ? `/api/v1/dns/static-records/${encodeURIComponent(id)}` : '/api/v1/dns/static-records', json(id ? 'PUT' : 'POST', record))
     } finally {
-      void queryClient.invalidateQueries({ queryKey: ['settings', 'dns'] })
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
+    }
+  }
+  const removeRecord = async (id: string) => {
+    try {
+      await api<void>(`/api/v1/dns/static-records/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
     }
   }
 
   return (
     <>
       {dns.error ? <Callout tone="danger" title={failureDetail(dns.error, t('common.requestFailed'))} /> : null}
-      <Effective data={data} global={global} records={records.length} />
+      <Effective data={data} dns={dns.data} />
 
       <PageSection title={t('network.dns.global')} description={draft ? t('network.wifi.editHint') : t('network.dns.globalCopy')}>
         <Panel className={draft ? 'ring-2 ring-primary/40' : undefined}>
@@ -127,14 +134,14 @@ export function DnsTab({ data, onEditing }: { data: NetworkData; onEditing: (edi
                           <div className="flex flex-wrap items-center gap-3">
                             <Input id={id} className="w-56 font-mono" value={draft.servers[index]} placeholder={t(index === 0 ? 'network.dns.required' : 'network.dns.optional')} aria-invalid={Boolean(errors[index])} onChange={(event) => { const next = [...draft.servers]; next[index] = event.target.value.trim(); setDraft({ ...draft, servers: next }); setTests(undefined) }} />
                             {result ? (result.reachable
-                              ? <span className="text-sm text-success">{t('network.dns.reachable', { ms: result.ms })}</span>
+                              ? <span className="text-sm text-success">{t('network.dns.reachable', { ms: result.latencyMs })}</span>
                               : <span className="text-sm text-destructive">{t('network.dns.timedOut')}</span>) : null}
                           </div>
                         )}
                       </FormField>
                     )
                   })}
-                  <FormField label={t('network.dns.test')} hint={t('network.dns.testHint', { name: data.status.data?.dns?.probe?.name ?? '' })}>
+                  <FormField label={t('network.dns.test')} hint={t('network.dns.testHint', { name: dns.data?.probe?.name ?? '' })}>
                     {() => (
                       <div>
                         <Button size="sm" variant="outline" disabled={testing || !draft.servers.some((server) => isIPv4(server))} onClick={() => void runTest()}>
@@ -158,7 +165,7 @@ export function DnsTab({ data, onEditing }: { data: NetworkData; onEditing: (edi
         </Panel>
       </PageSection>
 
-      <StaticRecords records={records} hostname={data.hostname ?? ''} isPending={dns.isPending} write={writeRecords} />
+      <StaticRecords records={records} hostname={data.hostname ?? ''} isPending={dns.isPending} write={writeRecord} remove={removeRecord} />
 
       {draft ? <EditBar what={t('network.dns.global')} dirty={dirty} errors={Object.keys(errors).length} onCancel={cancel} onDone={askOrSave} doneLabel={t('common.actions.save')} /> : null}
       <ConfirmDialog
@@ -182,14 +189,40 @@ export function DnsTab({ data, onEditing }: { data: NetworkData; onEditing: (edi
   )
 }
 
-function Effective({ data, global, records }: { data: NetworkData; global: DnsSettings['global']; records: number }) {
+/// `GET /api/v1/dns`, which the overview reads too.
+export function useDns() {
+  return useQuery({ queryKey: ['dns'], queryFn: () => api<DnsDocument>('/api/v1/dns'), refetchInterval: 10_000 })
+}
+
+/// The links whose servers are worth showing: the interfaces the pages list.
+export function dnsLinks(data: NetworkData, dns: DnsDocument | undefined) {
+  return (dns?.effective.links ?? []).filter((link) => data.applied.ifaces[link.name] && data.applied.ifaces[link.name].kind !== 'can')
+}
+
+export function ProbeText({ probe }: { probe: DnsProbe | null | undefined }) {
   const { t } = useTranslation()
-  const view = data.applied
-  const groups = view.order
-    .filter((name) => view.ifaces[name].kind !== 'can' && view.ifaces[name].obs)
-    .map((name) => ({ name, servers: view.ifaces[name].obs?.dns ?? [], source: dnsSource(view.ifaces[name].entry) }))
-    .filter((group) => group.servers.length > 0)
-  const probe = data.status.data?.dns?.probe
+  if (!probe) return <span>—</span>
+  return <span className={probe.ok ? 'text-success' : 'text-destructive'}>{t(probe.ok ? 'network.dns.resolves' : 'network.dns.unreachable')}{probe.ok && probe.latencyMs !== null ? ` · ${probe.latencyMs} ms` : ''}</span>
+}
+
+function Effective({ data, dns }: { data: NetworkData; dns: DnsDocument | undefined }) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [checking, setChecking] = useState(false)
+  const global = dns?.mode === 'global'
+  const links = dnsLinks(data, dns)
+  const probe = dns?.probe
+  const recheck = async () => {
+    setChecking(true)
+    try {
+      await api<DnsProbe>('/api/v1/dns/probe', json('POST', {}))
+    } catch (error) {
+      notifyFailure(t('network.dns.recheck'), failureDetail(error, t('common.requestFailed')))
+    } finally {
+      setChecking(false)
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
+    }
+  }
   return (
     <PageSection title={t('network.dns.effective')} description={t('network.dns.effectiveCopy')}>
       <Panel>
@@ -197,36 +230,36 @@ function Effective({ data, global, records }: { data: NetworkData; global: DnsSe
           {
             id: 'mode',
             label: t('network.dns.mode'),
-            value: global.enabled
+            value: global
               ? <span><strong>{t('network.dns.globalMode')}</strong> <span className="text-muted-foreground">· {t('network.dns.globalModeCopy')}</span></span>
               : <span><strong>{t('network.dns.perInterface')}</strong> <span className="text-muted-foreground">· {t('network.dns.perInterfaceCopy')}</span></span>,
           },
           {
             id: 'servers',
             label: t('network.dns.servers'),
-            value: global.enabled ? (
-              <span className="grid justify-items-end gap-0.5">{global.servers.map((server, index) => <span key={server} className="font-mono">{index + 1}. {server}</span>)}</span>
-            ) : groups.length ? (
+            value: global ? (
+              <span className="grid justify-items-end gap-0.5">{(dns?.effective.global ?? []).map((server, index) => <span key={server} className="font-mono">{index + 1}. {server}</span>)}</span>
+            ) : links.length ? (
               <span className="grid justify-items-end gap-0.5">
-                {groups.map((group) => (
-                  <span key={group.name}>
-                    <Link className="font-mono text-primary" to="/network/$name" params={{ name: group.name }}>{group.name}</Link>
-                    : <span className="font-mono">{group.servers.join(', ')}</span> <span className="text-muted-foreground">({t(`network.dns.sources.${group.source}`)})</span>
+                {links.map((link) => (
+                  <span key={link.name}>
+                    <Link className="font-mono text-primary" to="/network/$name" params={{ name: link.name }}>{link.name}</Link>
+                    : <span className="font-mono">{link.servers.length ? link.servers.join(', ') : t('network.values.none')}</span> <span className="text-muted-foreground">({t(`network.dns.sources.${link.source}`)})</span>
                   </span>
                 ))}
               </span>
             ) : <span className="text-muted-foreground">{t('network.values.none')}</span>,
           },
-          { id: 'records', label: t('network.dns.records'), value: t('network.dns.recordCount', { count: records }) },
+          { id: 'records', label: t('network.dns.records'), value: t('network.dns.recordCount', { count: dns?.staticRecords.length ?? 0 }) },
           {
             id: 'probe',
             label: t('network.dns.probe'),
             value: (
               <span className="flex flex-wrap items-center justify-end gap-2">
-                {probe ? <span className={probe.reachable ? 'text-success' : 'text-destructive'}>{t(probe.reachable ? 'network.dns.resolves' : 'network.dns.unreachable')}</span> : '—'}
+                <ProbeText probe={probe} />
                 {probe ? <span className="font-mono text-muted-foreground">{probe.name}</span> : null}
-                <Button size="sm" variant="outline" disabled={data.status.isFetching} onClick={() => void data.status.refetch()}>
-                  {data.status.isFetching ? <Spinner /> : null}{t('network.dns.recheck')}
+                <Button size="sm" variant="outline" disabled={checking} onClick={() => void recheck()}>
+                  {checking ? <Spinner /> : null}{t('network.dns.recheck')}
                 </Button>
               </span>
             ),
@@ -237,12 +270,12 @@ function Effective({ data, global, records }: { data: NetworkData; global: DnsSe
   )
 }
 
-/// The names the device resolves itself. Each change is one write of the
-/// whole list and takes effect without a network reload.
-function StaticRecords({ records, hostname, isPending, write }: { records: StaticRecord[]; hostname: string; isPending: boolean; write: (next: StaticRecord[]) => Promise<void> }) {
+/// The names the device resolves itself. Each record is written on its own
+/// and takes effect without a network reload.
+function StaticRecords({ records, hostname, isPending, write, remove }: { records: StaticRecord[]; hostname: string; isPending: boolean; write: (record: Omit<StaticRecord, 'id'>, id?: string) => Promise<void>; remove: (id: string) => Promise<void> }) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
-  const [editing, setEditing] = useState<{ index?: number; record: StaticRecord }>()
+  const [editing, setEditing] = useState<{ index?: number; record: Omit<StaticRecord, 'id'> & { id?: string } }>()
   const shown = records.map((record, index) => ({ record, index })).filter(({ record }) => !query || record.hostname.includes(query.trim().toLowerCase()))
   const record = editing?.record
   const name = record?.hostname.trim().toLowerCase() ?? ''
@@ -259,11 +292,7 @@ function StaticRecords({ records, hostname, isPending, write }: { records: Stati
   const submit = () => {
     if (!editing || !record) return Promise.resolve()
     const comment = record.comment?.trim()
-    const next: StaticRecord = { hostname: name, address: record.address, ...(comment ? { comment } : {}) }
-    const list = [...records]
-    if (editing.index === undefined) list.push(next)
-    else list[editing.index] = next
-    return write(list)
+    return write({ hostname: name, address: record.address, ...(comment ? { comment } : {}) }, record.id)
   }
   const hint = (key: string, fallback?: string) => errors[key] && (key !== 'hostname' || record?.hostname) ? <span className="text-destructive">{errors[key]}</span> : fallback
 
@@ -281,7 +310,7 @@ function StaticRecords({ records, hostname, isPending, write }: { records: Stati
       >
         <DataTable<{ record: StaticRecord; index: number }>
           rows={shown}
-          rowKey={({ record }) => record.hostname}
+          rowKey={({ record }) => record.id}
           isPending={isPending}
           empty={t(records.length ? 'network.dns.noMatch' : 'network.dns.noRecords')}
           columns={[
@@ -299,7 +328,7 @@ function StaticRecords({ records, hostname, isPending, write }: { records: Stati
                   tone="danger"
                   success={t('network.dns.removed', { name: record.hostname })}
                   failure={t('network.dns.remove')}
-                  onConfirm={() => write(records.filter((_, each) => each !== index))}
+                  onConfirm={() => remove(record.id)}
                 />
               </span>
             ) },
