@@ -78,7 +78,7 @@ test('stages an interface edit and applies it through the review dialog', async 
 
   const dialog = page.getByRole('dialog', { name: 'Review network changes' })
   await expect(dialog).toContainText('This browser reached the device on eth0')
-  const apply = dialog.getByRole('button', { name: 'Apply 1 changes' })
+  const apply = dialog.getByRole('button', { name: 'Apply 1 change' })
   await expect(apply).toBeDisabled()
   await dialog.getByRole('switch').click()
   const request = page.waitForRequest((candidate) => candidate.method() === 'PUT')
@@ -121,7 +121,10 @@ test('captures each network page for review', async ({ page }, testInfo) => {
   await page.getByRole('textbox', { name: 'Pool start' }).fill('192.168.10.50')
   await page.getByRole('button', { name: 'Done' }).click()
   await page.getByRole('button', { name: 'Review and apply' }).click()
-  await expect(page.getByRole('dialog', { name: 'Review network changes' })).toBeVisible()
+  const review = page.getByRole('dialog', { name: 'Review network changes' })
+  await expect(review).toBeVisible()
+  // The dialog fades in; capture it at rest.
+  await expect(review).toHaveCSS('opacity', '1')
   await page.screenshot({ path: testInfo.outputPath('network-review.png') })
 })
 

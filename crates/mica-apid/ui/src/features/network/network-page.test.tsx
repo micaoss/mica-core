@@ -67,13 +67,13 @@ describe('the network page', () => {
     await userEvent.click(within(wizard).getByRole('button', { name: 'Stage' }))
 
     const bar = await screen.findByRole('region', { name: 'Pending network changes' })
-    expect(within(bar).getByText('1 pending changes')).toBeTruthy()
+    expect(within(bar).getByText('1 pending change')).toBeTruthy()
     await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
 
     const review = await screen.findByRole('dialog')
     expect(within(review).getByText('wg1')).toBeTruthy()
     // Where the browser came from is not known here, so the write asks first.
-    const apply = within(review).getByRole('button', { name: 'Apply 1 changes' })
+    const apply = within(review).getByRole('button', { name: 'Apply 1 change' })
     expect(apply.hasAttribute('disabled')).toBe(true)
     await userEvent.click(within(review).getByRole('switch'))
     await userEvent.click(apply)
@@ -102,7 +102,7 @@ describe('the network page', () => {
     await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
     const review = await screen.findByRole('dialog')
     await userEvent.click(within(review).getByRole('switch'))
-    await userEvent.click(within(review).getByRole('button', { name: 'Apply 1 changes' }))
+    await userEvent.click(within(review).getByRole('button', { name: 'Apply 1 change' }))
 
     expect(await screen.findByText(/The device configuration changed underneath these edits: eth1/)).toBeTruthy()
     expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)

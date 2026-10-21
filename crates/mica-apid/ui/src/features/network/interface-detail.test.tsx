@@ -70,7 +70,7 @@ describe('one interface', () => {
     await userEvent.type(screen.getByLabelText('Gateway'), '10.0.0.1')
     expect(await screen.findByText('The gateway is outside this subnet.')).toBeTruthy()
     const bar = screen.getByRole('region', { name: 'Editing eth1' })
-    expect(within(bar).getByText('1 problems to fix')).toBeTruthy()
+    expect(within(bar).getByText('1 problem to fix')).toBeTruthy()
     expect(within(bar).getByRole('button', { name: 'Done' }).hasAttribute('disabled')).toBe(true)
   })
 

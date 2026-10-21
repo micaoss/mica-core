@@ -24,7 +24,7 @@ describe('the WireGuard tab', () => {
     open('tab=wireguard')
     const card = await screen.findByRole('link', { name: /wg0/ })
     expect(within(card).getByText('51820')).toBeTruthy()
-    expect(within(card).getByText('1 peers')).toBeTruthy()
+    expect(within(card).getByText('1 peer')).toBeTruthy()
   })
 
   it('gives the remote side this device as a host route on its own key', async () => {
