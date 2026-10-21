@@ -358,3 +358,84 @@ fn an_access_point_pool_stays_between_its_own_address_and_the_broadcast() {
         None
     );
 }
+
+#[test]
+fn global_dns_servers_are_other_hosts_listed_once() {
+    let network: BTreeMap<String, IfaceSettings> = [(
+        "eth0".to_string(),
+        IfaceSettings {
+            static_: Some(StaticConfig {
+                address: "192.168.1.10/24".to_string(),
+                gateway: None,
+                dns: Vec::new(),
+            }),
+            ..IfaceSettings::default()
+        },
+    )]
+    .into();
+    let with = |enabled: bool, servers: &[&str]| DnsSettings {
+        global: GlobalDns {
+            enabled,
+            servers: servers.iter().map(|server| (*server).to_string()).collect(),
+        },
+        ..DnsSettings::default()
+    };
+    let check = |dns: &DnsSettings| validate_dns(dns, "mica", &network);
+    assert!(check(&with(true, &["9.9.9.9", "1.1.1.1"])).is_ok());
+    assert!(check(&with(false, &[])).is_ok());
+    assert!(check(&with(true, &[])).is_err());
+    assert!(check(&with(true, &["9.9.9.9", "1.1.1.1", "8.8.8.8", "8.8.4.4"])).is_err());
+    assert!(check(&with(true, &["127.0.0.53"])).is_err());
+    assert!(check(&with(true, &["192.168.1.10"])).is_err());
+    assert!(check(&with(true, &["9.9.9.9", "9.9.9.9"])).is_err());
+    assert!(check(&with(true, &["2620:fe::fe"])).is_err());
+}
+
+#[test]
+fn static_records_name_other_hosts_once() {
+    let record = |hostname: &str, address: &str, comment: Option<&str>| StaticRecord {
+        hostname: hostname.to_string(),
+        address: address.to_string(),
+        comment: comment.map(str::to_string),
+    };
+    let check = |records: Vec<StaticRecord>| {
+        let dns = DnsSettings {
+            static_records: records,
+            ..DnsSettings::default()
+        };
+        validate_dns(&dns, "mica", &BTreeMap::new())
+    };
+    assert!(check(vec![record("nas.lan", "192.168.1.5", Some("the NAS"))]).is_ok());
+    assert!(check(vec![record("printer", "fd00::5", None)]).is_ok());
+    assert!(check(vec![record("*.lan", "192.168.1.5", None)]).is_err());
+    assert!(check(vec![record("localhost", "192.168.1.5", None)]).is_err());
+    assert!(check(vec![record("MICA", "192.168.1.5", None)]).is_err());
+    assert!(check(vec![record("nas", "nas.lan", None)]).is_err());
+    assert!(check(vec![record("nas", "192.168.1.5", Some("a\nb"))]).is_err());
+    assert!(check(vec![record("nas", "192.168.1.5", Some(&"x".repeat(65)))]).is_err());
+    assert!(
+        check(vec![
+            record("nas", "192.168.1.5", None),
+            record("NAS", "192.168.1.6", None)
+        ])
+        .is_err()
+    );
+    let many: Vec<StaticRecord> = (0..=MAX_STATIC_RECORDS)
+        .map(|index| record(&format!("host{index}"), "192.168.1.5", None))
+        .collect();
+    assert!(check(many[..MAX_STATIC_RECORDS].to_vec()).is_ok());
+    assert!(check(many).is_err());
+}
+
+#[test]
+fn a_hostname_that_a_record_already_names_is_refused() {
+    let mut settings = Settings::default();
+    settings
+        .set(
+            "dns.staticRecords",
+            serde_json::json!([{ "hostname": "nas", "address": "192.168.1.5" }]),
+        )
+        .unwrap();
+    assert!(settings.set("hostname", serde_json::json!("nas")).is_err());
+    assert!(settings.set("hostname", serde_json::json!("edge")).is_ok());
+}

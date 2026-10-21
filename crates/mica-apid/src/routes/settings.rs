@@ -69,15 +69,18 @@ pub(crate) async fn api_v1_settings(
 
 /// What the value at a writable dot-path has to be.
 ///
-/// Four shapes and not one validator per path, because the write surface
-/// admits its paths on one ground: each value's validity *"depends on nothing
-/// else in the tree"*. A hostname, which `valid_hostname` decides on its own;
-/// four switches, which accept either boolean value; and the two `time`
-/// values, whose rules ([`micad_settings::validate_timezone_name`] and
-/// [`micad_settings::validate_ntp_servers`]) are each self-contained — stated
-/// once, in the crate that owns the model, and only CALLED here, so this
-/// surface cannot drift from what `Settings::set` enforces. Anything
-/// relational is handled by resource routes or micad's reconcilers. In
+/// A few shapes and not one validator per path, because the write surface
+/// admits its paths on one ground: each value's validity depends on little
+/// else in the tree. A hostname, which `valid_hostname` decides on its own;
+/// four switches, which accept either boolean value; the two `time` values,
+/// whose rules ([`micad_settings::validate_timezone_name`] and
+/// [`micad_settings::validate_ntp_servers`]) are each self-contained; and the
+/// two `dns` values, held here to [`micad_settings::validate_dns`] on their
+/// own, and in micad against the hostname and the interfaces' addresses too.
+/// Each rule is stated once, in the crate that owns the model, and only
+/// CALLED here, so this surface cannot drift from what `Settings::set`
+/// enforces. Anything else relational is handled by resource routes or
+/// micad's reconcilers. In
 /// particular, a Wi-Fi client switch does not promise association or resolve
 /// a station/AP interface conflict; clients must inspect the apply state.
 #[derive(Clone, Copy)]
@@ -94,6 +97,12 @@ pub(super) enum ScalarShape {
     /// A JSON string [`micad_settings::validate_pairing_pin`] accepts, other
     /// than the default code, which only a reset returns to.
     PairingPin,
+    /// A `dns.global` object, held to [`micad_settings::validate_dns`]; micad
+    /// adds the rule against the interfaces' own addresses.
+    GlobalDns,
+    /// A `dns.staticRecords` array, held to [`micad_settings::validate_dns`];
+    /// micad adds the rule against the device's own hostname.
+    StaticRecords,
 }
 
 /// The dot-paths `PUT /api/v1/settings/{path}` writes, and the shape each
@@ -110,7 +119,7 @@ pub(super) enum ScalarShape {
 /// undeclared `wg9` writes a physical-kind `network.wg9` carrying a WireGuard
 /// block. Every path this list does not carry is refused by
 /// [`settings_write_refusal`] before any bus call is made.
-pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 8] = [
+pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 10] = [
     ("hostname", ScalarShape::Hostname),
     ("access.ssh.enabled", ScalarShape::Flag),
     ("container.enabled", ScalarShape::Flag),
@@ -119,6 +128,8 @@ pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 8] = [
     ("time.ntp.servers", ScalarShape::NtpServers),
     ("time.timezone", ScalarShape::Timezone),
     ("bluetooth.pin", ScalarShape::PairingPin),
+    ("dns.global", ScalarShape::GlobalDns),
+    ("dns.staticRecords", ScalarShape::StaticRecords),
 ];
 
 /// The resource the write route's not-found envelope names, being the settings
@@ -128,7 +139,7 @@ pub(super) const SETTINGS_COLLECTION: &str = "settings";
 /// The sentence a refusal carries when nothing more specific is true of the
 /// path: it is a real part of the tree, and this route is not how it is
 /// written.
-pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone` and `bluetooth.pin` and no other dot-path; every other subtree is written through its own resource route";
+pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` and `dns.staticRecords` and no other dot-path; every other subtree is written through its own resource route";
 
 /// The shape `path` is written with, when this route writes it at all.
 pub(super) fn writable_shape(path: &str) -> Option<ScalarShape> {
@@ -187,6 +198,26 @@ pub(super) fn check_scalar(shape: ScalarShape, value: &Value) -> Result<(), Stri
                 ));
             }
             Ok(())
+        }
+        ScalarShape::GlobalDns => {
+            let global: micad_settings::GlobalDns = serde_json::from_value(value.clone())
+                .map_err(|err| format!("this setting is `{{ enabled, servers }}`: {err}"))?;
+            let dns = micad_settings::DnsSettings {
+                global,
+                ..micad_settings::DnsSettings::default()
+            };
+            micad_settings::validate_dns(&dns, "", &std::collections::BTreeMap::new())
+        }
+        ScalarShape::StaticRecords => {
+            let static_records: Vec<micad_settings::StaticRecord> =
+                serde_json::from_value(value.clone()).map_err(|err| {
+                    format!("this setting is a list of `{{ hostname, address, comment? }}`: {err}")
+                })?;
+            let dns = micad_settings::DnsSettings {
+                static_records,
+                ..micad_settings::DnsSettings::default()
+            };
+            micad_settings::validate_dns(&dns, "", &std::collections::BTreeMap::new())
         }
     }
 }
@@ -269,8 +300,10 @@ pub(super) fn settings_write_refusal(path: &str) -> Response {
 /// The schema is wide because the dot-path decides what is acceptable. What
 /// is actually accepted is narrow: a JSON string for `hostname`,
 /// `time.timezone` and `bluetooth.pin`, `true` or `false` for the four
-/// switches, and a JSON array of server strings for `time.ntp.servers`.
-/// Anything else is **422**.
+/// switches, a JSON array of server strings for `time.ntp.servers`, a
+/// `{ enabled, servers }` object for `dns.global` and an array of
+/// `{ hostname, address, comment? }` for `dns.staticRecords`. Anything else is
+/// **422**.
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub(crate) struct SettingsWrite(pub(super) Value);
@@ -279,10 +312,11 @@ pub(crate) struct SettingsWrite(pub(super) Value);
 // which would invite a client to trust the echo over its own GET.
 /// Write one scalar setting by dot-path.
 ///
-/// Accepts eight paths and no others: `hostname`, `access.ssh.enabled`,
+/// Accepts ten paths and no others: `hostname`, `access.ssh.enabled`,
 /// `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`,
-/// `time.timezone` and `bluetooth.pin` (six digits, not `000000`). Any other
-/// path is refused.
+/// `time.timezone`, `bluetooth.pin` (six digits, not `000000`), `dns.global`
+/// (at most three IPv4 servers, kept while switched off) and
+/// `dns.staticRecords` (at most 100 records). Any other path is refused.
 ///
 /// Answers **202** with the queued task id on success. Takes a bearer token.
 #[utoipa::path(
@@ -290,7 +324,7 @@ pub(crate) struct SettingsWrite(pub(super) Value);
     path = V1_SETTINGS_DOC,
     context_path = API,
     tag = "resources",
-    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone` or `bluetooth.pin`")),
+    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` or `dns.staticRecords`")),
     request_body = SettingsWrite,
     responses(
         (status = 202, description = "The value was persisted and its scoped reconciliation was queued", body = TaskAccepted),

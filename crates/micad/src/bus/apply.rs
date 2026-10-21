@@ -285,7 +285,8 @@ impl MicadService {
 /// MQTT units need micad itself, mica-ntpd needs the network. Their startup
 /// apply runs after micad claims its bus name, so micad's readiness waits on
 /// none of them; the ones that run before it only render files and bus calls.
-pub(super) const DEFERRED: [&str; 8] = [
+pub(super) const DEFERRED: [&str; 9] = [
+    "dns",
     "sshd",
     "wifiClient",
     "wifiAp",
@@ -367,7 +368,13 @@ async fn reconcile_matching(
     let refused = refusals.read().await.clone();
     let mut failures = Vec::new();
     for reconciler in reconcilers {
-        if !paths_overlap(path, reconciler.subtree()) || !keep(reconciler.name()) {
+        let watched =
+            std::iter::once(reconciler.subtree()).chain(reconciler.reads().iter().copied());
+        if !watched
+            .into_iter()
+            .any(|subtree| paths_overlap(path, subtree))
+            || !keep(reconciler.name())
+        {
             continue;
         }
         // **"Refuses its subsystem" is enforced here**. The reconciler whose settings come out of a document that did

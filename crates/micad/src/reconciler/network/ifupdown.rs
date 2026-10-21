@@ -37,6 +37,8 @@ const UDHCPC_SCRIPT: &str = "/usr/lib/mica/mica-udhcpc";
 /// Base's per-interface resolver files and the file built from them.
 const RESOLVERS_DIR: &str = "/run/mica/resolv.d";
 const RESOLV_CONF: &str = "/run/mica/resolv.conf";
+/// Base's program building [`RESOLV_CONF`] from [`RESOLVERS_DIR`].
+const MICA_RESOLV: &str = "/usr/lib/mica/mica-resolv";
 const FILE_MODE: u32 = 0o644;
 /// Where a root's `ip` may be; the first present is the one ifupdown runs.
 const IP_PATHS: [&str; 4] = ["/usr/sbin/ip", "/usr/bin/ip", "/sbin/ip", "/bin/ip"];
@@ -184,9 +186,12 @@ fn dhcp_stanza(out: &mut String, iface: &str, dns: &[String]) {
 }
 
 /// The `up` and `down` lines that put `dns` into the resolver file `name` and
-/// rebuild the resolver configuration from every file.
+/// rebuild the resolver configuration: with Base's `mica-resolv`, which lets a
+/// global file stand alone, or else from every file.
 fn resolver_lines(out: &mut String, name: &str, dns: &[String]) {
-    let rebuild = format!("{{ cat {RESOLVERS_DIR}/* 2>/dev/null || :; }} >{RESOLV_CONF}");
+    let rebuild = format!(
+        "{{ if [ -x {MICA_RESOLV} ]; then {MICA_RESOLV}; else {{ cat {RESOLVERS_DIR}/* 2>/dev/null || :; }} >{RESOLV_CONF}; fi; }}"
+    );
     let _ = writeln!(
         out,
         "    up mkdir -p {RESOLVERS_DIR} && printf 'nameserver %s\\n' {} >{RESOLVERS_DIR}/{name} && {rebuild}",

@@ -65,6 +65,7 @@ pub(super) fn configured() -> Settings {
     settings.wifi.ap.ssid = Some("mica-ap".to_string());
     settings.mqtt.enabled = true;
     settings.time.timezone = "Europe/Berlin".to_string();
+    settings.dns.global.servers = vec!["9.9.9.9".to_string()];
     settings.container.enabled = !settings.container.enabled;
     settings.bluetooth.enabled = !settings.bluetooth.enabled;
     settings.services.units.insert(

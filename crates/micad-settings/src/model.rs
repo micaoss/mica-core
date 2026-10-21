@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 mod access;
 mod bluetooth;
 mod containers;
+mod dns;
 mod mqtt;
 mod network;
 mod provisioning;
@@ -21,6 +22,7 @@ mod wifi;
 pub use access::*;
 pub use bluetooth::*;
 pub use containers::*;
+pub use dns::*;
 pub use mqtt::*;
 pub use network::*;
 pub use provisioning::*;
@@ -36,6 +38,9 @@ pub struct Settings {
     pub hostname: String,
     /// Per-interface network configuration, keyed by interface name.
     pub network: BTreeMap<String, IfaceSettings>,
+    /// Global DNS servers and static host records.
+    #[serde(default)]
+    pub dns: DnsSettings,
     /// Access control settings.
     #[serde(default)]
     pub access: AccessSettings,
@@ -71,6 +76,7 @@ impl Default for Settings {
         Self {
             hostname: "mica".to_string(),
             network: BTreeMap::new(),
+            dns: DnsSettings::default(),
             access: AccessSettings::default(),
             provisioning: ProvisioningSettings::default(),
             wifi: WifiSettings::default(),
@@ -183,6 +189,19 @@ impl Settings {
                     message,
                 }
             })?;
+        }
+        // A record may not take the hostname and a server may not be an
+        // interface's own address, so a write of either side is held to it.
+        if candidate.dns != self.dns
+            || (candidate.hostname != self.hostname && !candidate.dns.static_records.is_empty())
+            || (candidate.network != self.network && candidate.dns.global != self.dns.global)
+        {
+            validate_dns(&candidate.dns, &candidate.hostname, &candidate.network).map_err(
+                |message| SettingsError::Validation {
+                    path: path.to_string(),
+                    message,
+                },
+            )?;
         }
         if candidate.services != self.services {
             validate_services(&candidate.services).map_err(|message| {

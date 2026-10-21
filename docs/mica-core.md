@@ -119,6 +119,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | --- | --- |
 | `hostname` | The hostname |
 | `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, a DHCP server; a `can` entry has its block alone (below) |
+| `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{hostname, address, comment?}`) go into the hosts file |
 | `access` | SSH (switch, listen addresses, authorized keys), the console, the API's listeners (`web`), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default) |
 | `container` | The engine switch (`enabled`) and the declared Compose projects (`projects`, section 3.9) |
@@ -129,7 +130,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `provisioning`, `reset` | Provisioning status; a staged reset |
 
 What an integrator sets lives on DATA, one JSON document per concern in `/mica/config/`
-(`system`, `network`, `wifi`, `ssh`, `mqtt`, `time`, `container`, `bluetooth`, `services`, directory `0700`,
+(`system`, `network`, `dns`, `wifi`, `ssh`, `mqtt`, `time`, `container`, `bluetooth`, `services`, directory `0700`,
 documents `0600`), beside `updates.json`; what the device mints (identity, credentials,
 provisioning state, a staged reset) is `settings.toml` on STATE. Each document has its own
 schema version, and an unknown key or version is refused, never converted. A document that does
@@ -171,6 +172,7 @@ live-state tree under its name.
 | --- | --- | --- |
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
 | `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device and named by file; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. VLAN, bridge, WireGuard, routes and the DHCP server are refused by name |
+| `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes. Global servers: resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf` (resolved restarted), and beside every `.network` a drop-in that clears its `DNS=` and sets `UseDNS=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file. Global servers: `/run/mica/resolv.d/global`, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
 | `sshd` | `/run/mica/dropbear.env`, the authorized keys of `root` and `mica`, `dropbear.service` | the same files, `mica-dropbear` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
 | `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server | configuration in `/var/lib/mica/hostapd`, `/run/mica/wifi-ap.env`, busybox udhcpd on the same pool (`/run/mica/wifi-ap-udhcpd.conf`), `mica-wifi-ap` |

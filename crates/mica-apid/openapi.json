@@ -3709,13 +3709,13 @@
           "resources"
         ],
         "summary": "Write one scalar setting by dot-path.",
-        "description": "Accepts eight paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`,\n`time.timezone` and `bluetooth.pin` (six digits, not `000000`). Any other\npath is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
+        "description": "Accepts ten paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`,\n`time.timezone`, `bluetooth.pin` (six digits, not `000000`), `dns.global`\n(at most three IPv4 servers, kept while switched off) and\n`dns.staticRecords` (at most 100 records). Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
         "operationId": "api_v1_settings_write",
         "parameters": [
           {
             "name": "path",
             "in": "path",
-            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone` or `bluetooth.pin`",
+            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` or `dns.staticRecords`",
             "required": true,
             "schema": {
               "type": "string"
@@ -9829,7 +9829,7 @@
         }
       },
       "SettingsWrite": {
-        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname`,\n`time.timezone` and `bluetooth.pin`, `true` or `false` for the four\nswitches, and a JSON array of server strings for `time.ntp.servers`.\nAnything else is **422**."
+        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname`,\n`time.timezone` and `bluetooth.pin`, `true` or `false` for the four\nswitches, a JSON array of server strings for `time.ntp.servers`, a\n`{ enabled, servers }` object for `dns.global` and an array of\n`{ hostname, address, comment? }` for `dns.staticRecords`. Anything else is\n**422**."
       },
       "SetupRequest": {
         "type": "object",

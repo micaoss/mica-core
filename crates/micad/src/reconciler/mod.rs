@@ -6,6 +6,7 @@ pub mod bluetooth;
 /// Visible to the daemon for the reason `network` is: the container actions
 /// the bus surfaces drive the unit name this reconciler renders.
 pub mod container;
+mod dns;
 mod hostname;
 pub use hostname::HostnameExecutor;
 mod mqtt;
@@ -31,6 +32,11 @@ pub trait Reconciler: Send + Sync {
     fn name(&self) -> &'static str;
     /// Dot-path prefix of the settings subtree this reconciler watches (e.g. "hostname", "network").
     fn subtree(&self) -> &'static str;
+    /// Other subtrees whose writes this reconciler applies too, because what
+    /// it renders depends on them.
+    fn reads(&self) -> &'static [&'static str] {
+        &[]
+    }
     /// Apply `settings` to the system; return the applied live-state as JSON.
     async fn apply(&self, settings: &Settings) -> anyhow::Result<serde_json::Value>;
 }
@@ -76,6 +82,7 @@ fn openrc_reconcilers(engine: micad_settings::ContainerEngine) -> Vec<Box<dyn Re
     vec![
         Box::new(hostname::HostnameReconciler::new(EtcHostname::production())),
         Box::new(network::IfupdownReconciler::production()),
+        Box::new(dns::DnsReconciler::openrc()),
         Box::new(sshd::SshdReconciler::openrc(OpenrcUnits::production())),
         Box::new(wifi_client::WifiClientReconciler::openrc(
             OpenrcUnits::production(),
@@ -104,6 +111,7 @@ fn systemd_reconcilers(engine: micad_settings::ContainerEngine) -> Vec<Box<dyn R
             hostname::Hostnamed::production(),
         )),
         Box::new(network::NetworkReconciler::production()),
+        Box::new(dns::DnsReconciler::production()),
         Box::new(sshd::SshdReconciler::production(systemd::Systemd::new())),
         Box::new(wifi_client::WifiClientReconciler::production()),
         Box::new(wifi_ap::WifiApReconciler::production()),
@@ -146,7 +154,14 @@ mod feature_tests {
         };
         let all = subtrees(&Features::all());
         let minimal = subtrees(&Features::only(&[]));
-        for always in ["hostname", "network", "time", "access.web", "services"] {
+        for always in [
+            "hostname",
+            "network",
+            "dns",
+            "time",
+            "access.web",
+            "services",
+        ] {
             assert!(minimal.contains(&always), "{always}: {minimal:?}");
         }
         for gated in [
@@ -181,6 +196,7 @@ mod feature_tests {
             [
                 "hostname",
                 "network",
+                "dns",
                 "access.ssh",
                 "wifi.client",
                 "wifi",

@@ -20,7 +20,7 @@ pub(super) fn writable_tree(password: &str) -> serde_json::Value {
     tree
 }
 
-// The eight dot-paths admitted, each written and
+// The ten dot-paths admitted, each written and
 // each read back through the route that answers for it.
 //
 // 202 and a task id: persistence has completed, while reconciliation is a
@@ -40,6 +40,11 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
         ("time.ntp.servers", r#"["0.pool.ntp.org","192.0.2.7"]"#),
         ("time.timezone", r#""Europe/Berlin""#),
         ("bluetooth.pin", r#""421137""#),
+        ("dns.global", r#"{"enabled":true,"servers":["9.9.9.9"]}"#),
+        (
+            "dns.staticRecords",
+            r#"[{"address":"192.168.1.5","comment":"the NAS","hostname":"nas"}]"#,
+        ),
     ] {
         let url = format!("/api/v1/settings/{path}");
         let response = bearer_json(&router, "PUT", &url, &token, body).await;
@@ -75,14 +80,16 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
             "wifi.client.enabled",
             "time.ntp.servers",
             "time.timezone",
-            "bluetooth.pin"
+            "bluetooth.pin",
+            "dns.global",
+            "dns.staticRecords"
         ],
         "one bus write per request, at the dot-path the URL named"
     );
 
     let tasks = bearer(&router, "GET", "/api/v1/tasks", &token).await;
     assert_eq!(tasks.status(), StatusCode::OK);
-    assert_eq!(body_json(tasks).await.as_array().unwrap().len(), 9);
+    assert_eq!(body_json(tasks).await.as_array().unwrap().len(), 11);
 
     let missing = bearer(&router, "GET", "/api/v1/tasks/not-retained", &token).await;
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
@@ -350,9 +357,9 @@ pub(super) async fn an_absent_root_is_404_and_a_malformed_path_is_422() {
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
 }
 
-// The ten top-level keys the write route's not-found rule is derived from.
+// The eleven top-level keys the write route's not-found rule is derived from.
 #[test]
-pub(super) fn the_settings_schema_has_the_ten_roots_the_write_route_knows() {
+pub(super) fn the_settings_schema_has_the_eleven_roots_the_write_route_knows() {
     let tree = serde_json::to_value(micad_settings::Settings::default()).unwrap();
     let mut keys: Vec<&str> = tree
         .as_object()
@@ -367,6 +374,7 @@ pub(super) fn the_settings_schema_has_the_ten_roots_the_write_route_knows() {
             "access",
             "bluetooth",
             "container",
+            "dns",
             "hostname",
             "mqtt",
             "network",
@@ -563,4 +571,41 @@ pub(super) fn the_openapi_document_covers_the_settings_write() {
 pub(super) async fn body_json(response: Response<axum::body::Body>) -> serde_json::Value {
     let body = body_string(response).await;
     serde_json::from_str(&body).unwrap_or_else(|_| panic!("a JSON body, got: {body}"))
+}
+
+// A DNS value the model's own rule refuses never reaches micad.
+#[tokio::test]
+pub(super) async fn a_dns_value_the_rule_refuses_is_a_422() {
+    let (tree, token) = with_token(writable_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+
+    for (path, body) in [
+        ("dns.global", r#"{"enabled":true,"servers":[]}"#),
+        ("dns.global", r#"{"enabled":true,"servers":["127.0.0.1"]}"#),
+        (
+            "dns.global",
+            r#"{"enabled":true,"servers":["9.9.9.9","1.1.1.1","8.8.8.8","8.8.4.4"]}"#,
+        ),
+        (
+            "dns.global",
+            r#"{"enabled":true,"servers":["9.9.9.9"],"extra":1}"#,
+        ),
+        (
+            "dns.staticRecords",
+            r#"[{"hostname":"*.lan","address":"192.168.1.5"}]"#,
+        ),
+        (
+            "dns.staticRecords",
+            r#"[{"hostname":"localhost","address":"192.168.1.5"}]"#,
+        ),
+    ] {
+        let url = format!("/api/v1/settings/{path}");
+        let response = bearer_json(&router, "PUT", &url, &token, body).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{body}"
+        );
+    }
+    assert!(fake.set_paths().is_empty());
 }

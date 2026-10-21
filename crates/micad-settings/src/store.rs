@@ -11,12 +11,12 @@ use serde_json::Value;
 
 use crate::documents::{
     BLUETOOTH_DOCUMENT, BLUETOOTH_SCHEMA_VERSION, CONTAINER_DOCUMENT, CONTAINER_PROJECTS_DIR,
-    CONTAINER_SCHEMA_VERSION, DEFAULT_CONFIG_DIR, DOCUMENT_MODE, DocumentSet, MQTT_DOCUMENT,
-    MQTT_SCHEMA_VERSION, NETWORK_DOCUMENT, NETWORK_SCHEMA_VERSION, SERVICES_DOCUMENT,
-    SERVICES_SCHEMA_VERSION, SSH_DOCUMENT, SSH_SCHEMA_VERSION, STATE_SCHEMA_VERSION,
-    SYSTEM_DOCUMENT, SYSTEM_SCHEMA_VERSION, StateDocument, TIME_DOCUMENT, TIME_SCHEMA_VERSION,
-    WIFI_DOCUMENT, WIFI_SCHEMA_VERSION, container_project_document, container_project_of,
-    document_subtrees,
+    CONTAINER_SCHEMA_VERSION, DEFAULT_CONFIG_DIR, DNS_DOCUMENT, DNS_SCHEMA_VERSION, DOCUMENT_MODE,
+    DocumentSet, MQTT_DOCUMENT, MQTT_SCHEMA_VERSION, NETWORK_DOCUMENT, NETWORK_SCHEMA_VERSION,
+    SERVICES_DOCUMENT, SERVICES_SCHEMA_VERSION, SSH_DOCUMENT, SSH_SCHEMA_VERSION,
+    STATE_SCHEMA_VERSION, SYSTEM_DOCUMENT, SYSTEM_SCHEMA_VERSION, StateDocument, TIME_DOCUMENT,
+    TIME_SCHEMA_VERSION, WIFI_DOCUMENT, WIFI_SCHEMA_VERSION, container_project_document,
+    container_project_of, document_subtrees,
 };
 use crate::error::SettingsError;
 use crate::model::MAX_CONTAINER_PROJECT_BYTES;
@@ -266,6 +266,7 @@ impl Store {
                 NETWORK_SCHEMA_VERSION,
                 refusals.as_deref_mut(),
             )?,
+            dns: self.read_config(DNS_DOCUMENT, DNS_SCHEMA_VERSION, refusals.as_deref_mut())?,
             wifi: self.read_config(WIFI_DOCUMENT, WIFI_SCHEMA_VERSION, refusals.as_deref_mut())?,
             ssh: self.read_config(SSH_DOCUMENT, SSH_SCHEMA_VERSION, refusals.as_deref_mut())?,
             mqtt: self.read_config(MQTT_DOCUMENT, MQTT_SCHEMA_VERSION, refusals.as_deref_mut())?,
@@ -409,6 +410,7 @@ impl Store {
         for (name, rendered) in [
             (SYSTEM_DOCUMENT, Format::Json.render(&documents.system)),
             (NETWORK_DOCUMENT, Format::Json.render(&documents.network)),
+            (DNS_DOCUMENT, Format::Json.render(&documents.dns)),
             (WIFI_DOCUMENT, Format::Json.render(&documents.wifi)),
             (SSH_DOCUMENT, Format::Json.render(&documents.ssh)),
             (MQTT_DOCUMENT, Format::Json.render(&documents.mqtt)),

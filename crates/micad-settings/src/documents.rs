@@ -12,9 +12,9 @@ use std::collections::BTreeMap;
 
 use crate::model::{
     AccessSettings, ApiToken, BluetoothSettings, ClaimSettings, ConsoleSettings, ContainerSettings,
-    DeviceCredentialSettings, IfaceSettings, MqttSettings, ProvisioningSettings, ResetSettings,
-    ServicesSettings, Settings, SshSettings, TimeSettings, WebAdminSettings, WebSettings,
-    WifiSettings,
+    DeviceCredentialSettings, DnsSettings, IfaceSettings, MqttSettings, ProvisioningSettings,
+    ResetSettings, ServicesSettings, Settings, SshSettings, TimeSettings, WebAdminSettings,
+    WebSettings, WifiSettings,
 };
 
 /// Directory the `/mica/config/` documents live in when nothing relocates it.
@@ -25,9 +25,10 @@ pub const DOCUMENT_MODE: u32 = 0o600;
 
 /// The namespace's own index: the documents this schema writes, in the order
 /// the table names them.
-pub const CONFIG_DOCUMENTS: [&str; 9] = [
+pub const CONFIG_DOCUMENTS: [&str; 10] = [
     SYSTEM_DOCUMENT,
     NETWORK_DOCUMENT,
+    DNS_DOCUMENT,
     WIFI_DOCUMENT,
     SSH_DOCUMENT,
     MQTT_DOCUMENT,
@@ -42,12 +43,13 @@ pub const CONFIG_DOCUMENTS: [&str; 9] = [
 /// The document mapping in the form a caller can compute with, rather than as
 /// prose a reader has to re-derive. Two callers need it and both are the
 /// pour's:
-pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 9] = [
+pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 10] = [
     (
         SYSTEM_DOCUMENT,
         &["hostname", "access.console", "access.web"],
     ),
     (NETWORK_DOCUMENT, &["network"]),
+    (DNS_DOCUMENT, &["dns"]),
     (WIFI_DOCUMENT, &["wifi"]),
     (SSH_DOCUMENT, &["access.ssh"]),
     (MQTT_DOCUMENT, &["mqtt"]),
@@ -75,6 +77,9 @@ pub fn document_subtrees(document: &str) -> &'static [&'static str] {
 pub const SYSTEM_DOCUMENT: &str = "system.json";
 /// The `network` subtree; the network reconciler.
 pub const NETWORK_DOCUMENT: &str = "network.json";
+/// The `dns` subtree; the dns reconciler, and the network reconciler for
+/// `dns.global`.
+pub const DNS_DOCUMENT: &str = "dns.json";
 /// The whole `wifi` subtree; the `wifiAp` and `wifiClient` reconcilers.
 pub const WIFI_DOCUMENT: &str = "wifi.json";
 /// `access.ssh`; the sshd reconciler.
@@ -94,6 +99,8 @@ pub const SERVICES_DOCUMENT: &str = "services.json";
 pub const SYSTEM_SCHEMA_VERSION: u32 = 1;
 /// Schema version of `network.json`.
 pub const NETWORK_SCHEMA_VERSION: u32 = 1;
+/// Schema version of `dns.json`.
+pub const DNS_SCHEMA_VERSION: u32 = 1;
 /// Schema version of `wifi.json`.
 pub const WIFI_SCHEMA_VERSION: u32 = 1;
 /// Schema version of `ssh.json`.
@@ -141,6 +148,17 @@ pub struct NetworkDocument {
     /// `network` in the addressed tree, keyed by interface name.
     #[serde(default)]
     pub network: BTreeMap<String, IfaceSettings>,
+}
+
+/// `dns.json`: the global DNS servers and the static host records.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DnsDocument {
+    /// Version of this document alone.
+    pub schema_version: u32,
+    /// `dns` in the addressed tree.
+    #[serde(default)]
+    pub dns: DnsSettings,
 }
 
 /// `wifi.json`: the station and access-point settings, and the site's WPA2
@@ -315,6 +333,7 @@ pub struct StateDocument {
 pub(crate) struct DocumentSet {
     pub system: SystemDocument,
     pub network: NetworkDocument,
+    pub dns: DnsDocument,
     pub wifi: WifiDocument,
     pub ssh: SshDocument,
     pub mqtt: MqttDocument,
@@ -339,6 +358,10 @@ impl DocumentSet {
             network: NetworkDocument {
                 schema_version: NETWORK_SCHEMA_VERSION,
                 network: settings.network.clone(),
+            },
+            dns: DnsDocument {
+                schema_version: DNS_SCHEMA_VERSION,
+                dns: settings.dns.clone(),
             },
             wifi: WifiDocument {
                 schema_version: WIFI_SCHEMA_VERSION,
@@ -391,6 +414,7 @@ impl DocumentSet {
         Settings {
             hostname: self.system.hostname,
             network: self.network.network,
+            dns: self.dns.dns,
             access: AccessSettings {
                 web_admin: self.state.access.web_admin,
                 claim: self.state.access.claim,
@@ -440,6 +464,7 @@ macro_rules! document_default {
 
 document_default!(SystemDocument, system);
 document_default!(NetworkDocument, network);
+document_default!(DnsDocument, dns);
 document_default!(WifiDocument, wifi);
 document_default!(SshDocument, ssh);
 document_default!(MqttDocument, mqtt);
