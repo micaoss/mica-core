@@ -346,7 +346,7 @@ function benchPayload(path: string): unknown {
   if (path === '/api/v1/network/wg0/peers') return [{ ...PEER, presharedKey: true, latestHandshake: null, rxBytes: null, txBytes: null }]
   if (path === '/api/v1/state/network') return { wg0: { publicKey: 'e2eDevicePublicKeye2eDevicePublicKeye2eDev0=' } }
   if (path === '/api/v1/wifi/client') return { enabled: true, interface: 'wlan0' }
-  if (path === '/api/v1/wifi/ap') return { mode: 'off', interface: 'wlan0', ssid: 'mica-cm4', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60 }
+  if (path === '/api/v1/wifi/ap') return { mode: 'off', interface: 'wlan0', ssid: 'mica-cm4', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60, dhcpServer: { poolStart: '192.168.4.2', poolEnd: '192.168.4.254' } }
   if (path === '/api/v1/wifi/client/networks') return [
     { ssid: 'marina-guest', psk: '<redacted>', hidden: false, priority: 10 },
     { ssid: 'fuel-dock', psk: '<redacted>', hidden: false, priority: 1, autoConnect: false },

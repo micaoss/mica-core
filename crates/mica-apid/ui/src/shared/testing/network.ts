@@ -47,7 +47,7 @@ export function observed(overrides: Partial<ObservedNetworkState> = {}): Observe
 }
 
 export function accessPoint(mode: 'off' | 'provisioning' | 'always' = 'off') {
-  return { mode, interface: 'wlan0', ssid: 'mica-lab', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60 }
+  return { mode, interface: 'wlan0', ssid: 'mica-lab', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60, dhcpServer: { poolStart: '192.168.4.2', poolEnd: '192.168.4.254' } }
 }
 
 /// The reads every network page makes, answered for the bench device.

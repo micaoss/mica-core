@@ -279,7 +279,7 @@ describe('the Wi-Fi tab', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'The device operates in this country' }))
     await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
 
-    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'ap', ap: { start: 'always', interface: 'wlan0', holdDownSeconds: 120, graceSeconds: 60, ssid: 'mica-lab', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', security: 'wpa2-psk', countryConfirmed: true } }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'ap', ap: { start: 'always', interface: 'wlan0', holdDownSeconds: 120, graceSeconds: 60, ssid: 'mica-lab', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', security: 'wpa2-psk', dhcpServer: { poolStart: '192.168.4.2', poolEnd: '192.168.4.254' }, countryConfirmed: true } }))
     expect(fetch.mock.calls.filter(([, init]) => ['PUT', 'PATCH'].includes((init as RequestInit | undefined)?.method ?? ''))).toHaveLength(1)
   })
 
@@ -310,7 +310,7 @@ describe('the Wi-Fi tab', () => {
     const body = bodyOf(fetch, 'PUT', '/api/v1/wifi')!
     expect(body).toMatchObject({ enabled: true, mode: 'ap' })
     expect((body.ap as Record<string, unknown>).psk).toBeUndefined()
-    expect(body.ap).toMatchObject({ start: 'always', interface: 'wlan0', ssid: 'mica-lab', countryCode: 'DE', countryConfirmed: true, channel: 6, address: '192.168.4.1/24', security: 'wpa2-psk', pool: { offset: 100, size: 50 }, leaseSeconds: 3600 })
+    expect(body.ap).toMatchObject({ start: 'always', interface: 'wlan0', ssid: 'mica-lab', countryCode: 'DE', countryConfirmed: true, channel: 6, address: '192.168.4.1/24', security: 'wpa2-psk', dhcpServer: { poolStart: '192.168.4.100', poolEnd: '192.168.4.149', leaseSeconds: 3600 } })
   })
 
   it('asks before switching a running access point to the client, and lets go of the radio first', async () => {

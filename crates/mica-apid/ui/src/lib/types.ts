@@ -90,11 +90,10 @@ export interface WifiAccessPoint {
   graceSeconds: number
   /// Absent is WPA2-PSK.
   security?: 'wpa2-psk' | 'wpa2-wpa3' | 'open'
-  /// Absent hands out from the address after the access point's to the end
-  /// of its subnet.
-  pool?: { offset: number; size: number }
-  /// Absent is the DHCP server's own default.
-  leaseSeconds?: number
+  /// Read whenever the address is valid. Absent on a write hands out from
+  /// the address after the access point's to the end of its subnet; an
+  /// absent lease is the DHCP server's own default.
+  dhcpServer?: { poolStart: string; poolEnd: string; leaseSeconds?: number }
 }
 
 export interface StaticRecord { id: string; hostname: string; address: string; comment?: string }

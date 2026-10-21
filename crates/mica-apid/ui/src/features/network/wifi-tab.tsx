@@ -78,8 +78,8 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
     channel: ap?.channel ?? 6,
     address: ap?.address ?? '192.168.4.1/24',
     security: ap?.security ?? 'wpa2-psk',
-    ...apPoolRange(ap?.address ?? '192.168.4.1/24', ap?.pool),
-    lease: ap?.leaseSeconds ? String(ap.leaseSeconds) : '',
+    ...(ap?.dhcpServer ? { poolStart: ap.dhcpServer.poolStart, poolEnd: ap.dhcpServer.poolEnd } : derivedPool(ap?.address ?? '192.168.4.1/24')),
+    lease: ap?.dhcpServer?.leaseSeconds ? String(ap.dhcpServer.leaseSeconds) : '',
     addressing: structuredClone(stored),
     customDns: Boolean(stored.dns?.length),
   })
@@ -177,26 +177,16 @@ function derivedPool(address: string): { poolStart: string; poolEnd: string } {
   return subnet && subnet.ip + 1 < subnet.broadcast ? { poolStart: intToIp(subnet.ip + 1), poolEnd: intToIp(subnet.broadcast - 1) } : { poolStart: '', poolEnd: '' }
 }
 
-function apPoolRange(address: string, pool: WifiAccessPoint['pool']): { poolStart: string; poolEnd: string } {
-  const subnet = parseCidr(address)
-  if (!subnet || !pool) return derivedPool(address)
-  return { poolStart: intToIp(subnet.net + pool.offset), poolEnd: intToIp(subnet.net + pool.offset + pool.size - 1) }
-}
-
-/// The access point fields a draft writes. A pool equal to the derived one is
-/// left undeclared, so it keeps following the address.
+/// The access point fields a draft writes. The device stores a pool equal to
+/// the derived one as none, so it keeps following the address.
 function apFields(draft: Draft) {
-  const subnet = parseCidr(draft.address)
-  const derived = derivedPool(draft.address)
-  const declared = subnet && (draft.poolStart !== derived.poolStart || draft.poolEnd !== derived.poolEnd)
   return {
     ssid: draft.ssid,
     channel: draft.channel,
     countryCode: draft.country,
     address: draft.address,
     security: draft.security,
-    pool: declared ? { offset: ipToInt(draft.poolStart) - subnet.net, size: ipToInt(draft.poolEnd) - ipToInt(draft.poolStart) + 1 } : undefined,
-    leaseSeconds: draft.lease ? Number(draft.lease) : undefined,
+    dhcpServer: { poolStart: draft.poolStart, poolEnd: draft.poolEnd, leaseSeconds: draft.lease ? Number(draft.lease) : undefined },
   }
 }
 
@@ -207,8 +197,7 @@ function storedFields(ap: WifiAccessPoint) {
     countryCode: ap.countryCode.toUpperCase(),
     address: ap.address,
     security: ap.security ?? 'wpa2-psk',
-    pool: ap.pool ? { offset: ap.pool.offset, size: ap.pool.size } : undefined,
-    leaseSeconds: ap.leaseSeconds,
+    dhcpServer: ap.dhcpServer ? { poolStart: ap.dhcpServer.poolStart, poolEnd: ap.dhcpServer.poolEnd, leaseSeconds: ap.dhcpServer.leaseSeconds } : undefined,
   }
 }
 
@@ -286,8 +275,8 @@ function ConfigView({ data }: { data: NetworkData }) {
       { id: 'country', label: t('network.wifi.country'), value: `${countryName(ap.countryCode, i18n.resolvedLanguage ?? 'en')} (${ap.countryCode})` },
       { id: 'channel', label: t('network.wifi.channel'), value: t('network.wifi.channelValue', { channel: ap.channel }) },
       { id: 'address', label: t('network.wifi.apAddress'), value: ap.address, mono: true },
-      { id: 'pool', label: t('network.wifi.pool'), value: (({ poolStart, poolEnd }) => `${poolStart} – ${poolEnd}`)(apPoolRange(ap.address, ap.pool)), mono: true },
-      { id: 'lease', label: t('network.wifi.lease'), value: ap.leaseSeconds ? t('network.values.seconds', { count: ap.leaseSeconds }) : t('network.wifi.leaseDefault') },
+      { id: 'pool', label: t('network.wifi.pool'), value: ap.dhcpServer ? `${ap.dhcpServer.poolStart} – ${ap.dhcpServer.poolEnd}` : '—', mono: true },
+      { id: 'lease', label: t('network.wifi.lease'), value: ap.dhcpServer?.leaseSeconds ? t('network.values.seconds', { count: ap.dhcpServer.leaseSeconds }) : t('network.wifi.leaseDefault') },
       { id: 'dhcp', label: t('network.wifi.apDhcp'), value: t('network.wifi.apDhcpCopy') },
     )
   }
