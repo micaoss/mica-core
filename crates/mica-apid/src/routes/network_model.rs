@@ -130,12 +130,13 @@ pub(crate) struct WireguardPeerState {
     /// Keepalive interval in seconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) persistent_keepalive: Option<u16>,
-    /// The last handshake, Unix seconds. Reserved: `null` until the device
-    /// reports the tunnel's state.
+    /// The last handshake, Unix seconds, as the kernel reports it; `null`
+    /// when the peer never completed one or the tunnel could not be asked.
     pub(super) latest_handshake: Option<u64>,
-    /// Bytes received from the peer. Reserved, as `latestHandshake` is.
+    /// Bytes received from the peer; `null` when the tunnel could not be
+    /// asked.
     pub(super) rx_bytes: Option<u64>,
-    /// Bytes sent to the peer. Reserved, as `latestHandshake` is.
+    /// Bytes sent to the peer; `null` when the tunnel could not be asked.
     pub(super) tx_bytes: Option<u64>,
 }
 

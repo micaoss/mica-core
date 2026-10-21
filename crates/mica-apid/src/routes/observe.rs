@@ -161,19 +161,28 @@ pub(crate) async fn api_v1_system_telemetry(
 ///
 /// What the network stack actually sees, distinct from the desired map at
 /// `/v1/network`: per interface the link and carrier state, the addresses
-/// with where each came from, the DHCP lease, the DNS servers, and the
-/// Wi-Fi association; the default routes; DNS reachability by a single
-/// bounded probe through resolved; and the radio and modem capabilities,
-/// with cellular explicitly unsupported. Nothing from the settings tree is
-/// in this answer, so a configured interface with no carrier reads as
-/// exactly that.
+/// with where each came from, the DHCP lease (`lease`: server, router and
+/// the seconds left), the link's DNS servers with their source (`linkDns`),
+/// its routes, a CAN controller's state and counters (`can`) and a
+/// WireGuard tunnel's peers with their last handshake and traffic
+/// (`wireguard`); the default routes; DNS reachability by a single bounded
+/// probe through resolved; the Wi-Fi association (`wifi.association`); the
+/// access point's clients with the address and hostname each was leased,
+/// whether it runs and, when it does not, why (`accessPoint.running`,
+/// `accessPoint.reason`); and the radio and modem capabilities, with
+/// cellular explicitly unsupported.
+///
+/// Two members join what the device sees with the request: `session` names
+/// the interface this request arrived on and the address it arrived at, and
+/// a configured interface the device does not have is listed with
+/// `present: false`. Every other entry is `present: true`.
 #[utoipa::path(
     get,
     path = V1_NETWORK_STATUS_PATH,
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "`interfaces`, `defaultRoutes`, `dns`, `wifi` and `capabilities`, each carrying `available` or `supported`; absent evidence carries the reason", body = ResourceValue),
+        (status = 200, description = "`session`, `interfaces`, `defaultRoutes`, `dns`, `wifi`, `accessPoint` and `capabilities`, each carrying `available` or `supported`; absent evidence carries the reason", body = ResourceValue),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 500, description = "micad failed to observe (`micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
@@ -184,9 +193,70 @@ pub(crate) async fn api_v1_system_telemetry(
 pub(crate) async fn api_v1_network_status(
     _credential: ApiCredential,
     State(state): State<AppState>,
+    local: Option<axum::Extension<crate::local_addr::LocalAddr>>,
 ) -> Response {
-    match state.api.get_observed_network().await {
-        Ok(value) => api_response(StatusCode::OK, ResourceValue(redact::redact(value, ""))),
-        Err(err) => bus_api_error(&err, None),
+    let mut value = match state.api.get_observed_network().await {
+        Ok(value) => value,
+        Err(err) => return bus_api_error(&err, None),
+    };
+    if let Ok(configured) = state.api.get_settings(NETWORK_SETTINGS_PATH).await {
+        list_missing_interfaces(&mut value, &configured);
     }
+    let local_address = local.map(|axum::Extension(local)| local.0.ip().to_canonical().to_string());
+    let session = session_json(&value, local_address);
+    if let Some(root) = value.as_object_mut() {
+        root.insert("session".to_string(), session);
+    }
+    api_response(StatusCode::OK, ResourceValue(redact::redact(value, "")))
+}
+
+/// Append each configured interface the device does not have as
+/// `{name, present: false}`. Only when the device listed its interfaces:
+/// with no list, nothing is known to be missing.
+fn list_missing_interfaces(observed: &mut serde_json::Value, configured: &serde_json::Value) {
+    let Some(entries) = observed
+        .pointer_mut("/interfaces/entries")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    let names: Vec<String> = configured
+        .as_object()
+        .into_iter()
+        .flat_map(serde_json::Map::keys)
+        .filter(|name| {
+            !entries.iter().any(|entry| {
+                entry.get("name").and_then(serde_json::Value::as_str) == Some(name.as_str())
+            })
+        })
+        .cloned()
+        .collect();
+    for name in names {
+        entries.push(serde_json::json!({ "name": name, "present": false }));
+    }
+}
+
+/// `session`: the address this request arrived at and the interface that
+/// holds it; `interface` is `null` when none does, as behind a proxy.
+fn session_json(observed: &serde_json::Value, local_address: Option<String>) -> serde_json::Value {
+    let interface = local_address.as_deref().and_then(|address| {
+        observed
+            .pointer("/interfaces/entries")?
+            .as_array()?
+            .iter()
+            .find(|entry| {
+                entry
+                    .get("addresses")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .any(|entry| {
+                        entry.get("address").and_then(serde_json::Value::as_str) == Some(address)
+                    })
+            })?
+            .get("name")?
+            .as_str()
+            .map(str::to_string)
+    });
+    serde_json::json!({ "interface": interface, "localAddress": local_address })
 }

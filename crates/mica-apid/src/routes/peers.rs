@@ -171,16 +171,41 @@ pub(crate) async fn api_v1_peers_list(
     Path(iface): Path<String>,
 ) -> Response {
     let path = peers_settings_path(&iface);
-    match tunnel_peers(&state, &iface, &path).await {
-        Ok(peers) => api_response(
-            StatusCode::OK,
-            peers
+    let peers = match tunnel_peers(&state, &iface, &path).await {
+        Ok(peers) => peers,
+        Err(response) => return *response,
+    };
+    // What the tunnel reports, joined by public key. An observation that
+    // fails leaves the three members null: the stored peers still answer.
+    let observed = state.api.get_observed_network().await.ok();
+    let reported = observed
+        .as_ref()
+        .and_then(|observed| observed.pointer("/interfaces/entries"))
+        .and_then(Value::as_array)
+        .and_then(|entries| {
+            entries
                 .iter()
-                .map(WireguardPeerState::from)
-                .collect::<Vec<_>>(),
-        ),
-        Err(response) => *response,
-    }
+                .find(|entry| entry.get("name").and_then(Value::as_str) == Some(iface.as_str()))
+        })
+        .and_then(|entry| entry.pointer("/wireguard/peers"))
+        .and_then(Value::as_array);
+    api_response(
+        StatusCode::OK,
+        peers
+            .iter()
+            .map(|peer| {
+                let mut state = WireguardPeerState::from(peer);
+                if let Some(seen) = reported.into_iter().flatten().find(|seen| {
+                    seen.get("publicKey").and_then(Value::as_str) == Some(peer.public_key.as_str())
+                }) {
+                    state.latest_handshake = seen.get("latestHandshake").and_then(Value::as_u64);
+                    state.rx_bytes = seen.get("rxBytes").and_then(Value::as_u64);
+                    state.tx_bytes = seen.get("txBytes").and_then(Value::as_u64);
+                }
+                state
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 // 409 and not 422 for a duplicate: the public key IS this collection's

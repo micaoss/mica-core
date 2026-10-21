@@ -3225,11 +3225,11 @@
           "resources"
         ],
         "summary": "Read the observed network state.",
-        "description": "What the network stack actually sees, distinct from the desired map at\n`/v1/network`: per interface the link and carrier state, the addresses\nwith where each came from, the DHCP lease, the DNS servers, and the\nWi-Fi association; the default routes; DNS reachability by a single\nbounded probe through resolved; and the radio and modem capabilities,\nwith cellular explicitly unsupported. Nothing from the settings tree is\nin this answer, so a configured interface with no carrier reads as\nexactly that.",
+        "description": "What the network stack actually sees, distinct from the desired map at\n`/v1/network`: per interface the link and carrier state, the addresses\nwith where each came from, the DHCP lease (`lease`: server, router and\nthe seconds left), the link's DNS servers with their source (`linkDns`),\nits routes, a CAN controller's state and counters (`can`) and a\nWireGuard tunnel's peers with their last handshake and traffic\n(`wireguard`); the default routes; DNS reachability by a single bounded\nprobe through resolved; the Wi-Fi association (`wifi.association`); the\naccess point's clients with the address and hostname each was leased,\nwhether it runs and, when it does not, why (`accessPoint.running`,\n`accessPoint.reason`); and the radio and modem capabilities, with\ncellular explicitly unsupported.\n\nTwo members join what the device sees with the request: `session` names\nthe interface this request arrived on and the address it arrived at, and\na configured interface the device does not have is listed with\n`present: false`. Every other entry is `present: true`.",
         "operationId": "api_v1_network_status",
         "responses": {
           "200": {
-            "description": "`interfaces`, `defaultRoutes`, `dns`, `wifi` and `capabilities`, each carrying `available` or `supported`; absent evidence carries the reason",
+            "description": "`session`, `interfaces`, `defaultRoutes`, `dns`, `wifi`, `accessPoint` and `capabilities`, each carrying `available` or `supported`; absent evidence carries the reason",
             "content": {
               "application/json": {
                 "schema": {
@@ -12160,7 +12160,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "The last handshake, Unix seconds. Reserved: `null` until the device\nreports the tunnel's state.",
+            "description": "The last handshake, Unix seconds, as the kernel reports it; `null`\nwhen the peer never completed one or the tunnel could not be asked.",
             "minimum": 0
           },
           "name": {
@@ -12193,7 +12193,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "Bytes received from the peer. Reserved, as `latestHandshake` is.",
+            "description": "Bytes received from the peer; `null` when the tunnel could not be\nasked.",
             "minimum": 0
           },
           "txBytes": {
@@ -12202,7 +12202,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "Bytes sent to the peer. Reserved, as `latestHandshake` is.",
+            "description": "Bytes sent to the peer; `null` when the tunnel could not be asked.",
             "minimum": 0
           }
         }
