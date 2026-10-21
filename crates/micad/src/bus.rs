@@ -184,6 +184,9 @@ pub struct MicadService {
     /// whole reason it is here: the agent blocks on a decision that arrives
     /// through the bus members below.
     agent: Arc<BluetoothAgent>,
+    /// BLE provisioning: its verifier and lockout. The default keeps
+    /// nothing, so a test or a dry run never writes a secret.
+    provisioning: Arc<crate::ble_provisioning::Provisioning>,
     /// The features the product carries. A member or a settings write that
     /// belongs to any other is refused by name.
     features: micad_settings::Features,
@@ -325,6 +328,7 @@ impl MicadService {
             engine: Arc::new(crate::containers::NoEngine),
             bluetooth: Arc::new(crate::bluetooth::NoAdapter),
             agent: Arc::new(BluetoothAgent::default()),
+            provisioning: Arc::default(),
             containerd: Arc::new(crate::containerd::NoContainerd),
             container_engine: micad_settings::ContainerEngine::default(),
             compose: Arc::new(crate::compose::NoCompose),

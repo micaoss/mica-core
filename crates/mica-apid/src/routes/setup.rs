@@ -166,16 +166,7 @@ pub(crate) async fn api_v1_setup(
         // one. the line carries the peer address, which is the whole of what
         // makes the record useful.
         state.audit.record(CLAIM_EVENT, "refused", &source);
-        return api_response(
-            StatusCode::CONFLICT,
-            ApiError::apid(
-                "already_configured",
-                "this device already has an admin password, so it is not in setup mode; \
-                 change the password with `POST /api/v1/actions/change-password`"
-                    .to_string(),
-            )
-            .at("access.webAdmin"),
-        );
+        return already_configured();
     }
 
     // Everything below this line validates. Nothing below it writes until the
@@ -357,25 +348,18 @@ pub(crate) async fn api_v1_setup(
     subtree.insert("claim".to_string(), claim);
     // The access point's key lands with the claim and not beside it: either
     // order of two writes leaves, on a failure between them, a device whose
-    // access point runs a key nobody was shown.
-    let written = match request.ap_psk.clone().or_else(|| generated_ap_psk.clone()) {
-        Some(psk) => {
-            state
-                .api
-                .set_settings_many(&[
-                    (ACCESS_PATH.to_string(), Value::Object(subtree)),
-                    (AP_PSK_PATH.to_string(), Value::String(psk)),
-                ])
-                .await
+    // access point runs a key nobody was shown. One `Claim`, which micad
+    // refuses when the device gained an administrator meanwhile -- by BLE
+    // provisioning, which this route's lock does not cover.
+    let mut writes = vec![(ACCESS_PATH.to_string(), Value::Object(subtree))];
+    if let Some(psk) = request.ap_psk.clone().or_else(|| generated_ap_psk.clone()) {
+        writes.push((AP_PSK_PATH.to_string(), Value::String(psk)));
+    }
+    if let Err(err) = state.api.claim(&writes, &request.password).await {
+        if is_already_claimed(&err) {
+            state.audit.record(CLAIM_EVENT, "refused", &source);
+            return already_configured();
         }
-        None => {
-            state
-                .api
-                .set_settings(ACCESS_PATH, &Value::Object(subtree))
-                .await
-        }
-    };
-    if let Err(err) = written {
         return bus_api_error(&err, Some(ACCESS_PATH));
     }
     // The device just left setup mode, and the gate must not keep believing
@@ -401,6 +385,27 @@ pub(crate) async fn api_v1_setup(
         }),
     )
         .into_response()
+}
+
+/// 409 `already_configured`: the device has an administrator.
+fn already_configured() -> Response {
+    api_response(
+        StatusCode::CONFLICT,
+        ApiError::apid(
+            "already_configured",
+            "this device already has an admin password, so it is not in setup mode; \
+             change the password with `POST /api/v1/actions/change-password`"
+                .to_string(),
+        )
+        .at("access.webAdmin"),
+    )
+}
+
+/// Whether micad refused a claim because the device is claimed.
+fn is_already_claimed(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<zbus::Error>()
+        .and_then(error_reply)
+        .is_some_and(|(name, _)| name == MICAD_ALREADY_CLAIMED)
 }
 
 // The claim lifecycle

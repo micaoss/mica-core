@@ -52,6 +52,26 @@ pub(super) fn shared_path(paths: &[String]) -> String {
         .join(".")
 }
 
+/// Each of `values_json` parsed, paired with its path.
+fn parse_writes(
+    paths: &[String],
+    values_json: &[String],
+) -> Result<Vec<(String, Value)>, SettingsFault> {
+    paths
+        .iter()
+        .zip(values_json)
+        .map(|(path, value_json)| {
+            serde_json::from_str(value_json)
+                .map(|value| (path.clone(), value))
+                .map_err(|err| {
+                    SettingsFault::Fdo(fdo::Error::InvalidArgs(format!(
+                        "invalid JSON value for `{path}`: {err}"
+                    )))
+                })
+        })
+        .collect()
+}
+
 #[zbus::interface(name = "com.mica.micad1")]
 impl MicadService {
     /// JSON-encoded settings value at dot-path `path` (`""` = whole tree).
@@ -104,15 +124,7 @@ impl MicadService {
                 "SetSettingsMany takes one value per path, and at least one".to_string(),
             )));
         }
-        let mut writes = Vec::with_capacity(paths.len());
-        for (path, value_json) in paths.iter().zip(&values_json) {
-            let value: Value = serde_json::from_str(value_json).map_err(|err| {
-                SettingsFault::Fdo(fdo::Error::InvalidArgs(format!(
-                    "invalid JSON value for `{path}`: {err}"
-                )))
-            })?;
-            writes.push((path.clone(), value));
-        }
+        let writes = parse_writes(&paths, &values_json)?;
         self.persist_settings(&writes).await.map_err(to_bus_error)?;
         for (path, value_json) in paths.iter().zip(&values_json) {
             Self::settings_changed(&emitter, path, value_json)
@@ -130,6 +142,68 @@ impl MicadService {
             )
             .await;
         Ok(task.id)
+    }
+
+    /// Claim the device: [`Self::set_settings_many`] of writes that give it
+    /// an administrator, refused with `AlreadyClaimed` when it has one, so
+    /// the console's setup and BLE provisioning cannot both claim it. Then
+    /// the BLE verifier of `password`, the administrator password the writes
+    /// carry the hash of.
+    pub(super) async fn claim(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        paths: Vec<String>,
+        values_json: Vec<String>,
+        password: String,
+    ) -> Result<String, SettingsFault> {
+        if paths.is_empty() || paths.len() != values_json.len() {
+            return Err(SettingsFault::Fdo(fdo::Error::InvalidArgs(
+                "Claim takes one value per path, and at least one".to_string(),
+            )));
+        }
+        let writes = parse_writes(&paths, &values_json)?;
+        self.persist_claim(&writes).await.map_err(to_bus_error)?;
+        for (path, value_json) in paths.iter().zip(&values_json) {
+            Self::settings_changed(&emitter, path, value_json)
+                .await
+                .map_err(|err| {
+                    SettingsFault::Fdo(fdo::Error::Failed(format!("emit SettingsChanged: {err}")))
+                })?;
+        }
+        let task = self
+            .enqueue_apply(
+                &emitter,
+                "settings-write",
+                &shared_path(&paths),
+                sender_of(&header),
+            )
+            .await;
+        // The claim landed; a verifier that could not be made is made at the
+        // next login.
+        if let Err(err) = self.provisioning.password_set(password) {
+            tracing::warn!(error = %format!("{err:#}"), "the BLE verifier could not be made at the claim");
+        }
+        Ok(task.id)
+    }
+
+    /// The administrator password was changed to `password`: replace the BLE
+    /// verifier, so the old password stops working over Bluetooth. The old
+    /// one is gone when this answers; the new one follows in about two
+    /// seconds.
+    pub(super) async fn admin_password_set(&self, password: String) -> fdo::Result<()> {
+        self.provisioning
+            .password_set(password)
+            .map_err(|err| fdo::Error::Failed(format!("replace the BLE verifier: {err:#}")))
+    }
+
+    /// The administrator logged in to the console with `password`, which the
+    /// caller verified: end a BLE lockout and make the verifier if there is
+    /// none.
+    pub(super) async fn admin_logged_in(&self, password: String) -> fdo::Result<()> {
+        self.provisioning
+            .logged_in(password)
+            .map_err(|err| fdo::Error::Failed(format!("BLE provisioning at login: {err:#}")))
     }
 
     /// JSON-encoded task record for `id`.

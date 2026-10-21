@@ -35,6 +35,8 @@ pub(crate) fn error_reply(err: &zbus::Error) -> Option<(String, Option<String>)>
 pub const NOT_FOUND_ERROR: &str = "com.mica.micad1.Error.NotFound";
 /// D-Bus error name for a settings dot-path that exists but rejects writes.
 pub const READ_ONLY_ERROR: &str = "com.mica.micad1.Error.ReadOnly";
+/// D-Bus error name for a claim of a device that is already claimed.
+pub const ALREADY_CLAIMED_ERROR: &str = "com.mica.micad1.Error.AlreadyClaimed";
 
 /// Reply error of the settings methods.
 #[derive(Debug)]
@@ -43,6 +45,8 @@ pub(super) enum SettingsFault {
     NotFound(String),
     /// [`READ_ONLY_ERROR`], from [`SettingsError::ReadOnly`].
     ReadOnly(String),
+    /// [`ALREADY_CLAIMED_ERROR`], from [`SettingsError::Claimed`].
+    AlreadyClaimed(String),
     /// Everything else, under its standard fdo name.
     Fdo(fdo::Error),
 }
@@ -52,13 +56,18 @@ impl zbus::DBusError for SettingsFault {
         match self {
             Self::NotFound(_) => zbus::names::ErrorName::from_static_str_unchecked(NOT_FOUND_ERROR),
             Self::ReadOnly(_) => zbus::names::ErrorName::from_static_str_unchecked(READ_ONLY_ERROR),
+            Self::AlreadyClaimed(_) => {
+                zbus::names::ErrorName::from_static_str_unchecked(ALREADY_CLAIMED_ERROR)
+            }
             Self::Fdo(err) => err.name(),
         }
     }
 
     fn description(&self) -> Option<&str> {
         match self {
-            Self::NotFound(message) | Self::ReadOnly(message) => Some(message),
+            Self::NotFound(message) | Self::ReadOnly(message) | Self::AlreadyClaimed(message) => {
+                Some(message)
+            }
             Self::Fdo(err) => err.description(),
         }
     }
@@ -83,6 +92,7 @@ pub(super) fn to_bus_error(err: SettingsError) -> SettingsFault {
             SettingsFault::NotFound(err.to_string())
         }
         SettingsError::ReadOnly(_) => SettingsFault::ReadOnly(err.to_string()),
+        SettingsError::Claimed => SettingsFault::AlreadyClaimed(err.to_string()),
         SettingsError::Validation { .. } => {
             SettingsFault::Fdo(fdo::Error::InvalidArgs(err.to_string()))
         }

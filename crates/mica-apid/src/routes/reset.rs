@@ -389,6 +389,9 @@ pub(crate) async fn api_v1_recovery_credential(
     state.access_cache.invalidate();
     // Every session was minted under a credential that no longer exists.
     state.sessions.remove_all_except("");
+    if let Err(err) = state.api.admin_password_set(&secret).await {
+        tracing::warn!(error = %format!("{err:#}"), "the BLE verifier was not replaced");
+    }
     // The second rule, and the release path item 2 promises: a
     // SUCCESSFUL rotation clears the guard, counters and window both, which is
     // what would make a hard `lockoutThreshold` safe to ship. A refused or

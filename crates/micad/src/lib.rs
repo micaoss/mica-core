@@ -362,6 +362,10 @@ async fn serve() -> anyhow::Result<()> {
             let agent = Arc::new(bluetooth::Agent::default());
             pairing_agent = Some(Arc::clone(&agent));
             service = service.with_bluetooth(Arc::new(bluetooth::BlueZ), Arc::clone(&agent));
+            service = service.with_ble_provisioning(Arc::new(ble_provisioning::Provisioning::new(
+                ble_provisioning::store::Store::new(&state_dir_for(&settings_path)),
+                Some(micad_settings::audit_ring_dir()),
+            )));
         }
         // Containers are the engine's the product carries, on either init:
         // mica-containerd's verbs and reads, its Compose check and podman for

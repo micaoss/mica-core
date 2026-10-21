@@ -143,7 +143,7 @@ pub(crate) async fn api_v1_session_create(
         );
     };
     let hash = hash.to_string();
-    let password = request.password;
+    let password = request.password.clone();
     let verified = tokio::task::spawn_blocking(move || auth::verify_password(&hash, &password))
         .await
         .unwrap_or_else(|err| {
@@ -174,6 +174,11 @@ pub(crate) async fn api_v1_session_create(
     };
     state.guard.record_success();
     state.audit.record("login", "success", &source);
+    // BLE provisioning's lockout ends at a console login, and a device
+    // claimed before it existed gets its verifier from this password.
+    if let Err(err) = state.api.admin_logged_in(&request.password).await {
+        tracing::warn!(error = %format!("{err:#}"), "BLE provisioning was not told of the login");
+    }
     (
         StatusCode::CREATED,
         [

@@ -166,6 +166,17 @@ impl MicadService {
         self
     }
 
+    /// Attach BLE provisioning (`Claim`, `AdminPasswordSet`,
+    /// `AdminLoggedIn`).
+    #[must_use]
+    pub fn with_ble_provisioning(
+        mut self,
+        provisioning: Arc<crate::ble_provisioning::Provisioning>,
+    ) -> Self {
+        self.provisioning = provisioning;
+        self
+    }
+
     /// Attach the board telemetry adapter (`GetTelemetry`).
     #[must_use]
     pub fn with_telemetry(mut self, telemetry: Arc<dyn TelemetrySource>) -> Self {

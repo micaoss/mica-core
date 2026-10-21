@@ -367,6 +367,7 @@ pub(crate) const STATE_SPELLINGS: (&str, &str, &str) =
 /// standard names for everything else.
 pub(super) const MICAD_NOT_FOUND: &str = "com.mica.micad1.Error.NotFound";
 pub(super) const MICAD_READ_ONLY: &str = "com.mica.micad1.Error.ReadOnly";
+pub(super) const MICAD_ALREADY_CLAIMED: &str = "com.mica.micad1.Error.AlreadyClaimed";
 pub(super) const FDO_INVALID_ARGS: &str = "org.freedesktop.DBus.Error.InvalidArgs";
 pub(super) const FDO_IO_ERROR: &str = "org.freedesktop.DBus.Error.IOError";
 pub(super) const FDO_FAILED: &str = "org.freedesktop.DBus.Error.Failed";

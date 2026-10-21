@@ -27,6 +27,9 @@ pub enum SettingsError {
         /// Human-readable reason the value was rejected.
         message: String,
     },
+    /// A claim, and the device already has an administrator.
+    #[error("this device is already claimed")]
+    Claimed,
     /// Underlying filesystem failure.
     #[error("settings io error: {0}")]
     Io(#[from] io::Error),

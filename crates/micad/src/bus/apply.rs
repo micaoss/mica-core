@@ -36,6 +36,28 @@ impl MicadService {
         &self,
         writes: &[(String, Value)],
     ) -> Result<(), SettingsError> {
+        self.persist_settings_as(writes, false).await
+    }
+
+    /// [`Self::persist_settings`] of a claim: refused with
+    /// [`SettingsError::Claimed`] when the tree it would change already has an
+    /// administrator, decided under the same lock the write takes, so of two
+    /// claims exactly one lands.
+    ///
+    /// # Errors
+    /// The device is claimed, or any error of [`Self::persist_settings`].
+    pub(crate) async fn persist_claim(
+        &self,
+        writes: &[(String, Value)],
+    ) -> Result<(), SettingsError> {
+        self.persist_settings_as(writes, true).await
+    }
+
+    async fn persist_settings_as(
+        &self,
+        writes: &[(String, Value)],
+        claim: bool,
+    ) -> Result<(), SettingsError> {
         // The path a refusal of the write as a whole names.
         let path = writes.first().map_or("", |(path, _)| path.as_str());
         // A path inside a feature the product does not carry is refused before
@@ -67,6 +89,9 @@ impl MicadService {
         let checked = self.check_written_projects(writes).await?;
         let sealed = {
             let mut inner = self.inner.write().await;
+            if claim && inner.settings.access.web_admin.is_some() {
+                return Err(SettingsError::Claimed);
+            }
             let mut candidate = inner.settings.clone();
             for (path, value) in writes {
                 candidate.set(path, value.clone())?;

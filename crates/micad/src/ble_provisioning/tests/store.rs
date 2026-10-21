@@ -101,3 +101,56 @@ fn the_lockout_survives_a_restart_and_the_history_keeps_ten() {
     assert_eq!(history[0].at, 2);
     assert_eq!(history[9].at, 11);
 }
+
+async fn verifier_of(store: &Store) -> spake2plus::Record {
+    for _ in 0..600 {
+        if let Some(record) = store.verifier().unwrap() {
+            return record;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("no verifier was made");
+}
+
+#[tokio::test]
+async fn a_login_ends_the_lockout_and_makes_a_missing_verifier() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    let mut lockout = Lockout::default();
+    for _ in 0..5 {
+        lockout.charge(100);
+    }
+    store.set_lockout(&lockout).unwrap();
+    let provisioning = std::sync::Arc::new(Provisioning::new(store.clone(), None));
+    assert!(!provisioning.verifier_ready());
+
+    provisioning.logged_in("harbour-pw-1".into()).unwrap();
+
+    assert_eq!(store.lockout(), Lockout::default());
+    let record = verifier_of(&store).await;
+    assert_eq!(record.iterations, ITERATIONS);
+    assert!(provisioning.verifier_ready());
+
+    provisioning.logged_in("harbour-pw-1".into()).unwrap();
+    assert_eq!(
+        store.verifier().unwrap(),
+        Some(record),
+        "an existing verifier stays"
+    );
+}
+
+#[tokio::test]
+async fn a_password_change_drops_the_old_verifier_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    let old = make_record(b"old-password", 1000).unwrap();
+    store.set_verifier(&old).unwrap();
+    let provisioning = std::sync::Arc::new(Provisioning::new(store.clone(), None));
+
+    provisioning.password_set("new-password".into()).unwrap();
+
+    assert_ne!(store.verifier().unwrap(), Some(old.clone()));
+    let new = verifier_of(&store).await;
+    assert_ne!(new, old);
+    assert_eq!(new.iterations, ITERATIONS);
+}

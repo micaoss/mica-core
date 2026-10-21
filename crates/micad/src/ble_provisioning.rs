@@ -2,6 +2,7 @@
 //! the Wi-Fi network to join over BLE and, on an unclaimed device, claims it.
 
 pub mod channel;
+pub mod runtime;
 pub mod spake2plus;
 pub mod store;
 
@@ -20,6 +21,8 @@ pub const INFO_UUID: &str = "a7f50002-aa05-4fbe-ae8a-39652ca94ed5";
 pub const SESSION_UUID: &str = "a7f50003-aa05-4fbe-ae8a-39652ca94ed5";
 pub const COMMAND_UUID: &str = "a7f50004-aa05-4fbe-ae8a-39652ca94ed5";
 pub const EVENT_UUID: &str = "a7f50005-aa05-4fbe-ae8a-39652ca94ed5";
+
+pub use runtime::Provisioning;
 
 #[cfg(test)]
 mod tests;

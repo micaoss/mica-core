@@ -172,6 +172,20 @@ impl Store {
         )
     }
 
+    /// Remove the `password` verifier; none is not an error.
+    ///
+    /// # Errors
+    /// The file exists and could not be removed.
+    pub fn remove_verifier(&self) -> Result<()> {
+        let path = self.state_dir.join("secrets").join(VERIFIER_FILE);
+        match std::fs::remove_file(&path) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                Err(err).with_context(|| format!("remove {}", path.display()))
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn read<T: serde::de::DeserializeOwned + Default>(&self, name: &str) -> T {
         let path = self.state_dir.join(name);
         match std::fs::read_to_string(&path) {

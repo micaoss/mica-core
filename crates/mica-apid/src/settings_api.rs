@@ -56,6 +56,21 @@ pub trait SettingsApi: Send + Sync {
     async fn set_settings_many(&self, _writes: &[(String, Value)]) -> anyhow::Result<String> {
         anyhow::bail!("set_settings_many is not wired up in this settings api")
     }
+    /// Claim the device with `writes` (`Claim`): one write, refused when the
+    /// device already has an administrator. `password` is the administrator
+    /// password whose hash the writes carry; micad makes the BLE
+    /// provisioning verifier from it.
+    async fn claim(&self, writes: &[(String, Value)], _password: &str) -> anyhow::Result<String> {
+        self.set_settings_many(writes).await
+    }
+    /// The administrator password changed to `password` (`AdminPasswordSet`).
+    async fn admin_password_set(&self, _password: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    /// The administrator logged in with `password` (`AdminLoggedIn`).
+    async fn admin_logged_in(&self, _password: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
     /// Task record by id.
     async fn get_task(&self, id: &str) -> anyhow::Result<TaskRecord> {
         Err(TaskNotFound(id.to_string()).into())

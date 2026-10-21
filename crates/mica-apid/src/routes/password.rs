@@ -143,6 +143,11 @@ pub(super) async fn change_password(
         .sessions
         .remove_all_except(acting_session.unwrap_or(""));
     state.audit.record("password", "changed", source);
+    // The BLE verifier follows the password; until it is replaced the old
+    // password must not work over Bluetooth, which micad sees to first.
+    if let Err(err) = state.api.admin_password_set(new).await {
+        tracing::warn!(error = %format!("{err:#}"), "the BLE verifier was not replaced");
+    }
     if discharged {
         // A second line and not a replacement: the password change happened
         // and is recorded as one, and this says what it additionally did to

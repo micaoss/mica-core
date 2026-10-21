@@ -26,6 +26,36 @@ and return its task id.
 <arg type="s" direction="out"/>
 </method>
 <!--
+Claim the device: [`Self::set_settings_many`] of writes that give it
+an administrator, refused with `AlreadyClaimed` when it has one, so
+the console's setup and BLE provisioning cannot both claim it. Then
+the BLE verifier of `password`, the administrator password the writes
+carry the hash of.
+-->
+<method name="Claim">
+<arg name="paths" type="as" direction="in"/>
+<arg name="values_json" type="as" direction="in"/>
+<arg name="password" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+The administrator password was changed to `password`: replace the BLE
+verifier, so the old password stops working over Bluetooth. The old
+one is gone when this answers; the new one follows in about two
+seconds.
+-->
+<method name="AdminPasswordSet">
+<arg name="password" type="s" direction="in"/>
+</method>
+<!--
+The administrator logged in to the console with `password`, which the
+caller verified: end a BLE lockout and make the verifier if there is
+none.
+-->
+<method name="AdminLoggedIn">
+<arg name="password" type="s" direction="in"/>
+</method>
+<!--
 JSON-encoded task record for `id`.
 -->
 <method name="GetTask">

@@ -225,6 +225,7 @@ directions, because `SettingsChanged` carries setting values.
 | Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
 | Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
 | Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey` |
+| Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so setup and BLE provisioning cannot both claim it), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
 | Containers and Bluetooth | `CheckContainerProject`, `CheckContainerProjectIn`, `StartContainer`, `StopContainer`, `RestartContainer`, `SetBluetoothDiscovery` (no API route serves it), `OpenBluetoothPairWindow`, `CloseBluetoothPairWindow`, `PairBluetoothDevice`, `ConfirmBluetoothPairing`, `RemoveBluetoothDevice` |

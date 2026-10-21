@@ -11,6 +11,7 @@ mod install;
 mod latest;
 mod observers;
 mod power;
+mod provisioning;
 mod refusals;
 mod state;
 mod units;
