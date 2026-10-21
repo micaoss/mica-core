@@ -119,7 +119,7 @@ test('captures each network page for review', async ({ page }, testInfo) => {
   }
   await page.goto('./network/eth1')
   await page.getByRole('button', { name: 'Edit' }).click()
-  await page.getByRole('textbox', { name: 'Pool start' }).fill('192.168.10.50')
+  await page.getByRole('textbox', { name: 'Address', exact: true }).fill('192.168.10.2/24')
   await page.getByRole('button', { name: 'Done' }).click()
   await page.getByRole('button', { name: 'Review and apply' }).click()
   const review = page.getByRole('dialog', { name: 'Review network changes' })
