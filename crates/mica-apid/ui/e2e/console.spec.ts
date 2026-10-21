@@ -30,7 +30,7 @@ test('routes the reported update from the overview attention list', async ({ pag
 
 test('writes real time settings', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop system workflow')
-  await page.goto('./system')
+  await page.goto('./system?tab=information')
   await page.getByRole('tab', { name: 'Time' }).click()
 
   await expect(page.getByRole('heading', { name: 'System' })).toBeVisible()
@@ -169,6 +169,67 @@ test('captures the review of a VLAN that takes its parent over', async ({ page }
   await page.screenshot({ path: testInfo.outputPath('network-review-adopt.png') })
 })
 
+test('captures the device code, the claim key and the pairing window', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  // The information tab reads more than the shared mocks answer.
+  await page.route('**/api/v1/system/info', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    ...(payload('/api/v1/system/info', 'GET') as object),
+    deployment: { available: true, id: 'mica-2026.08.2', version: '2026.08.2' },
+  }) }))
+  await page.route('**/api/v1/system/telemetry', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    thermal: { available: true, zones: [{ sensor: 'thermal_zone0', label: 'cpu', milliCelsius: 48200 }] },
+    watchdog: { available: true, devices: [] },
+    reset: { available: true, reason: 'unknown' },
+  }) }))
+  await page.goto('./system#information')
+  await expect(page.getByText('DFN4-L34C-T8N · emmc-cid')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('system-device-code.png') })
+
+  // Bluetooth: closed, then open with a phone waiting on the six digits.
+  let open = false
+  const declared = { 'AA:BB:CC:DD:EE:01': { name: 'Bridge tablet', trusted: true, blocked: false } }
+  await page.route('**/api/v1/bluetooth**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/api/v1/bluetooth/pairing-window') {
+      open = request.method() === 'POST'
+      return route.fulfill(open
+        ? { status: 200, contentType: 'application/json', body: JSON.stringify({ expiresAt: Math.floor(Date.now() / 1000) + 180 }) }
+        : { status: 204 })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      enabled: true,
+      pin: '421137',
+      declared,
+      adapter: { available: true, address: 'EC:B5:0A:97:9D:25', name: 'mica-cm4', powered: true, discoverable: open },
+      devices: { available: true, entries: [{ address: 'AA:BB:CC:DD:EE:01', name: 'Bridge tablet', paired: true, trusted: true, blocked: false, connected: true, rssi: -52 }] },
+      pending: open ? [{ name: 'Pixel 8', mac: '6C:2F:8A:41:D3:5B', passkey: '042137', since: 0 }] : [],
+      pairWindow: open ? { expiresAt: Math.floor(Date.now() / 1000) + 163 } : null,
+    }) })
+  })
+  // Tall enough for every panel: a full-page capture puts the fixed status bar over the requests.
+  await page.setViewportSize({ width: 1440, height: 1250 })
+  await page.goto('./network?tab=bluetooth')
+  await expect(page.getByText(/cannot normally be discovered/)).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('bluetooth.png') })
+  await page.getByRole('button', { name: 'Allow new devices' }).click()
+  await expect(page.getByText('042137')).toBeVisible()
+  await expect(page.getByTestId('pair-window')).toContainText('Allowing pairing')
+  await page.screenshot({ path: testInfo.outputPath('bluetooth-window.png') })
+
+  // The claim: an optional key, and a generated one shown once.
+  await page.route('**/api/v1/session', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'setup' }) }))
+  await page.route('**/api/v1/setup', (route) => route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ csrfToken: 'e2e-csrf', apPsk: 'K7QM2XWD9HC4TR8N' }) }))
+  await page.goto('./')
+  await page.getByLabel('Admin password').fill('harbour-pw-1')
+  await page.getByLabel('Confirm password').fill('harbour-pw-1')
+  await page.screenshot({ path: testInfo.outputPath('setup.png') })
+  await page.getByRole('button', { name: 'Configure device' }).click()
+  await expect(page.getByTestId('generated-ap-psk')).toHaveText('K7QM2XWD9HC4TR8N')
+  await page.screenshot({ path: testInfo.outputPath('setup-ap-key.png') })
+})
+
 test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'mobile navigation contract')
   await page.goto('./')
@@ -215,7 +276,7 @@ test('confirms a destructive action by closing it and saying what happened', asy
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the confirmation contract')
   // Ten of the eleven confirmations left the modal open with nothing said, so
   // a completed action and a lost click looked identical.
-  await page.goto('./system')
+  await page.goto('./system?tab=information')
   await page.getByRole('button', { name: 'Reboot' }).click()
   const dialog = page.getByRole('alertdialog')
   await expect(dialog).toBeVisible()
@@ -227,7 +288,7 @@ test('confirms a destructive action by closing it and saying what happened', asy
 
 test('reports a saved policy', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the feedback contract')
-  await page.goto('./system')
+  await page.goto('./system?tab=information')
   await page.getByRole('tab', { name: /Update/ }).click()
   await page.getByRole('button', { name: 'Save policy' }).click()
 
@@ -276,6 +337,7 @@ function payload(path: string, method: string): unknown {
   if (path === '/api/v1/session') return { state: 'authenticated', csrfToken: 'e2e-csrf', localAddress: '192.168.1.24' }
   if (path === '/api/v1/health') return { apid: 'ok', micad: 'ok', checkedAt: 183900 }
   if (path === '/api/v1/meta') return { api: 'v1', settingsSchemaVersion: 1, daemon: 'micad 0.0.1', init: 'systemd' }
+  if (path === '/api/v1/device/code') return { code: 'DFN4-L34C-T8N', source: 'emmc-cid' }
   if (path === '/api/v1/system/info') return {
     machineId: { available: true, id: '4f2e9c1a7b3d4e5f' },
     board: { available: true, model: 'mica-cm4 rev 2', source: 'device-tree' },

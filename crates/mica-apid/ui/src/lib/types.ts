@@ -61,26 +61,26 @@ export interface BluetoothDevice {
 }
 
 /// `GET /api/v1/bluetooth`: the declared trust list, the adapter, the devices
-/// BlueZ holds, the pairing code and whatever is waiting to be confirmed.
-/// Declared and observed are named apart because they answer different
-/// questions.
+/// BlueZ holds, the pairing window and whatever waits in it. Declared and
+/// observed are named apart because they answer different questions.
 export interface BluetoothOverview {
   enabled: boolean
-  discoverable: boolean
-  /// The code a legacy peer is answered with. Displayed by design: somebody
-  /// has to type it on the other device.
+  /// The phone app's code (`mica-bled`), shown once by the sign-in notice.
   pin: string
   declared: Record<string, { name: string; trusted: boolean; blocked: boolean }>
   adapter: AvailableFact & {
     address?: string
-    alias?: string
+    /// What it advertises: the hostname.
+    name?: string
     powered?: boolean
     discoverable?: boolean
-    discovering?: boolean
   }
   devices: AvailableFact & { entries?: BluetoothDevice[] }
-  /// The passkey waiting for a decision, or null.
-  pending: { address: string; passkey: number; since: number } | null
+  /// Pairings waiting for the console, each with the six digits to compare;
+  /// `passkey` is null for a peer with no display.
+  pending: { name: string; mac: string; passkey: string | null; since: number }[]
+  /// The open pairing window, or null.
+  pairWindow: { expiresAt: number } | null
 }
 
 /// The channels an access point may use in one country.

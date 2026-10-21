@@ -1,49 +1,42 @@
 import type { BluetoothOverview } from '@/lib/types'
 
-/// The code a device offers until somebody sets one; the panel asks for a
-/// new one while it is this.
+/// The phone app's code a device offers until it is claimed.
 export const DEFAULT_PIN = '000000'
 
 export interface BluetoothRow {
   address: string
   name: string
-  /// The device is in the declared trust list.
-  declared: boolean
-  /// The adapter currently sees it. `false` for a declared device that is out
-  /// of range, which is a different thing from one that was never paired.
+  /// The adapter currently sees it. `false` for a paired device out of range.
   seen: boolean
   connected: boolean
-  rssi?: number
+  trusted: boolean
+  blocked: boolean
 }
 
-/// Every device this page has anything to say about: the trust list and what
-/// the adapter sees, joined by address.
-///
-/// Both directions matter. A paired device out of range is declared and not
-/// seen; a device in range that nobody paired is seen and not declared, and
-/// pairing with it is the one action that changes that.
+/// The paired devices: the trust list, joined by address with what the
+/// adapter reports of each. A device in range that nobody paired is not one,
+/// and is not shown.
 export function bluetoothRows(overview: BluetoothOverview | undefined): BluetoothRow[] {
-  const rows = new Map<string, BluetoothRow>()
-  for (const [address, device] of Object.entries(overview?.declared ?? {})) {
-    rows.set(address, { address, name: device.name, declared: true, seen: false, connected: false })
-  }
-  for (const device of overview?.devices.entries ?? []) {
-    const existing = rows.get(device.address)
-    rows.set(device.address, {
-      address: device.address,
-      // The adapter's name wins: it is what the device calls itself now,
-      // while the declaration records what it called itself when it paired.
-      name: device.name || existing?.name || '',
-      declared: existing?.declared ?? false,
-      seen: true,
-      connected: device.connected,
-      rssi: device.rssi ?? undefined,
+  const seen = new Map((overview?.devices.entries ?? []).map((device) => [device.address, device]))
+  return Object.entries(overview?.declared ?? {})
+    .map(([address, declared]) => {
+      const device = seen.get(address)
+      return {
+        address,
+        // The adapter's name wins: it is what the device calls itself now,
+        // while the declaration records what it called itself when it paired.
+        name: device?.name || declared.name,
+        seen: device !== undefined,
+        connected: device?.connected ?? false,
+        trusted: declared.trusted,
+        blocked: declared.blocked,
+      }
     })
-  }
-  return [...rows.values()].sort((left, right) => {
-    // Declared first, then by name, then by address: the devices an operator
-    // already trusts are the ones they came to the page for.
-    if (left.declared !== right.declared) return left.declared ? -1 : 1
-    return (left.name || left.address).localeCompare(right.name || right.address)
-  })
+    .sort((left, right) => (left.name || left.address).localeCompare(right.name || right.address))
+}
+
+/// `m:ss` of the seconds left until `expiresAt`, never below zero.
+export function remaining(expiresAt: number, now: number): string {
+  const seconds = Math.max(0, Math.round(expiresAt - now / 1000))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
