@@ -4,6 +4,7 @@ use micad_settings::{ProvisioningSettings, WifiClientSettings, WifiSettings};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Mutex;
 
+mod acs;
 mod apply;
 mod conflicts;
 mod dhcp;

@@ -212,7 +212,7 @@ const MAX_REPLY: usize = 64 * 1024;
 
 /// One request/reply exchange on wpa_supplicant's control socket for
 /// `interface`, blocking, under `timeout`.
-pub(super) fn wpa_query(
+pub(crate) fn wpa_query(
     control_dir: &Path,
     interface: &str,
     command: &str,

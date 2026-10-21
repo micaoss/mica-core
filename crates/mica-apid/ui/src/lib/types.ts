@@ -592,6 +592,7 @@ export interface ObservedNetworkState {
     running?: boolean
     /// Why the access point is not running: `disabled`, `client_mode`,
     /// `radio_blocked`, `country_unset`, `channel_invalid`, `driver_error`.
+    /// While it runs: `acs_failed`, on the country's first channel.
     reason?: string | null
     reasonDetail?: string
     entries?: {

@@ -744,7 +744,9 @@ pub fn observed_json(
 /// the role is off (`disabled`) or held by the station (`client_mode`), an
 /// rfkill switch blocks the radio (`radio_blocked`), no country is set
 /// (`country_unset`), or hostapd failed -- over its channel
-/// (`channel_invalid`) or otherwise (`driver_error`).
+/// (`channel_invalid`) or otherwise (`driver_error`). One reason is reported
+/// while it runs: hostapd could not choose the channel and the access point
+/// runs on the country's first instead (`acs_failed`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApDownReason {
     Disabled,
@@ -753,6 +755,7 @@ pub enum ApDownReason {
     CountryUnset,
     ChannelInvalid,
     DriverError,
+    AcsFailed,
 }
 
 impl ApDownReason {
@@ -765,6 +768,7 @@ impl ApDownReason {
             Self::CountryUnset => "country_unset",
             Self::ChannelInvalid => "channel_invalid",
             Self::DriverError => "driver_error",
+            Self::AcsFailed => "acs_failed",
         }
     }
 }
@@ -783,7 +787,9 @@ pub fn blames_channel(lines: &[String]) -> bool {
 /// `ap_state` is what the access-point reconciler last recorded, and
 /// `hostapd_lines` hostapd's newest log lines, read only when that record
 /// says the service failed. A role that is meant to run, is not running and
-/// has none of the causes above has `reason: null`: it is starting.
+/// has none of the causes above has `reason: null`: it is starting. A running
+/// one has `reason: null` too, unless the reconciler fell back from a failed
+/// channel selection (`acsFallback`).
 pub fn annotate_access_point(
     observed: &mut Value,
     wifi: &micad_settings::WifiSettings,
@@ -804,8 +810,11 @@ pub fn annotate_access_point(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let station_holds_radio = wifi.client.enabled && wifi.client.interface == ap.interface;
+    let acs_fallback = ap_state
+        .and_then(|state| state.get("acsFallback"))
+        .filter(|fallback| !fallback.is_null());
     let reason = if running {
-        None
+        acs_fallback.map(|_| ApDownReason::AcsFailed)
     } else if ap.mode == micad_settings::ApMode::Off {
         Some(if station_holds_radio {
             ApDownReason::ClientMode
@@ -832,6 +841,16 @@ pub fn annotate_access_point(
             .last()
             .cloned()
             .or_else(|| ap_state?.get("error")?.as_str().map(str::to_string)),
+        Some(ApDownReason::AcsFailed) => acs_fallback.map(|fallback| {
+            format!(
+                "{}; running on channel {}",
+                fallback
+                    .get("detail")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                fallback.get("channel").unwrap_or(&Value::Null)
+            )
+        }),
         _ => None,
     };
     if let Some(member) = observed

@@ -145,7 +145,8 @@ pub struct WifiApSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub psk: Option<String>,
     /// 2.4 GHz channel the access point uses; 0 lets it choose, by ACS where
-    /// hostapd can and otherwise the first channel the country allows.
+    /// hostapd can and otherwise, or once ACS has failed, the first channel
+    /// the country allows.
     pub channel: u8,
     /// Regulatory domain the radio is configured for.
     #[serde(rename = "countryCode")]

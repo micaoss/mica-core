@@ -13,6 +13,8 @@
 //!   for.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use micad_settings::{ApMode, ApSecurity, Settings, WifiApSettings};
@@ -71,6 +73,11 @@ const SSID_PREFIX: &str = "mica-";
 /// Characters of the device identifier a derived SSID carries; the same count
 /// the derived hostname uses.
 const SSID_ID_CHARS: usize = 8;
+/// How long hostapd is given to choose a channel itself. A 2.4 GHz survey is
+/// a few sweeps of a few hundred milliseconds per channel.
+const ACS_WAIT: Duration = Duration::from_secs(30);
+/// How often hostapd is asked whether it has.
+const ACS_POLL: Duration = Duration::from_millis(500);
 /// Highest 2.4 GHz channel number; `wifi.ap.channel` is documented as 2.4 GHz.
 const MAX_CHANNEL: u8 = 14;
 /// Shortest prefix length that still leaves a usable subnet.
@@ -131,6 +138,21 @@ pub struct WifiApReconciler<C: UnitControl, R: NetworkReload> {
     /// The root the device code and the product secret are read under;
     /// `None` reads neither.
     device_root: Option<PathBuf>,
+    /// Where hostapd is asked whether its channel selection finished; `None`
+    /// does not ask.
+    acs_watch: Option<AcsWatch>,
+    /// Why channel selection failed, once it has. Until micad restarts --
+    /// normally the next boot -- channel 0 is then the country's first
+    /// channel rather than another survey that fails the same way.
+    acs_failed: Mutex<Option<String>>,
+}
+
+/// hostapd's control-socket directory, and how long and how often it is
+/// asked whether channel selection finished.
+struct AcsWatch {
+    control_dir: PathBuf,
+    wait: Duration,
+    poll: Duration,
 }
 
 /// Where the access point's key comes from.
@@ -176,6 +198,8 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
             reloader,
             acs: false,
             device_root: None,
+            acs_watch: None,
+            acs_failed: Mutex::new(None),
         }
     }
 
@@ -190,6 +214,18 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
     #[must_use]
     pub fn with_device_root(mut self, root: PathBuf) -> Self {
         self.device_root = Some(root);
+        self
+    }
+
+    /// Ask hostapd on its control socket under `control_dir`, every `poll`
+    /// for up to `wait`, whether channel selection finished.
+    #[must_use]
+    pub fn with_acs_watch(mut self, control_dir: PathBuf, wait: Duration, poll: Duration) -> Self {
+        self.acs_watch = Some(AcsWatch {
+            control_dir,
+            wait,
+            poll,
+        });
         self
     }
 }
@@ -235,6 +271,7 @@ impl<C: UnitControl> WifiApReconciler<C, NoReload> {
         )
         .with_acs(production_acs())
         .with_device_root(PathBuf::from("/"))
+        .with_acs_watch(PathBuf::from(CONTROL_DIR), ACS_WAIT, ACS_POLL)
     }
 }
 
@@ -278,6 +315,7 @@ impl WifiApReconciler<Systemd, Networkd> {
         )
         .with_acs(production_acs())
         .with_device_root(PathBuf::from("/"))
+        .with_acs_watch(PathBuf::from(CONTROL_DIR), ACS_WAIT, ACS_POLL)
     }
 }
 
@@ -301,7 +339,64 @@ fn is_wifi_ap_managed(file_name: &str) -> bool {
     file_name.starts_with(NETWORKD_PREFIX) && file_name.ends_with(".network")
 }
 
+/// Wait for hostapd on `interface` to finish choosing a channel: `Ok` once
+/// it reports `state=ENABLED`, otherwise why not -- it gave up
+/// (`state=DISABLED`), or the wait ran out, which also covers a hostapd that
+/// exits on the failure and is restarted into the same survey.
+async fn await_acs(watch: &AcsWatch, interface: &str) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + watch.wait;
+    let mut last = "no answer on its control socket".to_string();
+    loop {
+        let dir = watch.control_dir.clone();
+        let name = interface.to_string();
+        let status = tokio::task::spawn_blocking(move || {
+            crate::network_state::wpa_query(
+                &dir,
+                &name,
+                "STATUS",
+                crate::network_state::WPA_TIMEOUT,
+            )
+        })
+        .await;
+        if let Ok(Ok(text)) = status {
+            let state = text
+                .lines()
+                .find_map(|line| line.strip_prefix("state="))
+                .unwrap_or_default();
+            match state {
+                "ENABLED" => return Ok(()),
+                "DISABLED" => {
+                    return Err("hostapd gave up choosing a channel (state DISABLED)".to_string());
+                }
+                _ => last = format!("state {state}"),
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "hostapd did not choose a channel within {} s ({last})",
+                watch.wait.as_secs()
+            ));
+        }
+        tokio::time::sleep(watch.poll).await;
+    }
+}
+
 impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
+    /// Why channel selection failed on this run of micad, if it has.
+    fn acs_failure(&self) -> Option<String> {
+        match self.acs_failed.lock() {
+            Ok(failed) => failed.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    fn record_acs_failure(&self, detail: &str) {
+        match self.acs_failed.lock() {
+            Ok(mut failed) => *failed = Some(detail.to_string()),
+            Err(poisoned) => *poisoned.into_inner() = Some(detail.to_string()),
+        }
+    }
+
     /// This device's code, if its board declares a source that has a value.
     /// A board that declares none is not worth a warning; one whose source
     /// has no value is.
@@ -538,6 +633,8 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
         // (`mode: off`) fail on every reconcile.
         let mut config_changed = false;
         let mut psk_source = None;
+        let mut rendered_with = None;
+        let acs = self.acs && self.acs_failure().is_none();
         if up {
             let ssid = ssid.as_deref().ok_or_else(|| {
                 anyhow!("wifi.ap.ssid is unset and this device has no identity to derive one from")
@@ -551,11 +648,12 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
                 }
             };
             let ap = WifiApSettings {
-                channel: resolve_channel(ap, self.acs),
+                channel: resolve_channel(ap, acs),
                 ..ap.clone()
             };
             let rendered = render_config(&ap, ssid, psk.as_deref())?;
             config_changed = write_config_if_changed(&config_path, &rendered, CONFIG_MODE)?;
+            rendered_with = Some((ssid.to_string(), psk));
         }
 
         // Global DNS stops the uplinks learning servers, so the clients are
@@ -577,6 +675,34 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
             self.reloader.reload().await?;
         }
         let unit_changed = self.apply_unit(&unit, up, config_changed).await?;
+
+        // hostapd choosing the channel can fail where the driver reports no
+        // survey data, and it then exits rather than fall back. An access
+        // point on channel 0 must not stay down for that: it is restarted on
+        // the country's first channel, and the failure is recorded.
+        if let (Some(watch), Some((ssid, psk))) = (&self.acs_watch, &rendered_with)
+            && acs
+            && ap.channel == 0
+            && (config_changed || unit_changed)
+            && let Err(detail) = await_acs(watch, &ap.interface).await
+        {
+            tracing::warn!(%detail, "automatic channel selection failed; using the country's first channel");
+            self.record_acs_failure(&detail);
+            let fallback = WifiApSettings {
+                channel: resolve_channel(ap, false),
+                ..ap.clone()
+            };
+            write_config_if_changed(
+                &config_path,
+                &render_config(&fallback, ssid, psk.as_deref())?,
+                CONFIG_MODE,
+            )?;
+            self.control.restart(&unit).await?;
+        }
+        let acs_fallback = (up && ap.channel == 0)
+            .then(|| self.acs_failure())
+            .flatten()
+            .map(|detail| json!({"channel": resolve_channel(ap, false), "detail": detail}));
 
         let access_point = if !up {
             AccessPoint::Stopped
@@ -604,6 +730,7 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
             "ssidSource": ssid_source,
             "pskSource": psk_source,
             "channel": ap.channel,
+            "acsFallback": acs_fallback,
             "countryCode": ap.country_code,
             "address": ap.address,
             "secured": ap.security != ApSecurity::Open,

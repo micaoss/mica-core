@@ -257,6 +257,16 @@ pub(super) fn the_access_point_says_why_it_is_not_running() {
     assert_eq!(observed["accessPoint"]["reason"], "channel_invalid");
     assert_eq!(observed["accessPoint"]["reasonDetail"], lines[1]);
 
+    // Running, but on the country's first channel after ACS failed.
+    let state = json!({"activeState": "active", "acsFallback": {"channel": 1, "detail": "hostapd gave up choosing a channel (state DISABLED)"}});
+    let mut observed = ap_observed(true, false);
+    annotate_access_point(&mut observed, &wifi(Always, false), Some(&state), &[]);
+    assert_eq!(reason(&observed), (&json!(true), &json!("acs_failed")));
+    assert_eq!(
+        observed["accessPoint"]["reasonDetail"],
+        "hostapd gave up choosing a channel (state DISABLED); running on channel 1"
+    );
+
     // Meant to run, not running and nothing explains it: starting.
     let mut observed = ap_observed(false, false);
     annotate_access_point(
