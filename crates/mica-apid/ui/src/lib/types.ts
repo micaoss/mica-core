@@ -225,6 +225,8 @@ export interface MqttOverview {
 export interface NetworkOverview {
   configured: Record<string, unknown>
   configuredCount: number
+  /// Named as `baseVersion`, a write replaces only the map this read returned.
+  version: string
   observed: {
     available: boolean
     interfaceCount: number

@@ -256,6 +256,7 @@ export const zhCN: Translation = {
       delete: '此接口将从设备上删除。',
       deleteBridge: '网桥被删除，其端口恢复为 DHCP。',
       description: '以下更改会一起发送到设备。如果设备停止响应，控制台会提供恢复之前配置的选项。',
+      moved: '应用期间设备上的配置已被修改。更改已放到新的配置上，请重新审阅后再应用。',
       refused: '设备拒绝了更改',
       refusedHere: '被拒绝',
       revert: '撤销',

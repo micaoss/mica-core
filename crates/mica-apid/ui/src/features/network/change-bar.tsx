@@ -133,7 +133,8 @@ function ReviewDialog({ data, onClose }: { data: NetworkData; onClose: () => voi
     try {
       // The device's map now, not the one this set was staged on: an entry it
       // changed meanwhile is a conflict, and peers added meanwhile are kept.
-      const fresh = (await api<NetworkOverview>('/api/v1/network')).configured as NetworkMap
+      const read = await api<NetworkOverview>('/api/v1/network')
+      const fresh = read.configured as NetworkMap
       const rebased = rebase(set, fresh)
       if (rebased.conflicts.length > 0) {
         syncChangeSet(data.hostname, fresh)
@@ -141,12 +142,20 @@ function ReviewDialog({ data, onClose }: { data: NetworkData; onClose: () => voi
         return
       }
       const body = withFreshPeers(rebased.set.staged, fresh)
-      const accepted = await api<TaskAccepted>('/api/v1/network', json('PUT', body))
+      // The read and the write are two requests: the version makes the
+      // write refuse a map that moved between them.
+      const accepted = await api<TaskAccepted>('/api/v1/network', json('PUT', { baseVersion: read.version, configured: body }))
       settleChangeSet(body, { taskId: accepted.taskId, previous: fresh, restoring: false })
       void queryClient.invalidateQueries({ queryKey: ['network'] })
       onClose()
     } catch (failure) {
       setPending(false)
+      if (failure instanceof ApiError && failure.code === 'version_conflict') {
+        const fresh = (await api<NetworkOverview>('/api/v1/network').catch(() => undefined))?.configured as NetworkMap | undefined
+        if (fresh) syncChangeSet(data.hostname, fresh)
+        setError(t('network.review.moved'))
+        return
+      }
       setError(failureDetail(failure, t('common.requestFailed')))
       if (failure instanceof ApiError) {
         const named = data.pending.find((change) => failure.path?.split('.').includes(change.name) || failure.message.includes(change.name))
@@ -231,7 +240,8 @@ function ApplyStrip({ data }: { data: NetworkData }) {
   const stage = applyStage(task.data, connection)
   const settled = stage === 'applied' || stage === 'failed'
   const restore = async () => {
-    const accepted = await api<TaskAccepted>('/api/v1/network', json('PUT', applying.previous))
+    const read = await api<NetworkOverview>('/api/v1/network')
+    const accepted = await api<TaskAccepted>('/api/v1/network', json('PUT', { baseVersion: read.version, configured: applying.previous }))
     settleChangeSet(applying.previous, { taskId: accepted.taskId, previous: applying.previous, restoring: true })
     void queryClient.invalidateQueries({ queryKey: ['network'] })
   }

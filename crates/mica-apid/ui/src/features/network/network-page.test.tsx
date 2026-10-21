@@ -79,8 +79,50 @@ describe('the network page', () => {
     await userEvent.click(apply)
 
     await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/network')).toBeTruthy())
-    expect(bodyOf(fetch, 'PUT', '/api/v1/network')).toEqual({ ...configured(), wg1: { kind: 'wireguard', static: { address: '10.2.0.1/24' }, wireguard: { listenPort: 51821, peers: [] } } })
+    expect(bodyOf(fetch, 'PUT', '/api/v1/network')).toEqual({ baseVersion: 'v1', configured: { ...configured(), wg1: { kind: 'wireguard', static: { address: '10.2.0.1/24' }, wireguard: { listenPort: 51821, peers: [] } } } })
     expect(await screen.findByText('The device reports the interfaces reconciled.')).toBeTruthy()
+  })
+
+  it('restores the previous map at the version it reads first when the apply fails', async () => {
+    let puts = 0
+    const fetch = stubFetch({
+      ...networkRoutes(),
+      'PUT /api/v1/network': () => { puts += 1; return jsonResponse({ taskId: `t${puts}` }) },
+      '/api/v1/tasks/t1': { id: 't1', operation: 'network', dotPath: 'network', source: 'api', status: 'finished', outcome: 'failed', message: 'wg1 did not come up', enqueuedAt: '', foldedCount: 0 },
+      '/api/v1/tasks/t2': { id: 't2', operation: 'network', dotPath: 'network', source: 'api', status: 'running', enqueuedAt: '', foldedCount: 0 },
+      '/api/v1/health': { apid: 'ok', micad: 'ok' },
+    })
+    open('wireguard')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stage' }))
+    const bar = await screen.findByRole('region', { name: 'Pending network changes' })
+    await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
+    const review = await screen.findByRole('dialog')
+    await userEvent.click(within(review).getByRole('switch'))
+    await userEvent.click(within(review).getByRole('button', { name: 'Apply 1 change' }))
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Restore previous configuration' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Restore previous configuration' }))
+    await waitFor(() => expect(puts).toBe(2))
+    const writes = fetch.mock.calls.filter(([input, init]) => String(input) === '/api/v1/network' && (init as RequestInit | undefined)?.method === 'PUT')
+    expect(JSON.parse(String((writes[1][1] as RequestInit).body))).toEqual({ baseVersion: 'v1', configured: configured() })
+  })
+
+  it('keeps the changes and says so when the map moved between the read and the write', async () => {
+    stubFetch({
+      ...networkRoutes(),
+      'PUT /api/v1/network': () => jsonResponse({ error: { code: 'version_conflict', message: 'the network map changed since it was read', path: 'network' } }, 409),
+    })
+    open('wireguard')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stage' }))
+    const bar = await screen.findByRole('region', { name: 'Pending network changes' })
+    await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
+    const review = await screen.findByRole('dialog')
+    await userEvent.click(within(review).getByRole('switch'))
+    await userEvent.click(within(review).getByRole('button', { name: 'Apply 1 change' }))
+    expect(await within(review).findByText(/changed while this was being applied/)).toBeTruthy()
+    expect(within(review).getByText('wg1')).toBeTruthy()
   })
 
   it('reports a change the device made underneath the staged edits instead of overwriting it', async () => {

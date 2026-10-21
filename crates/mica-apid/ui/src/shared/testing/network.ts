@@ -54,7 +54,7 @@ export function accessPoint(mode: 'off' | 'provisioning' | 'always' = 'off') {
 export function networkRoutes(map: Record<string, unknown> = configured(), status: ObservedNetworkState = observed()) {
   return {
     '/api/v1/meta': { api: 'v1', features: ['wifi', 'bluetooth'], init: 'systemd' },
-    '/api/v1/network': { configured: map, configuredCount: Object.keys(map).length, observed: { available: true, interfaceCount: 0, interfaces: [] } },
+    '/api/v1/network': { configured: map, configuredCount: Object.keys(map).length, version: 'v1', observed: { available: true, interfaceCount: 0, interfaces: [] } },
     '/api/v1/network/status': status,
     '/api/v1/settings/hostname': 'mica-bench',
     '/api/v1/dns': {

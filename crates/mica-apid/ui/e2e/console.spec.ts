@@ -86,7 +86,7 @@ test('stages an interface edit and applies it through the review dialog', async 
   await apply.click()
   const write = await request
   expect(new URL(write.url()).pathname).toBe('/api/v1/network')
-  expect(write.postDataJSON()).toMatchObject({ eth0: { dhcp: false, static: { address: '192.168.1.24/24' } }, wg0: { kind: 'wireguard' } })
+  expect(write.postDataJSON()).toMatchObject({ baseVersion: 'e2e-version', configured: { eth0: { dhcp: false, static: { address: '192.168.1.24/24' } }, wg0: { kind: 'wireguard' } } })
   await expect(page.getByText('The device reports the interfaces reconciled.')).toBeVisible()
 })
 
@@ -330,7 +330,7 @@ function benchPayload(path: string): unknown {
       wg0: { kind: 'wireguard', dhcp: false, static: { address: '10.10.0.2/24', dns: [] }, wireguard: { listenPort: 51820, peers: [PEER] } },
     },
     configuredCount: 3,
-    revision: 'e2e-revision',
+    version: 'e2e-version',
     observed: { available: true, interfaceCount: 0, interfaces: [] },
   }
   if (path === '/api/v1/dns') return {

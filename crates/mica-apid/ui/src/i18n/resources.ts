@@ -333,6 +333,7 @@ export const en = {
       delete: 'This interface is removed from the device.',
       deleteBridge: 'The bridge is removed; its ports get DHCP back.',
       description: 'Everything below is sent to the device together. If it stops answering, the console offers to restore the previous configuration.',
+      moved: 'The device\'s configuration changed while this was being applied. The changes were placed on the new configuration; review them and apply again.',
       refused: 'The device refused the change',
       refusedHere: 'Refused',
       revert: 'Revert',
