@@ -504,6 +504,9 @@ pub(super) fn interface_json(
     if let Some(wireguard) = links.wireguard.get(name) {
         root.insert("wireguard".to_string(), wireguard.clone());
     }
+    if let Some(adoption) = links.adoptions.get(name) {
+        root.insert("adoption".to_string(), adoption.clone());
+    }
     Value::Object(root)
 }
 

@@ -20,6 +20,7 @@ use serde_json::{Map, Value, json};
 
 use crate::openrc::Commands;
 
+mod adopt;
 mod capabilities;
 mod dns;
 mod json;
@@ -235,6 +236,9 @@ pub struct LinkEvidence {
     /// Each WireGuard link's `{available, peers}`, or why they could not be
     /// read.
     pub wireguard: BTreeMap<String, Value>,
+    /// Each link configured by a file that is not micad's: the entry that
+    /// keeps that configuration ([`adopt::adoption`]).
+    pub adoptions: BTreeMap<String, Value>,
 }
 
 /// Ask the kernel about the CAN and WireGuard links `describe` lists.
@@ -257,6 +261,12 @@ pub(crate) async fn observe_links(describe: Result<&Value, &str>) -> LinkEvidenc
         let Some(name) = link.get("Name").and_then(Value::as_str).map(str::to_string) else {
             continue;
         };
+        let unit = link.clone();
+        if let Ok(Some(adoption)) =
+            tokio::task::spawn_blocking(move || adopt::adoption(&unit)).await
+        {
+            evidence.adoptions.insert(name.clone(), adoption);
+        }
         let can = link.get("Type").and_then(Value::as_str) == Some("can");
         let wireguard = link.get("Kind").and_then(Value::as_str) == Some("wireguard");
         if can {

@@ -176,3 +176,100 @@ pub(super) async fn a_collision_between_entries_the_write_does_not_touch_is_not_
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(envelope(response).await["code"], "address_overlap");
 }
+
+/// A device whose `eth2` runs on the image's DHCP file and whose `eth3` runs
+/// on a file an entry cannot say.
+fn with_image_links(fake: &FakeSettings) {
+    fake.set_observed_network(json!({
+        "interfaces": { "available": true, "entries": [
+            { "name": "eth2", "adoption": {
+                "networkFile": "/etc/systemd/network/80-dhcp.network", "entry": { "dhcp": true } } },
+            { "name": "eth3", "adoption": {
+                "networkFile": "/etc/systemd/network/10-bond.network", "refused": "[Network] Bond=" } },
+        ] },
+    }));
+}
+
+fn vlan_on(parent: &str) -> serde_json::Value {
+    json!({ "kind": "vlan", "dhcp": false, "vlan": { "parent": parent, "id": 7 } })
+}
+
+// A VLAN on an interface the map does not declare takes the parent over
+// with the entry that keeps the image's configuration; a dry run says so.
+#[tokio::test]
+pub(super) async fn a_vlan_adopts_its_undeclared_parent() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    with_image_links(&fake);
+    let mut map = stored_network_map(&fake).await;
+    map["eth2.7"] = vlan_on("eth2");
+
+    let read = body_json(bearer(&router, "GET", NETWORK_MAP_PATH, &token).await).await;
+    let body = json!({ "baseVersion": read["version"], "configured": map });
+    let url = format!("{NETWORK_MAP_PATH}?dryRun=true");
+    let response = bearer_json(&router, "PUT", &url, &token, &body.to_string()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let answer = body_json(response).await;
+    assert_eq!(answer["adopted"], json!(["eth2"]));
+
+    let response = put_network_map(&router, &token, &map).await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        stored_network_map(&fake).await["eth2"],
+        json!({ "dhcp": true })
+    );
+}
+
+// The single-entry route writes the parent it adopts with the VLAN.
+#[tokio::test]
+pub(super) async fn a_vlan_written_alone_adopts_its_parent_too() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    with_image_links(&fake);
+
+    let response = bearer_json(
+        &router,
+        "PUT",
+        &iface_url("eth2.7"),
+        &token,
+        &vlan_on("eth2").to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let stored = stored_network_map(&fake).await;
+    assert_eq!(stored["eth2"], json!({ "dhcp": true }));
+    assert_eq!(stored["eth2.7"]["vlan"]["parent"], "eth2");
+}
+
+#[tokio::test]
+pub(super) async fn a_parent_whose_file_an_entry_cannot_say_is_refused() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    with_image_links(&fake);
+    let before = stored_network_map(&fake).await;
+    let mut map = before.clone();
+    map["eth3.7"] = vlan_on("eth3");
+
+    let error = refused(&router, &token, map).await;
+    assert_eq!(error["code"], "vlan_parent_unsupported");
+    assert_eq!(
+        error["params"],
+        json!({ "parent": "eth3", "reason": "[Network] Bond=" })
+    );
+    assert_eq!(
+        codes(&error),
+        [(
+            "eth3.7".into(),
+            "vlan.parent".into(),
+            "vlan_parent_unsupported".into()
+        )]
+    );
+
+    let response = bearer_json(
+        &router,
+        "PUT",
+        &iface_url("eth3.7"),
+        &token,
+        &vlan_on("eth3").to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(stored_network_map(&fake).await, before);
+}

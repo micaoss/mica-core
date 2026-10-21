@@ -27,8 +27,9 @@ pub(crate) struct StaticAddressing {
 /// The 802.1Q parameters of a VLAN interface.
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub(crate) struct VlanParameters {
-    /// Name of the `network` entry this VLAN sits on. **It must be a declared
-    /// entry**; a body naming one that is not is refused at 422.
+    /// Name of the `network` entry this VLAN sits on. A write naming a parent
+    /// it does not declare declares it with the entry that keeps the image's
+    /// configuration of that link, or is refused at 422.
     pub(super) parent: String,
     /// 802.1Q VLAN id.
     pub(super) id: u16,
@@ -340,6 +341,63 @@ pub(super) fn violations_refusal(
     )))
 }
 
+/// Declare each VLAN parent `entries` names but does not declare, with the
+/// entry that keeps what the image's own `.network` gives it (the device's
+/// `adoption` of that link), and answer the parents declared. A parent whose
+/// file holds what an entry cannot say is 422 `vlan_parent_unsupported`; one
+/// the device offers nothing for is left to `vlan_parent_invalid`.
+pub(super) async fn adopt_vlan_parents(
+    state: &AppState,
+    entries: &mut NetworkEntries,
+    path: &str,
+) -> Result<Vec<String>, Box<Response>> {
+    let parents: std::collections::BTreeMap<String, String> = entries
+        .iter()
+        .filter_map(|(iface, cfg)| Some((cfg.vlan.as_ref()?.parent.clone(), iface.clone())))
+        .filter(|(parent, _)| !entries.contains_key(parent))
+        .collect();
+    if parents.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Ok(observed) = state.api.get_observed_network().await else {
+        return Ok(Vec::new());
+    };
+    let links = observed
+        .pointer("/interfaces/entries")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut adopted = Vec::new();
+    let mut refused = Vec::new();
+    for (parent, child) in parents {
+        let Some(adoption) = links
+            .iter()
+            .find(|link| link.get("name").and_then(Value::as_str) == Some(parent.as_str()))
+            .and_then(|link| link.get("adoption"))
+        else {
+            continue;
+        };
+        if let Some(entry) = adoption.get("entry")
+            && let Ok(cfg) = serde_json::from_value::<IfaceSettings>(entry.clone())
+        {
+            entries.insert(parent.clone(), cfg);
+            adopted.push(parent);
+        } else if let Some(reason) = adoption.get("refused").and_then(Value::as_str) {
+            refused.push(NetworkViolation::new(
+                &child,
+                "vlan.parent",
+                "vlan_parent_unsupported",
+                serde_json::json!({ "parent": parent, "reason": reason }),
+                format!(
+                    "the default configuration of {parent} cannot be taken over by mica ({reason}); configure {parent} first"
+                ),
+            ));
+        }
+    }
+    violations_refusal(refused, path)?;
+    Ok(adopted)
+}
+
 /// `entries` refused by a relational rule ([`relational_violations`]).
 pub(super) fn relational_refusal(
     entries: &NetworkEntries,
@@ -515,7 +573,8 @@ pub(crate) struct NetworkAccepted {
 #[derive(serde::Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NetworkDryRun {
-    /// Interfaces the write would declare on the operator's behalf; none.
+    /// VLAN parents the write would declare on the operator's behalf, each
+    /// with the entry that keeps the image's configuration of that link.
     pub(super) adopted: Vec<String>,
     /// What the operator should know before writing; none.
     pub(super) warnings: Vec<String>,

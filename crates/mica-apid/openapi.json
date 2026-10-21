@@ -3079,7 +3079,7 @@
           "resources"
         ],
         "summary": "Replace the whole interface map, validated as one tree.",
-        "description": "The only way to make two interdependent entries legal in one step: adding a\nbridge and its ports through the per-interface route means declaring the\nports first, because a bridge naming an undeclared port is refused.\n\nThe body names the version `GET` answered: a map changed since then is\n**409** `version_conflict`, and so is any write while a network task has\nnot finished (`busy`). A map that does not validate is **422**: `code`,\n`message` and `params` are the first broken rule's, and `details` lists\nevery one by interface and field. Nothing is written in either case.\n`?dryRun=true` validates and answers what the write would change.",
+        "description": "The only way to make two interdependent entries legal in one step: adding a\nbridge and its ports through the per-interface route means declaring the\nports first, because a bridge naming an undeclared port is refused.\n\nThe body names the version `GET` answered: a map changed since then is\n**409** `version_conflict`, and so is any write while a network task has\nnot finished (`busy`). A map that does not validate is **422**: `code`,\n`message` and `params` are the first broken rule's, and `details` lists\nevery one by interface and field. Nothing is written in either case.\n`?dryRun=true` validates and answers what the write would change.\n\nA VLAN whose parent the map does not declare takes the parent over: the\nwrite declares it with the entry that keeps what the image's own\n`.network` gives the link, and a dry run lists it in `adopted`. A file\nholding what an entry cannot say is **422** `vlan_parent_unsupported`.",
         "operationId": "api_v1_network_write",
         "parameters": [
           {
@@ -3177,7 +3177,7 @@
             }
           },
           "422": {
-            "description": "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), an undeclared VLAN parent whose image configuration an entry cannot say (`vlan_parent_unsupported`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -10857,7 +10857,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Interfaces the write would declare on the operator's behalf; none."
+            "description": "VLAN parents the write would declare on the operator's behalf, each\nwith the entry that keeps the image's configuration of that link."
           },
           "diff": {
             "type": "array",
@@ -11886,7 +11886,7 @@
           },
           "parent": {
             "type": "string",
-            "description": "Name of the `network` entry this VLAN sits on. **It must be a declared\nentry**; a body naming one that is not is refused at 422."
+            "description": "Name of the `network` entry this VLAN sits on. A write naming a parent\nit does not declare declares it with the entry that keeps the image's\nconfiguration of that link, or is refused at 422."
           }
         }
       },

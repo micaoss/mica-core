@@ -92,6 +92,11 @@ pub(crate) async fn api_v1_network_read(
 /// `message` and `params` are the first broken rule's, and `details` lists
 /// every one by interface and field. Nothing is written in either case.
 /// `?dryRun=true` validates and answers what the write would change.
+///
+/// A VLAN whose parent the map does not declare takes the parent over: the
+/// write declares it with the entry that keeps what the image's own
+/// `.network` gives the link, and a dry run lists it in `adopted`. A file
+/// holding what an entry cannot say is **422** `vlan_parent_unsupported`.
 #[utoipa::path(
     put,
     path = V1_NETWORK_PATH,
@@ -106,7 +111,7 @@ pub(crate) async fn api_v1_network_read(
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 409, description = "`baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)", body = ApiError),
-        (status = 422, description = "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), an undeclared VLAN parent whose image configuration an entry cannot say (`vlan_parent_unsupported`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -171,6 +176,10 @@ pub(crate) async fn api_v1_network_write(
     // map rather than merging into it. The keys are checked as well as the
     // bodies: `Settings::set` checks a new `network` key itself, but only
     // after the write is built.
+    let adopted = match adopt_vlan_parents(&state, &mut entries, NETWORK_SETTINGS_PATH).await {
+        Ok(adopted) => adopted,
+        Err(response) => return *response,
+    };
     let carried: Vec<&str> = entries.keys().map(String::as_str).collect();
     if let Err(response) = map_refusal(&entries, &carried, NETWORK_SETTINGS_PATH) {
         return *response;
@@ -181,7 +190,7 @@ pub(crate) async fn api_v1_network_write(
         return api_response(
             StatusCode::OK,
             NetworkDryRun {
-                adopted: Vec::new(),
+                adopted,
                 warnings: Vec::new(),
                 diff: network_diff(&current, &entries),
             },
@@ -264,17 +273,26 @@ pub(crate) async fn api_v1_network_iface_write(
     // not this request's fault and must not make an edit to a different
     // interface fail.
     candidate.insert(iface.clone(), cfg.clone());
-    if let Err(response) = map_refusal(&candidate, &[iface.as_str()], &path) {
-        return *response;
-    }
-    // The entry's own dot-path and not the whole map, so a concurrent edit of
-    // a different interface is not lost. Infallible: `IfaceSettings` is a
-    // struct of scalars, strings and vectors with no map keys to collide.
-    let value = match encode(&cfg) {
-        Ok(value) => value,
+    let adopted = match adopt_vlan_parents(&state, &mut candidate, &path).await {
+        Ok(adopted) => adopted,
         Err(response) => return *response,
     };
-    match state.api.set_settings(&path, &value).await {
+    let mut carried = vec![iface.as_str()];
+    carried.extend(adopted.iter().map(String::as_str));
+    if let Err(response) = map_refusal(&candidate, &carried, &path) {
+        return *response;
+    }
+    // The entries' own dot-paths and not the whole map, so a concurrent edit
+    // of a different interface is not lost. Infallible: `IfaceSettings` is a
+    // struct of scalars, strings and vectors with no map keys to collide.
+    let mut writes = Vec::with_capacity(carried.len());
+    for name in carried {
+        match encode(&candidate[name]) {
+            Ok(value) => writes.push((iface_settings_path(name), value)),
+            Err(response) => return *response,
+        }
+    }
+    match state.api.set_settings_many(&writes).await {
         Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
         Err(err) => bus_api_error(&err, Some(&path)),
     }

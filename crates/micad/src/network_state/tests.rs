@@ -1,6 +1,7 @@
 use super::*;
 use serde_json::json;
 
+mod adoption;
 mod capabilities;
 mod describe;
 mod dns_test;
