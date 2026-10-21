@@ -222,7 +222,9 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
 
     async fn apply(&self, settings: &Settings) -> Result<serde_json::Value> {
         let wanted = &settings.bluetooth;
-        if !wanted.enabled {
+        // A provisioning window powers the adapter even when Bluetooth is
+        // switched off, and gives it back when it closes.
+        if !wanted.enabled && !crate::ble_provisioning::radio_held() {
             // mica-bled first: it is bluetoothd's client.
             let bled = self.bled_off().await;
             // Stopped, not disabled: the unit ships enabled with the package
@@ -272,7 +274,11 @@ impl<C: UnitControl> Reconciler for BluetoothReconciler<C> {
             self.adapter.set_alias(&alias).await?;
         }
         let (adjusted, removed) = self.reconcile_devices(settings).await;
-        let bled = self.bled_on(settings).await;
+        let bled = if wanted.enabled {
+            self.bled_on(settings).await
+        } else {
+            self.bled_off().await
+        };
 
         Ok(serde_json::json!({
             "outcome": "applied",

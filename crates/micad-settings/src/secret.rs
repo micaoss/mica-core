@@ -17,6 +17,22 @@ pub fn random_bytes<const N: usize>() -> [u8; N] {
     bytes
 }
 
+/// Characters of a generated access-point key: 80 bits.
+const GENERATED_AP_PSK_CHARS: usize = 16;
+/// The alphabet a generated key is drawn from, the device code's: no `0`,
+/// `O`, `1` or `I` to misread off a screen. 32 divides 256, so a byte folds
+/// into it without bias.
+const AP_PSK_ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/// A fresh access-point key, as a claim that names none sets it.
+#[must_use]
+pub fn generate_ap_psk() -> String {
+    random_bytes::<GENERATED_AP_PSK_CHARS>()
+        .iter()
+        .map(|byte| char::from(AP_PSK_ALPHABET[usize::from(byte % 32)]))
+        .collect()
+}
+
 /// Hash `password` with Argon2id default parameters into a PHC string.
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     Ok(Argon2::default()

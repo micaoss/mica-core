@@ -35,6 +35,7 @@ mod errors;
 mod interface;
 mod operations;
 mod power;
+mod provisioning;
 mod served;
 
 pub use errors::*;

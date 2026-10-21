@@ -70,26 +70,6 @@ pub(crate) struct SetupResult {
     pub(super) ap_psk: Option<String>,
 }
 
-/// Characters of a generated access-point key: 80 bits.
-const GENERATED_AP_PSK_CHARS: usize = 16;
-/// The alphabet a generated key is drawn from, the device code's: no `0`,
-/// `O`, `1` or `I` to misread off a screen. 32 divides 256, so a byte folds
-/// into it without bias.
-const AP_PSK_ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-
-/// A fresh access-point key from the system CSPRNG.
-fn generate_ap_psk() -> anyhow::Result<String> {
-    use aws_lc_rs::rand::{SecureRandom, SystemRandom};
-    let mut bytes = [0u8; GENERATED_AP_PSK_CHARS];
-    SystemRandom::new()
-        .fill(&mut bytes)
-        .map_err(|_| anyhow::anyhow!("the system random source failed"))?;
-    Ok(bytes
-        .iter()
-        .map(|byte| char::from(AP_PSK_ALPHABET[usize::from(byte % 32)]))
-        .collect())
-}
-
 // The write order fails safe: nothing before `access.webAdmin` takes the
 // device out of setup mode, so a failure at any point leaves the wizard
 // reachable. The browser wizard writes in a different order and is not changed
@@ -281,23 +261,7 @@ pub(crate) async fn api_v1_setup(
         }
     };
 
-    let generated_ap_psk = match (wifi, &request.ap_psk) {
-        (true, None) => match generate_ap_psk() {
-            Ok(psk) => Some(psk),
-            Err(err) => {
-                tracing::error!(error = %err, "access-point key generation failed");
-                return api_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    ApiError::apid(
-                        "hash_failed",
-                        "no access-point key could be generated; nothing was written".to_string(),
-                    )
-                    .at(AP_PSK_PATH),
-                );
-            }
-        },
-        _ => None,
-    };
+    let generated_ap_psk = (wifi && request.ap_psk.is_none()).then(micad_settings::generate_ap_psk);
 
     // The writes. `hostname` and `network` come first and are their own calls:
     // neither takes the device out of the unclaimed state, so a failure in

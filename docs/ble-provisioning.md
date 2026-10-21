@@ -53,7 +53,8 @@ and an authentication mode:
 - Writes are write requests (with response). The page subscribes to `session` and `event`
   notifications before its first write.
 - One phone at a time: while a phone is connected the device stops advertising, and a second
-  central that connects anyway gets `busy` to every `session` message.
+  central that connects anyway has every read and write refused with `org.bluez.Error.InProgress`
+  (an ATT error, a rejected promise on the page), which the page reports as busy.
 
 ### `info`
 
@@ -104,7 +105,6 @@ Any `session` message may be answered by `{"t":"error","reason":"…"}`:
 
 | `reason` | Meaning |
 | --- | --- |
-| `busy` | another phone holds the session |
 | `unsupported_auth` | `auth` in `start` is not the device's current mode |
 | `password_unavailable` | no verifier exists yet (see `info.auth`) |
 | `locked` | too many failures; also has `retryAfter`, in seconds. The device stops advertising until then |

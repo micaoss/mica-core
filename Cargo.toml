@@ -32,7 +32,7 @@ thiserror = "2"
 anyhow = "1"
 async-trait = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }
-zbus = { version = "6", default-features = false, features = ["tokio", "proxy", "service", "tracing"] }
+zbus = { version = "6", default-features = false, features = ["tokio", "proxy", "service", "object-manager", "tracing"] }
 tracing = "0.1"
 # env-filter, so RUST_LOG still works. It pulls in regex (~1 MB in the
 # binary), and that is the right trade on a device with no shell and no

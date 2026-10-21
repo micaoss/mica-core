@@ -179,6 +179,8 @@ impl MicadService {
                 sender_of(&header),
             )
             .await;
+        // A phone provisioning the unclaimed device is told and let go.
+        self.provisioning.claimed_elsewhere();
         // The claim landed; a verifier that could not be made is made at the
         // next login.
         if let Err(err) = self.provisioning.password_set(password) {

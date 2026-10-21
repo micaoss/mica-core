@@ -308,6 +308,7 @@ async fn serve() -> anyhow::Result<()> {
     state.insert("meta".to_string(), meta.to_json());
 
     let mut pairing_agent: Option<Arc<bluetooth::Agent>> = None;
+    let mut ble_provisioning: Option<Arc<ble_provisioning::Provisioning>> = None;
 
     let mut service = bus::MicadService::new(
         store,
@@ -362,10 +363,12 @@ async fn serve() -> anyhow::Result<()> {
             let agent = Arc::new(bluetooth::Agent::default());
             pairing_agent = Some(Arc::clone(&agent));
             service = service.with_bluetooth(Arc::new(bluetooth::BlueZ), Arc::clone(&agent));
-            service = service.with_ble_provisioning(Arc::new(ble_provisioning::Provisioning::new(
+            let provisioning = Arc::new(ble_provisioning::Provisioning::new(
                 ble_provisioning::store::Store::new(&state_dir_for(&settings_path)),
                 Some(micad_settings::audit_ring_dir()),
-            )));
+            ));
+            ble_provisioning = Some(Arc::clone(&provisioning));
+            service = service.with_ble_provisioning(provisioning);
         }
         // Containers are the engine's the product carries, on either init:
         // mica-containerd's verbs and reads, its Compose check and podman for
@@ -443,6 +446,26 @@ async fn serve() -> anyhow::Result<()> {
             // Not once: bluetoothd starts when the settings turn Bluetooth on,
             // and forgets its agents whenever it restarts.
             tokio::spawn(bluetooth::keep_agent_registered(connection.clone(), agent));
+        }
+    }
+    // BLE provisioning: its GATT objects on the same connection, and the
+    // engine behind them, which reads and writes through the served service.
+    if let Some(provisioning) = ble_provisioning {
+        let service_ref = connection
+            .object_server()
+            .interface::<_, bus::MicadService>(bus::OBJECT_PATH)
+            .await
+            .context("look up served MicadService")?;
+        let service_ref = Arc::new(service_ref);
+        if let Err(err) = ble_provisioning::bluez::start(
+            &connection,
+            Arc::clone(&service_ref) as _,
+            service_ref as _,
+            provisioning,
+        )
+        .await
+        {
+            tracing::warn!(error = %err, "BLE provisioning could not start");
         }
     }
     // The service scan, started before the well-known name is claimed so that

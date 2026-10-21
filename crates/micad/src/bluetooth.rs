@@ -253,7 +253,9 @@ impl BlueZ {
     }
 
     /// The first adapter path in the tree, or the reason there is none.
-    async fn adapter_path(connection: &zbus::Connection) -> Result<zbus::OwnedObjectPath> {
+    pub(crate) async fn adapter_path(
+        connection: &zbus::Connection,
+    ) -> Result<zbus::OwnedObjectPath> {
         let objects = Self::objects(connection).await?;
         // Sorted by the path's own text: `OwnedObjectPath` has no ordering,
         // and "the first adapter" has to mean the same one on every pass or a

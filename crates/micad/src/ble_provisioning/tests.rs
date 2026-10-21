@@ -1,5 +1,6 @@
 //! The RFC 9383 vector and the vectors of `docs/ble-provisioning.md`.
 
+mod bluez;
 mod engine;
 mod store;
 mod window;

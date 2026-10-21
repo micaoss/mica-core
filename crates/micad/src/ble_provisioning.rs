@@ -1,6 +1,7 @@
 //! BLE provisioning, protocol 1 (`docs/ble-provisioning.md`): a phone sends
 //! the Wi-Fi network to join over BLE and, on an unclaimed device, claims it.
 
+pub mod bluez;
 pub mod channel;
 pub mod engine;
 pub mod runtime;
@@ -25,6 +26,21 @@ pub const COMMAND_UUID: &str = "a7f50004-aa05-4fbe-ae8a-39652ca94ed5";
 pub const EVENT_UUID: &str = "a7f50005-aa05-4fbe-ae8a-39652ca94ed5";
 
 pub use runtime::Provisioning;
+
+/// Whether a provisioning window holds the radio: the Bluetooth reconciler
+/// keeps the adapter running for it even when Bluetooth is switched off.
+static RADIO_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// See [`RADIO_HELD`].
+#[must_use]
+pub fn radio_held() -> bool {
+    RADIO_HELD.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// See [`RADIO_HELD`].
+pub fn set_radio_held(held: bool) {
+    RADIO_HELD.store(held, std::sync::atomic::Ordering::SeqCst);
+}
 
 #[cfg(test)]
 mod tests;
