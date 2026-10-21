@@ -66,6 +66,40 @@ pub(super) async fn the_access_point_reads_redacted_and_keeps_its_key_through_a_
     );
 }
 
+// Security, pool and lease are stored as sent.
+#[tokio::test]
+pub(super) async fn the_access_point_takes_its_security_pool_and_lease() {
+    let (router, fake) = test_app(ap_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_AP_API,
+        json!({
+            "mode": "always",
+            "interface": "wlan0",
+            "channel": 6,
+            "countryCode": "DE",
+            "address": "192.168.4.1/24",
+            "holdDownSeconds": 120,
+            "graceSeconds": 60,
+            "security": "wpa2-wpa3",
+            "pool": { "offset": 100, "size": 50 },
+            "leaseSeconds": 3600,
+        }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let stored = fake.get_settings("wifi.ap").await.unwrap();
+    assert_eq!(stored["security"], json!("wpa2-wpa3"));
+    assert_eq!(stored["pool"], json!({ "offset": 100, "size": 50 }));
+    assert_eq!(stored["leaseSeconds"], json!(3600));
+}
+
 // The refusals: a mode that is not one of the three, an interface that is not
 // one, an address that is not a network, and the sentinel written back.
 #[tokio::test]
@@ -85,6 +119,9 @@ pub(super) async fn an_access_point_the_device_would_refuse_is_refused_here() {
         json!({ "address": "192.168.4.1" }),
         json!({ "psk": "<redacted>" }),
         json!({ "psk": "short" }),
+        json!({ "security": "wep" }),
+        json!({ "pool": { "offset": 1, "size": 10 } }),
+        json!({ "leaseSeconds": 30 }),
     ] {
         let (router, fake) = test_app(ap_tree());
         let (cookie, csrf) = mqtt_session(&router).await;

@@ -334,3 +334,27 @@ fn a_service_is_written_by_its_quoted_name_and_checked() {
             .contains("[Install]")
     );
 }
+
+#[test]
+fn an_access_point_pool_stays_between_its_own_address_and_the_broadcast() {
+    let with = |offset, size, lease| WifiApSettings {
+        address: "192.168.4.1/24".to_string(),
+        pool: Some(ApPool { offset, size }),
+        lease_seconds: lease,
+        ..WifiApSettings::default()
+    };
+    assert!(validate_ap_pool(&with(2, 253, Some(60))).is_ok());
+    assert!(validate_ap_pool(&with(2, 254, None)).is_err());
+    assert!(validate_ap_pool(&with(1, 10, None)).is_err());
+    assert!(validate_ap_pool(&with(0, 1, None)).is_err());
+    assert!(validate_ap_pool(&with(10, 0, None)).is_err());
+    assert!(validate_ap_pool(&with(10, 10, Some(59))).is_err());
+    let security: ApSecurity = serde_json::from_value(serde_json::json!("wpa2-wpa3")).unwrap();
+    assert_eq!(security, ApSecurity::Wpa2Wpa3);
+    assert_eq!(
+        serde_json::to_value(WifiApSettings::default())
+            .unwrap()
+            .get("security"),
+        None
+    );
+}

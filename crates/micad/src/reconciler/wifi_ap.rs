@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
-use micad_settings::{ApMode, Settings, WifiApSettings};
+use micad_settings::{ApMode, ApSecurity, Settings, WifiApSettings};
 use serde_json::json;
 
 use super::Reconciler;
@@ -288,7 +288,13 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
         let udhcpd = &self.network_dir;
         let mut changed = write_config_if_changed(
             udhcpd,
-            &render_udhcpd(&ap.interface, &ap.address, OPENRC_UDHCPD_PID)?,
+            &render_udhcpd(
+                &ap.interface,
+                &ap.address,
+                ap.pool,
+                ap.lease_seconds,
+                OPENRC_UDHCPD_PID,
+            )?,
             0o644,
         )?;
         let (host, prefix) = parse_cidr(&ap.address)?;
@@ -309,12 +315,8 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
     /// Render the networkd unit for `interface` when the access point is meant
     /// to be up, remove every unit of this reconciler's that is not the wanted
     /// one, and report the wanted name plus whether anything changed.
-    fn apply_networkd(
-        &self,
-        interface: &str,
-        address: &str,
-        up: bool,
-    ) -> Result<(Option<String>, bool)> {
+    fn apply_networkd(&self, ap: &WifiApSettings, up: bool) -> Result<(Option<String>, bool)> {
+        let interface = ap.interface.as_str();
         std::fs::create_dir_all(&self.network_dir)
             .with_context(|| format!("create {}", self.network_dir.display()))?;
 
@@ -322,7 +324,7 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
         let mut changed = false;
         if let Some(name) = &wanted {
             let path = self.network_dir.join(name);
-            let rendered = render_networkd(interface, address)?;
+            let rendered = render_networkd(interface, &ap.address, ap.pool, ap.lease_seconds)?;
             if std::fs::read_to_string(&path).ok() != Some(rendered.clone()) {
                 std::fs::write(&path, &rendered)
                     .with_context(|| format!("render {}", path.display()))?;
@@ -436,8 +438,11 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
             let ssid = ssid.as_deref().ok_or_else(|| {
                 anyhow!("wifi.ap.ssid is unset and this device has no identity to derive one from")
             })?;
-            let psk = self.resolve_psk(ap)?;
-            let rendered = render_config(ap, ssid, &psk)?;
+            let psk = match ap.security {
+                ApSecurity::Open => None,
+                _ => Some(self.resolve_psk(ap)?),
+            };
+            let rendered = render_config(ap, ssid, psk.as_deref())?;
             config_changed = write_config_if_changed(&config_path, &rendered, CONFIG_MODE)?;
         }
 
@@ -447,7 +452,7 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
                 (None, false)
             }
             Some(_) => (None, false),
-            None => self.apply_networkd(&ap.interface, &ap.address, up)?,
+            None => self.apply_networkd(ap, up)?,
         };
         if networkd_changed {
             self.reloader.reload().await?;
@@ -480,7 +485,8 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
             "channel": ap.channel,
             "countryCode": ap.country_code,
             "address": ap.address,
-            "secured": true,
+            "secured": ap.security != ApSecurity::Open,
+            "security": ap.security,
             "config": config_path.display().to_string(),
             "networkdUnit": networkd_unit,
             "unit": unit,

@@ -32,7 +32,7 @@ pub(super) fn the_dhcp_pool_is_derived_from_the_access_point_address() {
         ),
     ] {
         assert_eq!(
-            render_networkd("wlan0", address).unwrap(),
+            render_networkd("wlan0", address, None, None).unwrap(),
             expected,
             "pool for {address}"
         );
@@ -75,7 +75,7 @@ pub(super) fn an_address_that_cannot_carry_a_pool_is_rejected() {
         "192.168.4.1/24\nEvil=1", // an injection attempt
     ] {
         assert!(
-            render_networkd("wlan0", bad).is_err(),
+            render_networkd("wlan0", bad, None, None).is_err(),
             "{bad:?} was accepted as an access-point address"
         );
     }
@@ -100,3 +100,27 @@ pub(super) async fn an_unusable_address_stops_the_apply_before_the_unit_is_start
 }
 
 // ---- what apply writes ------------------------------------------------
+
+#[test]
+pub(super) fn a_declared_pool_and_lease_replace_the_derived_ones() {
+    let pool = micad_settings::ApPool {
+        offset: 100,
+        size: 50,
+    };
+    assert_eq!(
+        render_networkd("wlan0", "192.168.4.1/24", Some(pool), Some(3600)).unwrap(),
+        "[Match]\nName=wlan0\n\n[Network]\nAddress=192.168.4.1/24\nDHCPServer=yes\n\n\
+         [DHCPServer]\nPoolOffset=100\nPoolSize=50\nDefaultLeaseTimeSec=3600\n"
+    );
+    // The access point's own address is never handed out.
+    let own = micad_settings::ApPool {
+        offset: 1,
+        size: 10,
+    };
+    assert!(render_networkd("wlan0", "192.168.4.1/24", Some(own), None).is_err());
+    let past = micad_settings::ApPool {
+        offset: 200,
+        size: 56,
+    };
+    assert!(render_networkd("wlan0", "192.168.4.1/24", Some(past), None).is_err());
+}

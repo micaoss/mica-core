@@ -6,7 +6,7 @@
 //! the two cannot disagree about what a declaration is.
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -133,6 +133,13 @@ pub fn validate_peers(iface: &str, peers: &[WireguardPeer]) -> Result<(), String
         }
     }
     Ok(())
+}
+
+/// The IPv4 address and prefix length of `cidr`, when it is IPv4 CIDR.
+pub(crate) fn ipv4_cidr(cidr: &str) -> Option<(Ipv4Addr, u8)> {
+    let (addr, prefix) = cidr.split_once('/')?;
+    let prefix = prefix.parse::<u8>().ok().filter(|prefix| *prefix <= 32)?;
+    Some((addr.parse().ok()?, prefix))
 }
 
 /// The highest nominal CAN bit rate, in bit/s.

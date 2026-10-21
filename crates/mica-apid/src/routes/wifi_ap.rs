@@ -35,6 +35,30 @@ pub(crate) struct WifiAccessPoint {
     pub(super) hold_down_seconds: u32,
     /// Seconds it stays up after an uplink returns.
     pub(super) grace_seconds: u32,
+    /// `wpa2-psk`, `wpa2-wpa3` (WPA3 beside WPA2, which needs a passphrase
+    /// rather than a raw PMK) or `open`; absent is `wpa2-psk`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) security: Option<String>,
+    /// The DHCP pool, as an offset into the subnet of `address` and a count;
+    /// absent is every address after the access point's own. It holds at
+    /// least one address and neither the access point's own, the subnet
+    /// address nor the broadcast address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) pool: Option<AccessPointPool>,
+    /// The DHCP lease time in seconds, at least 60; absent leaves the DHCP
+    /// server's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) lease_seconds: Option<u32>,
+}
+
+/// The access point's DHCP pool.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AccessPointPool {
+    /// The first address handed out, as an offset from the subnet address.
+    pub(super) offset: u32,
+    /// How many addresses the pool holds.
+    pub(super) size: u32,
 }
 
 /// Read the access-point configuration, with its key redacted.
@@ -81,7 +105,7 @@ pub(crate) async fn api_v1_wifi_ap_read(
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
-        (status = 422, description = "The body is not this shape, the mode is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, or the body carries the redaction sentinel (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, the mode or the security is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, the pool or the lease is one the DHCP server cannot serve, or the body carries the redaction sentinel (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "The stored subtree could not be read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -153,6 +177,21 @@ pub(crate) async fn api_v1_wifi_ap_write(
                 "the access-point address is IPv4 CIDR notation, e.g. 192.168.4.1/24".to_string(),
             )
             .at(WIFI_AP_PATH),
+        );
+    }
+    // The model's own rules for what this struct carries as plain values: the
+    // security name and the pool against the address.
+    let value = match encode(&requested) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
+    if let Err(message) = serde_json::from_value::<micad_settings::WifiApSettings>(value)
+        .map_err(|err| err.to_string())
+        .and_then(|ap| micad_settings::validate_ap_pool(&ap))
+    {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid("validation_failed", message).at(WIFI_AP_PATH),
         );
     }
     // The stored key is kept when the body sends none. Read from the tree and

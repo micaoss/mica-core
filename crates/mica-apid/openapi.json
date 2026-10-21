@@ -7680,7 +7680,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, the mode is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, or the body carries the redaction sentinel (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "The body is not this shape, the mode or the security is not one of the three, the interface is not an interface name, the key is outside IEEE 802.11i's bounds, the address is not IPv4 CIDR notation, the pool or the lease is one the DHCP server cannot serve, or the body carries the redaction sentinel (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -8422,6 +8422,29 @@
   },
   "components": {
     "schemas": {
+      "AccessPointPool": {
+        "type": "object",
+        "description": "The access point's DHCP pool.",
+        "required": [
+          "offset",
+          "size"
+        ],
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The first address handed out, as an offset from the subnet address.",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many addresses the pool holds.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "ActivateUiRequest": {
         "type": "object",
         "required": [
@@ -10418,9 +10441,29 @@
             "type": "string",
             "description": "The wireless interface it runs on."
           },
+          "leaseSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The DHCP lease time in seconds, at least 60; absent leaves the DHCP\nserver's default.",
+            "minimum": 0
+          },
           "mode": {
             "type": "string",
             "description": "`off`, `provisioning` (only while no uplink works) or `always`."
+          },
+          "pool": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccessPointPool",
+                "description": "The DHCP pool, as an offset into the subnet of `address` and a count;\nabsent is every address after the access point's own. It holds at\nleast one address and neither the access point's own, the subnet\naddress nor the broadcast address."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "psk": {
             "type": [
@@ -10428,6 +10471,13 @@
               "null"
             ],
             "description": "The pre-shared key. **Read as `<redacted>`**; absent on a write keeps\nthe stored one, and absent on a device that never had one derives it\nfrom the device credential."
+          },
+          "security": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`wpa2-psk`, `wpa2-wpa3` (WPA3 beside WPA2, which needs a passphrase\nrather than a raw PMK) or `open`; absent is `wpa2-psk`."
           },
           "ssid": {
             "type": [

@@ -3,9 +3,34 @@
 use super::*;
 
 #[test]
+pub(super) fn wpa2_wpa3_offers_sae_with_protected_frames_and_open_carries_no_key() {
+    let mixed = WifiApSettings {
+        security: micad_settings::ApSecurity::Wpa2Wpa3,
+        ..lab_ap()
+    };
+    let rendered = render_config(&mixed, "mica-lab", Some("labsecret1")).unwrap();
+    assert!(
+        rendered.contains("wpa=2\nwpa_key_mgmt=WPA-PSK SAE\nieee80211w=1\nrsn_pairwise=CCMP\n"),
+        "{rendered}"
+    );
+    // SAE cannot run on a raw PMK.
+    let pmk = "a".repeat(64);
+    assert!(render_config(&mixed, "mica-lab", Some(&pmk)).is_err());
+
+    let open = WifiApSettings {
+        security: micad_settings::ApSecurity::Open,
+        ..lab_ap()
+    };
+    let rendered = render_config(&open, "mica-lab", None).unwrap();
+    assert!(!rendered.contains("wpa"), "{rendered}");
+    assert!(!rendered.contains("labsecret1"), "{rendered}");
+    assert!(render_config(&lab_ap(), "mica-lab", None).is_err());
+}
+
+#[test]
 pub(super) fn the_render_matches_the_golden_file() {
     assert_eq!(
-        render_config(&lab_ap(), "mica-lab", "labsecret1").unwrap(),
+        render_config(&lab_ap(), "mica-lab", Some("labsecret1")).unwrap(),
         GOLDEN_CONFIG
     );
 }
@@ -14,14 +39,14 @@ pub(super) fn the_render_matches_the_golden_file() {
 pub(super) fn the_render_is_deterministic() {
     let ap = lab_ap();
     assert_eq!(
-        render_config(&ap, "mica-lab", "labsecret1").unwrap(),
-        render_config(&ap.clone(), "mica-lab", "labsecret1").unwrap()
+        render_config(&ap, "mica-lab", Some("labsecret1")).unwrap(),
+        render_config(&ap.clone(), "mica-lab", Some("labsecret1")).unwrap()
     );
 }
 
 #[test]
 pub(super) fn the_render_is_wpa2_psk_and_never_open() {
-    let rendered = render_config(&lab_ap(), "mica-lab", "labsecret1").unwrap();
+    let rendered = render_config(&lab_ap(), "mica-lab", Some("labsecret1")).unwrap();
 
     for expected in [
         "wpa=2\n",
@@ -42,7 +67,7 @@ pub(super) fn the_render_is_wpa2_psk_and_never_open() {
 
 #[test]
 pub(super) fn the_country_code_is_emitted_and_advertised() {
-    let rendered = render_config(&lab_ap(), "mica-lab", "labsecret1").unwrap();
+    let rendered = render_config(&lab_ap(), "mica-lab", Some("labsecret1")).unwrap();
 
     assert!(rendered.contains("country_code=DE\n"), "{rendered}");
     assert!(
@@ -75,7 +100,7 @@ pub(super) fn a_channel_outside_the_two_point_four_gigahertz_band_is_rejected() 
             ..lab_ap()
         };
         assert!(
-            render_config(&ap, "mica-lab", "labsecret1").is_err(),
+            render_config(&ap, "mica-lab", Some("labsecret1")).is_err(),
             "channel {bad} was accepted"
         );
     }
@@ -84,7 +109,7 @@ pub(super) fn a_channel_outside_the_two_point_four_gigahertz_band_is_rejected() 
             channel: good,
             ..lab_ap()
         };
-        let rendered = render_config(&ap, "mica-lab", "labsecret1").unwrap();
+        let rendered = render_config(&ap, "mica-lab", Some("labsecret1")).unwrap();
         assert!(
             rendered.contains(&format!("channel={good}\n")),
             "{rendered}"
@@ -98,7 +123,7 @@ pub(super) fn a_hostile_ssid_cannot_inject_configuration() {
     // — the entire escape, because hostapd has no quoting to break out of.
     let hostile = "evil\nssid=pwned\nwpa=0\n#";
 
-    let rendered = render_config(&lab_ap(), hostile, "labsecret1").unwrap();
+    let rendered = render_config(&lab_ap(), hostile, Some("labsecret1")).unwrap();
 
     assert!(
         !rendered.contains("pwned"),
@@ -142,7 +167,7 @@ pub(super) fn every_unrepresentable_ssid_goes_to_hex_and_plain_ones_stay_readabl
         " leading",
         "trailing ",
     ] {
-        let rendered = render_config(&lab_ap(), hostile, "labsecret1").unwrap();
+        let rendered = render_config(&lab_ap(), hostile, Some("labsecret1")).unwrap();
         assert!(
             rendered.contains(&format!("ssid2={}\n", hex::encode(hostile.as_bytes()))),
             "{hostile:?} must be hex-encoded: {rendered}"
@@ -159,7 +184,7 @@ pub(super) fn every_unrepresentable_ssid_goes_to_hex_and_plain_ones_stay_readabl
         "with'quote",
         "a.b:c_d",
     ] {
-        let rendered = render_config(&lab_ap(), plain, "labsecret1").unwrap();
+        let rendered = render_config(&lab_ap(), plain, Some("labsecret1")).unwrap();
         assert!(
             rendered.contains(&format!("ssid={plain}\n")),
             "{plain:?} must stay readable: {rendered}"
@@ -175,7 +200,7 @@ pub(super) fn an_ssid_ieee_802_11_cannot_carry_is_rejected() {
     assert!(validate_ssid(&"a".repeat(32)).is_ok(), "32 bytes rejected");
     assert!(validate_ssid("mica-lab").is_ok());
     assert!(
-        render_config(&lab_ap(), &"a".repeat(33), "labsecret1").is_err(),
+        render_config(&lab_ap(), &"a".repeat(33), Some("labsecret1")).is_err(),
         "hostapd rejects the whole file on an over-long SSID"
     );
 }
@@ -185,7 +210,7 @@ pub(super) fn a_sixty_four_character_hex_key_is_emitted_as_a_raw_pmk() {
     let pmk = "0123456789abcdef".repeat(4);
     assert_eq!(pmk.len(), 64);
 
-    let rendered = render_config(&lab_ap(), "mica-lab", &pmk).unwrap();
+    let rendered = render_config(&lab_ap(), "mica-lab", Some(&pmk)).unwrap();
 
     assert!(
         rendered.contains(&format!("wpa_psk={pmk}\n")),
@@ -198,7 +223,7 @@ pub(super) fn a_sixty_four_character_hex_key_is_emitted_as_a_raw_pmk() {
 #[test]
 pub(super) fn a_key_hostapd_cannot_carry_is_an_error_that_does_not_name_it() {
     for bad in ["short7X", &"x".repeat(64), "has\nnewlineXX", "trailingX "] {
-        let err = render_config(&lab_ap(), "mica-lab", bad).unwrap_err();
+        let err = render_config(&lab_ap(), "mica-lab", Some(bad)).unwrap_err();
         let chain = format!("{err:#}");
         assert!(chain.contains("pre-shared key"), "{bad:?} produced {chain}");
         assert!(
@@ -209,7 +234,7 @@ pub(super) fn a_key_hostapd_cannot_carry_is_an_error_that_does_not_name_it() {
     // The boundaries themselves are accepted.
     for good in ["8charsXX", &"y".repeat(63)] {
         assert!(
-            render_config(&lab_ap(), "mica-lab", good).is_ok(),
+            render_config(&lab_ap(), "mica-lab", Some(good)).is_ok(),
             "{good:?} is a legal WPA2 passphrase and was rejected"
         );
     }

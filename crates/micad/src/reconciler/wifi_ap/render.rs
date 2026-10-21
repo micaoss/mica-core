@@ -1,7 +1,9 @@
 //! The hostapd configuration and networkd unit the access point renders to.
 
 use anyhow::{Result, anyhow};
-use micad_settings::{MAX_PASSPHRASE_LEN, MIN_PASSPHRASE_LEN, RAW_PMK_LEN, WifiApSettings};
+use micad_settings::{
+    ApPool, ApSecurity, MAX_PASSPHRASE_LEN, MIN_PASSPHRASE_LEN, RAW_PMK_LEN, WifiApSettings,
+};
 use std::net::Ipv4Addr;
 
 use super::*;
@@ -140,9 +142,25 @@ pub(super) fn dhcp_pool(host: Ipv4Addr, prefix: u32) -> Result<(u32, u32)> {
     Ok((offset, broadcast_index - offset))
 }
 
-/// Render the hostapd configuration for `ap` with the resolved `ssid` and
-/// `psk`.
-pub(super) fn render_config(ap: &WifiApSettings, ssid: &str, psk: &str) -> Result<String> {
+/// The pool `pool` declares, checked against the subnet, or the one derived
+/// from the access point's own address.
+pub(super) fn ap_pool(host: Ipv4Addr, prefix: u32, pool: Option<ApPool>) -> Result<(u32, u32)> {
+    let derived = dhcp_pool(host, prefix)?;
+    let Some(pool) = pool else {
+        return Ok(derived);
+    };
+    let ap = WifiApSettings {
+        address: format!("{host}/{prefix}"),
+        pool: Some(pool),
+        ..WifiApSettings::default()
+    };
+    micad_settings::validate_ap_pool(&ap).map_err(anyhow::Error::msg)?;
+    Ok((pool.offset, pool.size))
+}
+
+/// Render the hostapd configuration for `ap` with the resolved `ssid` and,
+/// unless the access point is open, `psk`.
+pub(super) fn render_config(ap: &WifiApSettings, ssid: &str, psk: Option<&str>) -> Result<String> {
     validate_ssid(ssid)?;
     validate_country_code(&ap.country_code)?;
     if ap.channel == 0 || ap.channel > MAX_CHANNEL {
@@ -151,7 +169,22 @@ pub(super) fn render_config(ap: &WifiApSettings, ssid: &str, psk: &str) -> Resul
             ap.channel
         ));
     }
-    let key = psk_directive(psk)?;
+    let key = match (ap.security, psk) {
+        (ApSecurity::Open, _) => None,
+        (_, Some(psk)) => Some(psk_directive(psk)?),
+        (_, None) => return Err(anyhow!("a secured access point needs a pre-shared key")),
+    };
+    // SAE derives its keys from the passphrase itself, so a raw PMK cannot
+    // serve it.
+    if ap.security == ApSecurity::Wpa2Wpa3
+        && key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("wpa_psk="))
+    {
+        return Err(anyhow!(
+            "WPA3 needs a passphrase: a {RAW_PMK_LEN}-digit hex PMK serves WPA2 only"
+        ));
+    }
 
     let mut out = String::from(CONFIG_HEADER);
     out.push_str(&format!("interface={}\n", ap.interface));
@@ -164,10 +197,17 @@ pub(super) fn render_config(ap: &WifiApSettings, ssid: &str, psk: &str) -> Resul
     out.push_str("auth_algs=1\n");
     out.push_str("ignore_broadcast_ssid=0\n");
     out.push_str("wmm_enabled=1\n");
-    out.push_str("wpa=2\n");
-    out.push_str("wpa_key_mgmt=WPA-PSK\n");
-    out.push_str("rsn_pairwise=CCMP\n");
-    out.push_str(&format!("{key}\n"));
+    if let Some(key) = key {
+        out.push_str("wpa=2\n");
+        if ap.security == ApSecurity::Wpa2Wpa3 {
+            out.push_str("wpa_key_mgmt=WPA-PSK SAE\n");
+            out.push_str("ieee80211w=1\n");
+        } else {
+            out.push_str("wpa_key_mgmt=WPA-PSK\n");
+        }
+        out.push_str("rsn_pairwise=CCMP\n");
+        out.push_str(&format!("{key}\n"));
+    }
     out.push_str(&format!("ctrl_interface={CONTROL_DIR}\n"));
     Ok(out)
 }
@@ -177,33 +217,52 @@ pub(super) fn render_config(ap: &WifiApSettings, ssid: &str, psk: &str) -> Resul
 ///
 /// The address is re-rendered from the parsed value rather than echoed, so a
 /// value that parsed cannot carry anything else into the file.
-pub(super) fn render_networkd(interface: &str, address: &str) -> Result<String> {
+pub(super) fn render_networkd(
+    interface: &str,
+    address: &str,
+    pool: Option<ApPool>,
+    lease_seconds: Option<u32>,
+) -> Result<String> {
     let (host, prefix) = parse_cidr(address)?;
-    let (offset, size) = dhcp_pool(host, prefix)?;
-    Ok(format!(
+    let (offset, size) = ap_pool(host, prefix, pool)?;
+    let mut out = format!(
         "[Match]\nName={interface}\n\n\
          [Network]\nAddress={host}/{prefix}\nDHCPServer=yes\n\n\
          [DHCPServer]\nPoolOffset={offset}\nPoolSize={size}\n"
-    ))
+    );
+    if let Some(seconds) = lease_seconds {
+        out.push_str(&format!("DefaultLeaseTimeSec={seconds}\n"));
+    }
+    Ok(out)
 }
 
 /// Render busybox udhcpd's configuration for the access-point link, the
 /// OpenRC counterpart of [`render_networkd`]: the same pool, the access point
 /// as the clients' router.
-pub(super) fn render_udhcpd(interface: &str, address: &str, pidfile: &str) -> Result<String> {
+pub(super) fn render_udhcpd(
+    interface: &str,
+    address: &str,
+    pool: Option<ApPool>,
+    lease_seconds: Option<u32>,
+    pidfile: &str,
+) -> Result<String> {
     let (host, prefix) = parse_cidr(address)?;
-    let (offset, size) = dhcp_pool(host, prefix)?;
+    let (offset, size) = ap_pool(host, prefix, pool)?;
     let mask = u32::MAX << (32 - prefix);
     let subnet = u32::from(host) & mask;
     let start = Ipv4Addr::from(subnet + offset);
     let end = Ipv4Addr::from(subnet + offset + size - 1);
-    Ok(format!(
+    let mut out = format!(
         "# Managed by micad from wifi.ap. Do not edit.\n\
          interface {interface}\nstart {start}\nend {end}\n\
          option subnet {}\noption router {host}\n\
          pidfile {pidfile}\nlease_file /run/mica/wifi-ap-udhcpd.leases\n",
         Ipv4Addr::from(mask)
-    ))
+    );
+    if let Some(seconds) = lease_seconds {
+        out.push_str(&format!("option lease {seconds}\n"));
+    }
+    Ok(out)
 }
 
 /// SSID for a device with this identifier.

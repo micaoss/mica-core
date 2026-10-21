@@ -3,13 +3,13 @@ use super::*;
 #[test]
 pub(super) fn udhcpd_serves_the_pool_networkd_would() {
     assert_eq!(
-        render_udhcpd("wlan0", "192.168.4.1/24", "/run/x.pid").unwrap(),
+        render_udhcpd("wlan0", "192.168.4.1/24", None, None, "/run/x.pid").unwrap(),
         "# Managed by micad from wifi.ap. Do not edit.\n\
          interface wlan0\nstart 192.168.4.2\nend 192.168.4.254\n\
          option subnet 255.255.255.0\noption router 192.168.4.1\n\
          pidfile /run/x.pid\nlease_file /run/mica/wifi-ap-udhcpd.leases\n"
     );
-    assert!(render_udhcpd("wlan0", "192.168.4.255/24", "/run/x.pid").is_err());
+    assert!(render_udhcpd("wlan0", "192.168.4.255/24", None, None, "/run/x.pid").is_err());
 }
 
 #[tokio::test]
@@ -45,4 +45,25 @@ pub(super) async fn on_openrc_the_service_is_told_its_parameters_and_restarted_o
     // Nothing changed, nothing restarted.
     reconciler.apply(&settings_with(lab_ap())).await.unwrap();
     assert_eq!(reconciler.control.calls().len(), 1);
+}
+
+#[test]
+pub(super) fn udhcpd_serves_a_declared_pool_and_lease() {
+    let pool = micad_settings::ApPool {
+        offset: 100,
+        size: 50,
+    };
+    let rendered = render_udhcpd(
+        "wlan0",
+        "192.168.4.1/24",
+        Some(pool),
+        Some(3600),
+        "/run/x.pid",
+    )
+    .unwrap();
+    assert!(
+        rendered.contains("start 192.168.4.100\nend 192.168.4.149\n"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("option lease 3600\n"), "{rendered}");
 }

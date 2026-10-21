@@ -139,6 +139,94 @@ pub struct WifiApSettings {
     /// Seconds the access point stays up after an uplink is restored.
     #[serde(rename = "graceSeconds")]
     pub grace_seconds: u32,
+    /// How clients authenticate; absent is WPA2-PSK.
+    #[serde(skip_serializing_if = "ApSecurity::is_default")]
+    pub security: ApSecurity,
+    /// The DHCP pool handed to clients, as an offset into the subnet of
+    /// `address` and a count; absent is every address after the access
+    /// point's own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool: Option<ApPool>,
+    /// The DHCP lease time in seconds, at least [`MIN_LEASE_SECONDS`]; absent
+    /// leaves the DHCP server's own default.
+    #[serde(rename = "leaseSeconds", skip_serializing_if = "Option::is_none")]
+    pub lease_seconds: Option<u32>,
+}
+
+/// How clients of the access point authenticate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum ApSecurity {
+    /// WPA2 with a pre-shared key.
+    #[default]
+    #[serde(rename = "wpa2-psk")]
+    Wpa2Psk,
+    /// WPA2 and WPA3 (SAE) side by side, with management frames protected
+    /// when the client can.
+    #[serde(rename = "wpa2-wpa3")]
+    Wpa2Wpa3,
+    /// No key at all: anyone in range can join.
+    #[serde(rename = "open")]
+    Open,
+}
+
+impl ApSecurity {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// An access point's DHCP pool: `size` addresses from `offset` into the
+/// subnet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApPool {
+    /// The first address handed out, as an offset from the subnet address.
+    pub offset: u32,
+    /// How many addresses the pool holds.
+    pub size: u32,
+}
+
+/// The shortest DHCP lease the access point hands out, in seconds.
+pub const MIN_LEASE_SECONDS: u32 = 60;
+
+/// Refuse an access point's pool and lease the DHCP server cannot serve: a
+/// pool that is empty, reaches the subnet or broadcast address, or holds the
+/// access point's own address, and a lease shorter than
+/// [`MIN_LEASE_SECONDS`]. A pool is checked against `address`, so an
+/// address that is not IPv4 CIDR leaves the pool unchecked here; the address
+/// has its own rule.
+pub fn validate_ap_pool(ap: &WifiApSettings) -> Result<(), String> {
+    if let Some(seconds) = ap.lease_seconds
+        && seconds < MIN_LEASE_SECONDS
+    {
+        return Err(format!(
+            "wifi.ap.leaseSeconds {seconds} is shorter than {MIN_LEASE_SECONDS} seconds"
+        ));
+    }
+    let Some(pool) = ap.pool else {
+        return Ok(());
+    };
+    let Some((host, prefix)) = crate::network_rules::ipv4_cidr(&ap.address) else {
+        return Ok(());
+    };
+    let span = 1u64 << (32 - u32::from(prefix));
+    let host_index = u64::from(u32::from(host)) & (span - 1);
+    let (first, end) = (
+        u64::from(pool.offset),
+        u64::from(pool.offset) + u64::from(pool.size),
+    );
+    if pool.size == 0 || first == 0 || end > span - 1 {
+        return Err(format!(
+            "wifi.ap.pool must hold at least one address between the subnet and broadcast addresses of {}",
+            ap.address
+        ));
+    }
+    if (first..end).contains(&host_index) {
+        return Err(format!(
+            "wifi.ap.pool holds the access point's own address {host}"
+        ));
+    }
+    Ok(())
 }
 
 impl Default for WifiApSettings {
@@ -153,6 +241,9 @@ impl Default for WifiApSettings {
             address: "192.168.4.1/24".to_string(),
             hold_down_seconds: 120,
             grace_seconds: 60,
+            security: ApSecurity::default(),
+            pool: None,
+            lease_seconds: None,
         }
     }
 }
