@@ -35,6 +35,8 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 bcrypt = { workspace = true }
 aws-lc-rs = { workspace = true }
+# SPAKE2+ point arithmetic; every other primitive is aws-lc-rs.
+p256 = { workspace = true }
 hex = { workspace = true }
 # The WireGuard keystore: base64 is the key format on disk and on the wire;
 # aws-lc-rs derives the public half of a private key without a `wg` binary.

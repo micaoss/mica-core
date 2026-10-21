@@ -46,6 +46,9 @@ clap = { version = "4", features = ["derive"] }
 hex = "0.4"
 # The one crypto library: digests, HMAC, randomness, Ed25519 and rustls's provider.
 aws-lc-rs = "1"
+# P-256 group arithmetic for SPAKE2+ (BLE provisioning), which aws-lc-rs does not
+# expose: points and scalars only, no signatures and no randomness of its own.
+p256 = { version = "0.14", default-features = false, features = ["arithmetic"] }
 # WireGuard key handling. base64 is the wire and file format of every key
 # (`PrivateKeyFile=` and `PublicKey=`); 0.23 is a version the dependency graph
 # already resolves, so the direct dependency adds no crate to the image. The

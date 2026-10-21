@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 mod apply_queue;
+pub mod ble_provisioning;
 mod bluetooth;
 mod board_defaults;
 mod bus;
