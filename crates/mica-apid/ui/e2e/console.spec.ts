@@ -11,8 +11,9 @@ test('navigates the complete desktop console', async ({ page, isMobile }) => {
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
   for (const name of ['Network', 'Services', 'Access', 'System']) {
-    await page.getByRole('link', { name }).click()
-    await expect(page.getByRole('heading', { name })).toBeVisible()
+    // Exact: the overview's uplink card is a link to the network page too.
+    await page.getByRole('link', { name, exact: true }).click()
+    await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
   }
   await expect(page.getByRole('link', { name: 'Applications' })).toHaveCount(0)
 })
