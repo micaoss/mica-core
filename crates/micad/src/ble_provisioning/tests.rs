@@ -1,5 +1,7 @@
 //! The RFC 9383 vector and the vectors of `docs/ble-provisioning.md`.
 
+mod store;
+
 use std::num::NonZeroU32;
 
 use aws_lc_rs::agreement;

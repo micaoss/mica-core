@@ -57,8 +57,8 @@ pub struct ClaimSettings {
 
 /// Which channel claimed the device.
 ///
-/// Exactly the two channels that can mint a first administrator credential.
-/// There is no `unknown` member: a third channel would be an unauthenticated
+/// Exactly the channels that can mint a first administrator credential.
+/// There is no `unknown` member: another channel would be an unauthenticated
 /// write nobody decided to add, and naming one here would make room for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -67,6 +67,8 @@ pub enum ClaimChannel {
     Setup,
     /// A provisioning document.
     ProvisioningDocument,
+    /// BLE provisioning's `finish` (`docs/ble-provisioning.md`).
+    Ble,
 }
 
 /// SSH channel policy, reconciled into dropbear's arguments and the managed

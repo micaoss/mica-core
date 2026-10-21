@@ -192,8 +192,8 @@ pub(crate) async fn api_v1_reset(
 ///
 /// **An unclaimed device is refused**, pointing at `POST /api/v1/setup`. There
 /// is nothing to recover on a device that has no credential, and minting one
-/// here would be a third channel that can claim a device —
-/// `micad_settings::ClaimChannel` has exactly two members and says why.
+/// here would be another channel that can claim a device —
+/// `micad_settings::ClaimChannel` names every one and says why.
 ///
 /// **One rotation per presence assertion**. The assertion is read and
 /// spent inside one guard, so a second request — concurrent, or later inside

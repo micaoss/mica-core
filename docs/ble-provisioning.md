@@ -145,11 +145,12 @@ section 4. The page is the Prover; the device is the Verifier.
 | encodings | points SEC1 uncompressed (65 bytes) everywhere, the transcript's `M` and `N` included; `w0` in the transcript as 32 bytes big-endian; `len()` 8-byte little-endian |
 
 The device stores the verifier record `{salt, iterations, w0, L = w1·P}`: a 16-byte random salt,
-600000 iterations, never the password. The page accepts `iterations` from 10000 to 10000000 and
+300000 iterations (about 2 s on an armhf board), never the password. The count travels in `params`,
+so the page uses whatever the record holds; the test vectors below use 600000. The page accepts `iterations` from 10000 to 10000000 and
 refuses anything else.
 
 1. page -> `{"t":"start","auth":"password"}` (or `"temp-code"`)
-2. device -> `{"t":"params","salt":<16 bytes>,"iterations":600000}`
+2. device -> `{"t":"params","salt":<16 bytes>,"iterations":300000}`
 3. page -> `{"t":"share","shareP":<X, 65 bytes>}`
 4. device -> `{"t":"share","shareV":<Y, 65 bytes>,"confirmV":<32 bytes>}`
 5. page verifies `confirmV`; on a mismatch the password is wrong and the page stops here.

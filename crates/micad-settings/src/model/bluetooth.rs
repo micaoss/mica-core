@@ -1,4 +1,5 @@
-//! Bluetooth settings: the adapter, the pairing PIN and trusted devices.
+//! Bluetooth settings: the adapter, the pairing PIN, trusted devices and BLE
+//! provisioning.
 //!
 //! The adapter is never discoverable or pairable by a setting: an operator
 //! opens a pairing window for three minutes instead (micad's `bluetooth`
@@ -31,6 +32,8 @@ pub struct BluetoothSettings {
     /// The devices this device has paired with, by address.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, PairedDevice>,
+    /// BLE provisioning (`docs/ble-provisioning.md`).
+    pub provisioning: BleProvisioningSettings,
     /// `discoverable` and `alias`, which earlier documents carry: read and
     /// dropped at the next save.
     #[serde(skip_serializing)]
@@ -58,8 +61,28 @@ impl Default for BluetoothSettings {
             enabled: true,
             pin: None,
             devices: BTreeMap::new(),
+            provisioning: BleProvisioningSettings::default(),
             discoverable: Retired,
             alias: Retired,
+        }
+    }
+}
+
+/// BLE provisioning's one setting.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BleProvisioningSettings {
+    /// Whether a claimed device that had a default route this boot and lost
+    /// it for 120 seconds opens a provisioning window (`offline`). On by
+    /// default.
+    #[serde(rename = "autoWhenOffline")]
+    pub auto_when_offline: bool,
+}
+
+impl Default for BleProvisioningSettings {
+    fn default() -> Self {
+        Self {
+            auto_when_offline: true,
         }
     }
 }

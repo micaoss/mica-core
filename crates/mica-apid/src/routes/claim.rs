@@ -62,8 +62,8 @@ pub(super) fn stored_claim(access: &Value) -> Option<ClaimSettings> {
 pub(crate) struct ClaimStatus {
     /// `unclaimed` or `claimed`.
     pub(super) state: &'static str,
-    /// Which channel minted the administrator credential: `setup` or
-    /// `provisioning-document`. Absent while the device is unclaimed.
+    /// Which channel minted the administrator credential: `setup`,
+    /// `provisioning-document` or `ble`. Absent while the device is unclaimed.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub(super) via: Option<ClaimChannel>,

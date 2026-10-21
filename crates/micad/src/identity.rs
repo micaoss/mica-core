@@ -191,7 +191,7 @@ fn ensure_secrets_dir(state_dir: &Path) -> Result<PathBuf> {
 
 /// Write `value` to `<state_dir>/secrets/<name>` atomically and at
 /// [`SECRET_FILE_MODE`].
-fn write_secret(state_dir: &Path, name: &str, value: &str) -> Result<()> {
+pub(crate) fn write_secret(state_dir: &Path, name: &str, value: &str) -> Result<()> {
     let dir = ensure_secrets_dir(state_dir)?;
     let target = dir.join(name);
     mica_fs::Replace::new(&target, "tmp")?
@@ -205,7 +205,7 @@ fn write_secret(state_dir: &Path, name: &str, value: &str) -> Result<()> {
 /// Trailing whitespace is trimmed: the alphabet contains none, so trimming
 /// cannot corrupt a generated secret, and it keeps a file an operator opened in
 /// an editor (which appends a newline) from producing a PSK hostapd rejects.
-fn read_secret(state_dir: &Path, name: &str) -> Result<Option<String>> {
+pub(crate) fn read_secret(state_dir: &Path, name: &str) -> Result<Option<String>> {
     let path = secrets_dir(state_dir).join(name);
     match fs::read_to_string(&path) {
         Ok(text) => Ok(Some(text.trim_end().to_string())),

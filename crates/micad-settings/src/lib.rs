@@ -51,9 +51,9 @@ pub use error::SettingsError;
 pub use features::{ContainerEngine, Feature, Features, Init, PRODUCT_FILE};
 pub use model::{
     APID_LISTENERS_PATH, APID_LOCAL_SOCKET_PATH, AccessSettings, ApMode, ApPool, ApSecurity,
-    ApiToken, AuthorizedKey, BluetoothSettings, BridgeConfig, CanConfig, ClaimChannel,
-    ClaimSettings, ConsoleSettings, ContainerSettings, DEFAULT_PAIRING_PIN, DEVICE_ID_LEN,
-    DeviceCredentialSettings, DnsSettings, GlobalDns, IfaceKind, IfaceSettings,
+    ApiToken, AuthorizedKey, BleProvisioningSettings, BluetoothSettings, BridgeConfig, CanConfig,
+    ClaimChannel, ClaimSettings, ConsoleSettings, ContainerSettings, DEFAULT_PAIRING_PIN,
+    DEVICE_ID_LEN, DeviceCredentialSettings, DnsSettings, GlobalDns, IfaceKind, IfaceSettings,
     MAX_CONTAINER_PROJECT_BYTES, MAX_CONTAINER_PROJECTS, MAX_CONTAINER_PROJECTS_BYTES,
     MAX_GLOBAL_DNS_SERVERS, MAX_NTP_SERVERS, MAX_PASSPHRASE_LEN, MAX_RECORD_COMMENT_CHARS,
     MAX_RECORD_ID_LEN, MAX_STATIC_RECORDS, MAX_USER_UNIT_BYTES, MAX_USER_UNIT_CONF_BYTES,

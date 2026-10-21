@@ -3,6 +3,7 @@
 
 pub mod channel;
 pub mod spake2plus;
+pub mod store;
 
 /// `info.protocol`.
 pub const PROTOCOL: u32 = 1;

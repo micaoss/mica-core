@@ -13,7 +13,7 @@ pub(super) fn bluetooth_defaults_are_on() {
     assert!(settings.bluetooth.devices.is_empty());
     assert_eq!(
         serde_json::to_value(&settings.bluetooth).unwrap(),
-        serde_json::json!({ "enabled": true })
+        serde_json::json!({ "enabled": true, "provisioning": { "autoWhenOffline": true } })
     );
 }
 
@@ -27,7 +27,9 @@ pub(super) fn retired_bluetooth_keys_load_and_are_not_written_again() {
     .expect("an earlier document loads");
     assert_eq!(
         serde_json::to_value(&bluetooth).unwrap(),
-        serde_json::json!({ "enabled": true, "pin": "421137" })
+        serde_json::json!({
+            "enabled": true, "pin": "421137", "provisioning": { "autoWhenOffline": true },
+        })
     );
     assert!(
         serde_json::from_value::<micad_settings::BluetoothSettings>(
