@@ -86,8 +86,9 @@ pub struct DnsServerTest {
     pub server: String,
     /// Whether it answered the query, whatever the answer was.
     pub reachable: bool,
-    /// How long the answer took, when there was one.
-    pub ms: Option<u64>,
+    /// How long the answer took, in milliseconds, when there was one.
+    #[serde(rename = "latencyMs")]
+    pub latency_ms: Option<u64>,
 }
 
 /// One standard query with recursion desired: an `A` record for `name`,
@@ -131,7 +132,8 @@ fn ask_server(server: std::net::Ipv4Addr, port: u16, timeout: Duration) -> DnsSe
     DnsServerTest {
         server: server.to_string(),
         reachable: answered,
-        ms: answered.then(|| u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)),
+        latency_ms: answered
+            .then(|| u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)),
     }
 }
 
@@ -151,7 +153,7 @@ pub async fn test_dns_servers(
         results.push(ask.await.unwrap_or_else(|_| DnsServerTest {
             server: server.to_string(),
             reachable: false,
-            ms: None,
+            latency_ms: None,
         }));
     }
     results

@@ -204,7 +204,7 @@ directions, because `SettingsChanged` carries setting values.
 | Group | Members |
 | --- | --- |
 | Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
-| Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetBluetooth` |
+| Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
 | Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey` |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
@@ -221,6 +221,10 @@ absence is reported with its reason rather than as a healthy reading:
   bound under `/run/mica`: its unit has a private `/tmp`, which neither daemon can answer into)
   and a resolved probe; on
   OpenRC the same document from sysfs, busybox `ip` and `/run/mica/resolv.d`.
+- **Resolution check** (`GetDnsProbe`, `ProbeDns`): `0.debian.pool.ntp.org` looked up every
+  60 s and on demand, within 3 s, through resolved's `ResolveHostname` with
+  `SD_RESOLVED_NO_CACHE`, or on OpenRC through the C library's resolver; the last result is
+  `{ok, name, latencyMs, checkedAt, detail?}`.
 - **Time**: timesyncd; on OpenRC whether `mica-ntpd` runs and the kernel's synchronized bit.
 - **Storage**: tiers from the signed boot policy, bind namespaces, usage, DATA's project quotas
   (`quotactl_fd`), media health and pressure.

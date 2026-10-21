@@ -313,12 +313,16 @@ async fn serve() -> anyhow::Result<()> {
         Value::Object(state),
     )
     .with_features(features.clone());
+    let mut dns_probe: Option<Arc<network_state::DnsProbe>> = None;
     if !dry_run {
         // What the init itself answers: the network, the clock and the
         // failure evidence are systemd's services on one root and OpenRC's
         // commands and busybox's on the other.
         if openrc {
             service = service.with_network_state(Arc::new(openrc::IpNetworkState::production()));
+            dns_probe = Some(Arc::new(network_state::DnsProbe::production(Arc::new(
+                network_state::SystemLookup,
+            ))));
             service = service.with_time_status(Arc::new(openrc::NtpdTimeStatus::production()));
             service =
                 service.with_failure_evidence(Arc::new(diagnostics::HostFailureEvidence::new(
@@ -328,9 +332,15 @@ async fn serve() -> anyhow::Result<()> {
         } else {
             service = service
                 .with_network_state(Arc::new(network_state::SystemdNetworkState::production()));
+            dns_probe = Some(Arc::new(network_state::DnsProbe::production(Arc::new(
+                network_state::ResolvedLookup,
+            ))));
             service = service.with_time_status(Arc::new(time_status::SystemdTimesync));
             service = service
                 .with_failure_evidence(Arc::new(diagnostics::HostFailureEvidence::production()));
+        }
+        if let Some(probe) = &dns_probe {
+            service = service.with_dns_probe(Arc::clone(probe));
         }
         service = service.with_logs(Arc::new(logs::HostLogs::production(init)));
         service = service.with_user_units(Arc::new(user_units::UserUnits::production(init)));
@@ -464,6 +474,9 @@ async fn serve() -> anyhow::Result<()> {
         .with_context(|| format!("request name {}", bus::BUS_NAME))?;
     tracing::info!(bus = bus_kind, name = bus::BUS_NAME, "serving");
     tokio::spawn(deferred.run());
+    if let Some(probe) = dns_probe {
+        tokio::spawn(probe.run());
+    }
 
     let mut sigterm = signal(SignalKind::terminate()).context("install SIGTERM handler")?;
     tokio::select! {

@@ -218,7 +218,7 @@ impl MicadService {
 
     /// JSON: each of `servers`, IPv4 addresses, asked directly for one `A`
     /// record of the probe name over UDP, all at once and each within three
-    /// seconds: `[{server, reachable, ms}]` in their order.
+    /// seconds: `[{server, reachable, latencyMs}]` in their order.
     pub(super) async fn test_dns_servers(&self, servers: Vec<String>) -> fdo::Result<String> {
         if servers.is_empty() || servers.len() > micad_settings::MAX_GLOBAL_DNS_SERVERS {
             return Err(fdo::Error::InvalidArgs(format!(
@@ -241,6 +241,26 @@ impl MicadService {
         )
         .await;
         Ok(serde_json::to_string(&results).unwrap_or_default())
+    }
+
+    /// JSON: the last resolution check, `{ok, name, latencyMs, checkedAt,
+    /// detail?}`, or `null` before the first.
+    pub(super) async fn get_dns_probe(&self) -> fdo::Result<String> {
+        let last = match &self.dns_probe {
+            Some(probe) => probe.last().await,
+            None => None,
+        };
+        Ok(serde_json::to_string(&last).unwrap_or_default())
+    }
+
+    /// Run the resolution check now; answers it as `GetDnsProbe` would.
+    pub(super) async fn probe_dns(&self) -> fdo::Result<String> {
+        let Some(probe) = &self.dns_probe else {
+            return Err(fdo::Error::NotSupported(
+                "this daemon runs no resolution check".to_string(),
+            ));
+        };
+        Ok(serde_json::to_string(&probe.probe().await).unwrap_or_default())
     }
 
     /// JSON system information: machine id, board, kernel,

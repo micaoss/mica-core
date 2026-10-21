@@ -71,10 +71,23 @@ desired `network` settings, which this method never reads.
 <!--
 JSON: each of `servers`, IPv4 addresses, asked directly for one `A`
 record of the probe name over UDP, all at once and each within three
-seconds: `[{server, reachable, ms}]` in their order.
+seconds: `[{server, reachable, latencyMs}]` in their order.
 -->
 <method name="TestDnsServers">
 <arg name="servers" type="as" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON: the last resolution check, `{ok, name, latencyMs, checkedAt,
+detail?}`, or `null` before the first.
+-->
+<method name="GetDnsProbe">
+<arg type="s" direction="out"/>
+</method>
+<!--
+Run the resolution check now; answers it as `GetDnsProbe` would.
+-->
+<method name="ProbeDns">
 <arg type="s" direction="out"/>
 </method>
 <!--

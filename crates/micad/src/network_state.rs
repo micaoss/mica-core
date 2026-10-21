@@ -18,10 +18,12 @@ use serde_json::{Map, Value};
 
 mod dns;
 mod json;
+mod probe;
 mod radio;
 mod wifi;
 pub use dns::*;
 pub use json::*;
+pub use probe::*;
 pub use radio::*;
 pub use wifi::*;
 

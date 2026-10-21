@@ -141,6 +141,9 @@ pub struct MicadService {
     /// Read-only live network observation. The default is unavailable so
     /// tests and dry-run instances never inspect the host network.
     network_state: Arc<dyn NetworkState>,
+    /// The resolution check `GetDnsProbe` reads and `ProbeDns` runs; none in
+    /// tests and dry-run instances, for the same reason.
+    dns_probe: Option<Arc<crate::network_state::DnsProbe>>,
     /// Read-only time-synchronization observation, on the same default for
     /// the same reason.
     time_status: Arc<dyn TimeStatusSource>,
@@ -300,6 +303,7 @@ impl MicadService {
             registry: None,
             wireguard: Arc::new(NoRotation),
             network_state: Arc::new(UnavailableNetworkState),
+            dns_probe: None,
             time_status: Arc::new(UnavailableTimeStatus),
             storage_status: Arc::new(UnavailableStorageStatus),
             system_info: Arc::new(UnavailableSystemInfo),

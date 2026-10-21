@@ -70,6 +70,13 @@ impl MicadService {
         self
     }
 
+    /// Attach the resolution check.
+    #[must_use]
+    pub fn with_dns_probe(mut self, probe: Arc<crate::network_state::DnsProbe>) -> Self {
+        self.dns_probe = Some(probe);
+        self
+    }
+
     /// Attach the production time-synchronization observer.
     #[must_use]
     pub fn with_time_status(mut self, time_status: Arc<dyn TimeStatusSource>) -> Self {

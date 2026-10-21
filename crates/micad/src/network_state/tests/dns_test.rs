@@ -39,7 +39,10 @@ pub(super) async fn a_server_that_answers_is_reachable_and_timed() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].server, "127.0.0.1");
     assert!(results[0].reachable, "{results:?}");
-    assert!(results[0].ms.is_some_and(|ms| ms < 3000), "{results:?}");
+    assert!(
+        results[0].latency_ms.is_some_and(|ms| ms < 3000),
+        "{results:?}"
+    );
 }
 
 #[tokio::test]
@@ -57,7 +60,7 @@ pub(super) async fn a_silent_server_or_a_reply_to_another_query_is_unreachable()
             [DnsServerTest {
                 server: "127.0.0.1".to_string(),
                 reachable: false,
-                ms: None,
+                latency_ms: None,
             }]
         );
         assert!(started.elapsed() < Duration::from_secs(2));

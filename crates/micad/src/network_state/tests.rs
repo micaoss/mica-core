@@ -3,6 +3,7 @@ use serde_json::json;
 
 mod describe;
 mod dns_test;
+mod probe;
 mod sockets;
 mod wireless;
 
