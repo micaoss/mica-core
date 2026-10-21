@@ -74,24 +74,17 @@ const CAPABILITIES: [&str; 41] = [
     "CAP_BPF",
     "CAP_CHECKPOINT_RESTORE",
 ];
-/// The capabilities an app running as its own user may not have: each reaches
-/// past the app's own files and processes. An app that needs one runs as root.
-const DENIED_CAPABILITIES: [&str; 15] = [
-    "CAP_SYS_ADMIN",
-    "CAP_SYS_MODULE",
-    "CAP_SYS_PTRACE",
-    "CAP_DAC_OVERRIDE",
-    "CAP_DAC_READ_SEARCH",
-    "CAP_SYS_RAWIO",
-    "CAP_SYS_BOOT",
-    "CAP_SETUID",
-    "CAP_SETGID",
-    "CAP_SETPCAP",
-    "CAP_CHOWN",
-    "CAP_FOWNER",
-    "CAP_MKNOD",
-    "CAP_BPF",
-    "CAP_SYS_CHROOT",
+/// The capabilities an app running as its own user may have: each stays
+/// within the app's own sockets, memory and timers. An app that needs another
+/// runs as root.
+const ALLOWED_CAPABILITIES: [&str; 7] = [
+    "CAP_NET_ADMIN",
+    "CAP_NET_RAW",
+    "CAP_NET_BIND_SERVICE",
+    "CAP_NET_BROADCAST",
+    "CAP_IPC_LOCK",
+    "CAP_WAKE_ALARM",
+    "CAP_BLOCK_SUSPEND",
 ];
 
 /// What a bundle says it is.
@@ -461,7 +454,7 @@ fn check_privileges(manifest: &Manifest, fail: &mut impl FnMut(&'static str, Str
     for cap in &privileges.capabilities {
         if !CAPABILITIES.contains(&cap.as_str()) {
             fail("capability", format!("{cap:?} is not a capability"));
-        } else if DENIED_CAPABILITIES.contains(&cap.as_str()) {
+        } else if !ALLOWED_CAPABILITIES.contains(&cap.as_str()) {
             fail(
                 "capability",
                 format!("{cap} reaches past the app; an app that needs it runs as root"),
@@ -675,6 +668,20 @@ mod tests {
             .map(|p| p.rule)
             .collect();
         assert_eq!(rules, ["init"]);
+    }
+
+    #[test]
+    fn an_app_of_its_own_user_keeps_only_the_allowed_capabilities() {
+        let mut app = own_user();
+        app.privileges.capabilities = ALLOWED_CAPABILITIES.map(String::from).to_vec();
+        assert_eq!(rules_of(&app), Vec::<&str>::new());
+        for cap in CAPABILITIES
+            .iter()
+            .filter(|cap| !ALLOWED_CAPABILITIES.contains(cap))
+        {
+            app.privileges.capabilities = vec![cap.to_string()];
+            assert_eq!(rules_of(&app), ["capability"], "{cap}");
+        }
     }
 
     #[test]
