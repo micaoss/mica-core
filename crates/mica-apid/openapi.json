@@ -9395,16 +9395,6 @@
               }
             }
           },
-          "409": {
-            "description": "The mode leaves `network` while SSH is off or has no authorized key (`web_mode_needs_ssh`); only a remote caller is held to it",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
           "422": {
             "description": "The body is not a web document or a port is 0 (`validation_failed`); or micad rejected it, for a port another listener holds (`settings_rejected`)",
             "content": {

@@ -629,11 +629,10 @@ no configuration of its own; every read and change goes through micad.
 
 Out of `network` there is no console, no HTTP API, no setup page on the access point and no
 bearer token in use; micad and what it drives (the health gate, updates, SSH, MQTT, BLE
-provisioning, the `micad` commands, the user's services) are unchanged. A remote caller may take
-the mode away from `network` only while SSH is on with an authorized key (409
-`web_mode_needs_ssh`): `micad web network` over SSH is the way back. Root on the device is not
-held to it. The console's access page sets the mode: it asks once, naming that command, and
-once the write is accepted it gives way to a screen that says the API has left the network and
+provisioning, the `micad` commands, the user's services, the apps) are unchanged. A device may
+run with no API at all, managed by its apps or its fleet. The way back is `micad web network` as
+root on the device (over SSH when it is on), a provisioning document, or a reset. The console's
+access page sets the mode: it asks once, naming that command, and once the write is accepted it gives way to a screen that says the API has left the network and
 how to bring it back, and makes no further request.
 
 On the device, root's commands work in every mode, over the bus to micad: `micad web status`

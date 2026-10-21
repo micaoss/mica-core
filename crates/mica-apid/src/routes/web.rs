@@ -93,7 +93,6 @@ pub(crate) async fn api_v1_web_read(
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
-        (status = 409, description = "The mode leaves `network` while SSH is off or has no authorized key (`web_mode_needs_ssh`); only a remote caller is held to it", body = ApiError),
         (status = 422, description = "The body is not a web document or a port is 0 (`validation_failed`); or micad rejected it, for a port another listener holds (`settings_rejected`)", body = ApiError),
         (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
@@ -102,7 +101,7 @@ pub(crate) async fn api_v1_web_read(
     ),
 )]
 pub(crate) async fn api_v1_web_write(
-    credential: ApiCredential,
+    _credential: ApiCredential,
     State(state): State<AppState>,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
@@ -121,12 +120,6 @@ pub(crate) async fn api_v1_web_write(
             .at(WEB_SETTINGS_PATH),
         );
     }
-    if configured.mode != WebModeValue::Network
-        && !matches!(credential, ApiCredential::Local)
-        && let Some(response) = refuse_without_ssh(&state).await
-    {
-        return response;
-    }
     // Infallible: a struct of scalars.
     let value = match encode(&configured) {
         Ok(value) => value,
@@ -136,31 +129,6 @@ pub(crate) async fn api_v1_web_write(
         Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
         Err(err) => bus_api_error(&err, Some(WEB_SETTINGS_PATH)),
     }
-}
-
-/// A remote caller may take the API off the network only while SSH, the way
-/// back, is on with a key to log in with.
-async fn refuse_without_ssh(state: &AppState) -> Option<Response> {
-    let ssh = match state.api.get_settings("access.ssh").await {
-        Ok(value) => value,
-        Err(err) => return Some(bus_api_error(&err, Some("access.ssh"))),
-    };
-    let enabled = ssh["enabled"].as_bool() == Some(true);
-    let keyed = ssh["authorizedKeys"]
-        .as_array()
-        .is_some_and(|keys| !keys.is_empty());
-    (!(enabled && keyed)).then(|| {
-        api_response(
-            StatusCode::CONFLICT,
-            ApiError::apid(
-                "web_mode_needs_ssh",
-                "turn SSH on with an authorized key first: once the API leaves the network, \
-                 `micad web network` over SSH is the way back"
-                    .to_string(),
-            )
-            .at("access.web.mode"),
-        )
-    })
 }
 
 /// The console's TLS identity, as `GET /api/v1/web/certificate` reports it.

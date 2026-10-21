@@ -72,53 +72,28 @@ pub(super) async fn the_web_write_refuses_port_zero_and_a_partial_body() {
     assert!(fake.set_paths().is_empty());
 }
 
-/// Leaving `network` from afar needs SSH on with a key: it is the way back.
+/// A remote caller may take the API off the network with SSH off: a device
+/// may run with no API at all.
 #[tokio::test]
-pub(super) async fn leaving_the_network_needs_ssh_with_a_key() {
+pub(super) async fn leaving_the_network_needs_no_ssh() {
     let mut tree = web_tree(
         json!({ "mode": "network", "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 }),
     );
-    let (router, fake) = test_app(tree.clone());
-    let (cookie, csrf) = mqtt_session(&router).await;
-    let local =
-        json!({ "mode": "local", "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 });
-
-    for ssh in [
-        json!({ "enabled": false, "authorizedKeys": ["ssh-ed25519 AAAA a"] }),
-        json!({ "enabled": true, "authorizedKeys": [] }),
-    ] {
-        fake.set_settings("access.ssh", &ssh).await.unwrap();
-        let response = json_request(
-            &router,
-            "PUT",
-            WEB_PATH,
-            local.clone(),
-            Some(&cookie),
-            Some(&csrf),
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::CONFLICT);
-        assert_eq!(
-            body_json(response).await["error"]["code"],
-            json!("web_mode_needs_ssh")
-        );
-    }
-    assert!(!fake.set_paths().contains(&"access.web".to_string()));
-
-    tree["access"]["ssh"] = json!({ "enabled": true, "authorizedKeys": ["ssh-ed25519 AAAA a"] });
+    tree["access"]["ssh"] = json!({ "enabled": false, "authorizedKeys": [] });
     let (router, fake) = test_app(tree);
     let (cookie, csrf) = mqtt_session(&router).await;
+    let off = json!({ "mode": "off", "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 });
     let response = json_request(
         &router,
         "PUT",
         WEB_PATH,
-        local.clone(),
+        off.clone(),
         Some(&cookie),
         Some(&csrf),
     )
     .await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-    assert_eq!(fake.get_settings("access.web").await.unwrap(), local);
+    assert_eq!(fake.get_settings("access.web").await.unwrap(), off);
 }
 
 /// Over plain HTTP a `Secure` cookie would be dropped by the browser, so the

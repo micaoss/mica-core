@@ -328,10 +328,6 @@ test('captures taking the API off the network', async ({ page }, testInfo) => {
   await page.route('**/api/v1/web', (route) => route.request().method() === 'GET'
     ? route.fulfill(json({ mode: 'network', httpPort: 8080, httpsEnabled: false, httpsPort: 8443 }))
     : route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ taskId: 'task-e2e' }) }))
-  await page.route('**/api/v1/ssh/authorized-keys', (route) => route.fulfill(json({
-    keys: [{ key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpsE2e harbour', comment: 'harbour', fingerprint: 'SHA256:e2e' }],
-    notice: 'Every authorized key grants root on this appliance.',
-  })))
   await page.goto('./access')
   const panel = page.getByRole('group', { name: 'API access' }).locator('xpath=ancestor::form[1]')
   await page.getByRole('button', { name: 'Device only' }).click()

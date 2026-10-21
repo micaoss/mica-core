@@ -1077,15 +1077,14 @@ export const en = {
         local: { label: 'Device only', hint: 'Only root on this device reaches the API, through its local socket. No console, no HTTP API.' },
         off: { label: 'Off', hint: 'The API does not run. The device keeps working: updates, SSH, MQTT and BLE provisioning are not the API\'s.' },
       },
-      needsSsh: 'Turn SSH on and add a key first: once the API leaves the network, `micad web network` over SSH is the way back.',
       confirm: {
         title: { local: 'Keep the API on this device only?', off: 'Turn the API off?' },
-        body: 'This console stops answering. Bring it back from the device:',
+        body: 'This console stops answering. To bring it back, run this as root on the device, over SSH if it is on; a provisioning document or a reset brings it back too:',
         action: 'Leave the network',
       },
       gone: {
         title: { local: 'API access is now device only', off: 'API access is now off' },
-        body: 'This page no longer reaches the device, and the console makes no more requests. To turn the console back on, log in over SSH and run:',
+        body: 'This page no longer reaches the device, and the console makes no more requests. To turn the console back on, run this as root on the device, over SSH if it is on, or apply a provisioning document or a reset:',
       },
     },
     certificate: {

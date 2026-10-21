@@ -26,13 +26,11 @@ export function consoleUrl(web: WebConfiguration, hostname: string) {
 
 /// Who reaches the API, and where the console listens. A save restarts apid
 /// on the new listeners, so this page cannot stay: it says where the console
-/// went and follows it there. Taking the API off the network asks once, needs
-/// SSH as the way back, and leaves a screen that says how to come back.
+/// went and follows it there. Taking the API off the network asks once and
+/// leaves a screen that says how to come back.
 export function WebPanel() {
   const { t } = useTranslation()
   const web = useQuery({ queryKey: ['web'], queryFn: () => api<WebConfiguration>('/api/v1/web') })
-  const sshEnabled = useQuery({ queryKey: ['settings', 'access.ssh.enabled'], queryFn: () => api<boolean>('/api/v1/settings/access.ssh.enabled') })
-  const sshKeys = useQuery({ queryKey: ['ssh-keys'], queryFn: () => api<{ keys: unknown[] }>('/api/v1/ssh/authorized-keys') })
   const [mode, setMode] = useState<WebMode>()
   const [httpPort, setHttpPort] = useState<string>()
   const [httpsEnabled, setHttpsEnabled] = useState<boolean>()
@@ -48,7 +46,6 @@ export function WebPanel() {
     httpsPort: Number(httpsPort ?? stored?.httpsPort ?? 8443),
   }
   const leaving = current.mode !== 'network'
-  const sshReady = sshEnabled.data === true && (sshKeys.data?.keys.length ?? 0) > 0
   const host = window.location.hostname
 
   const write = useMutationFeedback<TaskAccepted, WebConfiguration>({
@@ -84,7 +81,6 @@ export function WebPanel() {
             />
           )}
         </FormField>
-        {leaving && !sshReady ? <Callout tone="warning" title={t('access.web.needsSsh')} /> : null}
         {leaving ? null : (
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label={t('access.web.httpPort')} hint={t('access.web.httpPortHint')}>
@@ -104,7 +100,7 @@ export function WebPanel() {
             <a className="font-mono underline" href={movingTo}>{t('access.web.open', { url: movingTo })}</a>
           </Callout>
         ) : null}
-        <Button className="justify-self-end" type="submit" disabled={write.isPending || !stored || movingTo !== undefined || (leaving && !sshReady)}>
+        <Button className="justify-self-end" type="submit" disabled={write.isPending || !stored || movingTo !== undefined}>
           {write.isPending ? <Spinner /> : null}{t('access.web.save')}
         </Button>
       </form>

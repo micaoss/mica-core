@@ -44,27 +44,21 @@ describe('the web console panel', () => {
     expect(await screen.findByText(/Open https:\/\/.*:9443\//)).toBeTruthy()
   })
 
-  /// Without SSH there would be no way back, so the console does not offer it.
-  it('will not leave the network without SSH and a key', async () => {
-    stubFetch({
-      '/api/v1/web': defaults,
-      '/api/v1/settings/access.ssh.enabled': false,
-      '/api/v1/ssh/authorized-keys': { keys: [], notice: '' },
-    })
+  /// A device may run with no API at all, so no SSH is asked for first.
+  it('offers to turn the API off without SSH', async () => {
+    stubFetch({ '/api/v1/web': defaults })
     renderPanel(<WebPanel />)
 
     await screen.findByDisplayValue('8080')
     await userEvent.click(screen.getByRole('button', { name: 'Off' }))
-    expect(await screen.findByText(/Turn SSH on and add a key first/)).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Save and restart the console' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Save and restart the console' }))
+    expect(await screen.findByRole('button', { name: 'Leave the network' })).toBeTruthy()
   })
 
   /// Leaving asks once, then the whole console gives way to the way back.
   it('confirms, writes the mode and leaves the screen that says how to come back', async () => {
     const fetch = stubFetch({
       '/api/v1/web': defaults,
-      '/api/v1/settings/access.ssh.enabled': true,
-      '/api/v1/ssh/authorized-keys': { keys: [{ key: 'ssh-ed25519 AAAA a' }], notice: '' },
       'PUT /api/v1/web': () => jsonResponse({ taskId: 'task-4' }, 202),
     })
     renderPanel(<ApiGoneGate><WebPanel /></ApiGoneGate>)
