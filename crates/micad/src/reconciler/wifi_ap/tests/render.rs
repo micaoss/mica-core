@@ -94,7 +94,7 @@ pub(super) fn a_country_code_that_is_not_a_regulatory_domain_is_rejected() {
 
 #[test]
 pub(super) fn a_channel_outside_the_two_point_four_gigahertz_band_is_rejected() {
-    for bad in [0u8, 15, 36, 255] {
+    for bad in [15u8, 36, 255] {
         let ap = WifiApSettings {
             channel: bad,
             ..lab_ap()
@@ -265,3 +265,22 @@ pub(super) fn the_length_refusal_is_the_same_sentence_for_every_length() {
 }
 
 // ---- derived SSID -----------------------------------------------------
+
+/// Channel 0 is hostapd's own choice where it can make one, and otherwise
+/// the first channel the country allows.
+#[test]
+pub(super) fn channel_zero_is_automatic_or_the_country_s_first() {
+    let auto = WifiApSettings {
+        channel: 0,
+        ..lab_ap()
+    };
+    let rendered = render_config(&auto, "mica-lab", Some("labsecret1")).unwrap();
+    assert!(rendered.contains("channel=acs_survey\n"), "{rendered}");
+    assert_eq!(resolve_channel(&auto, true), 0);
+    assert_eq!(resolve_channel(&auto, false), 1);
+    let fixed = WifiApSettings {
+        channel: 6,
+        ..lab_ap()
+    };
+    assert_eq!(resolve_channel(&fixed, false), 6);
+}

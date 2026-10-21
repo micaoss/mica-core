@@ -63,11 +63,12 @@ pub use model::{
     ProvisioningState, RAW_PMK_LEN, ResetSettings, ResetTier, RouteConfig, ServicesSettings,
     Settings, SshSettings, StaticConfig, StaticRecord, TimeSettings, UserUnit, VlanConfig,
     WebAdminSettings, WebSettings, WifiApSettings, WifiClientSettings, WifiNetwork, WifiSettings,
-    WireguardConfig, WireguardPeer, is_bluetooth_address, is_host_name, is_openrc_script_name,
-    is_project_name, is_systemd_template, is_systemd_unit_name, is_wpa_quotable,
-    unit_install_values, validate_ap_pool, validate_bluetooth, validate_container_project_dirs,
-    validate_container_projects, validate_device_id, validate_dns, validate_ntp_servers,
-    validate_pairing_pin, validate_services, validate_timezone_name, validate_wifi_psk,
+    WireguardConfig, WireguardPeer, ap_channels, is_bluetooth_address, is_host_name,
+    is_openrc_script_name, is_project_name, is_systemd_template, is_systemd_unit_name,
+    is_wpa_quotable, unit_install_values, validate_ap_pool, validate_bluetooth,
+    validate_container_project_dirs, validate_container_projects, validate_device_id, validate_dns,
+    validate_ntp_servers, validate_pairing_pin, validate_services, validate_timezone_name,
+    validate_wifi_psk,
 };
 pub use network_rules::{
     MAX_CAN_BITRATE, MAX_CAN_DATA_BITRATE, MAX_CAN_RESTART_MS, MAX_IFACE_LEN, check_iface_name,

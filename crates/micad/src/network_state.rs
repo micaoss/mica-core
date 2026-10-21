@@ -12,16 +12,21 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use anyhow::Context;
 use serde_json::{Map, Value, json};
 
+use crate::openrc::Commands;
+
+mod capabilities;
 mod dns;
 mod json;
 mod probe;
 mod radio;
 mod wifi;
+pub use capabilities::*;
 pub use dns::*;
 pub use json::*;
 pub use probe::*;
@@ -98,6 +103,11 @@ impl NetworkState for UnavailableNetworkState {
 pub struct SystemdNetworkState {
     root: PathBuf,
     probe_dns: bool,
+    /// What `iw` is asked through; none in a fixture tree.
+    commands: Option<Arc<dyn Commands>>,
+    /// The radio's capabilities, asked once: they do not change while the
+    /// daemon runs.
+    capabilities: OnceLock<Value>,
 }
 
 impl SystemdNetworkState {
@@ -105,7 +115,10 @@ impl SystemdNetworkState {
     /// probe on.
     #[must_use]
     pub fn production() -> Self {
-        Self::at("/").with_dns_probe(true)
+        Self {
+            commands: Some(Arc::new(crate::openrc::Host)),
+            ..Self::at("/").with_dns_probe(true)
+        }
     }
 
     /// An observer rooted at `root`, with NO DNS probe: nothing here touches
@@ -116,6 +129,8 @@ impl SystemdNetworkState {
         Self {
             root: root.into(),
             probe_dns: false,
+            commands: None,
+            capabilities: OnceLock::new(),
         }
     }
 
@@ -188,6 +203,22 @@ pub(crate) async fn observe_wifi(root: &std::path::Path, interfaces: &[String]) 
         }
     }
     evidence
+}
+
+/// The first radio's capabilities ([`wifi_capabilities`]), from `cache` once
+/// `iw` has answered.
+pub(crate) async fn cached_capabilities(
+    cache: &OnceLock<Value>,
+    root: &std::path::Path,
+    commands: &dyn Commands,
+    radios: &RadioEvidence,
+) -> Option<Value> {
+    if let Some(known) = cache.get() {
+        return Some(known.clone());
+    }
+    let interface = radios.wifi_interfaces.first()?;
+    let found = wifi_capabilities(root, commands, interface).await?;
+    Some(cache.get_or_init(|| found).clone())
 }
 
 /// What the observer asked the kernel about particular links: the clock
@@ -291,7 +322,12 @@ impl NetworkState for SystemdNetworkState {
 
     async fn observe(&self) -> anyhow::Result<Value> {
         let describe = describe_raw().await.map_err(|err| format!("{err:#}"));
-        let radios = radio_evidence(&self.root);
+        let mut radios = radio_evidence(&self.root);
+        if let Some(commands) = &self.commands {
+            radios.wifi_capabilities =
+                cached_capabilities(&self.capabilities, &self.root, commands.as_ref(), &radios)
+                    .await;
+        }
         let wifi = observe_wifi(&self.root, &radios.wifi_interfaces).await;
         let dns = if self.probe_dns {
             Some(observe_dns().await)

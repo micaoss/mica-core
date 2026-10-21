@@ -159,13 +159,14 @@ pub(super) fn ap_pool(host: Ipv4Addr, prefix: u32, pool: Option<ApPool>) -> Resu
 }
 
 /// Render the hostapd configuration for `ap` with the resolved `ssid` and,
-/// unless the access point is open, `psk`.
+/// unless the access point is open, `psk`. Channel 0 is hostapd's automatic
+/// selection; [`resolve_channel`] keeps it only where hostapd has it.
 pub(super) fn render_config(ap: &WifiApSettings, ssid: &str, psk: Option<&str>) -> Result<String> {
     validate_ssid(ssid)?;
     validate_country_code(&ap.country_code)?;
-    if ap.channel == 0 || ap.channel > MAX_CHANNEL {
+    if ap.channel > MAX_CHANNEL {
         return Err(anyhow!(
-            "wifi.ap.channel {} is not a 2.4 GHz channel (1..={MAX_CHANNEL})",
+            "wifi.ap.channel {} is not a 2.4 GHz channel (1..={MAX_CHANNEL}, or 0 for automatic)",
             ap.channel
         ));
     }
@@ -193,7 +194,11 @@ pub(super) fn render_config(ap: &WifiApSettings, ssid: &str, psk: Option<&str>) 
     out.push_str(&format!("country_code={}\n", ap.country_code));
     out.push_str("ieee80211d=1\n");
     out.push_str("hw_mode=g\n");
-    out.push_str(&format!("channel={}\n", ap.channel));
+    if ap.channel == 0 {
+        out.push_str("channel=acs_survey\n");
+    } else {
+        out.push_str(&format!("channel={}\n", ap.channel));
+    }
     out.push_str("auth_algs=1\n");
     out.push_str("ignore_broadcast_ssid=0\n");
     out.push_str("wmm_enabled=1\n");
@@ -300,4 +305,15 @@ fn dns_servers(dns: &[String]) -> Result<String> {
 pub(super) fn derived_ssid(device_id: &str) -> String {
     let suffix: String = device_id.chars().take(SSID_ID_CHARS).collect();
     format!("{SSID_PREFIX}{suffix}")
+}
+
+/// The channel `ap` runs on: its own, or for channel 0 (automatic) hostapd's
+/// selection where `acs` says hostapd can make one, and otherwise the first
+/// channel the country allows.
+pub(super) fn resolve_channel(ap: &WifiApSettings, acs: bool) -> u8 {
+    if ap.channel == 0 && !acs {
+        *micad_settings::ap_channels(&ap.country_code).start()
+    } else {
+        ap.channel
+    }
 }

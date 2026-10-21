@@ -110,6 +110,24 @@ pub fn validate_wifi_psk(psk: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The regulatory domains that follow the FCC's 2.4 GHz plan.
+const FCC_PLAN_COUNTRIES: [&str; 8] = ["US", "CA", "MX", "TW", "CO", "PE", "AR", "CL"];
+
+/// The 2.4 GHz channels an access point may use in `country_code`: 1–11
+/// where the regulator follows the FCC's plan, 1–13 elsewhere. Channel 14,
+/// 802.11b-only and only in Japan, is not offered.
+#[must_use]
+pub fn ap_channels(country_code: &str) -> std::ops::RangeInclusive<u8> {
+    if FCC_PLAN_COUNTRIES
+        .iter()
+        .any(|country| country.eq_ignore_ascii_case(country_code))
+    {
+        1..=11
+    } else {
+        1..=13
+    }
+}
+
 /// WiFi access-point configuration used by the provisioning flow.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -126,7 +144,8 @@ pub struct WifiApSettings {
     /// render time. A fleet-wide constant default is forbidden
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub psk: Option<String>,
-    /// 2.4 GHz channel the access point uses.
+    /// 2.4 GHz channel the access point uses; 0 lets it choose, by ACS where
+    /// hostapd can and otherwise the first channel the country allows.
     pub channel: u8,
     /// Regulatory domain the radio is configured for.
     #[serde(rename = "countryCode")]

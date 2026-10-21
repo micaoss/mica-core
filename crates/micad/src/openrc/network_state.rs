@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 
 use super::{Commands, Host};
 use crate::network_state::{
-    NET_CLASS_DIR, NetworkState, normalize, observe_links, observe_wifi, observed_json,
-    radio_evidence,
+    NET_CLASS_DIR, NetworkState, cached_capabilities, normalize, observe_links, observe_wifi,
+    observed_json, radio_evidence,
 };
 
 /// Base's per-interface resolver files, relative to the root.
@@ -36,6 +36,8 @@ const UDHCPD_HEADER_BYTES: usize = 8;
 pub struct IpNetworkState {
     root: PathBuf,
     commands: Arc<dyn Commands>,
+    /// The radio's capabilities, asked once.
+    capabilities: std::sync::OnceLock<Value>,
 }
 
 impl IpNetworkState {
@@ -43,6 +45,7 @@ impl IpNetworkState {
         Self {
             root: root.into(),
             commands,
+            capabilities: std::sync::OnceLock::new(),
         }
     }
 
@@ -291,7 +294,14 @@ impl NetworkState for IpNetworkState {
 
     async fn observe(&self) -> anyhow::Result<Value> {
         let describe = self.describe_raw().await.map_err(|err| format!("{err:#}"));
-        let radios = radio_evidence(&self.root);
+        let mut radios = radio_evidence(&self.root);
+        radios.wifi_capabilities = cached_capabilities(
+            &self.capabilities,
+            &self.root,
+            self.commands.as_ref(),
+            &radios,
+        )
+        .await;
         let wifi = observe_wifi(&self.root, &radios.wifi_interfaces).await;
         let describe = describe.as_ref().map_err(String::as_str);
         let links = observe_links(describe).await;

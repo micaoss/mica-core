@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use serde_json::Value;
+
 use super::*;
 
 /// The radios and modems sysfs shows.
@@ -15,6 +17,8 @@ pub struct RadioEvidence {
     pub wwan_interfaces: Vec<String>,
     /// Whether a `wlan` rfkill switch, soft or hard, blocks the radio.
     pub wifi_blocked: bool,
+    /// What the first radio can do ([`wifi_capabilities`]), when asked.
+    pub wifi_capabilities: Option<Value>,
 }
 
 /// rfkill switches, relative to the root.

@@ -699,6 +699,22 @@ pub fn observed_json(
                 .collect::<Vec<_>>(),
         })
     };
+    let mut wifi_capabilities = json!({
+        "supported": !radios.wifi_interfaces.is_empty(),
+        "interfaces": radios.wifi_interfaces,
+        "blocked": radios.wifi_blocked,
+        "detail": if radios.wifi_interfaces.is_empty() {
+            "no phy80211 device under /sys/class/net"
+        } else {
+            "station and access point are driven by the wifi reconcilers"
+        },
+    });
+    if let (Some(target), Some(Value::Object(found))) = (
+        wifi_capabilities.as_object_mut(),
+        radios.wifi_capabilities.as_ref(),
+    ) {
+        target.extend(found.clone());
+    }
     json!({
         "interfaces": interfaces,
         "defaultRoutes": default_routes,
@@ -706,16 +722,7 @@ pub fn observed_json(
         "wifi": wifi_member,
         "accessPoint": access_points,
         "capabilities": {
-            "wifi": {
-                "supported": !radios.wifi_interfaces.is_empty(),
-                "interfaces": radios.wifi_interfaces,
-                "blocked": radios.wifi_blocked,
-                "detail": if radios.wifi_interfaces.is_empty() {
-                    "no phy80211 device under /sys/class/net"
-                } else {
-                    "station and access point are driven by the wifi reconcilers"
-                },
-            },
+            "wifi": wifi_capabilities,
             "bluetooth": {
                 "supported": !radios.bluetooth_adapters.is_empty(),
                 "adapters": radios.bluetooth_adapters,

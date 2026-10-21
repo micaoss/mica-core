@@ -286,6 +286,45 @@ pub fn parse_scan_results(text: &str) -> Vec<ScannedNetwork> {
         .collect()
 }
 
+/// The channel number of a frequency in MHz, in the 2.4, 5 and 6 GHz bands.
+#[must_use]
+pub fn channel_of(frequency_mhz: u32) -> Option<u32> {
+    match frequency_mhz {
+        2484 => Some(14),
+        2412..=2472 => Some((frequency_mhz - 2407) / 5),
+        5955..=7115 => Some((frequency_mhz - 5950) / 5),
+        5000..=5900 => Some((frequency_mhz - 5000) / 5),
+        _ => None,
+    }
+}
+
+/// A scanned network's security, from its `SCAN_RESULTS` flags, in the
+/// access point's terms: `wpa2-wpa3` where it offers PSK and SAE, `wpa3-sae`,
+/// `wpa2-psk`, `wpa-psk`, `wpa2-eap` for enterprise, `wep`, `owe`, or `open`.
+#[must_use]
+pub fn scan_security(flags: &str) -> &'static str {
+    let rsn = flags.contains("[WPA2-") || flags.contains("[RSN-");
+    let psk = flags.contains("PSK");
+    let sae = flags.contains("SAE");
+    if psk && sae {
+        "wpa2-wpa3"
+    } else if sae {
+        "wpa3-sae"
+    } else if flags.contains("EAP") {
+        "wpa2-eap"
+    } else if psk && rsn {
+        "wpa2-psk"
+    } else if psk {
+        "wpa-psk"
+    } else if flags.contains("OWE") {
+        "owe"
+    } else if flags.contains("[WEP]") {
+        "wep"
+    } else {
+        "open"
+    }
+}
+
 /// Ask wpa_supplicant to scan, then read what it found.
 ///
 /// Blocking, like every other control-socket exchange here. The scan is

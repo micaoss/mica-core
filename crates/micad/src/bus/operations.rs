@@ -213,6 +213,8 @@ impl MicadService {
                         "ssid": network.ssid,
                         "bssid": network.bssid,
                         "frequencyMhz": network.frequency_mhz,
+                        "channel": network.frequency_mhz.and_then(crate::network_state::channel_of),
+                        "security": crate::network_state::scan_security(&network.flags),
                         "signalDbm": network.signal_dbm,
                         "flags": network.flags,
                     }))

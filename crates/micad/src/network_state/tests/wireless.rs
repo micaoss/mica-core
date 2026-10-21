@@ -128,3 +128,30 @@ pub(super) fn radios_are_discovered_and_cellular_is_explicitly_unsupported() {
     assert_eq!(none["capabilities"]["cellular"]["supported"], false);
     assert_eq!(none["wifi"]["available"], false);
 }
+
+/// A scanned network's channel from its frequency, and its security from
+/// its flags, in the access point's terms.
+#[test]
+pub(super) fn a_scan_row_reads_its_channel_and_security() {
+    for (frequency, channel) in [
+        (2412, Some(1)),
+        (2472, Some(13)),
+        (2484, Some(14)),
+        (5180, Some(36)),
+        (5955, Some(1)),
+        (900, None),
+    ] {
+        assert_eq!(channel_of(frequency), channel, "{frequency}");
+    }
+    for (flags, security) in [
+        ("[WPA2-PSK-CCMP][ESS]", "wpa2-psk"),
+        ("[WPA2-PSK+SAE-CCMP][ESS]", "wpa2-wpa3"),
+        ("[RSN-SAE-CCMP][ESS]", "wpa3-sae"),
+        ("[WPA-PSK-TKIP][ESS]", "wpa-psk"),
+        ("[WPA2-EAP-CCMP][ESS]", "wpa2-eap"),
+        ("[WEP][ESS]", "wep"),
+        ("[ESS]", "open"),
+    ] {
+        assert_eq!(scan_security(flags), security, "{flags}");
+    }
+}

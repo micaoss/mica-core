@@ -125,6 +125,8 @@ pub struct WifiApReconciler<C: UnitControl, R: NetworkReload> {
     state_dir: PathBuf,
     control: C,
     reloader: R,
+    /// Whether hostapd can select a channel itself, for channel 0.
+    acs: bool,
 }
 
 impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
@@ -146,7 +148,15 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
             state_dir,
             control,
             reloader,
+            acs: false,
         }
+    }
+
+    /// Whether hostapd can select a channel itself.
+    #[must_use]
+    pub fn with_acs(mut self, acs: bool) -> Self {
+        self.acs = acs;
+        self
     }
 }
 
@@ -189,7 +199,15 @@ impl<C: UnitControl> WifiApReconciler<C, NoReload> {
             production_state_dir(),
             control,
         )
+        .with_acs(production_acs())
     }
+}
+
+/// Whether this root's hostapd can select a channel itself.
+fn production_acs() -> bool {
+    crate::network_state::hostapd_has_acs(
+        &Path::new("/").join(crate::network_state::HOSTAPD_BINARY),
+    )
 }
 
 /// The directory of the settings file, where the per-device AP key lives.
@@ -223,6 +241,7 @@ impl WifiApReconciler<Systemd, Networkd> {
             Systemd::new(),
             Networkd,
         )
+        .with_acs(production_acs())
     }
 }
 
@@ -459,7 +478,11 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
                 ApSecurity::Open => None,
                 _ => Some(self.resolve_psk(ap)?),
             };
-            let rendered = render_config(ap, ssid, psk.as_deref())?;
+            let ap = WifiApSettings {
+                channel: resolve_channel(ap, self.acs),
+                ..ap.clone()
+            };
+            let rendered = render_config(&ap, ssid, psk.as_deref())?;
             config_changed = write_config_if_changed(&config_path, &rendered, CONFIG_MODE)?;
         }
 
