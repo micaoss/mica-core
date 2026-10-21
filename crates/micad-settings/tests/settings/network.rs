@@ -61,6 +61,8 @@ pub(super) fn every_kind() -> Settings {
                             allowed_ips: vec!["10.8.0.0/24".to_string()],
                             endpoint: Some("vpn.example.net:51820".to_string()),
                             persistent_keepalive: Some(25),
+                            name: None,
+                            preshared_key: None,
                         }],
                     }),
                     ..IfaceSettings::default()

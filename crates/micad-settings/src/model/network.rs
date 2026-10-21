@@ -197,6 +197,17 @@ pub struct WireguardPeer {
         skip_serializing_if = "Option::is_none"
     )]
     pub persistent_keepalive: Option<u16>,
+    /// A label for the peer, for people; never rendered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A pre-shared key mixed into the handshake: 32 bytes in padded base64,
+    /// like a public key.
+    #[serde(
+        rename = "presharedKey",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preshared_key: Option<String>,
 }
 
 /// Static addressing for a single interface.

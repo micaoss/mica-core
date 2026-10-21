@@ -1,4 +1,5 @@
-//! WireGuard private keys: lazy on-device generation, and the public half.
+//! WireGuard private keys: lazy on-device generation, and the public half;
+//! and the files networkd reads peers' pre-shared keys from.
 //!
 //! A WireGuard private key is machine-only. Nothing outside this module ever
 //! holds one: it is drawn from the system CSPRNG on the first reconcile of a
@@ -8,6 +9,7 @@
 //! live-state field can grow one by accident, and the settings tree carries no
 //! field it could be written into either.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, DirBuilder, Permissions};
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -21,6 +23,15 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 
 /// Sub-directory of the state directory holding the key files networkd reads.
 const NETWORKD_SECRETS_DIR: &str = "networkd-secrets";
+
+/// Directory networkd reads peers' pre-shared keys from on a device. Runtime
+/// and not STATE: each key is a copy of one the settings hold, written again
+/// on every reconcile.
+const RUNTIME_PSK_DIR: &str = "/run/mica/networkd-psk";
+
+/// Sub-directory of a test store's directory standing in for
+/// [`RUNTIME_PSK_DIR`].
+const PSK_SUBDIR: &str = "networkd-psk";
 
 /// Mode of the key directory: owner plus group, no world.
 const KEY_DIR_MODE: u32 = 0o750;
@@ -43,6 +54,7 @@ const KEY_LEN: usize = 32;
 #[derive(Debug, Clone)]
 pub struct Keystore {
     dir: PathBuf,
+    psk_dir: PathBuf,
     group: Option<u32>,
 }
 
@@ -56,6 +68,7 @@ impl Keystore {
     pub fn under(state_dir: &Path, group: Option<u32>) -> Self {
         Self {
             dir: state_dir.join(NETWORKD_SECRETS_DIR),
+            psk_dir: state_dir.join(PSK_SUBDIR),
             group,
         }
     }
@@ -64,7 +77,10 @@ impl Keystore {
     /// [`KEY_GROUP`] as the host's group database spells it.
     #[must_use]
     pub fn production(state_dir: &Path) -> Self {
-        Self::under(state_dir, lookup_group(Path::new(GROUP_FILE), KEY_GROUP))
+        Self {
+            psk_dir: PathBuf::from(RUNTIME_PSK_DIR),
+            ..Self::under(state_dir, lookup_group(Path::new(GROUP_FILE), KEY_GROUP))
+        }
     }
 
     /// Path of `iface`'s private-key file, which is what the rendered
@@ -75,6 +91,63 @@ impl Keystore {
     #[must_use]
     pub fn key_path(&self, iface: &str) -> PathBuf {
         self.dir.join(format!("wg-{iface}.key"))
+    }
+
+    /// Path of the pre-shared key file of `iface`'s peer at `index`, which the
+    /// rendered `.netdev` names in `PresharedKeyFile=`.
+    #[must_use]
+    pub fn psk_path(&self, iface: &str, index: usize) -> PathBuf {
+        self.psk_dir.join(format!("wg-{iface}-{index}.psk"))
+    }
+
+    /// Write each pre-shared key in `keys` to its [`Self::psk_path`], keyed by
+    /// interface and peer index, and remove every other key file. Answers the
+    /// interfaces whose keys changed, were added or were removed: networkd
+    /// reads a key when it creates the device, so those devices are built
+    /// again.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the directory or a file cannot be written.
+    pub fn sync_psks(&self, keys: &BTreeMap<(String, usize), String>) -> Result<BTreeSet<String>> {
+        let mut changed = BTreeSet::new();
+        if keys.is_empty() && !self.psk_dir.is_dir() {
+            return Ok(changed);
+        }
+        ensure_dir(&self.psk_dir, self.group)?;
+        let mut kept = BTreeSet::new();
+        for ((iface, index), key) in keys {
+            let path = self.psk_path(iface, *index);
+            if fs::read_to_string(&path).ok().as_deref() != Some(key.as_str()) {
+                mica_fs::Replace::new(&path, "tmp")?
+                    .mode(KEY_FILE_MODE)
+                    .group(self.group)
+                    .write(key)
+                    .with_context(|| format!("write {}", path.display()))?;
+                changed.insert(iface.clone());
+            }
+            kept.insert(path);
+        }
+        for entry in fs::read_dir(&self.psk_dir)
+            .with_context(|| format!("read {}", self.psk_dir.display()))?
+        {
+            let path = entry?.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Some((iface, _)) = name
+                .strip_prefix("wg-")
+                .and_then(|rest| rest.strip_suffix(".psk"))
+                .and_then(|rest| rest.rsplit_once('-'))
+            else {
+                continue;
+            };
+            if !kept.contains(&path) {
+                changed.insert(iface.to_string());
+                fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
+            }
+        }
+        Ok(changed)
     }
 
     /// The public half of `iface`'s private key, drawing and storing a private
@@ -109,7 +182,7 @@ impl Keystore {
     /// Write `key` to [`Self::key_path`] atomically, at [`KEY_FILE_MODE`] and
     /// owned by [`Self::group`].
     fn write_key(&self, iface: &str, key: &str) -> Result<()> {
-        self.ensure_dir()?;
+        ensure_dir(&self.dir, self.group)?;
         let target = self.key_path(iface);
         mica_fs::Replace::new(&target, "tmp")?
             .mode(KEY_FILE_MODE)
@@ -135,35 +208,34 @@ impl Keystore {
             .ok_or_else(|| anyhow!("{} does not hold a WireGuard key", path.display()))?;
         Ok(Some(bytes))
     }
+}
 
-    /// Create the key directory if needed and pin it to [`KEY_DIR_MODE`] and
-    /// [`Self::group`].
-    fn ensure_dir(&self) -> Result<()> {
-        if !self.dir.is_dir() {
-            if let Some(parent) = self.dir.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("create {}", parent.display()))?;
-            }
-            // mkdir(2) carries the mode, so the directory is never momentarily
-            // world-readable between creation and chmod.
-            match DirBuilder::new().mode(KEY_DIR_MODE).create(&self.dir) {
-                Ok(()) => {}
-                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(err) => {
-                    return Err(err).with_context(|| format!("create {}", self.dir.display()));
-                }
+/// Create the key directory `dir` if needed and pin it to [`KEY_DIR_MODE`]
+/// and `group`.
+fn ensure_dir(dir: &Path, group: Option<u32>) -> Result<()> {
+    if !dir.is_dir() {
+        if let Some(parent) = dir.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        // mkdir(2) carries the mode, so the directory is never momentarily
+        // world-readable between creation and chmod.
+        match DirBuilder::new().mode(KEY_DIR_MODE).create(dir) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(err) => {
+                return Err(err).with_context(|| format!("create {}", dir.display()));
             }
         }
-        // Unconditional, and not masked by the umask the way mkdir's mode is: a
-        // directory left behind by an older or interrupted run gets tightened.
-        fs::set_permissions(&self.dir, Permissions::from_mode(KEY_DIR_MODE))
-            .with_context(|| format!("chmod {}", self.dir.display()))?;
-        if let Some(group) = self.group {
-            std::os::unix::fs::chown(&self.dir, None, Some(group))
-                .with_context(|| format!("chgrp {}", self.dir.display()))?;
-        }
-        Ok(())
     }
+    // Unconditional, and not masked by the umask the way mkdir's mode is: a
+    // directory left behind by an older or interrupted run gets tightened.
+    fs::set_permissions(dir, Permissions::from_mode(KEY_DIR_MODE))
+        .with_context(|| format!("chmod {}", dir.display()))?;
+    if let Some(group) = group {
+        std::os::unix::fs::chown(dir, None, Some(group))
+            .with_context(|| format!("chgrp {}", dir.display()))?;
+    }
+    Ok(())
 }
 
 /// A fresh X25519 private key from the system CSPRNG, clamped.

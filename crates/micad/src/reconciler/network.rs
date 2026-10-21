@@ -314,6 +314,8 @@ impl<R: NetworkReload, D: LinkDelete> Reconciler for NetworkReconciler<R, D> {
     async fn apply(&self, settings: &Settings) -> anyhow::Result<serde_json::Value> {
         validate_network(&settings.network)?;
         validate_kernel_features(&settings.network, self.kernel.features().await.as_deref())?;
+        // Before the netdevs, so networkd finds every key file a unit names.
+        let psks = self.keys.sync_psks(&preshared_keys(&settings.network))?;
         let masters = bridge_ports(&settings.network);
         let children = vlan_children(&settings.network);
         std::fs::create_dir_all(&self.target_dir)?;
@@ -348,7 +350,9 @@ impl<R: NetworkReload, D: LinkDelete> Reconciler for NetworkReconciler<R, D> {
             if let Some(netdev) = render_netdev(iface, cfg, &self.keys) {
                 let netdev_name = format!("50-mica-{iface}.netdev");
                 let path = self.target_dir.join(&netdev_name);
-                if std::fs::read_to_string(&path).is_ok_and(|previous| previous != netdev) {
+                if std::fs::read_to_string(&path)
+                    .is_ok_and(|previous| previous != netdev || psks.contains(iface))
+                {
                     recreate.insert(iface.clone());
                 }
                 std::fs::write(&path, netdev)?;

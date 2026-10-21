@@ -50,6 +50,8 @@ pub(super) async fn renders_a_tunnel_that_only_initiates_without_a_listen_port()
                 allowed_ips: vec!["10.8.0.0/24".to_string(), "fd00::/64".to_string()],
                 endpoint: None,
                 persistent_keepalive: None,
+                name: None,
+                preshared_key: None,
             }],
         ),
     )]);
@@ -173,6 +175,68 @@ pub(super) async fn recreates_a_tunnel_whose_peers_changed_and_tears_down_a_remo
     // far end already trusts, and the file is unreachable to everything
     // but networkd meanwhile.
     assert!(dir.path().join("networkd-secrets/wg-wg0.key").exists());
+}
+
+#[tokio::test]
+pub(super) async fn a_preshared_key_is_a_file_the_netdev_names_and_a_new_key_rebuilds_the_tunnel() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, calls) = reconciler_in(dir.path());
+    let with_psk = |byte: u8| WireguardPeer {
+        name: Some("laptop".to_string()),
+        preshared_key: Some(peer_key(byte)),
+        ..peer(1)
+    };
+    reconciler
+        .apply(&settings_with(&[(
+            "wg0",
+            wireguard_iface(Some(51820), vec![with_psk(7)]),
+        )]))
+        .await
+        .unwrap();
+
+    let psk_file = dir.path().join("networkd-psk/wg-wg0-0.psk");
+    let netdev = std::fs::read_to_string(dir.path().join("50-mica-wg0.netdev")).unwrap();
+    assert!(
+        netdev.contains(&format!("PresharedKeyFile={}\n", psk_file.display())),
+        "{netdev}"
+    );
+    assert!(!netdev.contains(&peer_key(7)), "{netdev}");
+    assert!(!netdev.contains("laptop"), "{netdev}");
+    assert_eq!(std::fs::read_to_string(&psk_file).unwrap(), peer_key(7));
+    let mode = std::fs::metadata(&psk_file).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o640);
+
+    // The netdev is the same text with another key in the file, and the
+    // device still has to be built again to read it.
+    reconciler
+        .apply(&settings_with(&[(
+            "wg0",
+            wireguard_iface(Some(51820), vec![with_psk(8)]),
+        )]))
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&psk_file).unwrap(), peer_key(8));
+
+    reconciler
+        .apply(&settings_with(&[(
+            "wg0",
+            wireguard_iface(Some(51820), vec![peer(1)]),
+        )]))
+        .await
+        .unwrap();
+    assert!(!psk_file.exists());
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![
+            "reload".to_string(),
+            "del wg0".to_string(),
+            "reload".to_string(),
+            "del wg0".to_string(),
+            "reload".to_string(),
+        ]
+    );
 }
 
 #[tokio::test]

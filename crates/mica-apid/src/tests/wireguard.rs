@@ -377,3 +377,57 @@ pub(super) async fn the_state_route_serves_the_kind_and_the_public_key() {
 
 // `GET /api/v1/health` and the error envelope on a method a
 // declared `/api/` route does not serve.
+
+// A peer's pre-shared key reads as the sentinel, and the map written back
+// with the sentinel keeps the stored key.
+#[tokio::test]
+pub(super) async fn a_preshared_key_is_redacted_and_the_sentinel_keeps_it() {
+    let mut tree = kinds_tree("hunter2secret");
+    tree["network"]["wg0"]["wireguard"]["peers"][0]["presharedKey"] = json!(OTHER_PEER_KEY);
+    tree["network"]["wg0"]["wireguard"]["peers"][0]["name"] = json!("laptop");
+    let (tree, token) = with_token(tree);
+    let (router, fake) = test_app(tree);
+
+    let response = bearer(&router, "GET", "/api/v1/network", &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let read = &body["configured"]["wg0"]["wireguard"]["peers"][0];
+    assert_eq!(read["presharedKey"], json!("<redacted>"));
+    assert_eq!(read["name"], json!("laptop"));
+
+    let mut map = body["configured"].clone();
+    map["wg0"]["wireguard"]["listenPort"] = json!(51900);
+    let response = bearer_json(&router, "PUT", "/api/v1/network", &token, &map.to_string()).await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let stored = fake.get_settings("network").await.unwrap();
+    assert_eq!(
+        stored["wg0"]["wireguard"]["peers"][0]["presharedKey"],
+        json!(OTHER_PEER_KEY)
+    );
+    assert_eq!(stored["wg0"]["wireguard"]["listenPort"], json!(51900));
+}
+
+// The sentinel on a peer with no stored key means nothing and is refused,
+// on the map and on the one interface.
+#[tokio::test]
+pub(super) async fn the_sentinel_for_a_peer_with_no_stored_key_is_refused() {
+    let (tree, token) = with_token(kinds_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+    let mut entry = kinds_tree("unused")["network"]["wg0"].clone();
+    entry["wireguard"]["peers"][0]["presharedKey"] = json!("<redacted>");
+
+    let response = bearer_json(
+        &router,
+        "PUT",
+        "/api/v1/network/wg0",
+        &token,
+        &entry.to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let mut map = kinds_tree("unused")["network"].clone();
+    map["wg0"] = entry;
+    let response = bearer_json(&router, "PUT", "/api/v1/network", &token, &map.to_string()).await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(fake.set_paths().is_empty(), "a refused entry was written");
+}

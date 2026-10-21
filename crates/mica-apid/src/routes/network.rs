@@ -1,5 +1,6 @@
 //! Network interfaces.
 
+use crate::redact;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -28,7 +29,7 @@ pub(crate) async fn api_v1_network_read(
     State(state): State<AppState>,
 ) -> Response {
     let configured = match state.api.get_settings(NETWORK_SETTINGS_PATH).await {
-        Ok(value) => value,
+        Ok(value) => redact::redact(value, NETWORK_SETTINGS_PATH),
         Err(err) => return bus_api_error(&err, Some(NETWORK_SETTINGS_PATH)),
     };
     let configured_count = configured.as_object().map_or(0, serde_json::Map::len);
@@ -106,10 +107,21 @@ pub(crate) async fn api_v1_network_write(
     State(state): State<AppState>,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
-    let entries: NetworkEntries = match json_body(body, Some(NETWORK_SETTINGS_PATH)) {
+    let mut entries: NetworkEntries = match json_body(body, Some(NETWORK_SETTINGS_PATH)) {
         Ok(entries) => entries,
         Err(response) => return *response,
     };
+    if carries_redacted_psk(entries.values()) {
+        let stored = match api_network_entries(&state).await {
+            Ok(stored) => stored,
+            Err(response) => return *response,
+        };
+        for (iface, cfg) in &mut entries {
+            if let Err(response) = restore_preshared_keys(iface, cfg, &stored) {
+                return *response;
+            }
+        }
+    }
     // The keys as well as the bodies. `Settings::set` checks a new
     // `network` key itself, but it checks it *after* the write is
     // built, and a 422 that says which name is wrong beats one that says the
@@ -183,7 +195,7 @@ pub(crate) async fn api_v1_network_iface_write(
     if let Err(response) = check_iface_name(&iface, &path) {
         return *response;
     }
-    let cfg: IfaceSettings = match json_body(body, Some(&path)) {
+    let mut cfg: IfaceSettings = match json_body(body, Some(&path)) {
         Ok(cfg) => cfg,
         Err(response) => return *response,
     };
@@ -191,6 +203,9 @@ pub(crate) async fn api_v1_network_iface_write(
         Ok(entries) => entries,
         Err(response) => return *response,
     };
+    if let Err(response) = restore_preshared_keys(&iface, &mut cfg, &candidate) {
+        return *response;
+    }
     // The candidate tree and not the one entry, for the reason the pane's
     // comment gives: every relational rule is about two entries at once.
     candidate.insert(iface.clone(), cfg.clone());

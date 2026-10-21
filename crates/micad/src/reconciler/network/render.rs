@@ -2,24 +2,32 @@
 
 use crate::wgkeys::Keystore;
 use micad_settings::{CanConfig, IfaceKind, IfaceSettings, WireguardConfig};
-use std::path::Path;
 
 /// Render the `[WireGuard]` and `[WireGuardPeer]` sections of a tunnel's
 /// netdev.
 ///
-/// `PrivateKeyFile=` names the key rather than carrying it: the unit file lives
-/// in networkd's runtime directory, which is world-readable, and the key file
-/// it points at is not.
-pub(super) fn render_wireguard(cfg: &WireguardConfig, key_path: &Path) -> String {
-    let mut out = format!("\n[WireGuard]\nPrivateKeyFile={}\n", key_path.display());
+/// `PrivateKeyFile=` and `PresharedKeyFile=` name the keys rather than carrying
+/// them: the unit file lives in networkd's runtime directory, which is
+/// world-readable, and the key files it points at are not.
+pub(super) fn render_wireguard(iface: &str, cfg: &WireguardConfig, keys: &Keystore) -> String {
+    let mut out = format!(
+        "\n[WireGuard]\nPrivateKeyFile={}\n",
+        keys.key_path(iface).display()
+    );
     if let Some(port) = cfg.listen_port {
         out.push_str(&format!("ListenPort={port}\n"));
     }
-    for peer in &cfg.peers {
+    for (index, peer) in cfg.peers.iter().enumerate() {
         out.push_str(&format!(
             "\n[WireGuardPeer]\nPublicKey={}\n",
             peer.public_key
         ));
+        if peer.preshared_key.is_some() {
+            out.push_str(&format!(
+                "PresharedKeyFile={}\n",
+                keys.psk_path(iface, index).display()
+            ));
+        }
         if !peer.allowed_ips.is_empty() {
             out.push_str(&format!("AllowedIPs={}\n", peer.allowed_ips.join(",")));
         }
@@ -48,7 +56,7 @@ pub(super) fn render_netdev(iface: &str, cfg: &IfaceSettings, keys: &Keystore) -
         (IfaceKind::Bridge, _, _) => Some(format!("[NetDev]\nName={iface}\nKind=bridge\n")),
         (IfaceKind::Wireguard, _, Some(wireguard)) => Some(format!(
             "[NetDev]\nName={iface}\nKind=wireguard\n{}",
-            render_wireguard(wireguard, &keys.key_path(iface))
+            render_wireguard(iface, wireguard, keys)
         )),
         _ => None,
     }

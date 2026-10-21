@@ -39,11 +39,18 @@ pub const REDACTED: &str = "<redacted>";
 ///
 /// Stated because the alternative is a subsystem author who picks
 /// `sharedSecret`, ships it, and finds out from a support case. The moved
-/// schema satisfies it today with nothing added: the only secret-bearing keys
-/// in the namespace are `wifi.ap.psk` and `wifi.client.networks[].psk`, both
-/// spelled `psk`. `mqtt.auth` carries no credential at all -- the broker reads
+/// The secret-bearing keys in the namespace are `wifi.ap.psk` and
+/// `wifi.client.networks[].psk`, both spelled `psk`, and a WireGuard peer's
+/// `presharedKey`. `mqtt.auth` carries no credential at all -- the broker reads
 /// its accounts from a STATE file, the rule stated at that field.
-const SECRET_FIELDS: [&str; 5] = ["psk", "passwordHash", "password_hash", "hash", "privateKey"];
+const SECRET_FIELDS: [&str; 6] = [
+    "psk",
+    "passwordHash",
+    "password_hash",
+    "hash",
+    "privateKey",
+    "presharedKey",
+];
 
 /// Whether a field named `name` is redacted.
 fn is_secret(name: &str) -> bool {

@@ -18,7 +18,13 @@ pub(super) fn secret_tree(password: &str) -> serde_json::Value {
         // will — so the fixture plants the hypothetical the entry guards
         // against: a settings tree that somehow holds one must not serve it.
         "network": {
-            "wg0": { "kind": "wireguard", "privateKey": "wg-plaintext-marker" },
+            "wg0": {
+                "kind": "wireguard",
+                "privateKey": "wg-plaintext-marker",
+                "wireguard": { "peers": [
+                    { "publicKey": "peer", "presharedKey": "wg-psk-plaintext-marker" },
+                ] },
+            },
         },
         "access": {
             "webAdmin": { "password_hash": auth::hash_password(password).unwrap() },
@@ -57,7 +63,7 @@ pub(super) fn secret_tree(password: &str) -> serde_json::Value {
     })
 }
 
-// The live-state entry the state tests read, carrying all five names too:
+// The live-state entry the state tests read, carrying all six names too:
 // the redaction rule for the settings root extends to the state root, so the state root is held to the same proof.
 pub(super) fn secret_state_entry() -> serde_json::Value {
     json!({
@@ -66,6 +72,7 @@ pub(super) fn secret_state_entry() -> serde_json::Value {
         "peers": [
             { "ssid": "home", "psk": "state-peer-plaintext-marker" },
             { "id": "laptop", "hash": "state-hash-plaintext-marker" },
+            { "publicKey": "peer", "presharedKey": "state-psk-plaintext-marker" },
         ],
         "admin": {
             "passwordHash": "state-camel-plaintext-marker",
@@ -75,7 +82,9 @@ pub(super) fn secret_state_entry() -> serde_json::Value {
 }
 
 // Every marker string [`secret_tree`] and [`secret_state_entry`] plant.
-pub(super) const PLAINTEXT_MARKERS: [&str; 12] = [
+pub(super) const PLAINTEXT_MARKERS: [&str; 14] = [
+    "wg-psk-plaintext-marker",
+    "state-psk-plaintext-marker",
     "token-digest-plaintext-marker",
     "wg-plaintext-marker",
     "state-private-plaintext-marker",
@@ -91,8 +100,14 @@ pub(super) const PLAINTEXT_MARKERS: [&str; 12] = [
 ];
 
 // The field names the redaction rule names, `privateKey` included.
-pub(super) const SECRET_FIELD_NAMES: [&str; 5] =
-    ["psk", "passwordHash", "password_hash", "hash", "privateKey"];
+pub(super) const SECRET_FIELD_NAMES: [&str; 6] = [
+    "psk",
+    "passwordHash",
+    "password_hash",
+    "hash",
+    "privateKey",
+    "presharedKey",
+];
 
 // The sentinel a redacted field carries.
 pub(super) const REDACTED: &str = "<redacted>";
@@ -427,7 +442,7 @@ pub(super) async fn every_redacted_field_name_comes_back_redacted_from_the_setti
 
     // Three subtrees rather than one, because the whole-tree dot-path is `""`
     // and this route family takes a non-empty one. Between them they hold all
-    // five names.
+    // six names.
     let mut found = Vec::new();
     let mut bodies = String::new();
     for path in [

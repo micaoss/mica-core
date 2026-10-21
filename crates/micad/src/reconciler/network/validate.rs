@@ -173,3 +173,21 @@ pub(super) fn vlan_children(
     }
     children
 }
+
+/// Every peer's pre-shared key, keyed by tunnel and peer index.
+pub(super) fn preshared_keys(
+    network: &BTreeMap<String, IfaceSettings>,
+) -> BTreeMap<(String, usize), String> {
+    let mut keys = BTreeMap::new();
+    for (iface, cfg) in network {
+        let Some(wireguard) = &cfg.wireguard else {
+            continue;
+        };
+        for (index, peer) in wireguard.peers.iter().enumerate() {
+            if let Some(key) = &peer.preshared_key {
+                keys.insert((iface.clone(), index), key.clone());
+            }
+        }
+    }
+    keys
+}

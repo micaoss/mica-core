@@ -10536,6 +10536,13 @@
             ],
             "description": "`host:port` to send to, for a peer this end initiates to."
           },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A label for the peer, up to 64 characters with no control character."
+          },
           "persistentKeepalive": {
             "type": [
               "integer",
@@ -10544,6 +10551,13 @@
             "format": "int32",
             "description": "Keepalive interval in seconds, for a peer behind NAT.",
             "minimum": 0
+          },
+          "presharedKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A pre-shared key: 32 bytes in padded base64. **Read as\n`<redacted>`**; a `PUT` of the interface or the map that sends\n`<redacted>` keeps the key stored for the peer with that public key."
           },
           "publicKey": {
             "type": "string",

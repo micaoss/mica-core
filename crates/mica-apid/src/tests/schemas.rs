@@ -19,6 +19,8 @@ pub(super) fn the_network_schema_matches_the_settings_model() {
         allowed_ips: vec!["10.8.0.0/24".to_string()],
         endpoint: Some("vpn.example.net:51820".to_string()),
         persistent_keepalive: Some(25),
+        name: Some("laptop".to_string()),
+        preshared_key: Some(PEER_KEY.to_string()),
     };
     let iface = micad_settings::IfaceSettings {
         kind: micad_settings::IfaceKind::Wireguard,

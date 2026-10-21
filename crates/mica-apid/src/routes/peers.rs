@@ -173,10 +173,8 @@ pub(crate) async fn api_v1_peers_list(
     let path = peers_settings_path(&iface);
     match tunnel_peers(&state, &iface, &path).await {
         Ok(peers) => {
-            // Through the shared redactor, as the WiFi listing is. No field of
-            // a peer is on `redact`'s list today, so this substitutes nothing;
-            // it is the fail-closed half of that rule, so the day a peer
-            // pre-shared key enters the schema it is already covered.
+            // Through the shared redactor, as the WiFi listing is: a peer's
+            // `presharedKey` reads as the sentinel.
             // Infallible: a peer is a struct of strings and integers.
             let value = match encode(&peers) {
                 Ok(value) => value,

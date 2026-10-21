@@ -100,6 +100,70 @@ pub(crate) struct WireguardPeerEntry {
         skip_serializing_if = "Option::is_none"
     )]
     pub(super) persistent_keepalive: Option<u16>,
+    /// A label for the peer, up to 64 characters with no control character.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) name: Option<String>,
+    /// A pre-shared key: 32 bytes in padded base64. **Read as
+    /// `<redacted>`**; a `PUT` of the interface or the map that sends
+    /// `<redacted>` keeps the key stored for the peer with that public key.
+    #[serde(rename = "presharedKey", skip_serializing_if = "Option::is_none")]
+    pub(super) preshared_key: Option<String>,
+}
+
+/// Whether any peer in `entries` carries the redaction sentinel as its
+/// pre-shared key.
+pub(super) fn carries_redacted_psk<'a>(
+    mut entries: impl Iterator<Item = &'a IfaceSettings>,
+) -> bool {
+    entries.any(|cfg| {
+        cfg.wireguard.as_ref().is_some_and(|wireguard| {
+            wireguard
+                .peers
+                .iter()
+                .any(|peer| peer.preshared_key.as_deref() == Some(crate::redact::REDACTED))
+        })
+    })
+}
+
+/// `cfg` with each peer's `presharedKey` of `<redacted>` replaced by the key
+/// stored for the peer with the same public key: a client that read the map
+/// and sends it back means the key it could not see. A sentinel for a peer
+/// with no stored key is refused, since there is no key it could mean.
+pub(super) fn restore_preshared_keys(
+    iface: &str,
+    cfg: &mut IfaceSettings,
+    stored: &NetworkEntries,
+) -> Result<(), Box<Response>> {
+    let Some(wireguard) = &mut cfg.wireguard else {
+        return Ok(());
+    };
+    let stored_peers = stored
+        .get(iface)
+        .and_then(|entry| entry.wireguard.as_ref())
+        .map_or(&[][..], |wireguard| wireguard.peers.as_slice());
+    for (index, peer) in wireguard.peers.iter_mut().enumerate() {
+        if peer.preshared_key.as_deref() != Some(crate::redact::REDACTED) {
+            continue;
+        }
+        let kept = stored_peers
+            .iter()
+            .find(|stored| stored.public_key == peer.public_key)
+            .and_then(|stored| stored.preshared_key.clone());
+        let Some(kept) = kept else {
+            return Err(Box::new(api_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiError::apid(
+                    "validation_failed",
+                    format!(
+                        "network.{iface} peer {index} sends `<redacted>` as its preshared key, and no key is stored for that peer to keep"
+                    ),
+                )
+                .at(&iface_settings_path(iface)),
+            )));
+        };
+        peer.preshared_key = Some(kept);
+    }
+    Ok(())
 }
 
 /// One `network` entry, as the document describes it.

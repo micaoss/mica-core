@@ -88,6 +88,9 @@ pub fn is_wireguard_key(value: &str) -> bool {
     STANDARD.decode(value).is_ok_and(|bytes| bytes.len() == 32)
 }
 
+/// The longest peer name, in characters.
+pub const MAX_PEER_NAME_CHARS: usize = 64;
+
 /// Refuse a tunnel's peers the renderer must not see.
 ///
 /// A rejected peer is named by its index and never by its key: an operator who
@@ -112,6 +115,20 @@ pub fn validate_peers(iface: &str, peers: &[WireguardPeer]) -> Result<(), String
         {
             return Err(format!(
                 "network.{iface} peer {index} endpoint {endpoint:?} is not host:port"
+            ));
+        }
+        if let Some(name) = &peer.name
+            && (name.chars().count() > MAX_PEER_NAME_CHARS || name.chars().any(char::is_control))
+        {
+            return Err(format!(
+                "network.{iface} peer {index} name is longer than {MAX_PEER_NAME_CHARS} characters or carries a control character"
+            ));
+        }
+        if let Some(key) = &peer.preshared_key
+            && !is_wireguard_key(key)
+        {
+            return Err(format!(
+                "network.{iface} peer {index} has a preshared key that is not 32 bytes spelled in base64"
             ));
         }
     }
@@ -252,6 +269,35 @@ mod tests {
         assert!(!is_wireguard_key(unpadded.trim_end_matches('=')));
         assert!(!is_wireguard_key("not base64 at all"));
         assert!(!is_wireguard_key(""));
+    }
+
+    #[test]
+    fn a_peer_name_is_short_and_a_preshared_key_is_a_key() {
+        let peer = WireguardPeer {
+            public_key: STANDARD.encode([7u8; 32]),
+            allowed_ips: Vec::new(),
+            endpoint: None,
+            persistent_keepalive: None,
+            name: Some("laptop".to_string()),
+            preshared_key: Some(STANDARD.encode([9u8; 32])),
+        };
+        assert!(validate_peers("wg0", std::slice::from_ref(&peer)).is_ok());
+        let long = WireguardPeer {
+            name: Some("x".repeat(MAX_PEER_NAME_CHARS + 1)),
+            ..peer.clone()
+        };
+        assert!(validate_peers("wg0", &[long]).is_err());
+        let control = WireguardPeer {
+            name: Some("a\nb".to_string()),
+            ..peer.clone()
+        };
+        assert!(validate_peers("wg0", &[control]).is_err());
+        let bad_key = WireguardPeer {
+            preshared_key: Some("<redacted>".to_string()),
+            ..peer
+        };
+        let err = validate_peers("wg0", &[bad_key]).unwrap_err();
+        assert!(!err.contains("redacted"), "{err}");
     }
 
     #[test]
