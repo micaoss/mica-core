@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod app_cli;
 mod apply_queue;
 mod apps;
 pub mod ble_provisioning;

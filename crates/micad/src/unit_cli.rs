@@ -30,8 +30,10 @@ usage: micad unit install <file|-> [--name <name>] [--conf <file>] [--enable]
   disable  stop it now and no longer at boot
   remove   stop it and delete it
   start, stop, restart
-           the service, now; managed here or put there with mica-unit
-  list     every service, declared here or put there with mica-unit
+           the service, now; managed here, put there with mica-unit or part
+           of an app
+  list     every service, declared here, put there with mica-unit or part of
+           an app
   logs     its newest lines (200 unless --tail)
 
   Under systemd a name without a unit type is a .service.";
@@ -221,6 +223,22 @@ async fn run(command: Command) -> Result<()> {
         };
         anyhow::Ok(declared)
     };
+    // An app's units are its own: `micad app` installs and removes them.
+    let app_of = |name: &str| {
+        units["units"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|unit| unit["name"] == json!(name))
+            .and_then(|unit| unit["app"].as_str())
+            .map(str::to_string)
+    };
+    let refuse_app = |name: &str| match app_of(name) {
+        Some(app) => Err(anyhow::anyhow!(
+            "{name} is part of app {app}; `micad app` installs and removes it"
+        )),
+        None => Ok(()),
+    };
     match command {
         Command::Install(install) => {
             let text = read_input(&install.file, MAX_FILE)?;
@@ -234,6 +252,7 @@ async fn run(command: Command) -> Result<()> {
                         .context("the file names no unit; give one with --name")?,
                 },
             );
+            refuse_app(&name)?;
             let conf = install
                 .conf
                 .as_deref()
@@ -257,6 +276,7 @@ async fn run(command: Command) -> Result<()> {
         }
         Command::Enable { name, enabled } => {
             let name = unit_name(&init, &name);
+            refuse_app(&name)?;
             if !declared().await?.contains_key(&name) {
                 bail!(
                     "no service named {name} is declared here; `micad unit install` it, or use mica-unit for one put there by hand"
@@ -274,6 +294,7 @@ async fn run(command: Command) -> Result<()> {
         }
         Command::Remove(name) => {
             let name = unit_name(&init, &name);
+            refuse_app(&name)?;
             let mut units = declared().await?;
             if units.remove(&name).is_none() {
                 bail!("no service named {name} is declared here");
@@ -340,7 +361,9 @@ fn render_list(units: &Value) -> String {
         "MANAGED".to_string(),
     ]];
     for unit in units["units"].as_array().into_iter().flatten() {
-        let managed = if unit["managed"] == json!(true) {
+        let managed = if let Some(app) = unit["app"].as_str() {
+            format!("app {app}")
+        } else if unit["managed"] == json!(true) {
             "micad".to_string()
         } else if let Some(refused) = unit["refused"].as_str() {
             format!("refused: {refused}")

@@ -91,6 +91,7 @@ fn the_list_names_who_manages_each_service() {
             { "name": "hand.service", "managed": false, "enabled": false, "active": "inactive" },
             { "name": "x.service", "managed": true, "enabled": true, "active": "active" },
             { "name": "y", "managed": false, "enabled": false, "refused": "for openrc; this device runs systemd" },
+            { "name": "z.service", "managed": false, "enabled": true, "active": "active", "app": "demo" },
         ],
     });
     assert_eq!(
@@ -100,6 +101,7 @@ NAME          ENABLED  ACTIVE    MANAGED
 hand.service  no       inactive  by hand
 x.service     yes      active    micad
 y             no       -         refused: for openrc; this device runs systemd
+z.service     yes      active    app demo
 "
     );
     let none = json!({ "init": "systemd", "available": false, "units": [] });
