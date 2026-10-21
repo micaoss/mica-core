@@ -9443,45 +9443,6 @@
         },
         "additionalProperties": false
       },
-      "DhcpServer": {
-        "type": "object",
-        "description": "The DHCP server offered on one interface.",
-        "required": [
-          "poolOffset",
-          "poolSize"
-        ],
-        "properties": {
-          "dns": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "DNS servers announced to clients; empty announces none."
-          },
-          "leaseSeconds": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "Default lease time in seconds; absent leaves networkd's default.",
-            "minimum": 0
-          },
-          "poolOffset": {
-            "type": "integer",
-            "format": "int32",
-            "description": "First address handed out, as an offset into the interface's subnet.",
-            "minimum": 0
-          },
-          "poolSize": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many addresses the pool holds; at least one.",
-            "minimum": 0
-          }
-        },
-        "additionalProperties": false
-      },
       "DiscoveryRequest": {
         "type": "object",
         "description": "Whether a scan should be running.",
@@ -9703,7 +9664,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/CanParameters",
-                "description": "CAN parameters, for `kind = \"can\"`, which carries no addressing,\nroutes or DHCP server."
+                "description": "CAN parameters, for `kind = \"can\"`, which carries no addressing or\nroutes."
               },
               {
                 "type": "null"
@@ -9713,17 +9674,6 @@
           "dhcp": {
             "type": "boolean",
             "description": "Whether the interface acquires its address via DHCP; absent is false,\nand a CAN interface never does."
-          },
-          "dhcpServer": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/DhcpServer",
-                "description": "The DHCP server this interface offers. Absent offers none, and a link\nwith no static address of its own may not offer one."
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "dns": {
             "type": "array",

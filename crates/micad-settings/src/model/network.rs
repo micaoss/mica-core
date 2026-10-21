@@ -67,13 +67,6 @@ pub struct IfaceSettings {
     /// build that does not, until someone uses it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routes: Vec<RouteConfig>,
-    /// The DHCP server this interface offers, if it offers one.
-    #[serde(
-        rename = "dhcpServer",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub dhcp_server: Option<DhcpServerConfig>,
 }
 
 /// One static route, rendered as networkd's `[Route]`.
@@ -91,34 +84,6 @@ pub struct RouteConfig {
     /// Route metric; absent leaves networkd's own default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metric: Option<u32>,
-}
-
-/// The DHCP server offered on an interface, rendered as networkd's
-/// `[DHCPServer]`.
-///
-/// The pool is expressed the way networkd expresses it -- an offset into the
-/// interface's own subnet and a count -- rather than as a first and last
-/// address, because that is what the rendered file takes and a range converted
-/// twice is a range that can disagree with itself.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DhcpServerConfig {
-    /// First address handed out, as an offset from the subnet address.
-    #[serde(rename = "poolOffset")]
-    pub pool_offset: u32,
-    /// How many addresses the pool holds.
-    #[serde(rename = "poolSize")]
-    pub pool_size: u32,
-    /// DNS servers announced to clients; empty announces none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dns: Vec<String>,
-    /// Default lease time in seconds; absent leaves networkd's own default.
-    #[serde(
-        rename = "leaseSeconds",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub lease_seconds: Option<u32>,
 }
 
 /// The 802.1Q parameters of a VLAN interface.

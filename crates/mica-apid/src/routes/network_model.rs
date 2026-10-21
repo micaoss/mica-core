@@ -195,18 +195,14 @@ pub(crate) struct NetworkInterface {
     /// WireGuard parameters, for `kind = "wireguard"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) wireguard: Option<WireguardParameters>,
-    /// CAN parameters, for `kind = "can"`, which carries no addressing,
-    /// routes or DHCP server.
+    /// CAN parameters, for `kind = "can"`, which carries no addressing or
+    /// routes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) can: Option<CanParameters>,
     /// Static routes this interface carries, beyond the default route
     /// `static.gateway` declares. Empty and absent are the same thing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) routes: Vec<StaticRoute>,
-    /// The DHCP server this interface offers. Absent offers none, and a link
-    /// with no static address of its own may not offer one.
-    #[serde(rename = "dhcpServer", skip_serializing_if = "Option::is_none")]
-    pub(super) dhcp_server: Option<DhcpServer>,
 }
 
 /// One static route.
@@ -221,22 +217,6 @@ pub(crate) struct StaticRoute {
     /// Route metric; absent leaves networkd's default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) metric: Option<u32>,
-}
-
-/// The DHCP server offered on one interface.
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct DhcpServer {
-    /// First address handed out, as an offset into the interface's subnet.
-    pub(super) pool_offset: u32,
-    /// How many addresses the pool holds; at least one.
-    pub(super) pool_size: u32,
-    /// DNS servers announced to clients; empty announces none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) dns: Vec<String>,
-    /// Default lease time in seconds; absent leaves networkd's default.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) lease_seconds: Option<u32>,
 }
 
 /// The `network` subtree as typed entries, or the error envelope for whatever
@@ -327,17 +307,15 @@ pub(super) fn relational_refusal(
 /// [`api_v1_network_iface_remove`] re-validates the stored map without the
 /// removed entry, and putting this rule in that shared re-validation would make
 /// removing an unrelated interface start failing on bad data already on disk.
-/// The routing and DHCP-server rules of one entry.
+/// The routing rules of one entry.
 ///
-/// Three refusals, all of them about configurations networkd would accept and
-/// nothing could use:
+/// Two refusals, both about configurations networkd would accept and nothing
+/// could use:
 ///
 /// - a route whose destination is not a network, or whose next hop is not an
 ///   address;
 /// - a second default route, declared as a `0.0.0.0/0` route beside a
-///   `static.gateway` that already is one;
-/// - a DHCP server on a link with no address of its own, which has no subnet
-///   to hand addresses out of.
+///   `static.gateway` that already is one.
 pub(super) fn routing_refusal(iface: &str, cfg: &IfaceSettings) -> Result<(), Box<Response>> {
     let refuse = |message: String| {
         Box::new(api_response(
@@ -380,30 +358,6 @@ pub(super) fn routing_refusal(iface: &str, cfg: &IfaceSettings) -> Result<(), Bo
         for dns in &cfg.dns {
             if dns.parse::<IpAddr>().is_err() {
                 return Err(refuse(format!("the DNS server {dns:?} is not an address")));
-            }
-        }
-    }
-    if cfg.dhcp_server.is_some() {
-        let addressed = !cfg.dhcp && cfg.static_.is_some();
-        if !addressed {
-            return Err(refuse(
-                "a DHCP server needs a static address on this interface: the pool is an offset into the interface's own subnet, and a link with no address has no subnet"
-                    .to_string(),
-            ));
-        }
-        if let Some(server) = &cfg.dhcp_server {
-            if server.pool_size == 0 {
-                return Err(refuse(
-                    "the DHCP pool holds no addresses; give `poolSize` a count of at least 1"
-                        .to_string(),
-                ));
-            }
-            for dns in &server.dns {
-                if dns.parse::<IpAddr>().is_err() {
-                    return Err(refuse(format!(
-                        "the DNS server {dns:?} announced to clients is not an address"
-                    )));
-                }
             }
         }
     }

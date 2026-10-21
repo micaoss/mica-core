@@ -115,15 +115,12 @@ pub(super) fn render_unit(
     for child in vlans {
         out.push_str(&format!("VLAN={child}\n"));
     }
-    // A port carries neither: its addressing is the bridge's, and a DHCP
-    // server or a route on a link that has no address of its own is a
-    // configuration networkd would accept and nothing could use. apid refuses
-    // the entry; the renderer refuses to render it, so a file hand-edited past
-    // apid still produces a unit that means what the bridge means.
+    // A port carries no route: its addressing is the bridge's, and a route on a
+    // link that has no address of its own is a configuration networkd would
+    // accept and nothing could use. apid refuses the entry; the renderer
+    // refuses to render it, so a file hand-edited past apid still produces a
+    // unit that means what the bridge means.
     if master.is_none() {
-        if cfg.dhcp_server.is_some() {
-            out.push_str("DHCPServer=yes\n");
-        }
         for route in &cfg.routes {
             out.push_str(&format!("\n[Route]\nDestination={}\n", route.destination));
             if let Some(gateway) = &route.gateway {
@@ -131,18 +128,6 @@ pub(super) fn render_unit(
             }
             if let Some(metric) = route.metric {
                 out.push_str(&format!("Metric={metric}\n"));
-            }
-        }
-        if let Some(server) = &cfg.dhcp_server {
-            out.push_str(&format!(
-                "\n[DHCPServer]\nPoolOffset={}\nPoolSize={}\n",
-                server.pool_offset, server.pool_size
-            ));
-            for dns in &server.dns {
-                out.push_str(&format!("DNS={dns}\n"));
-            }
-            if let Some(seconds) = server.lease_seconds {
-                out.push_str(&format!("DefaultLeaseTimeSec={seconds}\n"));
             }
         }
     }

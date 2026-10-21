@@ -171,13 +171,12 @@ pub fn validate_can(iface: &str, cfg: &IfaceSettings) -> Result<(), String> {
         || cfg.static_.is_some()
         || !cfg.dns.is_empty()
         || !cfg.routes.is_empty()
-        || cfg.dhcp_server.is_some()
         || cfg.vlan.is_some()
         || cfg.bridge.is_some()
         || cfg.wireguard.is_some()
     {
         return Err(format!(
-            "network.{iface} is a CAN interface: it carries its can block alone, with no dhcp, static, dns, routes, dhcpServer, vlan, bridge or wireguard"
+            "network.{iface} is a CAN interface: it carries its can block alone, with no dhcp, static, dns, routes, vlan, bridge or wireguard"
         ));
     }
     if !(1..=MAX_CAN_BITRATE).contains(&can.bitrate) {

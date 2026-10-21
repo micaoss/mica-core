@@ -10,9 +10,9 @@
 //! its DNS servers into Base's `/run/mica/resolv.d/<iface>`.
 //!
 //! Wired DHCP and static addresses, and CAN controllers set with iproute2's
-//! `ip` from their stanza: VLANs, bridges, WireGuard, static routes and the
-//! DHCP server are networkd's, and an OpenRC device refuses them by name
-//! rather than half-configuring them.
+//! `ip` from their stanza: VLANs, bridges, WireGuard and static routes are
+//! networkd's, and an OpenRC device refuses them by name rather than
+//! half-configuring them.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -122,8 +122,6 @@ fn validate(iface: &str, cfg: &IfaceSettings, ip: Option<&Path>) -> Result<()> {
         Some("can")
     } else if !cfg.routes.is_empty() {
         Some("routes")
-    } else if cfg.dhcp_server.is_some() {
-        Some("dhcpServer")
     } else {
         None
     };

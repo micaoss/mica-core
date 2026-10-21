@@ -128,11 +128,10 @@ fn reconciler_in(
     (reconciler, calls)
 }
 
-/// A statically addressed link that hands out addresses and carries one
-/// static route: the two fields together, because the rendering order of
-/// the sections they produce is part of the file.
+/// A statically addressed link that carries one static route: the route
+/// renders as its own section after `[Network]`.
 #[test]
-fn a_server_and_a_route_render_as_their_own_sections() {
+fn a_route_renders_as_its_own_section() {
     let iface = IfaceSettings {
         dhcp: false,
         static_: Some(StaticConfig {
@@ -145,28 +144,21 @@ fn a_server_and_a_route_render_as_their_own_sections() {
             gateway: Some("192.168.50.254".to_string()),
             metric: Some(200),
         }],
-        dhcp_server: Some(micad_settings::DhcpServerConfig {
-            pool_offset: 100,
-            pool_size: 50,
-            dns: vec!["192.168.50.1".to_string()],
-            lease_seconds: Some(3600),
-        }),
         ..IfaceSettings::default()
     };
 
     assert_eq!(
         render_unit("eth1", &iface, None, &[]),
-        "[Match]\nName=eth1\n\n[Network]\nAddress=192.168.50.1/24\nDHCPServer=yes\n\n\
-         [Route]\nDestination=10.20.0.0/16\nGateway=192.168.50.254\nMetric=200\n\n\
-         [DHCPServer]\nPoolOffset=100\nPoolSize=50\nDNS=192.168.50.1\nDefaultLeaseTimeSec=3600\n"
+        "[Match]\nName=eth1\n\n[Network]\nAddress=192.168.50.1/24\n\n\
+         [Route]\nDestination=10.20.0.0/16\nGateway=192.168.50.254\nMetric=200\n"
     );
 }
 
 /// A port's addressing is the bridge's, and so is everything that depends
-/// on having an address. A hand-edited document that puts a server on a
-/// port renders a port, not a server.
+/// on having an address. A hand-edited document that puts a route on a
+/// port renders a port, not a route.
 #[test]
-fn a_bridge_port_renders_neither_a_route_nor_a_server() {
+fn a_bridge_port_renders_no_route() {
     let iface = IfaceSettings {
         dhcp: false,
         routes: vec![micad_settings::RouteConfig {
@@ -174,12 +166,6 @@ fn a_bridge_port_renders_neither_a_route_nor_a_server() {
             gateway: None,
             metric: None,
         }],
-        dhcp_server: Some(micad_settings::DhcpServerConfig {
-            pool_offset: 2,
-            pool_size: 10,
-            dns: Vec::new(),
-            lease_seconds: None,
-        }),
         ..IfaceSettings::default()
     };
 

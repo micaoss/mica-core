@@ -53,12 +53,6 @@ pub(super) fn the_network_schema_matches_the_settings_model() {
             gateway: Some("10.8.0.1".to_string()),
             metric: Some(200),
         }],
-        dhcp_server: Some(micad_settings::DhcpServerConfig {
-            pool_offset: 100,
-            pool_size: 50,
-            dns: vec!["10.8.0.1".to_string()],
-            lease_seconds: Some(3600),
-        }),
     };
 
     for (schema, model) in [
@@ -87,10 +81,6 @@ pub(super) fn the_network_schema_matches_the_settings_model() {
         (
             "StaticRoute",
             serde_json::to_value(&iface.routes[0]).unwrap(),
-        ),
-        (
-            "DhcpServer",
-            serde_json::to_value(iface.dhcp_server.clone().unwrap()).unwrap(),
         ),
     ] {
         let mut documented: Vec<String> = document["components"]["schemas"][schema]["properties"]

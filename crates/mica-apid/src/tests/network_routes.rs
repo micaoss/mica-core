@@ -1,4 +1,4 @@
-//! Static routes and the DHCP server.
+//! Static routes.
 
 use crate::auth;
 use crate::settings_api::SettingsApi;
@@ -20,9 +20,9 @@ pub(super) fn routed_tree() -> serde_json::Value {
 }
 
 // The accepted shape, written through the per-interface route and stored as
-// sent: routes are a list and the server is one block.
+// sent: routes are a list.
 #[tokio::test]
-pub(super) async fn an_interface_takes_static_routes_and_a_dhcp_server() {
+pub(super) async fn an_interface_takes_static_routes() {
     let (router, fake) = test_app(routed_tree());
     let (cookie, csrf) = mqtt_session(&router).await;
 
@@ -34,7 +34,6 @@ pub(super) async fn an_interface_takes_static_routes_and_a_dhcp_server() {
             "dhcp": false,
             "static": { "address": "192.168.50.1/24", "dns": [] },
             "routes": [{ "destination": "10.20.0.0/16", "gateway": "192.168.50.254", "metric": 200 }],
-            "dhcpServer": { "poolOffset": 100, "poolSize": 50, "dns": ["192.168.50.1"], "leaseSeconds": 3600 },
         }),
         Some(&cookie),
         Some(&csrf),
@@ -47,7 +46,6 @@ pub(super) async fn an_interface_takes_static_routes_and_a_dhcp_server() {
         stored["eth1"]["routes"][0]["destination"],
         json!("10.20.0.0/16")
     );
-    assert_eq!(stored["eth1"]["dhcpServer"]["poolSize"], json!(50));
 }
 
 // A DHCP entry may name the servers it uses instead of its lease's, and the
@@ -76,8 +74,8 @@ pub(super) async fn a_dhcp_entry_names_its_own_dns_and_the_write_answers_its_tas
     );
 }
 
-// The four refusals, each naming a configuration networkd would accept and
-// nothing could use.
+// The refusals, each naming a configuration networkd would accept and nothing
+// could use, and a DHCP server, which no interface offers.
 #[tokio::test]
 pub(super) async fn routing_configurations_that_cannot_work_are_refused() {
     for entry in [
@@ -99,16 +97,11 @@ pub(super) async fn routing_configurations_that_cannot_work_are_refused() {
             "static": { "address": "192.168.50.1/24", "gateway": "192.168.50.254", "dns": [] },
             "routes": [{ "destination": "0.0.0.0/0", "gateway": "192.168.50.1" }],
         }),
-        // A server on a link that gets its own address from one.
-        json!({
-            "dhcp": true,
-            "dhcpServer": { "poolOffset": 100, "poolSize": 50 },
-        }),
-        // A pool with no addresses in it.
+        // A DHCP server: a field the model does not carry.
         json!({
             "dhcp": false,
             "static": { "address": "192.168.50.1/24", "dns": [] },
-            "dhcpServer": { "poolOffset": 100, "poolSize": 0 },
+            "dhcpServer": { "poolOffset": 100, "poolSize": 50 },
         }),
         // Servers of its own on an entry with no lease to replace them in.
         json!({
