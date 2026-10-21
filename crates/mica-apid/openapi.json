@@ -2080,6 +2080,579 @@
         }
       }
     },
+    "/api/v1/dns": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read what the device resolves with.",
+        "description": "The global servers and the static records are the settings; `effective`\nis the global list in global mode and otherwise what each observed\ninterface reports, with where its servers come from; `probe` is the last\nresolution check, which runs every 60 seconds.",
+        "operationId": "api_v1_dns_read",
+        "responses": {
+          "200": {
+            "description": "The DNS document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored DNS settings could not be read (`settings_invalid`), or micad failed to answer (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/global": {
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Switch the global servers on or off, or change them.",
+        "description": "On needs one to three IPv4 servers, none of them this device and none\ntwice; off keeps the list. Applied as a task: resolved and every\ninterface's servers change with it.",
+        "operationId": "api_v1_dns_global_write",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DnsGlobal"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Stored; the reconcile continues as a task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A server is loopback or one of this device's addresses (`dns_server_invalid`), or the body breaks another rule (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/probe": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Run the resolution check now.",
+        "description": "**POST**, because it sends a query off the device. The probe name is\nlooked up through the device's own resolver, bypassing its cache, within\nthree seconds; the result is also what `GET /api/v1/dns` reports next.",
+        "operationId": "api_v1_dns_probe",
+        "responses": {
+          "200": {
+            "description": "The check just run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsProbe"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/static-records": {
+      "post": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Add a static record.",
+        "description": "Takes effect at once: the hosts file is rewritten and no interface is\nreloaded. The device gives the record its id.",
+        "operationId": "api_v1_dns_record_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DnsRecordBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The record as stored, with its id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another record names the host (`record_duplicate`), or there are 100 records already (`record_limit`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The name is not a host name, is localhost or this device's, the address is not IPv4, or the comment is long (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dns/static-records/{id}": {
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Replace one static record.",
+        "operationId": "api_v1_dns_record_replace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The record's id, as `GET /api/v1/dns` returns it",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DnsRecordBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The record as stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No record has that id (`settings_not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another record names the host (`record_duplicate`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The record breaks a rule (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Remove one static record.",
+        "operationId": "api_v1_dns_record_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The record's id, as `GET /api/v1/dns` returns it",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The record is gone from the hosts file"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No record has that id (`settings_not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/dns/test": {
       "post": {
         "tags": [
@@ -3946,13 +4519,13 @@
           "resources"
         ],
         "summary": "Write one scalar setting by dot-path.",
-        "description": "Accepts eleven paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,\n`time.ntp.servers`,\n`time.timezone`, `bluetooth.pin` (six digits, not `000000`), `dns.global`\n(at most three IPv4 servers, kept while switched off) and\n`dns.staticRecords` (at most 100 records). Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
+        "description": "Accepts nine paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,\n`time.ntp.servers`, `time.timezone` and `bluetooth.pin` (six digits, not\n`000000`). Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
         "operationId": "api_v1_settings_write",
         "parameters": [
           {
             "name": "path",
             "in": "path",
-            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone`, `bluetooth.pin`, `dns.global` or `dns.staticRecords`",
+            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone` or `bluetooth.pin`",
             "required": true,
             "schema": {
               "type": "string"
@@ -8753,6 +9326,13 @@
           "message": {
             "type": "string"
           },
+          "params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The values the message names, for a client that words it itself."
+          },
           "path": {
             "type": [
               "string",
@@ -9457,6 +10037,217 @@
         },
         "additionalProperties": false
       },
+      "DnsDocument": {
+        "type": "object",
+        "description": "The DNS document.",
+        "required": [
+          "global",
+          "mode",
+          "effective",
+          "staticRecords"
+        ],
+        "properties": {
+          "effective": {
+            "$ref": "#/components/schemas/DnsEffective",
+            "description": "The servers lookups go to."
+          },
+          "global": {
+            "$ref": "#/components/schemas/DnsGlobal",
+            "description": "The global servers."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`global` when the global servers replace every interface's, otherwise\n`interface`."
+          },
+          "probe": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DnsProbe",
+                "description": "The last resolution check; `null` before the first."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "staticRecords": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsRecord"
+            },
+            "description": "The names the device resolves itself."
+          }
+        }
+      },
+      "DnsEffective": {
+        "type": "object",
+        "description": "The servers lookups actually go to: the global list, or each interface's.",
+        "properties": {
+          "global": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The global servers, in global mode."
+          },
+          "links": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/DnsLink"
+            },
+            "description": "Each observed interface and its servers, in interface mode."
+          }
+        }
+      },
+      "DnsGlobal": {
+        "type": "object",
+        "description": "The global servers, as read and as written.",
+        "required": [
+          "enabled",
+          "servers"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the servers replace every interface's."
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "One to three IPv4 servers while on; kept while off."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DnsLink": {
+        "type": "object",
+        "description": "One interface's servers, when each interface uses its own.",
+        "required": [
+          "name",
+          "servers",
+          "source"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The interface."
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The servers it reports, possibly none."
+          },
+          "source": {
+            "type": "string",
+            "description": "Where they come from: `dhcp` (the lease), `custom` (set on a DHCP\ninterface) or `static`."
+          }
+        }
+      },
+      "DnsProbe": {
+        "type": "object",
+        "description": "The last resolution check.",
+        "required": [
+          "ok",
+          "name",
+          "checkedAt"
+        ],
+        "properties": {
+          "checkedAt": {
+            "type": "string",
+            "description": "When it finished, RFC 3339 UTC."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it did not resolve."
+          },
+          "latencyMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long it took, in milliseconds, when it resolved.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The name looked up."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "Whether the probe name resolved."
+          }
+        }
+      },
+      "DnsRecord": {
+        "type": "object",
+        "description": "One static record.",
+        "required": [
+          "id",
+          "hostname",
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "The IPv4 address it resolves to."
+          },
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A note for people, at most 64 characters."
+          },
+          "hostname": {
+            "type": "string",
+            "description": "The host name, a single label or dotted."
+          },
+          "id": {
+            "type": "string",
+            "description": "What the item routes name it by."
+          }
+        }
+      },
+      "DnsRecordBody": {
+        "type": "object",
+        "description": "A static record as a client writes it; the id is the device's.",
+        "required": [
+          "hostname",
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "The IPv4 address it resolves to."
+          },
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A note for people, at most 64 characters."
+          },
+          "hostname": {
+            "type": "string",
+            "description": "The host name, a single label or dotted."
+          }
+        },
+        "additionalProperties": false
+      },
       "DnsTestRequest": {
         "type": "object",
         "description": "The servers to test.",
@@ -9482,7 +10273,7 @@
           "reachable"
         ],
         "properties": {
-          "ms": {
+          "latencyMs": {
             "type": [
               "integer",
               "null"
@@ -10068,7 +10859,7 @@
         }
       },
       "SettingsWrite": {
-        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname`,\n`time.timezone` and `bluetooth.pin`, `off`, `provisioning` or `always` for\n`wifi.ap.mode`, `true` or `false` for the four switches, a JSON array of server strings for `time.ntp.servers`, a\n`{ enabled, servers }` object for `dns.global` and an array of\n`{ hostname, address, comment? }` for `dns.staticRecords`. Anything else is\n**422**."
+        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname`,\n`time.timezone` and `bluetooth.pin`, `off`, `provisioning` or `always` for\n`wifi.ap.mode`, `true` or `false` for the four switches, and a JSON array\nof server strings for `time.ntp.servers`. Anything else is **422**."
       },
       "SetupRequest": {
         "type": "object",

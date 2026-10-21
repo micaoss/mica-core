@@ -35,6 +35,10 @@ pub(crate) struct ApiErrorDetail {
     pub(super) source: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) path: Option<String>,
+    /// The values the message names, for a client that words it itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub(super) params: Option<Value>,
     /// Every problem of a refused Compose file (`compose_invalid`), by
     /// service and field.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,6 +61,7 @@ impl ApiError {
                 message,
                 source,
                 path: None,
+                params: None,
                 problems: None,
             },
         }
@@ -64,6 +69,11 @@ impl ApiError {
 
     pub(super) fn at(mut self, path: &str) -> Self {
         self.error.path = Some(path.to_string());
+        self
+    }
+
+    pub(super) fn with_params(mut self, params: Value) -> Self {
+        self.error.params = Some(params);
         self
     }
 

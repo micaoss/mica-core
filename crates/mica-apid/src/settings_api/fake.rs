@@ -88,6 +88,16 @@ pub struct FakeSettings {
 
 #[cfg(test)]
 impl FakeSettings {
+    /// The resolution check the fake always reports.
+    pub fn dns_probe() -> Value {
+        serde_json::json!({
+            "ok": true,
+            "name": "0.debian.pool.ntp.org",
+            "latencyMs": 18,
+            "checkedAt": "2026-10-21T08:00:00Z",
+        })
+    }
+
     pub fn new(tree: Value) -> Self {
         Self {
             tree: std::sync::Mutex::new(tree),
@@ -628,11 +638,19 @@ impl SettingsApi for FakeSettings {
                     serde_json::json!({
                         "server": server,
                         "reachable": reachable,
-                        "ms": reachable.then_some(12),
+                        "latencyMs": reachable.then_some(12),
                     })
                 })
                 .collect(),
         ))
+    }
+
+    async fn get_dns_probe(&self) -> anyhow::Result<Value> {
+        Ok(Self::dns_probe())
+    }
+
+    async fn probe_dns(&self) -> anyhow::Result<Value> {
+        Ok(Self::dns_probe())
     }
 
     async fn scan_wifi(&self) -> anyhow::Result<Value> {

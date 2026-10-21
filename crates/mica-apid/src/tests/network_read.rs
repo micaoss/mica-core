@@ -120,8 +120,8 @@ pub(super) async fn the_dns_test_answers_each_server_in_order() {
     assert_eq!(
         body_json(response).await,
         json!([
-            { "server": "1.1.1.1", "reachable": true, "ms": 12 },
-            { "server": "9.9.9.9", "reachable": false, "ms": null },
+            { "server": "1.1.1.1", "reachable": true, "latencyMs": 12 },
+            { "server": "9.9.9.9", "reachable": false, "latencyMs": null },
         ])
     );
 

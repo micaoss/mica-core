@@ -236,7 +236,15 @@ pub(super) fn wifi_routes() -> Router<AppState> {
             get(api_v1_wifi_client_read).put(api_v1_wifi_client_write),
         )
         .route(V1_WIFI_SCAN_PATH, post(api_v1_wifi_scan))
+        .route(V1_DNS_PATH, get(api_v1_dns_read))
+        .route(V1_DNS_GLOBAL_PATH, put(api_v1_dns_global_write))
+        .route(V1_DNS_RECORDS_PATH, post(api_v1_dns_record_add))
+        .route(
+            V1_DNS_RECORD_ROUTE,
+            put(api_v1_dns_record_replace).delete(api_v1_dns_record_remove),
+        )
         .route(V1_DNS_TEST_PATH, post(api_v1_dns_test))
+        .route(V1_DNS_PROBE_PATH, post(api_v1_dns_probe))
         .route(
             V1_WIFI_AP_PATH,
             get(api_v1_wifi_ap_read).put(api_v1_wifi_ap_write),

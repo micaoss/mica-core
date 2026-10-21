@@ -81,6 +81,8 @@ trait Micad {
     fn get_containers(&self) -> zbus::Result<String>;
     fn scan_wifi(&self) -> zbus::Result<String>;
     fn test_dns_servers(&self, servers: &[&str]) -> zbus::Result<String>;
+    fn get_dns_probe(&self) -> zbus::Result<String>;
+    fn probe_dns(&self) -> zbus::Result<String>;
     fn get_bluetooth(&self) -> zbus::Result<String>;
     fn set_bluetooth_discovery(&self, on: bool) -> zbus::Result<()>;
     fn pair_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
@@ -493,6 +495,20 @@ impl SettingsApi for BusSettings {
         let json = self
             .call("TestDnsServers", proxy.test_dns_servers(&servers))
             .await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    /// The last resolution check.
+    async fn get_dns_probe(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetDnsProbe", proxy.get_dns_probe()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    /// Run the resolution check now.
+    async fn probe_dns(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("ProbeDns", proxy.probe_dns()).await?;
         Ok(serde_json::from_str(&json)?)
     }
 

@@ -230,9 +230,19 @@ pub(super) const WIFI_NETWORKS_PATH: &str = "wifi.client.networks";
 pub(super) const V1_WIFI_CLIENT_PATH: &str = "/v1/wifi/client";
 pub(super) const WIFI_CLIENT_PATH: &str = "wifi.client";
 
+/// The DNS module: what the device resolves with, the global servers, the
+/// static records by id, the server test and the resolution check.
+pub(super) const V1_DNS_PATH: &str = "/v1/dns";
+pub(super) const V1_DNS_GLOBAL_PATH: &str = "/v1/dns/global";
+pub(super) const V1_DNS_RECORDS_PATH: &str = "/v1/dns/static-records";
+pub(super) const V1_DNS_RECORD_ROUTE: &str = "/v1/dns/static-records/{id}";
 /// The DNS server test: POST, because it sends traffic off the device.
 pub(super) const V1_DNS_TEST_PATH: &str = "/v1/dns/test";
+/// The resolution check run now: POST, for the same reason.
+pub(super) const V1_DNS_PROBE_PATH: &str = "/v1/dns/probe";
+pub(super) const DNS_PATH: &str = "dns";
 pub(super) const DNS_GLOBAL_PATH: &str = "dns.global";
+pub(super) const DNS_RECORDS_PATH: &str = "dns.staticRecords";
 
 /// The scan: POST, because it puts the radio to work.
 pub(super) const V1_WIFI_SCAN_PATH: &str = "/v1/wifi/client/scan";

@@ -150,6 +150,14 @@ pub trait SettingsApi: Send + Sync {
     async fn test_dns_servers(&self, _servers: &[String]) -> anyhow::Result<Value> {
         anyhow::bail!("this build sends no DNS query")
     }
+    /// The last resolution check, or `null` before the first (`GetDnsProbe`).
+    async fn get_dns_probe(&self) -> anyhow::Result<Value> {
+        Ok(Value::Null)
+    }
+    /// Run the resolution check now (`ProbeDns`).
+    async fn probe_dns(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build sends no DNS query")
+    }
     /// The declared containers joined with what the engine reports
     /// (`GetContainers`). Unavailable by default: a build with no bus behind
     /// it reports the engine as absent rather than inventing an empty list.
