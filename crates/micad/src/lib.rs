@@ -25,6 +25,7 @@ mod docker;
 mod fswrite;
 mod identity;
 mod logs;
+mod netlink;
 mod network_state;
 mod openrc;
 mod power;

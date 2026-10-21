@@ -10,11 +10,12 @@
 //! control socket reports that it could not be asked; a board with no radio
 //! says `supported: false`. Nothing is inferred to be healthy.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Context;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 mod dns;
 mod json;
@@ -66,6 +67,9 @@ pub const NET_CLASS_DIR: &str = "sys/class/net";
 pub const BLUETOOTH_CLASS_DIR: &str = "sys/class/bluetooth";
 /// The most wireless interfaces asked about; each costs a socket exchange.
 pub const MAX_WIFI_INTERFACES: usize = 4;
+/// The most links the kernel is asked about over netlink; each costs a
+/// socket exchange.
+const MAX_KERNEL_LINKS: usize = 32;
 
 #[async_trait::async_trait]
 pub trait NetworkState: Send + Sync {
@@ -186,6 +190,74 @@ pub(crate) async fn observe_wifi(root: &std::path::Path, interfaces: &[String]) 
     evidence
 }
 
+/// What the observer asked the kernel about particular links: the clock
+/// networkd's lifetimes are read against, and each CAN and WireGuard link's
+/// own state, rendered.
+#[derive(Debug, Clone, Default)]
+pub struct LinkEvidence {
+    /// `CLOCK_BOOTTIME` when the observation ran, in microseconds: networkd's
+    /// address lifetimes are timestamps on that clock.
+    pub boottime_usec: Option<u64>,
+    /// Each CAN link's controller state ([`crate::netlink::can_json`]), or
+    /// why it could not be read.
+    pub can: BTreeMap<String, Value>,
+    /// Each WireGuard link's `{available, peers}`, or why they could not be
+    /// read.
+    pub wireguard: BTreeMap<String, Value>,
+}
+
+/// Ask the kernel about the CAN and WireGuard links `describe` lists.
+pub(crate) async fn observe_links(describe: Result<&Value, &str>) -> LinkEvidence {
+    let now = rustix::time::clock_gettime(rustix::time::ClockId::Boottime);
+    let mut evidence = LinkEvidence {
+        boottime_usec: u64::try_from(now.tv_sec)
+            .ok()
+            .and_then(|seconds| seconds.checked_mul(1_000_000))
+            .and_then(|usec| usec.checked_add(u64::try_from(now.tv_nsec / 1000).ok()?)),
+        ..LinkEvidence::default()
+    };
+    let links = describe
+        .ok()
+        .and_then(|value| value.get("Interfaces"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for link in links.iter().take(MAX_KERNEL_LINKS) {
+        let Some(name) = link.get("Name").and_then(Value::as_str).map(str::to_string) else {
+            continue;
+        };
+        let can = link.get("Type").and_then(Value::as_str) == Some("can");
+        let wireguard = link.get("Kind").and_then(Value::as_str) == Some("wireguard");
+        if can {
+            let asked = name.clone();
+            let value =
+                match tokio::task::spawn_blocking(move || crate::netlink::can_link(&asked)).await {
+                    Ok(Ok(Some(value))) => value,
+                    Ok(Ok(None)) => absent("the kernel does not report this link as a CAN one"),
+                    Ok(Err(err)) => absent(format!("the kernel could not be asked: {err}")),
+                    Err(err) => absent(format!("the kernel could not be asked: {err}")),
+                };
+            evidence.can.insert(name, value);
+        } else if wireguard {
+            let asked = name.clone();
+            let value = match tokio::task::spawn_blocking(move || {
+                crate::netlink::wireguard_device(&asked)
+            })
+            .await
+            {
+                Ok(Ok(peers)) => json!({
+                    "available": true,
+                    "peers": peers.iter().map(crate::netlink::WireguardPeerObservation::to_json).collect::<Vec<_>>(),
+                }),
+                Ok(Err(err)) => absent(format!("the kernel could not be asked: {err}")),
+                Err(err) => absent(format!("the kernel could not be asked: {err}")),
+            };
+            evidence.wireguard.insert(name, value);
+        }
+    }
+    evidence
+}
+
 #[zbus::proxy(
     interface = "org.freedesktop.network1.Manager",
     default_service = "org.freedesktop.network1",
@@ -226,11 +298,14 @@ impl NetworkState for SystemdNetworkState {
         } else {
             None
         };
+        let describe = describe.as_ref().map_err(String::as_str);
+        let links = observe_links(describe).await;
         Ok(observed_json(
-            describe.as_ref().map_err(String::as_str),
+            describe,
             &wifi,
             dns.as_ref(),
             &radios,
+            &links,
         ))
     }
 }

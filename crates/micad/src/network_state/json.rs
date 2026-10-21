@@ -286,6 +286,122 @@ pub(super) fn dhcp_json(link: &Value) -> Value {
     }
 }
 
+/// The `lease` member: the DHCPv4 server that leased the interface its
+/// address, the router that came with the lease and how long the address
+/// stays valid. Read from the address networkd sourced from DHCPv4 and the
+/// default route it installed with it, whose lifetime is a `CLOCK_BOOTTIME`
+/// timestamp; absent when the interface holds no DHCPv4 address.
+pub(super) fn lease_json(link: &Value, boottime_usec: Option<u64>) -> Value {
+    let Some(entry) = link
+        .get("Addresses")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|entry| entry.get("ConfigSource").and_then(Value::as_str) == Some("DHCPv4"))
+    else {
+        return absent("the interface holds no DHCPv4-leased address");
+    };
+    let server = entry
+        .get("ConfigProvider")
+        .and_then(bytes_of)
+        .and_then(|bytes| format_address(None, &bytes));
+    let router = link
+        .get("Routes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|route| route.get("ConfigSource").and_then(Value::as_str) == Some("DHCPv4"))
+        .filter(|route| is_default_route(route))
+        .find_map(|route| {
+            let family = route.get("Family").and_then(Value::as_i64);
+            format_address(family, &route.get("Gateway").and_then(bytes_of)?)
+        });
+    let remaining = entry
+        .get("ValidLifetimeUSec")
+        .and_then(Value::as_u64)
+        .zip(boottime_usec)
+        .map(|(valid, now)| valid.saturating_sub(now) / 1_000_000);
+    json!({
+        "available": true,
+        "server": server,
+        "router": router,
+        "remainingSeconds": remaining,
+    })
+}
+
+/// The `linkDns` member: the servers networkd hands resolved for this link,
+/// each with where it came from (`static`, `DHCPv4`, `DHCPv6`, `NDisc`) and,
+/// for a learned one, who announced it.
+pub(super) fn link_dns_json(link: &Value) -> Value {
+    let servers: Vec<Value> = link
+        .get("DNS")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let (address, _) = address_of(entry, "Address")?;
+            let mut root = Map::new();
+            root.insert("address".to_string(), json!(address));
+            if let Some(source) = entry.get("ConfigSource").and_then(Value::as_str) {
+                root.insert("source".to_string(), json!(source));
+            }
+            if let Some(provider) = entry
+                .get("ConfigProvider")
+                .and_then(bytes_of)
+                .and_then(|bytes| format_address(None, &bytes))
+            {
+                root.insert("provider".to_string(), json!(provider));
+            }
+            Some(Value::Object(root))
+        })
+        .collect();
+    Value::Array(servers)
+}
+
+/// The kernel's `local` routing table: the addresses the host answers for
+/// itself, not routes anyone configures.
+const LOCAL_TABLE: u64 = 255;
+
+/// The `routes` member: every route on the link outside the `local` table,
+/// with the destination, the gateway, the metric, where it came from and the
+/// table, the addresses written out.
+pub(super) fn routes_json(link: &Value) -> Value {
+    let routes: Vec<Value> = link
+        .get("Routes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|route| route.get("Table").and_then(Value::as_u64) != Some(LOCAL_TABLE))
+        .filter_map(|route| {
+            let family = route.get("Family").and_then(Value::as_i64);
+            let destination =
+                format_address(family, &route.get("Destination").and_then(bytes_of)?)?;
+            let prefix = route
+                .get("DestinationPrefixLength")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let via = route
+                .get("Gateway")
+                .and_then(bytes_of)
+                .and_then(|bytes| format_address(family, &bytes));
+            let table = route_table_name(route).map(str::to_string).or_else(|| {
+                route
+                    .get("Table")
+                    .and_then(Value::as_u64)
+                    .map(|id| id.to_string())
+            });
+            Some(json!({
+                "dest": format!("{destination}/{prefix}"),
+                "via": via,
+                "metric": route.get("Priority").and_then(Value::as_u64),
+                "source": route.get("ConfigSource").and_then(Value::as_str),
+                "table": table,
+            }))
+        })
+        .collect();
+    Value::Array(routes)
+}
+
 pub(super) fn wifi_json(association: &WifiAssociation) -> Value {
     let mut root = Map::new();
     root.insert("interface".to_string(), json!(association.interface));
@@ -324,8 +440,13 @@ pub(super) fn wifi_json(association: &WifiAssociation) -> Value {
     Value::Object(root)
 }
 
-pub(super) fn interface_json(link: &Value, wifi: Option<&WifiAssociation>) -> Value {
+pub(super) fn interface_json(
+    link: &Value,
+    wifi: Option<&WifiAssociation>,
+    links: &LinkEvidence,
+) -> Value {
     let mut root = Map::new();
+    root.insert("present".to_string(), json!(true));
     for (from, to) in [
         ("Name", "name"),
         ("Index", "index"),
@@ -370,10 +491,52 @@ pub(super) fn interface_json(link: &Value, wifi: Option<&WifiAssociation>) -> Va
         .filter_map(|entry| address_of(entry, "Address").map(|(address, _)| json!(address)))
         .collect();
     root.insert("dns".to_string(), Value::Array(dns));
+    root.insert("linkDns".to_string(), link_dns_json(link));
+    root.insert("lease".to_string(), lease_json(link, links.boottime_usec));
+    root.insert("routes".to_string(), routes_json(link));
     if let Some(association) = wifi {
         root.insert("wifi".to_string(), wifi_json(association));
     }
+    let name = link.get("Name").and_then(Value::as_str).unwrap_or_default();
+    if let Some(can) = links.can.get(name) {
+        root.insert("can".to_string(), can.clone());
+    }
+    if let Some(wireguard) = links.wireguard.get(name) {
+        root.insert("wireguard".to_string(), wireguard.clone());
+    }
     Value::Object(root)
+}
+
+/// The security a wpa_supplicant `key_mgmt` names, in the access point's
+/// terms: `wpa3-sae`, `wpa2-psk`, `wpa-psk`, `open`; anything else lower-cased.
+fn association_security(key_management: &str) -> String {
+    match key_management {
+        "NONE" => "open".to_string(),
+        "WPA-PSK" => "wpa-psk".to_string(),
+        management if management.contains("SAE") => "wpa3-sae".to_string(),
+        management if management.contains("PSK") => "wpa2-psk".to_string(),
+        management => management.to_ascii_lowercase(),
+    }
+}
+
+/// The `wifi.association` member: the network the radio has joined, or why
+/// there is none.
+pub(super) fn association_json(associations: &[WifiAssociation]) -> Value {
+    let Some(association) = associations
+        .iter()
+        .find(|association| association.state.as_deref() == Some("COMPLETED"))
+    else {
+        return absent("the radio has joined no network");
+    };
+    json!({
+        "available": true,
+        "interface": association.interface,
+        "ssid": association.ssid,
+        "bssid": association.bssid,
+        "signalDbm": association.rssi_dbm,
+        "txBitrate": association.link_speed_mbps,
+        "security": association.key_management.as_deref().map(association_security),
+    })
 }
 
 /// The `dns` member: the per-link servers networkd reports, the resolver's
@@ -440,6 +603,7 @@ pub fn observed_json(
     wifi: &WifiEvidence,
     dns: Option<&DnsEvidence>,
     radios: &RadioEvidence,
+    links_evidence: &LinkEvidence,
 ) -> Value {
     let links: Vec<&Value> = describe
         .ok()
@@ -463,6 +627,7 @@ pub fn observed_json(
                 interface_json(
                     link,
                     association_for(link.get("Name").and_then(Value::as_str)),
+                    links_evidence,
                 )
             })
             .collect();
@@ -508,6 +673,7 @@ pub fn observed_json(
         json!({
             "available": true,
             "associations": wifi.associations.iter().map(wifi_json).collect::<Vec<_>>(),
+            "association": association_json(&wifi.associations),
         })
     };
     // Named apart from `wifi`: an association is this device joining someone
@@ -520,7 +686,16 @@ pub fn observed_json(
             "entries": wifi
                 .access_points
                 .iter()
-                .map(access_point_json)
+                .map(|access_point| {
+                    let leases = links
+                        .iter()
+                        .find(|link| {
+                            link.get("Name").and_then(Value::as_str)
+                                == Some(access_point.interface.as_str())
+                        })
+                        .and_then(|link| link.pointer("/DHCPServer/Leases"));
+                    access_point_json(access_point, leases)
+                })
                 .collect::<Vec<_>>(),
         })
     };
@@ -534,6 +709,7 @@ pub fn observed_json(
             "wifi": {
                 "supported": !radios.wifi_interfaces.is_empty(),
                 "interfaces": radios.wifi_interfaces,
+                "blocked": radios.wifi_blocked,
                 "detail": if radios.wifi_interfaces.is_empty() {
                     "no phy80211 device under /sys/class/net"
                 } else {
@@ -551,5 +727,124 @@ pub fn observed_json(
                 "detail": "no cellular modem support in this image: SKU-specific and not selected",
             },
         },
+    })
+}
+
+/// Why the access point is not running, in the order the causes are checked:
+/// the role is off (`disabled`) or held by the station (`client_mode`), an
+/// rfkill switch blocks the radio (`radio_blocked`), no country is set
+/// (`country_unset`), or hostapd failed -- over its channel
+/// (`channel_invalid`) or otherwise (`driver_error`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApDownReason {
+    Disabled,
+    ClientMode,
+    RadioBlocked,
+    CountryUnset,
+    ChannelInvalid,
+    DriverError,
+}
+
+impl ApDownReason {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::ClientMode => "client_mode",
+            Self::RadioBlocked => "radio_blocked",
+            Self::CountryUnset => "country_unset",
+            Self::ChannelInvalid => "channel_invalid",
+            Self::DriverError => "driver_error",
+        }
+    }
+}
+
+/// Whether hostapd's own lines blame the channel: it refuses a channel the
+/// regulatory domain or the driver does not allow with a line naming it.
+#[must_use]
+pub fn blames_channel(lines: &[String]) -> bool {
+    lines
+        .iter()
+        .any(|line| line.to_ascii_lowercase().contains("channel"))
+}
+
+/// Add `running` and `reason` to the observed `accessPoint` member.
+///
+/// `ap_state` is what the access-point reconciler last recorded, and
+/// `hostapd_lines` hostapd's newest log lines, read only when that record
+/// says the service failed. A role that is meant to run, is not running and
+/// has none of the causes above has `reason: null`: it is starting.
+pub fn annotate_access_point(
+    observed: &mut Value,
+    wifi: &micad_settings::WifiSettings,
+    ap_state: Option<&Value>,
+    hostapd_lines: &[String],
+) {
+    let ap = &wifi.ap;
+    let running = observed
+        .pointer("/accessPoint/entries")
+        .and_then(Value::as_array)
+        .is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry.get("interface").and_then(Value::as_str) == Some(&ap.interface))
+        });
+    let blocked = observed
+        .pointer("/capabilities/wifi/blocked")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let station_holds_radio = wifi.client.enabled && wifi.client.interface == ap.interface;
+    let reason = if running {
+        None
+    } else if ap.mode == micad_settings::ApMode::Off {
+        Some(if station_holds_radio {
+            ApDownReason::ClientMode
+        } else {
+            ApDownReason::Disabled
+        })
+    } else if station_holds_radio {
+        Some(ApDownReason::ClientMode)
+    } else if blocked {
+        Some(ApDownReason::RadioBlocked)
+    } else if ap.country_code.trim().is_empty() {
+        Some(ApDownReason::CountryUnset)
+    } else if failed(ap_state) {
+        Some(if blames_channel(hostapd_lines) {
+            ApDownReason::ChannelInvalid
+        } else {
+            ApDownReason::DriverError
+        })
+    } else {
+        None
+    };
+    let detail = match reason {
+        Some(ApDownReason::ChannelInvalid | ApDownReason::DriverError) => hostapd_lines
+            .last()
+            .cloned()
+            .or_else(|| ap_state?.get("error")?.as_str().map(str::to_string)),
+        _ => None,
+    };
+    if let Some(member) = observed
+        .get_mut("accessPoint")
+        .and_then(Value::as_object_mut)
+    {
+        member.insert("running".to_string(), json!(running));
+        member.insert(
+            "reason".to_string(),
+            json!(reason.map(ApDownReason::as_str)),
+        );
+        if let Some(detail) = detail {
+            member.insert("reasonDetail".to_string(), json!(detail));
+        }
+    }
+}
+
+/// Whether the access-point reconciler's record says hostapd is not up: the
+/// apply failed, or the unit it brought up has since failed.
+#[must_use]
+pub fn failed(ap_state: Option<&Value>) -> bool {
+    ap_state.is_some_and(|state| {
+        state.get("error").is_some()
+            || state.get("activeState").and_then(Value::as_str) == Some("failed")
     })
 }

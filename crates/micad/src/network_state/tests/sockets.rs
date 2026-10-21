@@ -101,7 +101,13 @@ pub(super) async fn the_control_socket_is_asked_for_each_wireless_interface() {
     assert_eq!(association.rssi_dbm, Some(-60));
     assert_eq!(association.link_speed_mbps, Some(72));
 
-    let observed = observed_json(Err("no networkd in this test"), &wifi, None, &radios);
+    let observed = observed_json(
+        Err("no networkd in this test"),
+        &wifi,
+        None,
+        &radios,
+        &LinkEvidence::default(),
+    );
     assert_eq!(observed["wifi"]["available"], true);
     assert_eq!(observed["wifi"]["associations"][0]["associated"], true);
     assert_eq!(observed["wifi"]["associations"][0]["frequencyMhz"], 2437);

@@ -3,6 +3,7 @@ use serde_json::json;
 
 mod describe;
 mod dns_test;
+mod links;
 mod probe;
 mod sockets;
 mod wireless;
@@ -26,7 +27,7 @@ fn describe_fixture() -> Value {
                 "AdministrativeState": "configured", "OperationalState": "routable",
                 "CarrierState": "carrier", "OnlineState": "online", "AddressState": "routable",
                 "Addresses": [
-                    {"Family": 2, "Address": [192,0,2,10], "PrefixLength": 24, "Scope": 0, "ScopeString": "global", "ConfigSource": "DHCPv4", "ConfigProvider": [192,0,2,1]},
+                    {"Family": 2, "Address": [192,0,2,10], "PrefixLength": 24, "Scope": 0, "ScopeString": "global", "ConfigSource": "DHCPv4", "ConfigProvider": [192,0,2,1], "ValidLifetimeUSec": 90_000_000_000u64},
                     {"Family": 10, "Address": [0xfe,0x80,0,0,0,0,0,0,0,0x42,0xac,0xff,0xfe,0x11,0,2], "PrefixLength": 64, "Scope": 253, "ScopeString": "link", "ConfigSource": "foreign"}
                 ],
                 "DNS": [{"Family": 2, "Address": [192,0,2,1], "ConfigSource": "DHCPv4"}],
@@ -140,7 +141,13 @@ fn a_device_running_no_access_point_says_so() {
         ..RadioEvidence::default()
     };
 
-    let observed = observed_json(Err("x"), &WifiEvidence::default(), None, &radios);
+    let observed = observed_json(
+        Err("x"),
+        &WifiEvidence::default(),
+        None,
+        &radios,
+        &LinkEvidence::default(),
+    );
 
     assert_eq!(observed["accessPoint"]["available"], json!(false));
     assert!(observed["accessPoint"]["detail"].is_string());

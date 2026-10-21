@@ -42,7 +42,7 @@ base64 = { workspace = true }
 # `process` for the `networkctl delete` teardown the network reconciler runs when a
 # virtual device's unit goes away; networkd does not reap devices it created.
 tokio = { workspace = true, features = ["process", "signal", "time", "io-util"] }
-rustix = { workspace = true, features = ["process", "system"] }
+rustix = { workspace = true, features = ["net", "process", "system", "time"] }
 zbus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -34,6 +34,7 @@ pub(super) fn the_observed_surface_carries_link_address_lease_route_and_dns() {
         &WifiEvidence::default(),
         None,
         &RadioEvidence::default(),
+        &LinkEvidence::default(),
     );
 
     assert_eq!(observed["interfaces"]["available"], true);
@@ -105,6 +106,7 @@ pub(super) fn rtnetlink_enums_are_names_beside_the_ids_they_came_from() {
         &WifiEvidence::default(),
         None,
         &RadioEvidence::default(),
+        &LinkEvidence::default(),
     );
     let route = &observed["defaultRoutes"]["entries"][0];
     assert_eq!(route["protocol"], "dhcp");
@@ -138,6 +140,7 @@ pub(super) fn rtnetlink_enums_are_names_beside_the_ids_they_came_from() {
         &WifiEvidence::default(),
         None,
         &RadioEvidence::default(),
+        &LinkEvidence::default(),
     );
     let route = &observed["defaultRoutes"]["entries"][0];
     assert_eq!(route["protocol"], "unknown");
@@ -161,6 +164,7 @@ pub(super) fn rtnetlink_enums_are_names_beside_the_ids_they_came_from() {
         &WifiEvidence::default(),
         None,
         &RadioEvidence::default(),
+        &LinkEvidence::default(),
     );
     let route = &observed["defaultRoutes"]["entries"][0];
     assert!(route.get("protocol").is_none());
@@ -182,6 +186,7 @@ pub(super) fn an_unanswering_networkd_is_absent_not_empty() {
         &WifiEvidence::default(),
         None,
         &radios,
+        &LinkEvidence::default(),
     );
     assert_eq!(observed["interfaces"]["available"], false);
     assert!(
@@ -213,6 +218,7 @@ pub(super) fn a_lease_is_inferred_from_a_dhcp_sourced_address_and_says_so() {
         &WifiEvidence::default(),
         None,
         &RadioEvidence::default(),
+        &LinkEvidence::default(),
     );
     let dhcp = &observed["interfaces"]["entries"][1]["dhcp"];
     assert_eq!(dhcp["available"], true);
@@ -231,6 +237,7 @@ pub(super) fn no_default_route_is_reported_as_zero_not_absent() {
         &WifiEvidence::default(),
         None,
         &RadioEvidence::default(),
+        &LinkEvidence::default(),
     );
     assert_eq!(observed["defaultRoutes"]["available"], true);
     assert_eq!(observed["defaultRoutes"]["count"], 0);

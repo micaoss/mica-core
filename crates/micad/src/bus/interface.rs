@@ -14,6 +14,9 @@ use zbus::object_server::SignalEmitter;
 
 use super::*;
 
+/// The newest hostapd lines the access point's down reason is read from.
+const AP_LOG_LINES: usize = 5;
+
 /// Whole seconds since boot, from the first field of `/proc/uptime`.
 ///
 /// `None` on an unreadable or malformed file — a soft failure rather than a
@@ -207,13 +210,39 @@ impl MicadService {
     /// radio/modem capabilities, observed at call time and DISTINCT from the
     /// desired `network` settings, which this method never reads.
     pub(super) async fn get_observed_network(&self) -> Result<String, SettingsFault> {
-        self.network_state
-            .observe()
-            .await
-            .map(|value| value.to_string())
-            .map_err(|err| {
-                SettingsFault::Fdo(fdo::Error::Failed(format!("observe network: {err:#}")))
-            })
+        let mut observed = self.network_state.observe().await.map_err(|err| {
+            SettingsFault::Fdo(fdo::Error::Failed(format!("observe network: {err:#}")))
+        })?;
+        let (wifi, ap_state) = {
+            let inner = self.inner.read().await;
+            (
+                inner.settings.wifi.clone(),
+                inner.state.get("wifiAp").cloned(),
+            )
+        };
+        // hostapd's own words are read only when they can explain something.
+        let mut lines = Vec::new();
+        if crate::network_state::failed(ap_state.as_ref())
+            && let Ok(source) = crate::logs::source("wifi-ap", &self.features)
+        {
+            let log = crate::logs::log_json(self.logs.as_ref(), source).await;
+            lines = log
+                .get("lines")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            lines.drain(..lines.len().saturating_sub(AP_LOG_LINES));
+        }
+        crate::network_state::annotate_access_point(
+            &mut observed,
+            &wifi,
+            ap_state.as_ref(),
+            &lines,
+        );
+        Ok(observed.to_string())
     }
 
     /// JSON: each of `servers`, IPv4 addresses, asked directly for one `A`

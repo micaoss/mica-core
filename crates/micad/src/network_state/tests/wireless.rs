@@ -100,7 +100,13 @@ pub(super) fn radios_are_discovered_and_cellular_is_explicitly_unsupported() {
     assert_eq!(radios.bluetooth_adapters, vec!["hci0"]);
     assert_eq!(radios.wwan_interfaces, vec!["wwx0"]);
 
-    let observed = observed_json(Err("x"), &WifiEvidence::default(), None, &radios);
+    let observed = observed_json(
+        Err("x"),
+        &WifiEvidence::default(),
+        None,
+        &radios,
+        &LinkEvidence::default(),
+    );
     assert_eq!(observed["capabilities"]["cellular"]["supported"], false);
     assert_eq!(
         observed["capabilities"]["cellular"]["interfaces"],
@@ -115,6 +121,7 @@ pub(super) fn radios_are_discovered_and_cellular_is_explicitly_unsupported() {
         &WifiEvidence::default(),
         None,
         &RadioEvidence::default(),
+        &LinkEvidence::default(),
     );
     assert_eq!(none["capabilities"]["wifi"]["supported"], false);
     assert_eq!(none["capabilities"]["bluetooth"]["supported"], false);

@@ -345,8 +345,29 @@ pub fn observe_access_point(root: &Path, interface: &str) -> ApEvidence {
     evidence
 }
 
-/// One access point and its stations, rendered.
-pub(super) fn access_point_json(evidence: &ApEvidence) -> Value {
+/// The lease networkd's (or udhcpd's) DHCP server holds for `mac`: the
+/// address it handed out and the hostname the client sent.
+fn station_lease<'a>(leases: Option<&'a Value>, mac: &str) -> Option<&'a Value> {
+    leases?.as_array()?.iter().find(|lease| {
+        lease
+            .get("HardwareAddress")
+            .and_then(bytes_of)
+            .is_some_and(|bytes| {
+                bytes.len() >= 6
+                    && bytes[..6]
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<Vec<_>>()
+                        .join(":")
+                        .eq_ignore_ascii_case(mac)
+            })
+    })
+}
+
+/// One access point and its stations, rendered. `leases` is the DHCP
+/// server's `Leases` for the access point's interface, which name each
+/// station's address and hostname.
+pub(super) fn access_point_json(evidence: &ApEvidence, leases: Option<&Value>) -> Value {
     let stations: Vec<Value> = evidence
         .stations
         .iter()
@@ -364,6 +385,14 @@ pub(super) fn access_point_json(evidence: &ApEvidence) -> Value {
             }
             if let Some(bytes) = station.tx_bytes {
                 entry.insert("txBytes".to_string(), json!(bytes));
+            }
+            if let Some(lease) = station_lease(leases, &station.mac) {
+                if let Some((address, _)) = address_of(lease, "Address") {
+                    entry.insert("address".to_string(), json!(address));
+                }
+                if let Some(hostname) = lease.get("Hostname").and_then(Value::as_str) {
+                    entry.insert("hostname".to_string(), json!(hostname));
+                }
             }
             Value::Object(entry)
         })

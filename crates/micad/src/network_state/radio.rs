@@ -13,7 +13,12 @@ pub struct RadioEvidence {
     pub bluetooth_adapters: Vec<String>,
     /// Interfaces the kernel types `wwan`.
     pub wwan_interfaces: Vec<String>,
+    /// Whether a `wlan` rfkill switch, soft or hard, blocks the radio.
+    pub wifi_blocked: bool,
 }
+
+/// rfkill switches, relative to the root.
+const RFKILL_CLASS_DIR: &str = "sys/class/rfkill";
 
 pub(super) fn sorted_entries(dir: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -44,5 +49,12 @@ pub fn radio_evidence(root: &Path) -> RadioEvidence {
         }
     }
     evidence.bluetooth_adapters = sorted_entries(&root.join(BLUETOOTH_CLASS_DIR));
+    let rfkill = root.join(RFKILL_CLASS_DIR);
+    evidence.wifi_blocked = sorted_entries(&rfkill).iter().any(|name| {
+        let switch = rfkill.join(name);
+        let read = |attribute: &str| mica_fs::read_trimmed(&switch.join(attribute));
+        read("type").as_deref() == Some("wlan")
+            && (read("soft").as_deref() == Some("1") || read("hard").as_deref() == Some("1"))
+    });
     evidence
 }
