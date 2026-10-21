@@ -2080,6 +2080,111 @@
         }
       }
     },
+    "/api/v1/dns/test": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Ask each server directly for one `A` record.",
+        "description": "**POST**, because it sends traffic off the device. Each server gets one\nUDP query for the probe name and three seconds to answer; they are asked\nat once and answered in the order given. Nothing is written.",
+        "operationId": "api_v1_dns_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DnsTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "One result per server, in the order given",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DnsTestResult"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, names no server or more than three, or a server is not an IPv4 address (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [
@@ -9390,6 +9495,50 @@
           }
         },
         "additionalProperties": false
+      },
+      "DnsTestRequest": {
+        "type": "object",
+        "description": "The servers to test.",
+        "required": [
+          "servers"
+        ],
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IPv4 server addresses, one to three."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DnsTestResult": {
+        "type": "object",
+        "description": "What asking one server found.",
+        "required": [
+          "server",
+          "reachable"
+        ],
+        "properties": {
+          "ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long the answer took, in milliseconds; absent when there was none.",
+            "minimum": 0
+          },
+          "reachable": {
+            "type": "boolean",
+            "description": "Whether it answered, whatever the answer was."
+          },
+          "server": {
+            "type": "string",
+            "description": "The server asked."
+          }
+        }
       },
       "MintTokenRequest": {
         "type": "object",

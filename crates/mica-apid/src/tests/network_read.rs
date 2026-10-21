@@ -96,3 +96,57 @@ pub(super) fn the_dotted_iface_path_apid_builds_is_accepted_by_the_settings_mode
 }
 
 // SSH pane
+
+// The DNS test is POST-only -- it sends traffic off the device -- answers one
+// result per server in order, and refuses a list micad would.
+#[tokio::test]
+pub(super) async fn the_dns_test_answers_each_server_in_order() {
+    let (router, _fake) = test_app(configured_tree("hunter2secret"));
+    let (cookie, csrf) = mqtt_session(&router).await;
+
+    let refused = get(&router, "/api/v1/dns/test", Some(&cookie)).await;
+    assert_eq!(refused.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    let response = json_request(
+        &router,
+        "POST",
+        "/api/v1/dns/test",
+        json!({ "servers": ["1.1.1.1", "9.9.9.9"] }),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(response).await,
+        json!([
+            { "server": "1.1.1.1", "reachable": true, "ms": 12 },
+            { "server": "9.9.9.9", "reachable": false, "ms": null },
+        ])
+    );
+
+    for servers in [
+        json!([]),
+        json!(["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"]),
+        json!(["2606:4700::1111"]),
+        json!(["dns.example"]),
+    ] {
+        let response = json_request(
+            &router,
+            "POST",
+            "/api/v1/dns/test",
+            json!({ "servers": servers }),
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{servers}"
+        );
+        let error = envelope(response).await;
+        assert_eq!(error["code"], "validation_failed", "{servers}");
+        assert_eq!(error["path"], "dns.global", "{servers}");
+    }
+}

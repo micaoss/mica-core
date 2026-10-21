@@ -78,3 +78,81 @@ pub(super) async fn observe_dns() -> DnsEvidence {
     evidence.probe = Some((DNS_PROBE_NAME.to_string(), outcome));
     evidence
 }
+
+/// What asking one server directly found.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DnsServerTest {
+    /// The server asked.
+    pub server: String,
+    /// Whether it answered the query, whatever the answer was.
+    pub reachable: bool,
+    /// How long the answer took, when there was one.
+    pub ms: Option<u64>,
+}
+
+/// One standard query with recursion desired: an `A` record for `name`,
+/// under `id`.
+pub(super) fn dns_query(id: [u8; 2], name: &str) -> Vec<u8> {
+    let mut packet = Vec::with_capacity(18 + name.len());
+    packet.extend_from_slice(&id);
+    packet.extend_from_slice(&[0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0]);
+    for label in name.split('.') {
+        packet.push(u8::try_from(label.len()).unwrap_or(0));
+        packet.extend_from_slice(label.as_bytes());
+    }
+    packet.extend_from_slice(&[0, 0, 1, 0, 1]);
+    packet
+}
+
+/// Send one query for [`DNS_PROBE_NAME`] to `server` on `port` and wait up to
+/// `timeout` for a reply carrying its id; blocking.
+fn ask_server(server: std::net::Ipv4Addr, port: u16, timeout: Duration) -> DnsServerTest {
+    let id = micad_settings::random_bytes::<2>();
+    let started = std::time::Instant::now();
+    let answered = (|| -> std::io::Result<bool> {
+        let socket = std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0))?;
+        socket.connect((server, port))?;
+        socket.send(&dns_query(id, DNS_PROBE_NAME))?;
+        let mut buffer = [0u8; 512];
+        loop {
+            let left = timeout.saturating_sub(started.elapsed());
+            if left.is_zero() {
+                return Ok(false);
+            }
+            socket.set_read_timeout(Some(left))?;
+            let received = socket.recv(&mut buffer)?;
+            // A reply to this query: the id, and the response bit.
+            if received >= 12 && buffer[..2] == id && buffer[2] & 0x80 != 0 {
+                return Ok(true);
+            }
+        }
+    })()
+    .unwrap_or(false);
+    DnsServerTest {
+        server: server.to_string(),
+        reachable: answered,
+        ms: answered.then(|| u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)),
+    }
+}
+
+/// Ask each of `servers` on `port` at once, each bounded by `timeout`, and
+/// answer in their order.
+pub async fn test_dns_servers(
+    servers: &[std::net::Ipv4Addr],
+    port: u16,
+    timeout: Duration,
+) -> Vec<DnsServerTest> {
+    let asks: Vec<_> = servers
+        .iter()
+        .map(|&server| tokio::task::spawn_blocking(move || ask_server(server, port, timeout)))
+        .collect();
+    let mut results = Vec::with_capacity(asks.len());
+    for (ask, server) in asks.into_iter().zip(servers) {
+        results.push(ask.await.unwrap_or_else(|_| DnsServerTest {
+            server: server.to_string(),
+            reachable: false,
+            ms: None,
+        }));
+    }
+    results
+}

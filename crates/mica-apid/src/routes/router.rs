@@ -236,6 +236,7 @@ pub(super) fn wifi_routes() -> Router<AppState> {
             get(api_v1_wifi_client_read).put(api_v1_wifi_client_write),
         )
         .route(V1_WIFI_SCAN_PATH, post(api_v1_wifi_scan))
+        .route(V1_DNS_TEST_PATH, post(api_v1_dns_test))
         .route(
             V1_WIFI_AP_PATH,
             get(api_v1_wifi_ap_read).put(api_v1_wifi_ap_write),

@@ -618,6 +618,23 @@ impl SettingsApi for FakeSettings {
         self.update_call(&format!("bluetooth remove {address}"))
     }
 
+    async fn test_dns_servers(&self, servers: &[String]) -> anyhow::Result<Value> {
+        // `9.9.9.9` stays silent; every other server answers in 12 ms.
+        Ok(Value::Array(
+            servers
+                .iter()
+                .map(|server| {
+                    let reachable = server != "9.9.9.9";
+                    serde_json::json!({
+                        "server": server,
+                        "reachable": reachable,
+                        "ms": reachable.then_some(12),
+                    })
+                })
+                .collect(),
+        ))
+    }
+
     async fn scan_wifi(&self) -> anyhow::Result<Value> {
         self.update_log
             .lock()

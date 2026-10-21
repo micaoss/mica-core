@@ -216,6 +216,33 @@ impl MicadService {
             })
     }
 
+    /// JSON: each of `servers`, IPv4 addresses, asked directly for one `A`
+    /// record of the probe name over UDP, all at once and each within three
+    /// seconds: `[{server, reachable, ms}]` in their order.
+    pub(super) async fn test_dns_servers(&self, servers: Vec<String>) -> fdo::Result<String> {
+        if servers.is_empty() || servers.len() > micad_settings::MAX_GLOBAL_DNS_SERVERS {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "test 1 to {} servers",
+                micad_settings::MAX_GLOBAL_DNS_SERVERS
+            )));
+        }
+        let addresses = servers
+            .iter()
+            .map(|server| {
+                server.parse::<std::net::Ipv4Addr>().map_err(|_| {
+                    fdo::Error::InvalidArgs(format!("{server:?} is not an IPv4 address"))
+                })
+            })
+            .collect::<fdo::Result<Vec<_>>>()?;
+        let results = crate::network_state::test_dns_servers(
+            &addresses,
+            53,
+            crate::network_state::DNS_PROBE_TIMEOUT,
+        )
+        .await;
+        Ok(serde_json::to_string(&results).unwrap_or_default())
+    }
+
     /// JSON system information: machine id, board, kernel,
     /// release, the image version with its git stamp and build date, the
     /// installed packages, the running deployment and the uptime — every one read

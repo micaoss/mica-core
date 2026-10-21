@@ -80,6 +80,7 @@ trait Micad {
     fn rotate_wireguard_key(&self, iface: &str) -> zbus::Result<String>;
     fn get_containers(&self) -> zbus::Result<String>;
     fn scan_wifi(&self) -> zbus::Result<String>;
+    fn test_dns_servers(&self, servers: &[&str]) -> zbus::Result<String>;
     fn get_bluetooth(&self) -> zbus::Result<String>;
     fn set_bluetooth_discovery(&self, on: bool) -> zbus::Result<()>;
     fn pair_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
@@ -482,6 +483,16 @@ impl SettingsApi for BusSettings {
     async fn scan_wifi(&self) -> anyhow::Result<Value> {
         let proxy = self.proxy().await?;
         let json = self.call("ScanWifi", proxy.scan_wifi()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    /// Ask each server directly for one `A` record.
+    async fn test_dns_servers(&self, servers: &[String]) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let servers: Vec<&str> = servers.iter().map(String::as_str).collect();
+        let json = self
+            .call("TestDnsServers", proxy.test_dns_servers(&servers))
+            .await?;
         Ok(serde_json::from_str(&json)?)
     }
 

@@ -230,6 +230,10 @@ pub(super) const WIFI_NETWORKS_PATH: &str = "wifi.client.networks";
 pub(super) const V1_WIFI_CLIENT_PATH: &str = "/v1/wifi/client";
 pub(super) const WIFI_CLIENT_PATH: &str = "wifi.client";
 
+/// The DNS server test: POST, because it sends traffic off the device.
+pub(super) const V1_DNS_TEST_PATH: &str = "/v1/dns/test";
+pub(super) const DNS_GLOBAL_PATH: &str = "dns.global";
+
 /// The scan: POST, because it puts the radio to work.
 pub(super) const V1_WIFI_SCAN_PATH: &str = "/v1/wifi/client/scan";
 

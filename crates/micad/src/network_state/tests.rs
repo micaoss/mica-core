@@ -2,6 +2,7 @@ use super::*;
 use serde_json::json;
 
 mod describe;
+mod dns_test;
 mod sockets;
 mod wireless;
 

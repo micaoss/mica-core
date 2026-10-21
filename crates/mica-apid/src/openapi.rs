@@ -67,6 +67,7 @@ use utoipa::OpenApi;
         crate::routes::api_v1_wifi_networks_remove,
         crate::routes::api_v1_wifi_client_read,
         crate::routes::api_v1_wifi_scan,
+        crate::routes::api_v1_dns_test,
         crate::routes::api_v1_bluetooth_read,
         crate::routes::api_v1_bluetooth_write,
         crate::routes::api_v1_bluetooth_discovery,

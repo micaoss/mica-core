@@ -146,6 +146,10 @@ pub trait SettingsApi: Send + Sync {
     async fn scan_wifi(&self) -> anyhow::Result<Value> {
         anyhow::bail!("this build drives no radio")
     }
+    /// Ask each server directly for one `A` record (`TestDnsServers`).
+    async fn test_dns_servers(&self, _servers: &[String]) -> anyhow::Result<Value> {
+        anyhow::bail!("this build sends no DNS query")
+    }
     /// The declared containers joined with what the engine reports
     /// (`GetContainers`). Unavailable by default: a build with no bus behind
     /// it reports the engine as absent rather than inventing an empty list.

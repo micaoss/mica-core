@@ -69,6 +69,15 @@ desired `network` settings, which this method never reads.
 <arg type="s" direction="out"/>
 </method>
 <!--
+JSON: each of `servers`, IPv4 addresses, asked directly for one `A`
+record of the probe name over UDP, all at once and each within three
+seconds: `[{server, reachable, ms}]` in their order.
+-->
+<method name="TestDnsServers">
+<arg name="servers" type="as" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
 JSON system information: machine id, board, kernel,
 release, the image version with its git stamp and build date, the
 installed packages, the running deployment and the uptime — every one read
