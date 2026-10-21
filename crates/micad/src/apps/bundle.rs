@@ -441,6 +441,7 @@ pub(crate) mod tests {
             "version": version,
             "arch": ["all"],
             "units": [{ "systemd": format!("{name}.service"), "openrc": name, "enable": true }],
+            "privileges": { "user": "root" },
         })
         .to_string()
     }
@@ -508,16 +509,6 @@ pub(crate) mod tests {
                 Member::Dir("files"),
                 Member::File("files/tailscale", b"", 0o755),
                 Member::File("files/tailscaled", b"", 0o755),
-                Member::File(
-                    "units/systemd/tailscaled.service",
-                    include_bytes!("../../../../docs/apps/tailscale/tailscaled.service"),
-                    0o644,
-                ),
-                Member::File(
-                    "units/openrc/tailscaled",
-                    include_bytes!("../../../../docs/apps/tailscale/tailscaled.openrc"),
-                    0o644,
-                ),
                 Member::File(
                     "hooks/first-run",
                     include_bytes!("../../../../docs/apps/tailscale/first-run"),

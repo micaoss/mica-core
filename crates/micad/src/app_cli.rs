@@ -280,6 +280,7 @@ fn render_list(apps: &Value) -> String {
         "VERSION".to_string(),
         "PREVIOUS".to_string(),
         "SOURCE".to_string(),
+        "RUNS AS".to_string(),
         "UPDATE".to_string(),
     ]];
     let text = |value: &Value| value.as_str().unwrap_or("-").to_string();
@@ -297,10 +298,11 @@ fn render_list(apps: &Value) -> String {
             text(&app["version"]),
             text(&app["previous"]),
             text(&app["source"]),
+            runs_as(&app["privileges"]),
             update,
         ]);
     }
-    let widths: Vec<usize> = (0..5)
+    let widths: Vec<usize> = (0..6)
         .map(|column| rows.iter().map(|row| row[column].len()).max().unwrap_or(0))
         .collect();
     for row in rows {
@@ -316,6 +318,15 @@ fn render_list(apps: &Value) -> String {
 }
 
 /// One app, a line a fact.
+/// Who an app runs as: root, or its own user.
+fn runs_as(privileges: &Value) -> String {
+    match privileges["user"].as_str() {
+        Some("root") => "root".to_string(),
+        Some(_) => privileges["account"].as_str().unwrap_or("-").to_string(),
+        None => "-".to_string(),
+    }
+}
+
 fn render_status(app: &Value) -> String {
     let text = |value: &Value| value.as_str().unwrap_or("-").to_string();
     let mut out = format!(
@@ -327,6 +338,23 @@ fn render_status(app: &Value) -> String {
         text(&app["installedAt"]),
         text(&app["sha256"]),
     );
+    let privileges = &app["privileges"];
+    match runs_as(privileges).as_str() {
+        "root" => out.push_str("runs as: root, with full control of the device\n"),
+        "-" => {}
+        account => out.push_str(&format!("runs as: {account} (uid {})\n", privileges["uid"])),
+    }
+    for key in ["capabilities", "devices"] {
+        let list: Vec<&str> = privileges[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        if !list.is_empty() {
+            out.push_str(&format!("{key}: {}\n", list.join(", ")));
+        }
+    }
     for unit in app["units"].as_array().into_iter().flatten() {
         out.push_str(&format!(
             "unit: {} ({}, {})\n",
@@ -462,21 +490,33 @@ mod tests {
             "name": "demo", "version": "1.1", "previous": "1.0", "source": "upload",
             "installedAt": "2026-10-21T08:00:00Z", "sha256": "ab",
             "units": [{ "name": "demo.service", "enabled": true, "active": "active" }],
+            "privileges": {
+                "user": "app", "account": "mica-app-demo", "uid": 30000,
+                "capabilities": ["CAP_NET_ADMIN"], "devices": ["/dev/net/tun"],
+            },
             "last": { "action": "upgrade", "outcome": "ok" },
             "update": { "url": "https://apps.example/demo.json", "available": "1.2" },
         });
+        let root = json!({
+            "name": "tool", "version": "1", "source": "cli",
+            "privileges": { "user": "root", "capabilities": [], "devices": [] },
+        });
         assert_eq!(
-            render_list(&json!({ "available": true, "apps": [app] })),
-            "NAME  VERSION  PREVIOUS  SOURCE  UPDATE\n\
-             demo  1.1      1.0       upload  1.2 available\n"
+            render_list(&json!({ "available": true, "apps": [app, root] })),
+            "NAME  VERSION  PREVIOUS  SOURCE  RUNS AS        UPDATE\n\
+             demo  1.1      1.0       upload  mica-app-demo  1.2 available\n\
+             tool  1        -         cli     root           -\n"
         );
         assert_eq!(
             render_status(&app),
             "name: demo\nversion: 1.1\nprevious: 1.0\nsource: upload\n\
              installed: 2026-10-21T08:00:00Z\nsha256: ab\n\
+             runs as: mica-app-demo (uid 30000)\ncapabilities: CAP_NET_ADMIN\n\
+             devices: /dev/net/tun\n\
              unit: demo.service (enabled, active)\nlast: upgrade ok\n\
              update: https://apps.example/demo.json (1.2 available)\n"
         );
+        assert!(render_status(&root).contains("runs as: root, with full control of the device\n"));
     }
 
     #[test]

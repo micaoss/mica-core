@@ -8,6 +8,7 @@
 mod bundle;
 mod flow;
 mod manifest;
+mod render;
 mod seed;
 mod update;
 
@@ -40,6 +41,10 @@ const DATA_DIR: &str = "srv/apps";
 const MAX_APPS: usize = 16;
 /// How long a first-run hook may run.
 const HOOK_TIMEOUT: Duration = Duration::from_secs(300);
+/// The first uid an app's own user gets; the next [`UID_COUNT`] are apps'.
+const UID_BASE: u32 = 30000;
+/// How many uids apps may have.
+const UID_COUNT: u32 = 1000;
 
 /// Why an app request is refused or failed.
 #[derive(Debug)]
@@ -150,6 +155,10 @@ struct AppEntry {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Record {
     apps: BTreeMap<String, AppEntry>,
+    /// Each app's own uid, which is its gid too: kept while its data is,
+    /// through a remove, until a purge.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    uids: BTreeMap<String, u32>,
 }
 
 /// The apps of one root.
@@ -163,6 +172,10 @@ pub struct Apps {
     /// Where a first-run hook's output is sent too, tagged: `logger`.
     logger: Option<String>,
     hook_timeout: Duration,
+    /// The first uid of apps' own users.
+    uid_base: u32,
+    /// What a first-run hook of an app's own user runs through.
+    setpriv: PathBuf,
     busy: AtomicBool,
 }
 
@@ -188,6 +201,8 @@ impl Apps {
             fetch,
             logger: None,
             hook_timeout: HOOK_TIMEOUT,
+            uid_base: UID_BASE,
+            setpriv: PathBuf::from(render::SETPRIV),
             busy: AtomicBool::new(false),
         }
     }
@@ -332,6 +347,16 @@ impl Apps {
                 units.push(json!({ "name": unit, "enabled": enable, "active": active }));
             }
         }
+        let privileges = manifest.as_ref().map(|m| {
+            let root = m.privileges.user == manifest::RunAs::Root;
+            json!({
+                "user": m.privileges.user,
+                "account": (!root).then(|| format!("mica-app-{name}")),
+                "uid": if root { None } else { self.read_record().uids.get(name).copied() },
+                "capabilities": m.privileges.capabilities,
+                "devices": m.privileges.devices,
+            })
+        });
         let update = manifest.as_ref().and_then(|m| m.update.as_ref());
         let available = entry
             .update
@@ -349,6 +374,7 @@ impl Apps {
             "installedAt": entry.current.installed_at,
             "previous": entry.previous.as_ref().map(|p| &p.version),
             "units": units,
+            "privileges": privileges,
             "last": entry.last,
             "update": update.map(|spec| json!({
                 "url": spec.url,

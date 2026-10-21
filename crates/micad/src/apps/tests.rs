@@ -15,6 +15,7 @@ use crate::reconciler::systemd::UnitControl;
 #[derive(Default)]
 struct FakeMicaUnit {
     units: Mutex<BTreeMap<String, bool>>,
+    texts: Mutex<BTreeMap<String, String>>,
     calls: Mutex<Vec<String>>,
 }
 
@@ -32,6 +33,10 @@ impl Commands for FakeMicaUnit {
             }
             ["install", path] => {
                 let name = std::path::Path::new(path).file_name().unwrap();
+                self.texts.lock().unwrap().insert(
+                    name.to_string_lossy().into_owned(),
+                    std::fs::read_to_string(path).unwrap_or_default(),
+                );
                 units
                     .entry(name.to_string_lossy().into_owned())
                     .or_insert(false);
@@ -63,6 +68,15 @@ impl Commands for FakeMicaUnit {
 impl FakeMicaUnit {
     fn units(&self) -> BTreeMap<String, bool> {
         self.units.lock().unwrap().clone()
+    }
+
+    fn text(&self, unit: &str) -> String {
+        self.texts
+            .lock()
+            .unwrap()
+            .get(unit)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -168,11 +182,19 @@ impl Rig {
             Arc::clone(&mica) as Arc<dyn Commands>,
             Arc::clone(&control) as Arc<dyn UnitControl>,
         ));
-        let apps = Arc::new(Apps::new(
-            dir.path(),
-            units,
-            Arc::clone(&fetch) as Arc<dyn Fetch>,
-        ));
+        // setpriv's stand-in runs the command as the test's own user, which
+        // is the first app uid.
+        let setpriv = dir.path().join("setpriv");
+        std::fs::write(
+            &setpriv,
+            "#!/bin/sh\nwhile [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&setpriv, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut apps = Apps::new(dir.path(), units, Arc::clone(&fetch) as Arc<dyn Fetch>);
+        apps.uid_base = rustix::process::geteuid().as_raw();
+        apps.setpriv = setpriv;
+        let apps = Arc::new(apps);
         Self {
             dir,
             mica,
@@ -195,13 +217,19 @@ impl Rig {
         extra: serde_json::Value,
         hook: Option<&str>,
     ) -> std::path::PathBuf {
+        // An app of its own user declares services; the others ship units.
+        let own_user = extra.get("services").is_some();
         let mut manifest = json!({
             "schemaVersion": 1,
             "name": name,
             "version": version,
             "arch": ["all"],
-            "units": [{ "systemd": format!("{name}.service"), "openrc": name, "enable": true }],
         });
+        if !own_user {
+            manifest["units"] =
+                json!([{ "systemd": format!("{name}.service"), "openrc": name, "enable": true }]);
+            manifest["privileges"] = json!({ "user": "root" });
+        }
         for (key, value) in extra.as_object().unwrap() {
             manifest[key] = value.clone();
         }
@@ -217,8 +245,10 @@ impl Rig {
         ];
         let unit_path = format!("units/systemd/{name}.service");
         let script_path = format!("units/openrc/{name}");
-        members.push(Member::File(&unit_path, unit.as_bytes(), 0o644));
-        members.push(Member::File(&script_path, b"#!/sbin/openrc-run\n", 0o755));
+        if !own_user {
+            members.push(Member::File(&unit_path, unit.as_bytes(), 0o644));
+            members.push(Member::File(&script_path, b"#!/sbin/openrc-run\n", 0o755));
+        }
         if let Some(hook) = hook {
             members.push(Member::File("hooks/first-run", hook.as_bytes(), 0o755));
         }
@@ -515,6 +545,83 @@ async fn remove_keeps_the_data_unless_purged() {
         rig.apps.remove("demo", true).await,
         Err(AppError::NotFound(_))
     ));
+}
+
+/// An app of its own user: micad writes its units, which run it through
+/// setpriv with what it declares, its hook runs as it, and its uid is kept
+/// through a remove until a purge.
+#[tokio::test]
+async fn an_app_runs_as_its_own_user() {
+    let rig = Rig::new(Init::Systemd);
+    let base = rig.apps.uid_base;
+    let own = json!({
+        "privileges": { "capabilities": ["CAP_NET_ADMIN"], "devices": ["/dev/net/tun"] },
+        "services": [{ "name": "demo", "exec": ["files/run", "--data=${APP_DATA}"], "enable": true }],
+    });
+    let hook = "#!/bin/sh\necho \"$HOME\" > ../home\n";
+    rig.install(&rig.bundle("demo", "1.0", own.clone(), Some(hook)), false)
+        .await
+        .unwrap();
+    let text = rig.mica.text("demo.service");
+    assert!(
+        text.contains(&format!(
+            "ExecStart=\"/usr/bin/setpriv\" \"--reuid={base}\" \"--regid={base}\" \"--clear-groups\" \"--bounding-set=-all,+net_admin\""
+        )),
+        "{text}"
+    );
+    assert!(text.contains("\"/mica/apps/demo/current/files/run\" \"--data=/srv/apps/demo\""));
+    assert!(text.contains("DeviceAllow=/dev/net/tun rw"));
+    assert_eq!(
+        rig.mica.units(),
+        BTreeMap::from([("demo.service".into(), true)])
+    );
+    assert_eq!(
+        std::fs::read_to_string(rig.path("mica/apps/demo/home")).unwrap(),
+        "/srv/apps/demo\n"
+    );
+    assert_eq!(rig.record().uids, BTreeMap::from([("demo".into(), base)]));
+    let view = rig.apps.view(Some("demo")).await.unwrap();
+    assert_eq!(view["privileges"]["user"], json!("app"));
+    assert_eq!(view["privileges"]["account"], json!("mica-app-demo"));
+    assert_eq!(view["privileges"]["uid"], json!(base));
+    assert_eq!(view["privileges"]["capabilities"], json!(["CAP_NET_ADMIN"]));
+
+    // A second app gets the next uid; a removed one keeps its own.
+    let other = json!({ "services": [{ "name": "other", "exec": ["files/run"] }] });
+    rig.install(&rig.bundle("other", "1.0", other, None), false)
+        .await
+        .unwrap();
+    rig.apps.remove("demo", false).await.unwrap();
+    assert_eq!(rig.record().uids["demo"], base);
+    assert_eq!(rig.record().uids["other"], base + 1);
+    rig.install(&rig.bundle("demo", "1.0", own, None), false)
+        .await
+        .unwrap();
+    assert_eq!(rig.record().uids["demo"], base);
+    rig.apps.remove("demo", true).await.unwrap();
+    assert!(!rig.record().uids.contains_key("demo"));
+
+    // A root app shows as root.
+    rig.install(&rig.bundle("tool", "1.0", json!({}), None), false)
+        .await
+        .unwrap();
+    let view = rig.apps.view(Some("tool")).await.unwrap();
+    assert_eq!(view["privileges"]["user"], json!("root"));
+    assert_eq!(view["privileges"]["uid"], json!(null));
+}
+
+/// Under OpenRC the service is a script micad writes, under supervise-daemon.
+#[tokio::test]
+async fn an_openrc_app_of_its_own_user_gets_a_written_script() {
+    let rig = Rig::new(Init::Openrc);
+    let own = json!({ "services": [{ "name": "demo", "exec": ["files/run"], "enable": true }] });
+    rig.install(&rig.bundle("demo", "1.0", own, None), false)
+        .await
+        .unwrap();
+    let text = rig.mica.text("demo");
+    assert!(text.starts_with("#!/sbin/openrc-run\n"));
+    assert!(text.contains("supervisor=supervise-daemon"));
+    assert!(text.contains("command=/usr/bin/setpriv"));
 }
 
 #[tokio::test]

@@ -1,5 +1,6 @@
 //! Install, upgrade, roll back and remove an app.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, bail};
@@ -7,8 +8,9 @@ use micad_settings::{Init, ServicesSettings};
 use serde_json::{Value, json};
 
 use super::bundle;
-use super::manifest::{self, Manifest, Problem};
-use super::{AppEntry, AppError, Apps, Installed, LastResult, MAX_APPS, Record, now};
+use super::manifest::{self, Manifest, Problem, RunAs};
+use super::render::{self, Account};
+use super::{AppEntry, AppError, Apps, Installed, LastResult, MAX_APPS, Record, UID_COUNT, now};
 use crate::user_units::Verb;
 
 /// The most bytes of a first-run hook's output kept.
@@ -200,7 +202,10 @@ impl Apps {
             && !old
                 .as_ref()
                 .is_some_and(|entry| entry.first_run.contains(&version));
-        let switched = self.switch(&name, from.as_ref(), &manifest, run_hook).await;
+        let account = self.account(&name, &manifest, &mut record)?;
+        let switched = self
+            .switch(&name, from.as_ref(), &manifest, account.as_ref(), run_hook)
+            .await;
         let action = if old.is_some() { "upgrade" } else { "install" };
         match switched {
             Ok(()) => {
@@ -240,7 +245,19 @@ impl Apps {
                 }
                 match (&old, &from) {
                     (Some(entry), Some(from)) => {
-                        let back = self.switch(&name, Some(&manifest), from, false).await;
+                        let back = match self.account(&name, from, &mut record) {
+                            Ok(back_account) => {
+                                self.switch(
+                                    &name,
+                                    Some(&manifest),
+                                    from,
+                                    back_account.as_ref(),
+                                    false,
+                                )
+                                .await
+                            }
+                            Err(err) => Err(anyhow_of(err)),
+                        };
                         let message = match back {
                             Ok(()) => format!("{err:#}; rolled back to {}", entry.current.version),
                             Err(back) => {
@@ -273,13 +290,16 @@ impl Apps {
 
     /// Switch `name` from `from` to `to`, whose version directory is in place:
     /// stop the old units, install the new ones and remove the gone, point
-    /// `current` and `app.env` at it, run its first-run hook if `run_hook`,
-    /// then enable and start its `enable` units.
+    /// `current` and `app.env` at it, give its data to `account` (root's
+    /// without one), run its first-run hook if `run_hook`, then enable and
+    /// start its `enable` units. A service's unit is written from the
+    /// manifest; a root app's comes from its bundle.
     async fn switch(
         &self,
         name: &str,
         from: Option<&Manifest>,
         to: &Manifest,
+        account: Option<&Account>,
         run_hook: bool,
     ) -> anyhow::Result<()> {
         let init = self.init();
@@ -296,9 +316,24 @@ impl Apps {
         }
         let dir = self.version_dir(name, &to.version).map_err(anyhow_of)?;
         let units = dir.join("units").join(init.as_str());
+        let vars: BTreeMap<String, String> = self.env_of(name, to)?.into_iter().collect();
         for (unit, _) in &new {
-            let text = std::fs::read_to_string(units.join(unit))
-                .with_context(|| format!("read {unit}"))?;
+            let service = to
+                .services
+                .iter()
+                .find(|service| manifest::service_unit(&service.name, init) == *unit);
+            let text = match service {
+                Some(service) => render::unit(
+                    init,
+                    name,
+                    service,
+                    account.context("a service runs as the app's own user")?,
+                    &to.privileges.devices,
+                    &vars,
+                )?,
+                None => std::fs::read_to_string(units.join(unit))
+                    .with_context(|| format!("read {unit}"))?,
+            };
             self.units.install(unit, &text, false).await?;
             if init == Init::Openrc
                 && let Ok(conf) = std::fs::read_to_string(units.join("conf.d").join(unit))
@@ -315,8 +350,9 @@ impl Apps {
         }
         self.point_current(name, &to.version)?;
         self.write_env(name, to)?;
+        self.own_data(name, account.map(|account| account.uid))?;
         if run_hook && let Some(hook) = &to.first_run {
-            self.run_hook(name, &dir, hook).await?;
+            self.run_hook(name, &dir, hook, account).await?;
         }
         let listed = self.units.listed().await?;
         for (unit, enable) in &new {
@@ -359,6 +395,77 @@ impl Apps {
                 tracing::warn!(unit, %err, "remove an app unit");
             }
         }
+    }
+
+    /// Who `manifest`'s processes run as: nobody for a root app, else the
+    /// app's own uid, kept in `record` or given there now.
+    fn account(
+        &self,
+        name: &str,
+        manifest: &Manifest,
+        record: &mut Record,
+    ) -> Result<Option<Account>, AppError> {
+        use std::os::unix::fs::MetadataExt;
+        if manifest.privileges.user == RunAs::Root {
+            return Ok(None);
+        }
+        let uid = match record.uids.get(name) {
+            Some(uid) => *uid,
+            None => {
+                let taken = self.taken_ids(record);
+                let uid = (self.uid_base..self.uid_base.saturating_add(UID_COUNT))
+                    .find(|id| !taken.contains(id))
+                    .ok_or_else(|| AppError::Refused("every uid for apps is taken".into()))?;
+                record.uids.insert(name.to_string(), uid);
+                uid
+            }
+        };
+        let root = self.root()?;
+        let mut groups: Vec<u32> = manifest
+            .privileges
+            .devices
+            .iter()
+            .filter_map(|device| std::fs::metadata(root.join(device.trim_start_matches('/'))).ok())
+            .map(|meta| meta.gid())
+            .filter(|gid| *gid != 0)
+            .collect();
+        groups.sort_unstable();
+        groups.dedup();
+        Ok(Some(Account {
+            uid,
+            groups,
+            capabilities: manifest.privileges.capabilities.clone(),
+        }))
+    }
+
+    /// The ids the root's accounts and groups and the apps hold.
+    fn taken_ids(&self, record: &Record) -> BTreeSet<u32> {
+        let mut taken: BTreeSet<u32> = record.uids.values().copied().collect();
+        if let Ok(root) = self.root() {
+            for file in ["etc/passwd", "etc/group"] {
+                if let Ok(text) = std::fs::read_to_string(root.join(file)) {
+                    taken.extend(
+                        text.lines()
+                            .filter_map(|line| line.split(':').nth(2)?.parse::<u32>().ok()),
+                    );
+                }
+            }
+        }
+        taken
+    }
+
+    /// Give `name`'s data to `uid`, or to micad's own user (root on a
+    /// device), unless it is theirs already.
+    fn own_data(&self, name: &str, uid: Option<u32>) -> anyhow::Result<()> {
+        use std::os::unix::fs::MetadataExt;
+        let data = self.data_dir(name).map_err(anyhow_of)?;
+        let owner = uid.unwrap_or_else(|| rustix::process::geteuid().as_raw());
+        let meta =
+            std::fs::symlink_metadata(&data).with_context(|| format!("read {}", data.display()))?;
+        if meta.uid() == owner && meta.gid() == owner {
+            return Ok(());
+        }
+        chown_tree(&data, owner)
     }
 
     /// Point `current` at `version`, in one rename.
@@ -406,18 +513,42 @@ impl Apps {
         Ok(env)
     }
 
-    /// Run the first-run hook as root in `dir`, bounded; its output is kept in
-    /// the app's directory and sent to the system log.
-    async fn run_hook(&self, name: &str, dir: &Path, hook: &str) -> anyhow::Result<()> {
+    /// Run the first-run hook in `dir`, bounded: as `account`, with no
+    /// capabilities, or as root without one. Its output is kept in the app's
+    /// directory and sent to the system log.
+    async fn run_hook(
+        &self,
+        name: &str,
+        dir: &Path,
+        hook: &str,
+        account: Option<&Account>,
+    ) -> anyhow::Result<()> {
         let manifest = bundle::read_manifest(dir).map_err(|err| anyhow::anyhow!("{err}"))?;
-        let run = tokio::process::Command::new(dir.join(hook))
-            .current_dir(dir)
-            .env_clear()
-            .env(
-                "PATH",
-                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            )
-            .envs(self.env_of(name, &manifest)?)
+        let mut command = match account {
+            Some(account) => {
+                let mut command = tokio::process::Command::new(&self.setpriv);
+                command
+                    .args(render::setpriv_args(&Account {
+                        capabilities: Vec::new(),
+                        ..account.clone()
+                    }))
+                    .arg(dir.join(hook));
+                command
+            }
+            None => tokio::process::Command::new(dir.join(hook)),
+        };
+        let vars = self.env_of(name, &manifest)?;
+        command.current_dir(dir).env_clear().env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        );
+        if account.is_some()
+            && let Some((_, data)) = vars.iter().find(|(key, _)| key == "APP_DATA")
+        {
+            command.env("HOME", data);
+        }
+        let run = command
+            .envs(vars)
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true)
             .output();
@@ -501,8 +632,27 @@ impl Apps {
         })?;
         let current = self.manifest_of(name, &entry.current.version)?;
         let target = self.manifest_of(name, &previous.version)?;
-        if let Err(err) = self.switch(name, Some(&current), &target, false).await {
-            let back = self.switch(name, Some(&target), &current, false).await;
+        let current_account = self.account(name, &current, &mut record)?;
+        let target_account = self.account(name, &target, &mut record)?;
+        if let Err(err) = self
+            .switch(
+                name,
+                Some(&current),
+                &target,
+                target_account.as_ref(),
+                false,
+            )
+            .await
+        {
+            let back = self
+                .switch(
+                    name,
+                    Some(&target),
+                    &current,
+                    current_account.as_ref(),
+                    false,
+                )
+                .await;
             let mut message = format!("roll back {name} to {}: {err:#}", previous.version);
             if let Err(back) = back {
                 message.push_str(&format!(
@@ -564,6 +714,9 @@ impl Apps {
             }
         }
         record.apps.remove(name);
+        if purge {
+            record.uids.remove(name);
+        }
         self.write_record(&record)?;
         tracing::info!(app = name, purge, "app removed");
         Ok(json!({ "name": name, "action": "remove", "purged": purge }))
@@ -647,7 +800,7 @@ fn record_last(record: &mut Record, name: &str, result: LastResult) {
     }
 }
 
-/// `/srv/apps/<name>`, the app's own: root's, 0700.
+/// `/srv/apps/<name>`, 0700; [`Apps::own_data`] gives it to the app's user.
 fn make_data_dir(path: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     if let Some(parent) = path.parent() {
@@ -661,6 +814,18 @@ fn make_data_dir(path: &Path) -> anyhow::Result<()> {
     }
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
         .with_context(|| format!("chmod {}", path.display()))
+}
+
+/// `path` and everything under it, links not followed, to `id`:`id`.
+fn chown_tree(path: &Path, id: u32) -> anyhow::Result<()> {
+    std::os::unix::fs::lchown(path, Some(id), Some(id))
+        .with_context(|| format!("chown {}", path.display()))?;
+    if std::fs::symlink_metadata(path)?.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            chown_tree(&entry?.path(), id)?;
+        }
+    }
+    Ok(())
 }
 
 /// Refuse a bundle the filesystem `dest` is on has no room to unpack: what it

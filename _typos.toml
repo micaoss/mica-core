@@ -21,6 +21,8 @@ hiden = "hiden"
 abd = "abd"
 # Bosnia and Herzegovina's ISO 3166 code, in the regulatory country list.
 BA = "BA"
+# setpriv's `--inh-caps`, the inheritable capabilities.
+inh = "inh"
 
 [default.extend-identifiers]
 # O_WRONLY.

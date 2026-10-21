@@ -4,11 +4,26 @@
   "version": "1.104.2",
   "arch": ["arm64"],
   "description": "Tailscale node: reach this device over the tailnet",
-  "units": [
-    { "systemd": "tailscaled.service", "openrc": "tailscaled", "enable": true }
+  "privileges": {
+    "user": "app",
+    "capabilities": ["CAP_NET_ADMIN", "CAP_NET_RAW"],
+    "devices": ["/dev/net/tun"]
+  },
+  "services": [
+    {
+      "name": "tailscaled",
+      "exec": [
+        "files/tailscaled",
+        "--state=${APP_DATA}/tailscaled.state",
+        "--statedir=${APP_DATA}",
+        "--socket=${TS_SOCKET}",
+        "--port=41641"
+      ],
+      "enable": true
+    }
   ],
   "env": {
-    "TS_SOCKET": "/run/tailscale/tailscaled.sock"
+    "TS_SOCKET": "/srv/apps/tailscale/tailscaled.sock"
   },
   "firstRun": "hooks/first-run",
   "seedPolicy": "follow-image"
