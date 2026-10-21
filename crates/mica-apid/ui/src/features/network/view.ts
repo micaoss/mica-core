@@ -37,7 +37,8 @@ export interface WifiView {
   radio?: string
   mode: 'off' | 'client' | 'ap'
   apRunning: boolean
-  /// Why the access point is not running, as the device says.
+  /// Why the access point is not running, or `acs_failed` while it runs on
+  /// the fallback channel, as the device says.
   apReason?: string
   apSsid?: string
   stations: number
@@ -188,6 +189,7 @@ export function computeStatus(view: NetView, name: string): IfaceStatus {
       if (wifi.mode === 'off') return status('neutral', 'off')
       if (wifi.mode === 'ap') {
         if (!wifi.apRunning) return status('danger', 'apDown', wifi.apReason ? { key: `network.status.notes.apReason.${wifi.apReason}` } : undefined)
+        if (wifi.apReason === 'acs_failed') return status('warning', 'apRunning', { key: 'network.status.notes.apFallback', params: { ssid: wifi.apSsid ?? '' } })
         return status('success', 'apRunning', { key: 'network.status.notes.ap', params: { ssid: wifi.apSsid ?? '', count: wifi.stations } })
       }
       if (!wifi.association) return status('danger', 'notConnected', { key: 'network.status.notes.searching' })

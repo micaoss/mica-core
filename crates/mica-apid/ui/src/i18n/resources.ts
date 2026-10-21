@@ -226,6 +226,7 @@ export const en = {
         afterApply: 'It exists once the pending changes are applied.',
         ap: 'Broadcasting {{ssid}} · {{count}} clients',
         ap_one: 'Broadcasting {{ssid}} · 1 client',
+        apFallback: 'Broadcasting {{ssid}} on the country\'s first channel: automatic channel selection failed.',
         apReason: {
           disabled: 'The access point is switched off.',
           client_mode: 'The radio is joined to a network as a client.',

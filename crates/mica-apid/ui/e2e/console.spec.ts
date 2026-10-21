@@ -230,6 +230,32 @@ test('captures the device code, the claim key and the pairing window', async ({ 
   await page.screenshot({ path: testInfo.outputPath('setup-ap-key.png') })
 })
 
+test('captures an access point on the fallback channel', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/api/v1/wifi/ap', (route) => route.fulfill(json({ ...(benchPayload('/api/v1/wifi/ap') as object), mode: 'always', ssid: 'mica-789Z', channel: 0 })))
+  await page.route('**/api/v1/wifi/client', (route) => route.fulfill(json({ enabled: false, interface: 'wlan0' })))
+  await page.route('**/api/v1/network/status', (route) => {
+    const status = benchPayload('/api/v1/network/status') as Record<string, unknown>
+    return route.fulfill(json({
+      ...status,
+      wifi: { available: true, associations: [] },
+      accessPoint: {
+        available: true,
+        running: true,
+        reason: 'acs_failed',
+        reasonDetail: 'hostapd gave up choosing a channel (state DISABLED); running on channel 1',
+        entries: [{ interface: 'wlan0', stationCount: 0, stations: [] }],
+      },
+    }))
+  })
+  await page.goto('./network')
+  await expect(page.getByText(/automatic channel selection failed/).first()).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('network-acs-fallback.png'), fullPage: true })
+})
+
 test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'mobile navigation contract')
   await page.goto('./')

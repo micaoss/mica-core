@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { configured, observed } from '@/shared/testing/network'
 import type { NetworkMap } from './model'
 import { diffRows } from './summary'
+import { wifiView } from './use-network'
 import { addressBook, validateEntry } from './validate'
 import { buildView, computeStatus, exitOf, sessionInterface, type WifiView } from './view'
 
@@ -59,6 +60,20 @@ describe('the joined view', () => {
     const joined = buildView({ ...configured() as NetworkMap, eth9: { dhcp: true } }, status, ap)
     expect(computeStatus(joined, 'wlan0')).toEqual({ tone: 'danger', label: 'apDown', note: { key: 'network.status.notes.apReason.radio_blocked' } })
     expect(computeStatus(joined, 'eth9').label).toBe('notCreated')
+  })
+
+  it('warns while the access point runs on the fallback channel', () => {
+    const ap: WifiView = { radio: 'wlan0', mode: 'ap', apRunning: true, apReason: 'acs_failed', apSsid: 'mica-789Z', stations: 0 }
+    const joined = buildView(configured() as NetworkMap, observed(), ap)
+    expect(computeStatus(joined, 'wlan0')).toEqual({ tone: 'warning', label: 'apRunning', note: { key: 'network.status.notes.apFallback', params: { ssid: 'mica-789Z' } } })
+
+    // Only that reason reaches a running access point's view.
+    const ap0 = { mode: 'always', interface: 'wlan0', ssid: 'mica-789Z', channel: 0 } as never
+    const at = (reason: string) => ({ ...observed(), accessPoint: { available: true, running: true, reason } })
+    expect(wifiView(undefined, ap0, at('acs_failed')).apReason).toBe('acs_failed')
+    expect(wifiView(undefined, ap0, at('driver_error')).apReason).toBeUndefined()
+    // A device that reports no access point at all.
+    expect(wifiView(undefined, ap0, { ...observed(), accessPoint: undefined } as never).apReason).toBeUndefined()
   })
 
   it('takes the session\'s interface from the device when it says', () => {

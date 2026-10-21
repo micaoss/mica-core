@@ -149,6 +149,7 @@ export const zhCN: Translation = {
         afterApply: '应用待应用的更改后才会存在。',
         ap: '广播 {{ssid}} · {{count}} 台设备',
         ap_one: '广播 {{ssid}} · {{count}} 台设备',
+        apFallback: '广播 {{ssid}}，使用所在国家/地区的第一个信道：自动选择信道失败。',
         apReason: {
           disabled: '热点已关闭。',
           client_mode: '无线网卡正作为客户端连接网络。',

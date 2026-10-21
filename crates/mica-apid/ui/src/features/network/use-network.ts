@@ -64,7 +64,9 @@ export function wifiView(client: WifiClientRole | undefined, ap: WifiAccessPoint
     radio,
     mode: apOn ? 'ap' : client?.enabled ? 'client' : 'off',
     apRunning: running ?? point !== undefined,
-    apReason: running === false ? status?.accessPoint.reason ?? undefined : undefined,
+    // A running access point has a reason only when it fell back from a
+    // failed channel selection.
+    apReason: running === false || status?.accessPoint?.reason === 'acs_failed' ? status?.accessPoint?.reason ?? undefined : undefined,
     apSsid: ap?.ssid,
     stations: point?.stationCount ?? 0,
     association: association ? { ssid: association.ssid, bssid: association.bssid, rssiDbm: association.rssiDbm, linkSpeedMbps: association.linkSpeedMbps } : undefined,
