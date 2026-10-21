@@ -83,6 +83,8 @@ use utoipa::OpenApi;
         crate::routes::api_v1_wifi_ap_write,
         crate::routes::api_v1_wifi_read,
         crate::routes::api_v1_wifi_write,
+        crate::routes::api_v1_wifi_capabilities,
+        crate::routes::api_v1_wifi_channels,
         crate::routes::api_v1_wifi_client_write,
         crate::routes::api_v1_containers_read,
         crate::routes::api_v1_container_project_write,

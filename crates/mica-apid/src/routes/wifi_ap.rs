@@ -353,6 +353,48 @@ async fn stored_access_point(
             ApiError::apid("validation_failed", message).at(WIFI_AP_PATH),
         )));
     }
+    if requested.channel != 0
+        && !micad_settings::ap_channels(&requested.country_code).contains(&requested.channel)
+    {
+        let allowed = micad_settings::ap_channels(&requested.country_code);
+        return Err(Box::new(api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "channel_not_allowed",
+                format!(
+                    "channel {} is not allowed in {}: use {} to {}, or 0 for automatic",
+                    requested.channel,
+                    requested.country_code,
+                    allowed.start(),
+                    allowed.end()
+                ),
+            )
+            .with_params(serde_json::json!({
+                "channel": requested.channel,
+                "countryCode": requested.country_code,
+            }))
+            .at(WIFI_AP_PATH),
+        )));
+    }
+    // Refused only when the radio said what it offers: a radio not asked yet
+    // is not one known to lack it.
+    if requested.security.as_deref() == Some("wpa2-wpa3")
+        && radio_capabilities(state)
+            .await
+            .and_then(|capabilities| capabilities.get("security").cloned())
+            .and_then(|security| security.as_array().cloned())
+            .is_some_and(|security| !security.iter().any(|offered| offered == "wpa2-wpa3"))
+    {
+        return Err(Box::new(api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "not_supported",
+                "this radio cannot run WPA3 as an access point".to_string(),
+            )
+            .with_params(serde_json::json!({ "security": "wpa2-wpa3" }))
+            .at(WIFI_AP_PATH),
+        )));
+    }
     let stored = state
         .api
         .get_settings(WIFI_AP_PATH)
@@ -620,4 +662,171 @@ async fn radio_addressing(
     address_refusal(&radio, &cfg)?;
     routing_refusal(&radio, &cfg)?;
     Ok((path, encode(&cfg)?))
+}
+
+/// `capabilities.wifi` of the observed network, once the device has said
+/// what its radio offers.
+async fn radio_capabilities(state: &AppState) -> Option<Value> {
+    let observed = state.api.get_observed_network().await.ok()?;
+    let wifi = observed.pointer("/capabilities/wifi")?;
+    wifi.get("security").is_some().then(|| wifi.clone())
+}
+
+/// What the radio can do as an access point.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WifiCapabilities {
+    /// Whether the device said; when not, the other members are what every
+    /// radio this image drives offers.
+    pub(super) available: bool,
+    /// The security types an access point can offer: `wpa2-psk`,
+    /// `wpa2-wpa3` where SAE and protected management frames run, `open`.
+    pub(super) security: Vec<String>,
+    /// The bands the radio has: `2.4`, `5`, `6`.
+    pub(super) bands: Vec<String>,
+    /// Whether the access point can choose its channel itself (channel 0).
+    pub(super) acs: bool,
+    /// Whether the radio can be a station and an access point at once.
+    pub(super) ap_client_concurrent: bool,
+}
+
+/// Read what the radio can do as an access point.
+///
+/// From `iw`, asked once per daemon: the security types, the bands, whether
+/// the access point can choose its channel (the driver keeps a survey and
+/// hostapd was built with ACS) and whether a station and an access point can
+/// run at once. A device that has not said answers `available: false` with
+/// WPA2 and open on 2.4 GHz.
+#[utoipa::path(
+    get,
+    path = V1_WIFI_CAPABILITIES_PATH,
+    context_path = API,
+    tag = "resources",
+    responses(
+        (status = 200, description = "What the radio offers", body = WifiCapabilities),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_wifi_capabilities(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    let strings = |value: Option<&Value>| -> Vec<String> {
+        value
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    };
+    let capabilities = match radio_capabilities(&state).await {
+        Some(found) => WifiCapabilities {
+            available: true,
+            security: strings(found.get("security")),
+            bands: strings(found.get("bands")),
+            acs: found.get("acs").and_then(Value::as_bool).unwrap_or(false),
+            ap_client_concurrent: found
+                .get("apClientConcurrent")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
+        None => WifiCapabilities {
+            available: false,
+            security: vec!["wpa2-psk".to_string(), "open".to_string()],
+            bands: vec!["2.4".to_string()],
+            acs: false,
+            ap_client_concurrent: false,
+        },
+    };
+    api_response(StatusCode::OK, capabilities)
+}
+
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+pub(crate) struct WifiChannelsQuery {
+    /// The two-letter regulatory domain.
+    pub(super) country: String,
+}
+
+/// The channels an access point may use in one country.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WifiChannels {
+    pub(super) country_code: String,
+    /// The 2.4 GHz channels, in order.
+    pub(super) channels: Vec<u8>,
+    /// Whether channel 0, the access point's own choice, is offered.
+    pub(super) auto: bool,
+}
+
+/// Read the channels an access point may use in a country.
+///
+/// The 2.4 GHz channels the country allows -- 1 to 11 under the FCC's plan,
+/// 1 to 13 elsewhere -- that the radio has, and whether it can choose one
+/// itself.
+#[utoipa::path(
+    get,
+    path = V1_WIFI_CHANNELS_PATH,
+    context_path = API,
+    tag = "resources",
+    params(WifiChannelsQuery),
+    responses(
+        (status = 200, description = "The allowed channels", body = WifiChannels),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 422, description = "`country` is missing or not a two-letter code (`validation_failed`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_wifi_channels(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    query: Result<
+        axum::extract::Query<WifiChannelsQuery>,
+        axum::extract::rejection::QueryRejection,
+    >,
+) -> Response {
+    let country = match query {
+        Ok(axum::extract::Query(query))
+            if query.country.len() == 2
+                && query.country.bytes().all(|byte| byte.is_ascii_alphabetic()) =>
+        {
+            query.country.to_ascii_uppercase()
+        }
+        _ => {
+            return api_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiError::apid(
+                    "validation_failed",
+                    "`country` is a two-letter regulatory domain, e.g. ?country=GR".to_string(),
+                )
+                .at(WIFI_AP_PATH),
+            );
+        }
+    };
+    let capabilities = radio_capabilities(&state).await;
+    let present: Option<Vec<u64>> = capabilities
+        .as_ref()
+        .and_then(|found| found.get("channels"))
+        .and_then(Value::as_array)
+        .map(|channels| channels.iter().filter_map(Value::as_u64).collect());
+    let channels = micad_settings::ap_channels(&country)
+        .filter(|channel| {
+            present
+                .as_ref()
+                .is_none_or(|present| present.contains(&u64::from(*channel)))
+        })
+        .collect();
+    api_response(
+        StatusCode::OK,
+        WifiChannels {
+            country_code: country,
+            channels,
+            auto: capabilities
+                .as_ref()
+                .and_then(|found| found.get("acs"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
+    )
 }

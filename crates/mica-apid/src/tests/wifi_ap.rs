@@ -254,3 +254,141 @@ pub(super) async fn the_scan_is_a_post_that_answers_what_the_radio_found() {
 }
 
 // --- Declared containers -----------------------------------------------------
+
+fn radio(security: serde_json::Value, channels: serde_json::Value, acs: bool) -> serde_json::Value {
+    json!({
+        "capabilities": { "wifi": {
+            "supported": true, "interfaces": ["wlan0"],
+            "security": security, "bands": ["2.4"], "acs": acs,
+            "apClientConcurrent": false, "channels": channels,
+        } }
+    })
+}
+
+fn ap_body(channel: u8, security: &str) -> serde_json::Value {
+    json!({
+        "mode": "always", "interface": "wlan0", "ssid": "mica-lab",
+        "channel": channel, "countryCode": "DE", "address": "192.168.4.1/24",
+        "holdDownSeconds": 120, "graceSeconds": 60, "security": security,
+    })
+}
+
+// What the radio offers, and the fallback before it has said.
+#[tokio::test]
+pub(super) async fn the_capabilities_are_the_radio_s_or_the_baseline() {
+    let (router, fake) = test_app(ap_tree());
+    let (cookie, _csrf) = mqtt_session(&router).await;
+    let read = body_json(get(&router, "/api/v1/wifi/capabilities", Some(&cookie)).await).await;
+    assert_eq!(
+        read,
+        json!({ "available": false, "security": ["wpa2-psk", "open"], "bands": ["2.4"], "acs": false, "apClientConcurrent": false })
+    );
+    fake.set_observed_network(radio(
+        json!(["wpa2-psk", "wpa2-wpa3", "open"]),
+        json!([1, 2, 3]),
+        true,
+    ));
+    let read = body_json(get(&router, "/api/v1/wifi/capabilities", Some(&cookie)).await).await;
+    assert_eq!(read["available"], true);
+    assert_eq!(read["security"], json!(["wpa2-psk", "wpa2-wpa3", "open"]));
+    assert_eq!(read["acs"], true);
+}
+
+// The country's channels that the radio has; a country that is not a code
+// is refused.
+#[tokio::test]
+pub(super) async fn the_channels_are_the_country_s_that_the_radio_has() {
+    let (router, fake) = test_app(ap_tree());
+    let (cookie, _csrf) = mqtt_session(&router).await;
+    let read =
+        body_json(get(&router, "/api/v1/wifi/channels?country=gr", Some(&cookie)).await).await;
+    assert_eq!(read["countryCode"], "GR");
+    assert_eq!(read["channels"], json!((1..=13).collect::<Vec<u8>>()));
+    assert_eq!(read["auto"], false);
+    let read =
+        body_json(get(&router, "/api/v1/wifi/channels?country=US", Some(&cookie)).await).await;
+    assert_eq!(read["channels"], json!((1..=11).collect::<Vec<u8>>()));
+
+    fake.set_observed_network(radio(
+        json!(["wpa2-psk", "open"]),
+        json!([1, 6, 11, 12]),
+        true,
+    ));
+    let read =
+        body_json(get(&router, "/api/v1/wifi/channels?country=DE", Some(&cookie)).await).await;
+    assert_eq!(read["channels"], json!([1, 6, 11, 12]));
+    assert_eq!(read["auto"], true);
+
+    for bad in ["/api/v1/wifi/channels", "/api/v1/wifi/channels?country=GRC"] {
+        let response = get(&router, bad, Some(&cookie)).await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    }
+}
+
+// A channel the country does not allow is refused by its own code; 0 is
+// the access point's own choice.
+#[tokio::test]
+pub(super) async fn a_channel_outside_the_country_s_is_refused() {
+    let (router, fake) = test_app(ap_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+    let mut body = ap_body(14, "wpa2-psk");
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_AP_API,
+        body.clone(),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let error = envelope(response).await;
+    assert_eq!(error["code"], "channel_not_allowed");
+    assert_eq!(error["params"]["channel"], 14);
+    body["channel"] = json!(0);
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_AP_API,
+        body,
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(fake.get_settings("wifi.ap").await.unwrap()["channel"], 0);
+}
+
+// WPA3 is refused on a radio that said it cannot run it, and taken on one
+// that has not said.
+#[tokio::test]
+pub(super) async fn wpa3_is_refused_where_the_radio_lacks_it() {
+    let (router, fake) = test_app(ap_tree());
+    let (cookie, csrf) = mqtt_session(&router).await;
+    fake.set_observed_network(radio(json!(["wpa2-psk", "open"]), json!([1, 6, 11]), false));
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_AP_API,
+        ap_body(6, "wpa2-wpa3"),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let error = envelope(response).await;
+    assert_eq!(error["code"], "not_supported");
+    assert_eq!(error["params"]["security"], "wpa2-wpa3");
+
+    fake.set_observed_network(json!({ "capabilities": { "wifi": { "supported": true } } }));
+    let response = json_request(
+        &router,
+        "PUT",
+        WIFI_AP_API,
+        ap_body(6, "wpa2-wpa3"),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}

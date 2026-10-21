@@ -250,6 +250,8 @@ pub(super) fn wifi_routes() -> Router<AppState> {
             get(api_v1_wifi_ap_read).put(api_v1_wifi_ap_write),
         )
         .route(V1_WIFI_PATH, get(api_v1_wifi_read).put(api_v1_wifi_write))
+        .route(V1_WIFI_CAPABILITIES_PATH, get(api_v1_wifi_capabilities))
+        .route(V1_WIFI_CHANNELS_PATH, get(api_v1_wifi_channels))
 }
 
 /// Bluetooth: one document, one write for the adapter, and the verbs that pair

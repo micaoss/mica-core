@@ -269,6 +269,10 @@ pub(super) const WIFI_AP_PATH: &str = "wifi.ap";
 /// The radio's role: which of the two holds it, written with that role's
 /// configuration in one write.
 pub(super) const V1_WIFI_PATH: &str = "/v1/wifi";
+/// What the radio can do as an access point, and the channels a country
+/// allows it.
+pub(super) const V1_WIFI_CAPABILITIES_PATH: &str = "/v1/wifi/capabilities";
+pub(super) const V1_WIFI_CHANNELS_PATH: &str = "/v1/wifi/channels";
 pub(super) const WIFI_SETTINGS_PATH: &str = "wifi";
 
 /// The network cluster: the interface map, one interface, and a tunnel's peer collection.

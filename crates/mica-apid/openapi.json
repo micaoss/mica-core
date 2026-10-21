@@ -8761,6 +8761,111 @@
         }
       }
     },
+    "/api/v1/wifi/capabilities": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read what the radio can do as an access point.",
+        "description": "From `iw`, asked once per daemon: the security types, the bands, whether\nthe access point can choose its channel (the driver keeps a survey and\nhostapd was built with ACS) and whether a station and an access point can\nrun at once. A device that has not said answers `available: false` with\nWPA2 and open on 2.4 GHz.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "operationId": "api_v1_wifi_capabilities",
+        "responses": {
+          "200": {
+            "description": "What the radio offers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiCapabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wifi/channels": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read the channels an access point may use in a country.",
+        "description": "The 2.4 GHz channels the country allows -- 1 to 11 under the FCC's plan,\n1 to 13 elsewhere -- that the radio has, and whether it can choose one\nitself.\n\nServed only when the product carries the `wifi` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "operationId": "api_v1_wifi_channels",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "path",
+            "description": "The two-letter regulatory domain.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The allowed channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WifiChannels"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`country` is missing or not a two-letter code (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/wifi/client": {
       "get": {
         "tags": [
@@ -11919,6 +12024,72 @@
           }
         },
         "additionalProperties": false
+      },
+      "WifiCapabilities": {
+        "type": "object",
+        "description": "What the radio can do as an access point.",
+        "required": [
+          "available",
+          "security",
+          "bands",
+          "acs",
+          "apClientConcurrent"
+        ],
+        "properties": {
+          "acs": {
+            "type": "boolean",
+            "description": "Whether the access point can choose its channel itself (channel 0)."
+          },
+          "apClientConcurrent": {
+            "type": "boolean",
+            "description": "Whether the radio can be a station and an access point at once."
+          },
+          "available": {
+            "type": "boolean",
+            "description": "Whether the device said; when not, the other members are what every\nradio this image drives offers."
+          },
+          "bands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The bands the radio has: `2.4`, `5`, `6`."
+          },
+          "security": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The security types an access point can offer: `wpa2-psk`,\n`wpa2-wpa3` where SAE and protected management frames run, `open`."
+          }
+        }
+      },
+      "WifiChannels": {
+        "type": "object",
+        "description": "The channels an access point may use in one country.",
+        "required": [
+          "countryCode",
+          "channels",
+          "auto"
+        ],
+        "properties": {
+          "auto": {
+            "type": "boolean",
+            "description": "Whether channel 0, the access point's own choice, is offered."
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The 2.4 GHz channels, in order."
+          },
+          "countryCode": {
+            "type": "string"
+          }
+        }
       },
       "WifiClientConfig": {
         "type": "object",
