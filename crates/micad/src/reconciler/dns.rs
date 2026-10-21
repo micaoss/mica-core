@@ -3,8 +3,9 @@
 //!
 //! `/etc/hosts` links to [`HOSTS_PATH`], which Base seeds at boot with the
 //! lines this reconciler starts with. Global servers are resolved's drop-in on
-//! systemd, with a networkd drop-in beside every `.network` that takes the
-//! link's own servers away; on OpenRC they are `resolv.d/global`, which Base's
+//! systemd, which also empties resolved's fallback list whether they are on or
+//! not, with a networkd drop-in beside every `.network` that takes the link's
+//! own servers and search domains away; on OpenRC they are `resolv.d/global`, which Base's
 //! `mica-resolv` makes the whole of `resolv.conf`.
 
 use std::collections::BTreeSet;
@@ -40,10 +41,11 @@ const NETWORK_DIRS: [&str; 4] = [
 const RUNTIME_NETWORK_DIR: &str = "/run/systemd/network";
 /// The name of the drop-in in each `.network.d`.
 const LINK_DROP_IN: &str = "90-mica-global-dns.conf";
-/// What the link drop-in says: no server of the link's own, and none taken
-/// from a lease or a router advertisement.
+/// What the link drop-in says: no server of the link's own, and no server or
+/// search domain taken from a lease or a router advertisement.
 const LINK_DROP_IN_TEXT: &str = "# Managed by micad from dns.global. Do not edit.\n\
-     [Network]\nDNS=\n\n[DHCPv4]\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n";
+     [Network]\nDNS=\n\n[DHCPv4]\nUseDNS=no\nUseDomains=no\n\n\
+     [DHCPv6]\nUseDNS=no\nUseDomains=no\n\n[IPv6AcceptRA]\nUseDNS=no\nUseDomains=no\n";
 /// The OpenRC resolver directory and the global file in it.
 const RESOLVERS_DIR: &str = "/run/mica/resolv.d";
 /// Base's program building `resolv.conf` from [`RESOLVERS_DIR`].
@@ -152,12 +154,15 @@ fn render_hosts(hostname: &str, dns: &DnsSettings) -> String {
     out
 }
 
-/// resolved's drop-in for the global servers.
-fn render_resolved(servers: &[String]) -> String {
-    format!(
-        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nDNS={}\n",
-        servers.join(" ")
-    )
+/// resolved's drop-in: the global servers when they are on, and never a
+/// fallback server, so a lookup goes only where the settings say.
+fn render_resolved(global: &micad_settings::GlobalDns) -> String {
+    let mut out = "# Managed by micad from dns.global. Do not edit.\n[Resolve]\n".to_string();
+    if global.enabled {
+        out.push_str(&format!("DNS={}\n", global.servers.join(" ")));
+    }
+    out.push_str("FallbackDNS=\n");
+    out
 }
 
 /// `resolv.d/global` for the global servers.
@@ -252,11 +257,8 @@ impl Reconciler for DnsReconciler {
                 control,
                 reloader,
             } => {
-                let resolver_changed = if global.enabled {
-                    write_config_if_changed(drop_in, &render_resolved(&global.servers), FILE_MODE)?
-                } else {
-                    remove_if_present(drop_in)?
-                };
+                let resolver_changed =
+                    write_config_if_changed(drop_in, &render_resolved(global), FILE_MODE)?;
                 let wanted = if global.enabled {
                     network_files(network_dirs)
                 } else {

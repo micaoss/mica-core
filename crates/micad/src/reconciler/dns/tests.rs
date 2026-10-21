@@ -86,9 +86,13 @@ async fn the_hosts_file_carries_the_hostname_and_the_records() {
         "127.0.0.1\tlocalhost\n::1\tlocalhost\n127.0.1.1\tedge\n\
          192.168.1.5\tnas.lan\t# the NAS\n"
     );
-    // Off, nothing else is written and nothing restarted.
-    assert!(!host.dir.path().join("resolved.conf.d").exists());
-    assert!(host.control.calls().is_empty());
+    // Off, resolved is only told to keep no fallback servers, and no link
+    // is touched.
+    assert_eq!(
+        std::fs::read_to_string(host.dir.path().join("resolved.conf.d/60-mica-dns.conf")).unwrap(),
+        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nFallbackDNS=\n"
+    );
+    assert_eq!(host.control.calls(), ["restart systemd-resolved.service"]);
     assert_eq!(*host.reloads.0.lock().unwrap(), 0);
 }
 
@@ -102,14 +106,25 @@ async fn global_servers_replace_every_links_own_and_go_away_again() {
 
     assert_eq!(
         std::fs::read_to_string(host.dir.path().join("resolved.conf.d/60-mica-dns.conf")).unwrap(),
-        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nDNS=9.9.9.9 1.1.1.1\n"
+        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nDNS=9.9.9.9 1.1.1.1\nFallbackDNS=\n"
     );
     let run = host.dir.path().join("run");
     for unit in ["80-dhcp.network", "50-mica-eth1.network"] {
         let drop_in = run.join(format!("{unit}.d")).join(LINK_DROP_IN);
         let text = std::fs::read_to_string(&drop_in).unwrap();
         assert!(text.contains("[Network]\nDNS=\n"), "{text}");
-        assert!(text.contains("[DHCPv4]\nUseDNS=no\n"), "{text}");
+        assert!(
+            text.contains("[DHCPv4]\nUseDNS=no\nUseDomains=no\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("[DHCPv6]\nUseDNS=no\nUseDomains=no\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("[IPv6AcceptRA]\nUseDNS=no\nUseDomains=no\n"),
+            "{text}"
+        );
     }
     assert!(!run.join("50-mica-eth1.netdev.d").exists());
     assert_eq!(host.control.calls(), ["restart systemd-resolved.service"]);
@@ -123,17 +138,15 @@ async fn global_servers_replace_every_links_own_and_go_away_again() {
     assert_eq!(host.control.calls().len(), 1);
     assert_eq!(*host.reloads.0.lock().unwrap(), 1);
 
-    // Off keeps the servers in the settings and takes every file away.
+    // Off keeps the servers in the settings and takes the links' drop-ins
+    // away; resolved keeps no fallback servers either way.
     host.reconciler
         .apply(&settings(false, &["9.9.9.9", "1.1.1.1"], Vec::new()))
         .await
         .unwrap();
-    assert!(
-        !host
-            .dir
-            .path()
-            .join("resolved.conf.d/60-mica-dns.conf")
-            .exists()
+    assert_eq!(
+        std::fs::read_to_string(host.dir.path().join("resolved.conf.d/60-mica-dns.conf")).unwrap(),
+        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nFallbackDNS=\n"
     );
     assert!(!run.join("80-dhcp.network.d").exists());
     assert!(!run.join("50-mica-eth1.network.d").exists());
