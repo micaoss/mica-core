@@ -265,8 +265,9 @@ session added. While a session holds the radio, the console's Wi-Fi routes answe
 
 ## Test vectors
 
-Produced by an independent implementation (Node.js, BigInt P-256) that first reproduces the
-RFC 9383 P256-SHA256-HKDF-HMAC-SHA256 vector exactly. All values are hex unless shown as JSON. `x`
+Produced by the reference in [ble-provisioning/reference](ble-provisioning/reference/README.md)
+(Node.js, BigInt P-256), which first reproduces the RFC 9383 P256-SHA256-HKDF-HMAC-SHA256 vector
+exactly. All values are hex unless shown as JSON. `x`
 and `y` are fixed here; real sessions draw them at random.
 
 ### SPAKE2+, auth password
