@@ -22,11 +22,15 @@ import { Switch } from '@/shared/components/ui/switch'
 import { failureDetail, notifyFailure, notifySuccess } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { EditBar } from './change-bar'
-import { inSubnet, isIPv4, overlaps, parseCidr, sameEntry, type IfaceEntry } from './model'
+import { inSubnet, intToIp, ipToInt, isIPv4, overlaps, parseCidr, sameEntry, type IfaceEntry } from './model'
 import { channelsFor, countryName, ELSEWHERE, EUROPE } from './regulatory'
 import type { NetworkData } from './use-network'
 
-interface WifiNetwork { ssid: string; psk?: string; hidden: boolean; priority: number }
+interface WifiNetwork { ssid: string; psk?: string; hidden: boolean; priority: number; autoConnect?: boolean }
+
+type ApSecurity = NonNullable<WifiAccessPoint['security']>
+const AP_SECURITIES: ApSecurity[] = ['wpa2-psk', 'wpa2-wpa3', 'open']
+const MIN_LEASE = 60
 
 interface Draft {
   enabled: boolean
@@ -38,6 +42,11 @@ interface Draft {
   countryConfirmed: boolean
   channel: number
   address: string
+  security: ApSecurity
+  poolStart: string
+  poolEnd: string
+  /// Seconds; empty is the DHCP server's own default.
+  lease: string
   /// The radio's own addressing as a client.
   addressing: IfaceEntry
   customDns: boolean
@@ -68,6 +77,9 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
     countryConfirmed: false,
     channel: ap?.channel ?? 6,
     address: ap?.address ?? '192.168.4.1/24',
+    security: ap?.security ?? 'wpa2-psk',
+    ...apPoolRange(ap?.address ?? '192.168.4.1/24', ap?.pool),
+    lease: ap?.leaseSeconds ? String(ap.leaseSeconds) : '',
     addressing: structuredClone(stored),
     customDns: Boolean(stored.dns?.length),
   })
@@ -76,39 +88,35 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
   const modeChanged = draft !== undefined && draft.enabled && wifi.mode !== 'off' && draft.mode !== wifi.mode
   const turningOff = draft !== undefined && !draft.enabled && wifi.mode !== 'off'
   const onSession = data.session !== null && data.session === radio
+  const openNow = draft !== undefined && draft.enabled && draft.mode === 'ap' && draft.security === 'open' && !(wifi.mode === 'ap' && ap?.security === 'open')
+  const apChanged = draft !== undefined && ap !== undefined && JSON.stringify(apFields(draft)) !== JSON.stringify(storedFields(ap))
   const dirty = draft !== undefined && (
     draft.enabled !== (wifi.mode !== 'off') || (draft.enabled && draft.mode !== wifi.mode)
-    || (draft.mode === 'ap' && (draft.start !== (ap?.mode === 'provisioning' ? 'provisioning' : 'always') || draft.ssid !== (ap?.ssid ?? '') || draft.psk !== '' || draft.country !== (ap?.countryCode ?? '').toUpperCase() || draft.channel !== ap?.channel || draft.address !== ap?.address))
+    || (draft.mode === 'ap' && (draft.start !== (ap?.mode === 'provisioning' ? 'provisioning' : 'always') || draft.psk !== '' || apChanged))
     || (draft.mode === 'client' && !sameEntry(draft.addressing, stored)))
 
   const saved = t(modeChanged ? 'network.wifi.switched' : turningOff ? 'network.wifi.turnedOff' : 'network.wifi.configSaved')
   const send = async () => {
     if (!draft) return
-    const apBody = (mode: WifiAccessPoint['mode']): Partial<WifiAccessPoint> => {
-      const body: Partial<WifiAccessPoint> = { ...ap, mode, interface: radio }
-      // The stored key reads as the redaction sentinel; absent keeps it.
-      delete body.psk
-      return body
-    }
+    // The role switch is one write of both roles: one radio, one role.
+    const roles = (client: boolean, apMode: WifiAccessPoint['mode']) => api<TaskAccepted>('/api/v1/settings', json('PATCH', { 'wifi.client.enabled': client, 'wifi.ap.mode': apMode }))
     try {
       if (!draft.enabled) {
-        if (ap && ap.mode !== 'off') await api<TaskAccepted>('/api/v1/wifi/ap', json('PUT', apBody('off')))
-        if (client?.enabled) await api<TaskAccepted>('/api/v1/wifi/client', json('PUT', { enabled: false, interface: radio }))
+        await roles(false, 'off')
       } else if (draft.mode === 'client') {
-        // The access point lets go of the radio first: one radio, one role.
-        if (ap && ap.mode !== 'off') await api<TaskAccepted>('/api/v1/wifi/ap', json('PUT', apBody('off')))
-        if (!client?.enabled || client.interface !== radio) await api<TaskAccepted>('/api/v1/wifi/client', json('PUT', { enabled: true, interface: radio }))
+        if (client && client.interface !== radio) await api<TaskAccepted>('/api/v1/wifi/client', json('PUT', { enabled: client.enabled, interface: radio }))
+        if (!client?.enabled || (ap && ap.mode !== 'off')) await roles(true, 'off')
         if (!sameEntry(draft.addressing, stored)) await api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(radio)}`, json('PUT', draft.addressing))
       } else {
-        if (client?.enabled) await api<TaskAccepted>('/api/v1/wifi/client', json('PUT', { enabled: false, interface: radio }))
-        await api<TaskAccepted>('/api/v1/wifi/ap', json('PUT', {
-          ...apBody(draft.start),
-          ...(draft.ssid ? { ssid: draft.ssid } : {}),
-          ...(draft.psk ? { psk: draft.psk } : {}),
-          channel: draft.channel,
-          countryCode: draft.country,
-          address: draft.address,
-        }))
+        if (draft.psk !== '' || apChanged || !ap) {
+          // The stored key reads as the redaction sentinel; absent keeps it.
+          const body: Partial<WifiAccessPoint> = { ...ap, mode: ap?.mode ?? 'off', interface: radio, ...apFields(draft) }
+          delete body.psk
+          if (!body.ssid) delete body.ssid
+          if (draft.psk && draft.security !== 'open') body.psk = draft.psk
+          await api<TaskAccepted>('/api/v1/wifi/ap', json('PUT', body))
+        }
+        if (client?.enabled || ap?.mode !== draft.start) await roles(false, draft.start)
       }
       setDraft(undefined)
     } finally {
@@ -116,7 +124,7 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
     }
   }
   const askOrSave = () => {
-    if (modeChanged || turningOff || onSession) setConfirming(true)
+    if (modeChanged || turningOff || onSession || openNow) setConfirming(true)
     else void send().then(() => notifySuccess(saved), (error: unknown) => notifyFailure(t('network.wifi.saveFailed'), failureDetail(error, t('common.requestFailed'))))
   }
   const listMode = draft ? (draft.enabled ? draft.mode : undefined) : wifi.mode === 'off' ? 'client' : wifi.mode
@@ -147,13 +155,14 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        tone={turningOff || onSession ? 'danger' : 'neutral'}
+        tone={turningOff || onSession || openNow ? 'danger' : 'neutral'}
         title={t(turningOff ? 'network.wifi.confirmOff' : modeChanged ? (draft?.mode === 'ap' ? 'network.wifi.confirmAp' : 'network.wifi.confirmClient') : 'network.wifi.confirmSave')}
         description={(
           <span className="grid gap-2">
             {turningOff ? <span>{t(wifi.mode === 'ap' ? 'network.wifi.offApCopy' : 'network.wifi.offClientCopy', { radio })}</span> : null}
             {modeChanged ? <span>{t('network.wifi.switchCopy', { from: t(`network.wifi.modes.${wifi.mode}`) })}</span> : null}
             {modeChanged && draft?.mode === 'client' ? <span>{t('network.wifi.reachCopy', { host: `${data.hostname ?? 'mica'}.local` })}</span> : null}
+            {openNow ? <span className="text-destructive">{t('network.wifi.openCopy')}</span> : null}
             {onSession ? <span className="text-destructive">{t('network.wifi.sessionCopy')}</span> : null}
           </span>
         )}
@@ -166,17 +175,64 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
   )
 }
 
+/// The pool micad derives when none is declared: from the address after the
+/// access point's to the one before the broadcast address.
+function derivedPool(address: string): { poolStart: string; poolEnd: string } {
+  const subnet = parseCidr(address)
+  return subnet && subnet.ip + 1 < subnet.broadcast ? { poolStart: intToIp(subnet.ip + 1), poolEnd: intToIp(subnet.broadcast - 1) } : { poolStart: '', poolEnd: '' }
+}
+
+function apPoolRange(address: string, pool: WifiAccessPoint['pool']): { poolStart: string; poolEnd: string } {
+  const subnet = parseCidr(address)
+  if (!subnet || !pool) return derivedPool(address)
+  return { poolStart: intToIp(subnet.net + pool.offset), poolEnd: intToIp(subnet.net + pool.offset + pool.size - 1) }
+}
+
+/// The access point fields a draft writes. A pool equal to the derived one is
+/// left undeclared, so it keeps following the address.
+function apFields(draft: Draft) {
+  const subnet = parseCidr(draft.address)
+  const derived = derivedPool(draft.address)
+  const declared = subnet && (draft.poolStart !== derived.poolStart || draft.poolEnd !== derived.poolEnd)
+  return {
+    ssid: draft.ssid,
+    channel: draft.channel,
+    countryCode: draft.country,
+    address: draft.address,
+    security: draft.security,
+    pool: declared ? { offset: ipToInt(draft.poolStart) - subnet.net, size: ipToInt(draft.poolEnd) - ipToInt(draft.poolStart) + 1 } : undefined,
+    leaseSeconds: draft.lease ? Number(draft.lease) : undefined,
+  }
+}
+
+function storedFields(ap: WifiAccessPoint) {
+  return {
+    ssid: ap.ssid ?? '',
+    channel: ap.channel,
+    countryCode: ap.countryCode.toUpperCase(),
+    address: ap.address,
+    security: ap.security ?? 'wpa2-psk',
+    pool: ap.pool ? { offset: ap.pool.offset, size: ap.pool.size } : undefined,
+    leaseSeconds: ap.leaseSeconds,
+  }
+}
+
 function draftErrors(draft: Draft, data: NetworkData, t: (key: string, params?: Record<string, unknown>) => string): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!draft.enabled) return errors
   if (draft.mode === 'ap') {
     if (new TextEncoder().encode(draft.ssid).length > 32) errors.ssid = t('network.wifi.ssidLong')
-    if (draft.psk && !(draft.psk.length >= 8 && draft.psk.length <= 63)) errors.psk = t('network.wifi.pskLength')
-    if (!parseCidr(draft.address)) errors.address = t('network.problems.cidr')
+    if (draft.security !== 'open' && draft.psk && !(draft.psk.length >= 8 && draft.psk.length <= 63)) errors.psk = t('network.wifi.pskLength')
+    const subnet = parseCidr(draft.address)
+    if (!subnet) errors.address = t('network.problems.cidr')
     else {
       const clash = data.applied.order.find((name) => name !== data.wifi.radio && data.applied.ifaces[name].obs?.address && overlaps(draft.address, data.applied.ifaces[name].obs?.address ?? ''))
       if (clash) errors.address = t('network.problems.overlapWith', { name: clash })
+      if (!inSubnet(draft.poolStart, draft.address) || !inSubnet(draft.poolEnd, draft.address)) errors.pool = t('network.wifi.poolSubnet')
+      else if (ipToInt(draft.poolStart) > ipToInt(draft.poolEnd)) errors.pool = t('network.wifi.poolOrder')
+      else if (subnet.ip >= ipToInt(draft.poolStart) && subnet.ip <= ipToInt(draft.poolEnd)) errors.pool = t('network.wifi.poolOwn', { address: intToIp(subnet.ip) })
     }
+    if (draft.lease && !(Number(draft.lease) >= MIN_LEASE)) errors.lease = t('network.wifi.leaseShort', { count: MIN_LEASE })
     if (!draft.countryConfirmed) errors.country = t('network.wifi.confirmCountry')
     if (!channelsFor(draft.country).includes(draft.channel)) errors.channel = t('network.wifi.channelInvalid')
     return errors
@@ -230,11 +286,13 @@ function ConfigView({ data }: { data: NetworkData }) {
     facts.push(
       { id: 'start', label: t('network.wifi.start'), value: t(`network.wifi.starts.${ap.mode === 'provisioning' ? 'provisioning' : 'always'}`) },
       { id: 'ssid', label: 'SSID', value: ap.ssid || t('network.wifi.ssidAuto') },
-      { id: 'security', label: t('network.wifi.security'), value: 'WPA2-PSK' },
-      { id: 'psk', label: t('network.wifi.password'), value: t('network.wifi.pskHidden') },
+      { id: 'security', label: t('network.wifi.security'), value: t(`network.wifi.apSecurities.${ap.security ?? 'wpa2-psk'}`) },
+      ap.security !== 'open' && { id: 'psk', label: t('network.wifi.password'), value: t('network.wifi.pskHidden') },
       { id: 'country', label: t('network.wifi.country'), value: `${countryName(ap.countryCode, i18n.resolvedLanguage ?? 'en')} (${ap.countryCode})` },
       { id: 'channel', label: t('network.wifi.channel'), value: t('network.wifi.channelValue', { channel: ap.channel }) },
       { id: 'address', label: t('network.wifi.apAddress'), value: ap.address, mono: true },
+      { id: 'pool', label: t('network.wifi.pool'), value: (({ poolStart, poolEnd }) => `${poolStart} – ${poolEnd}`)(apPoolRange(ap.address, ap.pool)), mono: true },
+      { id: 'lease', label: t('network.wifi.lease'), value: ap.leaseSeconds ? t('network.values.seconds', { count: ap.leaseSeconds }) : t('network.wifi.leaseDefault') },
       { id: 'dhcp', label: t('network.wifi.apDhcp'), value: t('network.wifi.apDhcpCopy') },
     )
   }
@@ -282,10 +340,20 @@ function ConfigForm({ draft, setDraft, errors, current }: { draft: Draft; setDra
             <FormField label="SSID" hint={hint('ssid', t('network.wifi.ssidHint'))}>
               {(id) => <Input id={id} value={draft.ssid} aria-invalid={Boolean(errors.ssid)} onChange={(event) => setDraft({ ...draft, ssid: event.target.value })} />}
             </FormField>
-            <FormField label={t('network.wifi.password')} hint={hint('psk', t('network.wifi.pskHint'))}>
-              {(id) => <Input id={id} type="password" value={draft.psk} placeholder={t('network.wifi.pskKeep')} aria-invalid={Boolean(errors.psk)} onChange={(event) => setDraft({ ...draft, psk: event.target.value })} />}
+            <FormField label={t('network.wifi.security')}>
+              {(id) => (
+                <Select value={draft.security} onValueChange={(value) => setDraft({ ...draft, security: value as ApSecurity })}>
+                  <SelectTrigger id={id} className="w-56"><SelectValue>{t(`network.wifi.apSecurities.${draft.security}`)}</SelectValue></SelectTrigger>
+                  <SelectContent>{AP_SECURITIES.map((each) => <SelectItem key={each} value={each}>{t(`network.wifi.apSecurities.${each}`)}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
             </FormField>
           </div>
+          {draft.security === 'open' ? <Callout tone="warning" title={t('network.wifi.openWarning')} /> : (
+            <FormField label={t('network.wifi.password')} hint={hint('psk', t('network.wifi.pskHint'))}>
+              {(id) => <Input id={id} className="sm:w-1/2" type="password" value={draft.psk} placeholder={t('network.wifi.pskKeep')} aria-invalid={Boolean(errors.psk)} onChange={(event) => setDraft({ ...draft, psk: event.target.value })} />}
+            </FormField>
+          )}
           <FormField label={t('network.wifi.country')} hint={hint('country', t('network.wifi.countryHint'))}>
             {(id) => (
               <div className="grid gap-2">
@@ -310,10 +378,22 @@ function ConfigForm({ draft, setDraft, errors, current }: { draft: Draft; setDra
               )}
             </FormField>
             <FormField label={t('network.wifi.apAddress')} hint={hint('address', t('network.wifi.apAddressHint'))}>
-              {(id) => <Input id={id} className="font-mono" value={draft.address} aria-invalid={Boolean(errors.address)} onChange={(event) => setDraft({ ...draft, address: event.target.value.trim() })} />}
+              {(id) => <Input id={id} className="font-mono" value={draft.address} aria-invalid={Boolean(errors.address)} onChange={(event) => { const address = event.target.value.trim(); const derived = derivedPool(draft.address); const following = draft.poolStart === derived.poolStart && draft.poolEnd === derived.poolEnd; setDraft({ ...draft, address, ...(following ? derivedPool(address) : {}) }) }} />}
+            </FormField>
+            <FormField label={t('network.wifi.pool')} hint={hint('pool', t('network.wifi.poolHint'))}>
+              {(id) => (
+                <div className="flex items-center gap-2">
+                  <Input id={id} className="font-mono" aria-label={t('network.wifi.poolStart')} value={draft.poolStart} aria-invalid={Boolean(errors.pool)} onChange={(event) => setDraft({ ...draft, poolStart: event.target.value.trim() })} />
+                  <span>–</span>
+                  <Input className="font-mono" aria-label={t('network.wifi.poolEnd')} value={draft.poolEnd} aria-invalid={Boolean(errors.pool)} onChange={(event) => setDraft({ ...draft, poolEnd: event.target.value.trim() })} />
+                </div>
+              )}
+            </FormField>
+            <FormField label={t('network.wifi.leaseSeconds')} hint={hint('lease', t('network.wifi.leaseHint'))}>
+              {(id) => <Input id={id} className="w-32 font-mono" inputMode="numeric" value={draft.lease} placeholder={t('network.wifi.leaseDefault')} aria-invalid={Boolean(errors.lease)} onChange={(event) => setDraft({ ...draft, lease: event.target.value.replace(/\D/g, '') })} />}
             </FormField>
           </div>
-          <p className="text-sm text-muted-foreground">{t('network.wifi.securityNote')}</p>
+          <p className="text-sm text-muted-foreground">{t('network.wifi.apGatewayNote')}</p>
         </>
       ) : (
         <>
@@ -371,6 +451,7 @@ function ClientLists({ data }: { data: NetworkData }) {
   const [psk, setPsk] = useState('')
   const [hidden, setHidden] = useState(false)
   const [priority, setPriority] = useState('0')
+  const [autoConnect, setAutoConnect] = useState(true)
   const [ssid, setSsid] = useState('')
   const wifi = data.wifi
   const scanBlocked = wifi.mode === 'ap' ? t('network.wifi.scanApHolds', { iface: wifi.radio ?? '' }) : wifi.mode === 'off' ? t('network.wifi.scanClientOff') : undefined
@@ -386,13 +467,14 @@ function ClientLists({ data }: { data: NetworkData }) {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['wifi-networks'] }),
   })
   const open = (next: { ssid: string; existing: boolean; secured: boolean }, entry?: WifiNetwork) => {
-    setDialog(next); setSsid(next.ssid); setPsk(''); setHidden(entry?.hidden ?? false); setPriority(String(entry?.priority ?? 0))
+    setDialog(next); setSsid(next.ssid); setPsk(''); setHidden(entry?.hidden ?? false); setPriority(String(entry?.priority ?? 0)); setAutoConnect(entry?.autoConnect !== false)
   }
   const pskError = psk && !(psk.length >= 8 && psk.length <= 63) ? t('network.wifi.pskLength') : undefined
   const ssidError = !dialog?.existing && ssid && networks.data?.some((each) => each.ssid === ssid) ? t('network.wifi.ssidSaved') : undefined
   const submit = () => {
     if (!dialog) return Promise.resolve()
-    const body = { ssid, ...(psk ? { psk } : {}), hidden, priority: Number(priority) }
+    // Absent is joined automatically, which a replacing PUT then restores.
+    const body = { ssid, ...(psk ? { psk } : {}), hidden, priority: Number(priority), ...(autoConnect ? {} : { autoConnect: false }) }
     const request = dialog.existing
       ? api<WifiNetwork>(`/api/v1/wifi/client/networks/${encodeURIComponent(dialog.ssid)}`, json('PUT', body))
       : api<WifiNetwork>('/api/v1/wifi/client/networks', json('POST', body))
@@ -414,6 +496,7 @@ function ClientLists({ data }: { data: NetworkData }) {
               { id: 'ssid', header: t('network.wifi.network'), cell: (entry) => <span className="flex flex-wrap items-center gap-1.5"><strong>{entry.ssid}</strong>{entry.hidden ? <span className="text-xs text-muted-foreground">{t('network.wifi.hidden')}</span> : null}{wifi.association?.ssid === entry.ssid ? <span className="text-xs text-primary">{t('network.status.connected')}</span> : null}</span> },
               { id: 'security', header: t('network.wifi.security'), cell: (entry) => t(entry.psk ? 'network.wifi.wpa' : 'network.wifi.open') },
               { id: 'priority', header: t('network.wifi.priority'), cell: (entry) => entry.priority },
+              { id: 'auto', header: t('network.wifi.autoConnect'), cell: (entry) => t(entry.autoConnect === false ? 'network.values.off' : 'network.values.on') },
               { id: 'actions', header: '', align: 'end', cell: (entry) => (
                 <span className="flex justify-end gap-2">
                   <Button type="button" size="sm" variant="outline" onClick={() => open({ ssid: entry.ssid, existing: true, secured: Boolean(entry.psk) }, entry)}>{t('common.actions.edit')}</Button>
@@ -486,6 +569,7 @@ function ClientLists({ data }: { data: NetworkData }) {
           </FormField>
         ) : null}
         <ToggleField title={t('network.wifi.hidden')} description={t('network.wifi.hiddenHint')} control={<Switch checked={hidden} onCheckedChange={setHidden} aria-label={t('network.wifi.hidden')} />} />
+        <ToggleField title={t('network.wifi.autoConnect')} description={t('network.wifi.autoConnectHint')} control={<Switch checked={autoConnect} onCheckedChange={setAutoConnect} aria-label={t('network.wifi.autoConnect')} />} />
         <FormField label={t('network.wifi.priority')} hint={t('network.wifi.priorityHint')}>
           {(id) => <Input id={id} className="w-32 font-mono" inputMode="numeric" value={priority} onChange={(event) => setPriority(event.target.value.replace(/\D/g, ''))} />}
         </FormField>

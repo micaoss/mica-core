@@ -88,6 +88,13 @@ export interface WifiAccessPoint {
   address: string
   holdDownSeconds: number
   graceSeconds: number
+  /// Absent is WPA2-PSK.
+  security?: 'wpa2-psk' | 'wpa2-wpa3' | 'open'
+  /// Absent hands out from the address after the access point's to the end
+  /// of its subnet.
+  pool?: { offset: number; size: number }
+  /// Absent is the DHCP server's own default.
+  leaseSeconds?: number
 }
 
 export interface StaticRecord { hostname: string; address: string; comment?: string }
