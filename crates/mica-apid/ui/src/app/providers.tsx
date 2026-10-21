@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { i18n } from '@/i18n/i18n'
 import { ThemeProvider } from '@/theme/theme'
 import { Toaster } from '@/shared/components/ui/toast'
+import { ApiGoneGate } from '@/features/access/api-gone'
 import { queryClient } from './query-client'
 
 export function AppProviders({ children }: { children: ReactNode }) {
@@ -19,7 +20,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
             {/* One feedback surface for the whole console. It is mounted above
                 the router so a toast raised by a write survives the navigation
                 that write triggers. */}
-            <Toaster>{children}</Toaster>
+            <Toaster><ApiGoneGate>{children}</ApiGoneGate></Toaster>
           </ThemeProvider>
         </QueryClientProvider>
       </I18nextProvider>

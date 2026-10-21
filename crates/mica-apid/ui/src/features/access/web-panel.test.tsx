@@ -3,13 +3,15 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderPanel, stubFetch } from '@/shared/testing/panel'
 import { WebPanel, consoleUrl } from './web-panel'
+import { ApiGoneGate, resetApiGone } from './api-gone'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  resetApiGone()
 })
 
-const defaults = { httpPort: 8080, httpsEnabled: false, httpsPort: 8443 }
+const defaults = { mode: 'network' as const, httpPort: 8080, httpsEnabled: false, httpsPort: 8443 }
 
 describe('the web console panel', () => {
   it('reads the listeners the device holds', async () => {
@@ -38,8 +40,45 @@ describe('the web console panel', () => {
 
     await waitFor(() => expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
     const call = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
-    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ httpPort: 8080, httpsEnabled: true, httpsPort: 9443 })
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ mode: 'network', httpPort: 8080, httpsEnabled: true, httpsPort: 9443 })
     expect(await screen.findByText(/Open https:\/\/.*:9443\//)).toBeTruthy()
+  })
+
+  /// Without SSH there would be no way back, so the console does not offer it.
+  it('will not leave the network without SSH and a key', async () => {
+    stubFetch({
+      '/api/v1/web': defaults,
+      '/api/v1/settings/access.ssh.enabled': false,
+      '/api/v1/ssh/authorized-keys': { keys: [], notice: '' },
+    })
+    renderPanel(<WebPanel />)
+
+    await screen.findByDisplayValue('8080')
+    await userEvent.click(screen.getByRole('button', { name: 'Off' }))
+    expect(await screen.findByText(/Turn SSH on and add a key first/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Save and restart the console' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  /// Leaving asks once, then the whole console gives way to the way back.
+  it('confirms, writes the mode and leaves the screen that says how to come back', async () => {
+    const fetch = stubFetch({
+      '/api/v1/web': defaults,
+      '/api/v1/settings/access.ssh.enabled': true,
+      '/api/v1/ssh/authorized-keys': { keys: [{ key: 'ssh-ed25519 AAAA a' }], notice: '' },
+      'PUT /api/v1/web': () => jsonResponse({ taskId: 'task-4' }, 202),
+    })
+    renderPanel(<ApiGoneGate><WebPanel /></ApiGoneGate>)
+
+    await screen.findByDisplayValue('8080')
+    await userEvent.click(screen.getByRole('button', { name: 'Device only' }))
+    expect(screen.queryByLabelText(/HTTP port/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Save and restart the console' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Leave the network' }))
+
+    expect(await screen.findByText('API access is now device only')).toBeTruthy()
+    expect(screen.getByText(/micad web network/)).toBeTruthy()
+    const call = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ ...defaults, mode: 'local' })
   })
 
   it('addresses the console by the listener that serves it', () => {

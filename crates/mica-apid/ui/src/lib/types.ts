@@ -206,8 +206,9 @@ export interface ComposeCheck {
   problems?: { service: string; field: string; detail: string }[]
 }
 
-/// `GET`/`PUT /api/v1/web`: where the console listens.
+/// `GET`/`PUT /api/v1/web`: who reaches the API, and where the console listens.
 export interface WebConfiguration {
+  mode: 'network' | 'local' | 'off'
   httpPort: number
   httpsEnabled: boolean
   httpsPort: number

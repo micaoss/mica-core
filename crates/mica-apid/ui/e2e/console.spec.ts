@@ -321,6 +321,30 @@ test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
   await expect(page.getByRole('heading', { name: 'Network' })).toBeVisible()
 })
 
+test('captures taking the API off the network', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/api/v1/web', (route) => route.request().method() === 'GET'
+    ? route.fulfill(json({ mode: 'network', httpPort: 8080, httpsEnabled: false, httpsPort: 8443 }))
+    : route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ taskId: 'task-e2e' }) }))
+  await page.route('**/api/v1/ssh/authorized-keys', (route) => route.fulfill(json({
+    keys: [{ key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOpsE2e harbour', comment: 'harbour', fingerprint: 'SHA256:e2e' }],
+    notice: 'Every authorized key grants root on this appliance.',
+  })))
+  await page.goto('./access')
+  const panel = page.getByRole('group', { name: 'API access' }).locator('xpath=ancestor::form[1]')
+  await page.getByRole('button', { name: 'Device only' }).click()
+  await expect(page.getByText('Only root on this device reaches the API')).toBeVisible()
+  await panel.screenshot({ path: testInfo.outputPath('access-web-mode.png') })
+  await page.getByRole('button', { name: 'Save and restart the console' }).click()
+  await expect(page.getByRole('alertdialog')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('access-web-confirm.png'), animations: 'disabled' })
+  await page.getByRole('button', { name: 'Leave the network' }).click()
+  await expect(page.getByRole('heading', { name: 'API access is now device only' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('api-gone.png') })
+})
+
 test('keeps a tall dialog inside a short appliance screen', async ({ page }, testInfo) => {
   await mockNetworkBench(page)
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the geometry')

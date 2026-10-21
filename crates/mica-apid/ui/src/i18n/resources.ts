@@ -1023,6 +1023,22 @@ export const en = {
       saved: 'Console settings saved.',
       moving: 'The console is restarting at {{url}}. This page moves there in a few seconds.',
       open: 'Open {{url}}',
+      mode: 'API access',
+      modes: {
+        network: { label: 'Network', hint: 'The console and the HTTP API answer on the ports below.' },
+        local: { label: 'Device only', hint: 'Only root on this device reaches the API, through its local socket. No console, no HTTP API.' },
+        off: { label: 'Off', hint: 'The API does not run. The device keeps working: updates, SSH, MQTT and BLE provisioning are not the API\'s.' },
+      },
+      needsSsh: 'Turn SSH on and add a key first: once the API leaves the network, `micad web network` over SSH is the way back.',
+      confirm: {
+        title: { local: 'Keep the API on this device only?', off: 'Turn the API off?' },
+        body: 'This console stops answering. Bring it back from the device:',
+        action: 'Leave the network',
+      },
+      gone: {
+        title: { local: 'API access is now device only', off: 'API access is now off' },
+        body: 'This page no longer reaches the device, and the console makes no more requests. To turn the console back on, log in over SSH and run:',
+      },
     },
     certificate: {
       title: 'HTTPS certificate',

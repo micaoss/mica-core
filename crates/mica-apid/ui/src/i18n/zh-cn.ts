@@ -873,6 +873,22 @@ export const zhCN: Translation = {
       saved: '控制台设置已保存。',
       moving: '控制台正在 {{url}} 重启，本页将在几秒后跳转过去。',
       open: '打开 {{url}}',
+      mode: 'API 访问',
+      modes: {
+        network: { label: '网络', hint: '控制台和 HTTP API 在下面的端口上提供服务。' },
+        local: { label: '仅本机', hint: '只有本设备上的 root 能通过本地 socket 访问 API；没有控制台，也没有 HTTP API。' },
+        off: { label: '关闭', hint: 'API 不运行。设备照常工作：更新、SSH、MQTT 和蓝牙配网都不依赖 API。' },
+      },
+      needsSsh: '请先开启 SSH 并添加密钥：API 离开网络后，要通过 SSH 执行 `micad web network` 才能恢复。',
+      confirm: {
+        title: { local: '只允许本机访问 API？', off: '关闭 API？' },
+        body: '本控制台将不再响应。可在设备上恢复：',
+        action: '离开网络',
+      },
+      gone: {
+        title: { local: 'API 现在仅限本机访问', off: 'API 现在已关闭' },
+        body: '本页面已无法访问设备，控制台不会再发出请求。要重新开启控制台，请通过 SSH 登录并执行：',
+      },
     },
     certificate: {
       title: 'HTTPS 证书',

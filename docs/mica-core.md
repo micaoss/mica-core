@@ -520,7 +520,9 @@ bearer token in use; micad and what it drives (the health gate, updates, SSH, MQ
 provisioning, the `micad` commands, the user's services) are unchanged. A remote caller may take
 the mode away from `network` only while SSH is on with an authorized key (409
 `web_mode_needs_ssh`): `micad web network` over SSH is the way back. Root on the device is not
-held to it.
+held to it. The console's access page sets the mode: it asks once, naming that command, and
+once the write is accepted it gives way to a screen that says the API has left the network and
+how to bring it back, and makes no further request.
 
 On the device, root's commands work in every mode, over the bus to micad: `micad web status`
 names the mode and the listeners, `micad web network|local|off` sets the mode and waits for it to
