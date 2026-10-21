@@ -8,7 +8,7 @@ use micad_settings::{Init, ServicesSettings};
 use serde_json::{Value, json};
 
 use super::bundle;
-use super::manifest::{self, Manifest, Problem, RunAs};
+use super::manifest::{self, Manifest, Privileges, Problem, RunAs};
 use super::render::{self, Account};
 use super::{AppEntry, AppError, Apps, Installed, LastResult, MAX_APPS, Record, UID_COUNT, now};
 use crate::user_units::Verb;
@@ -36,6 +36,9 @@ pub struct InstallOptions {
     pub reinstall: bool,
     /// Refuse a bundle of an app that is not installed.
     pub upgrade: bool,
+    /// Refuse a bundle that asks for more privileges than the installed
+    /// version: an update no one started.
+    pub unattended: bool,
 }
 
 impl Apps {
@@ -82,6 +85,17 @@ impl Apps {
         }
         if !problems.is_empty() {
             return Err(AppError::Invalid(problems));
+        }
+        if options.unattended
+            && let Some(entry) = record.apps.get(&manifest.name)
+        {
+            let installed = self.manifest_of(&manifest.name, &entry.current.version)?;
+            if asks_for_more(&installed.privileges, &manifest.privileges) {
+                return Err(AppError::Refused(format!(
+                    "{} {} asks for more privileges than {}; only an install by hand takes it",
+                    manifest.name, manifest.version, entry.current.version
+                )));
+            }
         }
         Ok(manifest)
     }
@@ -949,4 +963,21 @@ pub(super) fn group_refusal(gid: u32, groups: Option<&str>) -> Option<String> {
         )),
         Some(_) => None,
     }
+}
+
+/// Whether `next` runs as root where `installed` did not, or keeps a
+/// capability or opens a device `installed` did not.
+pub(super) fn asks_for_more(installed: &Privileges, next: &Privileges) -> bool {
+    if installed.user == RunAs::Root {
+        return false;
+    }
+    next.user == RunAs::Root
+        || next
+            .capabilities
+            .iter()
+            .any(|cap| !installed.capabilities.contains(cap))
+        || next
+            .devices
+            .iter()
+            .any(|device| !installed.devices.contains(device))
 }

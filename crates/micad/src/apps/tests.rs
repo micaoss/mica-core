@@ -889,6 +889,83 @@ async fn an_update_is_offered_fetched_and_checked() {
     );
 }
 
+/// An update no one started never takes a version that asks for more: root,
+/// a capability or a device. An update by hand does.
+#[tokio::test]
+async fn an_unattended_update_asks_for_no_more_privileges() {
+    let rig = Rig::new(Init::Systemd);
+    let services = ServicesSettings::default();
+    let own = json!({
+        "update": { "url": "https://apps.example/demo/latest.json", "auto": true },
+        "services": [{ "name": "demo", "exec": ["files/run"] }],
+    });
+    rig.install(&rig.bundle("demo", "1.0", own, None), false)
+        .await
+        .unwrap();
+    let next = rig.bundle(
+        "demo",
+        "2.0",
+        json!({ "update": { "url": "https://apps.example/demo/latest.json", "auto": true } }),
+        None,
+    );
+    let body = std::fs::read(&next).unwrap();
+    {
+        let mut files = rig.fetch.files.lock().unwrap();
+        files.insert(
+            "https://apps.example/demo/latest.json".into(),
+            json!({
+                "name": "demo",
+                "version": "2.0",
+                "bundles": { "all": {
+                    "url": "demo-2.0.tar.gz",
+                    "sha256": bundle::sha256_file(&next).unwrap(),
+                    "size": body.len(),
+                } },
+            })
+            .to_string()
+            .into_bytes(),
+        );
+        files.insert("https://apps.example/demo/demo-2.0.tar.gz".into(), body);
+    }
+    let Err(AppError::Refused(why)) = rig.apps.fetch_update("demo", &services, true).await else {
+        panic!("a root version is not taken unattended")
+    };
+    assert!(why.contains("more privileges"), "{why}");
+    assert_eq!(rig.record().apps["demo"].current.version, "1.0");
+
+    let mut record = rig.record();
+    record.apps.get_mut("demo").unwrap().update.failed = None;
+    rig.apps.write_record(&record).unwrap();
+    rig.apps.update("demo", &services).await.unwrap();
+    assert_eq!(rig.record().apps["demo"].current.version, "2.0");
+}
+
+#[test]
+fn more_privileges_are_root_a_capability_or_a_device() {
+    let own = |caps: &[&str], devices: &[&str]| manifest::Privileges {
+        user: manifest::RunAs::App,
+        capabilities: caps.iter().map(|c| c.to_string()).collect(),
+        devices: devices.iter().map(|d| d.to_string()).collect(),
+    };
+    let root = manifest::Privileges {
+        user: manifest::RunAs::Root,
+        ..own(&[], &[])
+    };
+    let tun = own(&["CAP_NET_ADMIN"], &["/dev/net/tun"]);
+    assert!(!flow::asks_for_more(&tun, &tun));
+    assert!(!flow::asks_for_more(&tun, &own(&[], &[])));
+    assert!(!flow::asks_for_more(&root, &tun));
+    assert!(flow::asks_for_more(&tun, &root));
+    assert!(flow::asks_for_more(
+        &tun,
+        &own(&["CAP_NET_ADMIN", "CAP_NET_RAW"], &["/dev/net/tun"])
+    ));
+    assert!(flow::asks_for_more(
+        &tun,
+        &own(&["CAP_NET_ADMIN"], &["/dev/net/tun", "/dev/ttyUSB0"])
+    ));
+}
+
 #[tokio::test]
 async fn the_logs_are_the_units_and_the_first_run() {
     let rig = Rig::new(Init::Systemd);

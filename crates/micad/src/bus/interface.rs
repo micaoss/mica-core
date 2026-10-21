@@ -567,7 +567,11 @@ impl MicadService {
         reinstall: bool,
         upgrade: bool,
     ) -> Result<String, AppFault> {
-        let options = crate::apps::InstallOptions { reinstall, upgrade };
+        let options = crate::apps::InstallOptions {
+            reinstall,
+            upgrade,
+            unattended: false,
+        };
         Ok(self
             .install_app_now(&emitter, sender_of(&header), path, options)
             .await?)

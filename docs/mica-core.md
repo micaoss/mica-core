@@ -600,7 +600,9 @@ seed is taken by one rule, recorded in `/var/lib/mica/seeded-apps.json`:
 "size"}}}`, `url` relative to the file or absolute and `https`. micad reads it every 24 h and on
 demand, and records what it offers; an update fetches the bundle for the device's arch, checks its
 size and sha256, and upgrades. A version that failed is not offered again. With `auto` the daily
-check updates on its own.
+check updates on its own, except to a version that asks for more than the installed one of its own
+user: root, a capability or a device it did not have. That version fails the update, and only an
+install or update by hand takes it.
 
 **Bus.** Each change is a task of kind `app.apply` (`GetTask`), one at a time:
 

@@ -170,6 +170,17 @@ impl Apps {
     /// The check failed, nothing newer is offered, the bundle did not match
     /// its sha256, or its install failed (and was rolled back).
     pub async fn update(&self, name: &str, services: &ServicesSettings) -> Result<Value, AppError> {
+        self.fetch_update(name, services, false).await
+    }
+
+    /// [`Apps::update`]; when `unattended`, a version that asks for more
+    /// privileges is refused, and left to an update by hand.
+    pub(super) async fn fetch_update(
+        &self,
+        name: &str,
+        services: &ServicesSettings,
+        unattended: bool,
+    ) -> Result<Value, AppError> {
         self.check_update(name).await?;
         let record = self.read_record();
         let entry = record
@@ -201,6 +212,7 @@ impl Apps {
                     "url",
                     InstallOptions {
                         upgrade: true,
+                        unattended,
                         ..Default::default()
                     },
                     services,
@@ -220,7 +232,8 @@ impl Apps {
         installed
     }
 
-    /// Every app with an update URL checked; those that say `auto` updated.
+    /// Every app with an update URL checked; those that say `auto` updated,
+    /// unless the newer version asks for more privileges.
     pub async fn check_all(self: &Arc<Self>, services: &ServicesSettings) {
         for (name, entry) in self.read_record().apps {
             let Ok(manifest) = self.manifest_of(&name, &entry.current.version) else {
@@ -235,7 +248,7 @@ impl Apps {
             let done = if spec.auto {
                 match self.check_update(&name).await {
                     Ok(checked) if checked["available"] == json!(true) => {
-                        self.update(&name, services).await
+                        self.fetch_update(&name, services, true).await
                     }
                     other => other,
                 }
