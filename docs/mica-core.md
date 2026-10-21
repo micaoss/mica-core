@@ -506,14 +506,24 @@ report it; exit 0 done, 1 failed, 2 misused.
 
 ### 3.11 Apps
 
-An app is software the user installs as one bundle: its files, its units for either init, a
-first-run hook and where its newer versions are announced. micad unpacks it under
-`/mica/apps/<name>/<version>`, keeps its units through `mica-unit` as it keeps the user's services
-(3.10), and gives it `/srv/apps/<name>` (root's, `0700`) for its data, which stays across versions.
-`docs/apps/tailscale.md` builds one.
+An app is software the user installs as one bundle: its files, what it runs, a first-run hook
+and where its newer versions are announced. micad unpacks it under `/mica/apps/<name>/<version>`,
+keeps its units through `mica-unit` as it keeps the user's services (3.10), and gives it
+`/srv/apps/<name>` (`0700`) for its data, which stays across versions. `docs/apps/tailscale.md`
+builds one.
+
+**Who an app runs as.** By default an app runs as its own user, and declares its services in its
+manifest: micad writes their units itself, so nothing the bundle ships runs as root. An app may
+instead declare `"user": "root"` and ship its own units: it then has full control of the device,
+and the console and `micad app status` say so. An app has no management interface: the bus and
+the API's local socket answer root alone, so an app of its own user reaches neither, and only
+micad fetches its updates. With the API off (section 4) and no root app, the device is a closed
+appliance: what it runs is what the image and the operator installed, and an app cannot change
+it.
 
 **The bundle** is a gzip tar of at most 256 MiB, unpacking to at most 1 GiB and 20 000 members:
-`mica-app.json` at its top, and `files/`, `units/systemd/`, `units/openrc/` and `hooks/`. Each
+`mica-app.json` at its top, and `files/`, `hooks/` and, for a root app, `units/systemd/` and
+`units/openrc/`. Each
 member is checked as it is unpacked: a path that leaves the bundle or lies elsewhere, a member
 under a link, a link pointing outside, a setuid or setgid mode, a member that is not a file, a
 directory or a symbolic link, or one there twice refuses it. The manifest:
@@ -525,7 +535,9 @@ directory or a symbolic link, or one there twice refuses it. The manifest:
 | `version` | A version in dpkg's order, at most 64 characters |
 | `arch` | Some of `amd64`, `arm64`, `armhf`, or `all`; the device's must be among them |
 | `description` | Optional |
-| `units` | At most 16 `{"systemd"?, "openrc"?, "enable"}`, each naming its file in `units/<init>/`; a bundle with units has one for the device's init. `enable` starts it at boot and at install |
+| `privileges` | `{"user", "capabilities", "devices"}`: `user` is `app` (default) or `root`; an app of its own user lists the `CAP_*` its services keep and the device nodes under `/dev` they may open. `CAP_SYS_ADMIN`, `CAP_SYS_MODULE`, `CAP_SYS_PTRACE`, `CAP_DAC_OVERRIDE`, `CAP_DAC_READ_SEARCH`, `CAP_SYS_RAWIO`, `CAP_SYS_BOOT`, `CAP_SETUID`, `CAP_SETGID`, `CAP_SETPCAP`, `CAP_CHOWN`, `CAP_FOWNER`, `CAP_MKNOD`, `CAP_BPF` and `CAP_SYS_CHROOT` reach past the app and are refused: an app that needs one runs as root. A root app lists neither |
+| `services` | An app of its own user's: at most 16 `{"name", "exec", "enable"}`. `name` is 1 to 32 of `[a-z0-9-]`, its unit `<name>.service` or the OpenRC script `<name>`; `exec` a file in `files/`, then its arguments, where `${VAR}` names an `APP_*` or `env` variable and no quote, backslash, backquote or control character appears; `enable` starts it at boot and at install |
+| `units` | A root app's: at most 16 `{"systemd"?, "openrc"?, "enable"}`, each naming its file in `units/<init>/`; a bundle with units has one for the device's init |
 | `env` | At most 64 upper-case variables outside `APP_`, without quotes, backslashes, `$`, backquotes or control characters |
 | `firstRun` | Optional, an executable file in `hooks/` |
 | `update` | Optional `{"url", "auto"}`: an `https` version file, and whether a newer version installs on its own |
@@ -533,6 +545,24 @@ directory or a symbolic link, or one there twice refuses it. The manifest:
 
 A unit is refused when the root ships its name, `services.units` declares it, another app has it,
 or a hand installed it with `mica-unit`. At most 16 apps are installed.
+
+**An app's own user.** micad gives the app a uid, the same as its gid, from 30000 to 30999, one no
+account or group of the root has, and keeps it in `/mica/apps/apps.json` through a remove until a
+purge. The root's accounts are read-only, so it has no name there: micad shows it as
+`mica-app-<name>`, and `ps` the number. `/srv/apps/<name>` is the app's, and is given back to root
+should a later version run as root. Each service runs through `setpriv` as that uid, with no
+supplementary groups but those of its devices' nodes, its bounding, inheritable and ambient
+capabilities only the ones it declares, and no new privileges. Under systemd its unit runs it in a
+sandbox besides: `ProtectSystem=strict` with `/srv/apps/<name>` alone writable, `PrivateTmp`,
+`ProtectHome`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectControlGroups`,
+`RestrictSUIDSGID`, `NoNewPrivileges`, `DevicePolicy=closed` with `DeviceAllow=` each declared
+device, and `CapabilityBoundingSet=` the declared capabilities with the three `setpriv` drops
+before it runs the service (`CAP_SETUID`, `CAP_SETGID`, `CAP_SETPCAP`). Under OpenRC the script
+runs it under `supervise-daemon` through the same `setpriv`; OpenRC has no namespaces, so there
+the uid, the capabilities and the files' own permissions are all that confine it: it writes only
+its data, its own processes' files and what is world-writable (`/tmp`), reads what is
+world-readable, and opens a device whose node lets its uid or group. The first-run hook of an app
+of its own user runs as it too, with no capabilities and `HOME` its data.
 
 **Install and upgrade.** A bundle is checked before it is taken: its manifest, its units and what
 is installed, so a broken one is refused with every rule it breaks and nothing changes. The
@@ -542,9 +572,9 @@ that the filesystem has room for what it unpacks to, flushed and renamed into pl
 stops the units the running version has, installs the new version's (and an OpenRC script's `conf.d`, `units/openrc/conf.d/<name>`),
 removes those it no longer ships, points `/mica/apps/<name>/current` at the version in one
 rename, and writes `/mica/apps/<name>/app.env`: `APP_NAME`, `APP_VERSION`, `APP_DIR` (`current`),
-`APP_DATA` and the manifest's `env`, which the units read. The first-run hook runs once per
-version, as root in the version's directory with only `PATH` and that environment, for at most
-300 s; its output is kept in `first-run.log` beside `app.env` and sent to syslog tagged
+`APP_DATA` and the manifest's `env`, which the units read; the services of an app of its own user
+get `HOME` its data too. The first-run hook runs once per version, in the version's directory as
+the app runs, with only `PATH` and that environment, for at most 300 s; its output is kept in `first-run.log` beside `app.env` and sent to syslog tagged
 `mica-app-<name>`. Then each unit is enabled or disabled as the manifest says and the enabled ones
 are started; one left `failed` fails the install. A failed upgrade switches back to the version
 that ran; a failed first install leaves nothing. micad keeps the current and the previous
@@ -573,7 +603,7 @@ check updates on its own.
 
 | Member | Does |
 | --- | --- |
-| `GetApps`, `GetApp(name)` | `{available, arch, apps}`, and one of them: each app's `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `last` (the last flow's `action`, `outcome` `ok` or `failed`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` |
+| `GetApps`, `GetApp(name)` | `{available, arch, apps}`, and one of them: each app's `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user`, `account` and `uid` of its own user, `capabilities`, `devices`), `last` (the last flow's `action`, `outcome` `ok` or `failed`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` |
 | `InstallApp(path, reinstall, upgrade)` | Install the bundle at `path`; `upgrade` refuses an app not installed |
 | `RollbackApp(name)`, `RemoveApp(name, purge)`, `CheckAppUpdate(name)`, `UpdateApp(name)` | The flows above |
 | `StartApp`, `StopApp`, `RestartApp(name)` | The verb on its units, at once |
@@ -594,7 +624,7 @@ of as `app`, and a `services.units` write naming an app's unit is refused (`unit
 | `check [name]` | Read its update URL now; every app with one, without a name |
 | `rollback <name>` | Switch to the previous version |
 | `remove <name> [--purge]` | Stop it and delete it; `--purge` its data too |
-| `list`, `status <name>` | Every app; one |
+| `list`, `status <name>` | Every app, and whom it runs as; one, with its privileges |
 | `logs <name> [--tail N]` | Its units' newest lines and its first-run output (200 unless asked) |
 
 The changes wait for their task unless `--detach`; exit 0 done, 1 failed, 2 misused. `micad unit`
