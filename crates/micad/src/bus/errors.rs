@@ -37,6 +37,9 @@ pub const NOT_FOUND_ERROR: &str = "com.mica.micad1.Error.NotFound";
 pub const READ_ONLY_ERROR: &str = "com.mica.micad1.Error.ReadOnly";
 /// D-Bus error name for a claim of a device that is already claimed.
 pub const ALREADY_CLAIMED_ERROR: &str = "com.mica.micad1.Error.AlreadyClaimed";
+/// D-Bus error name for a Wi-Fi write while a BLE provisioning session holds
+/// the radio.
+pub const WIFI_LOCKED_ERROR: &str = "com.mica.micad1.Error.WifiLocked";
 
 /// Reply error of the settings methods.
 #[derive(Debug)]
@@ -47,6 +50,8 @@ pub(super) enum SettingsFault {
     ReadOnly(String),
     /// [`ALREADY_CLAIMED_ERROR`], from [`SettingsError::Claimed`].
     AlreadyClaimed(String),
+    /// [`WIFI_LOCKED_ERROR`].
+    WifiLocked(String),
     /// Everything else, under its standard fdo name.
     Fdo(fdo::Error),
 }
@@ -59,15 +64,19 @@ impl zbus::DBusError for SettingsFault {
             Self::AlreadyClaimed(_) => {
                 zbus::names::ErrorName::from_static_str_unchecked(ALREADY_CLAIMED_ERROR)
             }
+            Self::WifiLocked(_) => {
+                zbus::names::ErrorName::from_static_str_unchecked(WIFI_LOCKED_ERROR)
+            }
             Self::Fdo(err) => err.name(),
         }
     }
 
     fn description(&self) -> Option<&str> {
         match self {
-            Self::NotFound(message) | Self::ReadOnly(message) | Self::AlreadyClaimed(message) => {
-                Some(message)
-            }
+            Self::NotFound(message)
+            | Self::ReadOnly(message)
+            | Self::AlreadyClaimed(message)
+            | Self::WifiLocked(message) => Some(message),
             Self::Fdo(err) => err.description(),
         }
     }

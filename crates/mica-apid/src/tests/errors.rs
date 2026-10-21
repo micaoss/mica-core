@@ -265,6 +265,11 @@ pub(super) async fn each_fdo_error_name_gets_its_own_envelope() {
             StatusCode::CONFLICT,
         ),
         (
+            "com.mica.micad1.Error.WifiLocked",
+            "wifi_locked",
+            StatusCode::LOCKED,
+        ),
+        (
             "org.freedesktop.DBus.Error.InvalidArgs",
             "settings_rejected",
             StatusCode::UNPROCESSABLE_ENTITY,

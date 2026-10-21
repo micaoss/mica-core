@@ -151,6 +151,19 @@ pub trait SettingsApi: Send + Sync {
     async fn close_bluetooth_pair_window(&self) -> anyhow::Result<()> {
         anyhow::bail!("this build drives no Bluetooth adapter")
     }
+    /// BLE provisioning's state (`GetBleProvisioning`).
+    async fn get_ble_provisioning(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build runs no BLE provisioning")
+    }
+    /// Open a `manual` window for `seconds`, answering its temp code
+    /// (`OpenBleProvisioning`).
+    async fn open_ble_provisioning(&self, _seconds: u64) -> anyhow::Result<String> {
+        anyhow::bail!("this build runs no BLE provisioning")
+    }
+    /// Close the `manual` window (`CloseBleProvisioning`).
+    async fn close_ble_provisioning(&self) -> anyhow::Result<()> {
+        anyhow::bail!("this build runs no BLE provisioning")
+    }
     /// Pair with a device (`PairBluetoothDevice`).
     async fn pair_bluetooth_device(&self, _address: &str) -> anyhow::Result<()> {
         anyhow::bail!("this build drives no Bluetooth adapter")

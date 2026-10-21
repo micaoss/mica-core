@@ -90,6 +90,9 @@ trait Micad {
     fn get_bluetooth(&self) -> zbus::Result<String>;
     fn open_bluetooth_pair_window(&self) -> zbus::Result<u64>;
     fn close_bluetooth_pair_window(&self) -> zbus::Result<()>;
+    fn get_ble_provisioning(&self) -> zbus::Result<String>;
+    fn open_ble_provisioning(&self, seconds: u64) -> zbus::Result<String>;
+    fn close_ble_provisioning(&self) -> zbus::Result<()>;
     fn pair_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
     fn confirm_bluetooth_pairing(&self, address: &str, accept: bool) -> zbus::Result<()>;
     fn remove_bluetooth_device(&self, address: &str) -> zbus::Result<()>;
@@ -497,6 +500,29 @@ impl SettingsApi for BusSettings {
             proxy.close_bluetooth_pair_window(),
         )
         .await
+    }
+
+    /// BLE provisioning's state.
+    async fn get_ble_provisioning(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self
+            .call("GetBleProvisioning", proxy.get_ble_provisioning())
+            .await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    /// Open a `manual` window.
+    async fn open_ble_provisioning(&self, seconds: u64) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call("OpenBleProvisioning", proxy.open_ble_provisioning(seconds))
+            .await
+    }
+
+    /// Close the `manual` window.
+    async fn close_ble_provisioning(&self) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call("CloseBleProvisioning", proxy.close_ble_provisioning())
+            .await
     }
 
     /// Pair with a device and record it in the trust list.

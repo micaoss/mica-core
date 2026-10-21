@@ -812,3 +812,22 @@ async fn offline_opens_after_the_route_has_been_gone_for_two_minutes() {
     bench.engine.handle(Input::Route(true)).await;
     assert_eq!(bench.last_advert(), None);
 }
+
+#[tokio::test]
+async fn auto_when_offline_switched_off_keeps_the_offline_window_shut() {
+    let mut bench = Bench::new(true).await;
+    bench.set_verifier(PASSWORD);
+    bench.engine.handle(Input::Route(true)).await;
+    bench.tick(700).await;
+    bench.device.facts.lock().unwrap().auto_when_offline = false;
+    bench.engine.handle(Input::Route(false)).await;
+    bench.tick(300).await;
+    assert_eq!(bench.last_advert(), None);
+    let (reply, status) = oneshot::channel();
+    bench.engine.handle(Input::Status { reply }).await;
+    assert_eq!(status.await.unwrap()["autoWhenOffline"], json!(false));
+
+    bench.device.facts.lock().unwrap().auto_when_offline = true;
+    bench.tick(1).await;
+    assert_eq!(bench.last_advert().as_deref(), Some("mica-a4e2e69e"));
+}

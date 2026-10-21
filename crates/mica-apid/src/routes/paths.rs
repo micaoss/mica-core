@@ -256,6 +256,9 @@ pub(super) const V1_WIFI_SCAN_PATH: &str = "/v1/wifi/client/scan";
 /// merely follows a link should open the adapter or pair with a device.
 pub(super) const V1_BLUETOOTH_PATH: &str = "/v1/bluetooth";
 pub(super) const V1_BLUETOOTH_PAIR_WINDOW_PATH: &str = "/v1/bluetooth/pairing-window";
+pub(super) const V1_BLUETOOTH_PROVISIONING_PATH: &str = "/v1/bluetooth/provisioning";
+pub(super) const V1_BLUETOOTH_PROVISIONING_SETTINGS_PATH: &str =
+    "/v1/bluetooth/provisioning/settings";
 pub(super) const V1_BLUETOOTH_PAIRING_REQUEST_ROUTE: &str = "/v1/bluetooth/pairing-requests/{mac}";
 pub(super) const V1_BLUETOOTH_DEVICE_ROUTE: &str = "/v1/bluetooth/devices/{address}";
 pub(super) const V1_BLUETOOTH_DEVICE_ACTION_ROUTE: &str =
@@ -360,14 +363,17 @@ pub(crate) const SETTINGS_SPELLINGS: (&str, &str, &str) =
 pub(crate) const STATE_SPELLINGS: (&str, &str, &str) =
     (V1_STATE_PREFIX, V1_STATE_ROUTE, V1_STATE_DOC);
 
-/// The error names micad maps its `SettingsError` onto, and the five rows of
-/// the table that name one. The first two are interface-scoped: the fdo
-/// vocabulary has no name that separates a missing dot-path or a read-only
-/// one from a bad value, so micad coins its own for those and keeps the
-/// standard names for everything else.
+/// The error names micad maps its `SettingsError` onto, and the six rows of
+/// the table that name one. The interface-scoped ones are micad's own: the
+/// fdo vocabulary has no name that separates a missing dot-path, a read-only
+/// one, a claimed device or a Wi-Fi write refused during BLE provisioning
+/// from a bad value, so micad coins its own for those and keeps the standard
+/// names for everything else.
 pub(super) const MICAD_NOT_FOUND: &str = "com.mica.micad1.Error.NotFound";
 pub(super) const MICAD_READ_ONLY: &str = "com.mica.micad1.Error.ReadOnly";
 pub(super) const MICAD_ALREADY_CLAIMED: &str = "com.mica.micad1.Error.AlreadyClaimed";
+pub(super) const MICAD_WIFI_LOCKED: &str = "com.mica.micad1.Error.WifiLocked";
+pub(super) const FDO_ACCESS_DENIED: &str = "org.freedesktop.DBus.Error.AccessDenied";
 pub(super) const FDO_INVALID_ARGS: &str = "org.freedesktop.DBus.Error.InvalidArgs";
 pub(super) const FDO_IO_ERROR: &str = "org.freedesktop.DBus.Error.IOError";
 pub(super) const FDO_FAILED: &str = "org.freedesktop.DBus.Error.Failed";

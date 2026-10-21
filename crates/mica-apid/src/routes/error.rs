@@ -262,6 +262,9 @@ pub(crate) fn bus_api_error(err: &anyhow::Error, path: Option<&str>) -> Response
                         StatusCode::CONFLICT,
                         ApiError::micad("settings_read_only", message),
                     ),
+                    MICAD_WIFI_LOCKED => {
+                        (StatusCode::LOCKED, ApiError::micad("wifi_locked", message))
+                    }
                     FDO_INVALID_ARGS => (
                         StatusCode::UNPROCESSABLE_ENTITY,
                         ApiError::micad("settings_rejected", message),

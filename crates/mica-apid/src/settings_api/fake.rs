@@ -42,6 +42,8 @@ pub struct FakeSettings {
     pub(super) bluetooth_window: std::sync::Mutex<Option<u64>>,
     /// The pairings waiting in it.
     pub(super) bluetooth_pending: std::sync::Mutex<Vec<Value>>,
+    /// The `manual` provisioning window: when it closes and its code.
+    pub(super) ble_window: std::sync::Mutex<Option<(u64, String)>>,
     /// What `get_telemetry` answers; the shape micad's `telemetry_json` serves.
     pub(super) telemetry: std::sync::Mutex<Value>,
     /// What `get_observed_network` answers; the shape micad's `observed_json`
@@ -119,6 +121,7 @@ impl FakeSettings {
             })),
             bluetooth_window: std::sync::Mutex::new(None),
             bluetooth_pending: std::sync::Mutex::new(Vec::new()),
+            ble_window: std::sync::Mutex::new(None),
             system_info: std::sync::Mutex::new(serde_json::json!({
                 "machineId": { "available": true, "id": "0123456789abcdef0123456789abcdef" },
                 "board": { "available": false, "detail": "fake" },
@@ -656,6 +659,50 @@ impl SettingsApi for FakeSettings {
         *self.bluetooth_window.lock().unwrap() = None;
         self.bluetooth_pending.lock().unwrap().clear();
         self.update_call("bluetooth window close")
+    }
+
+    async fn get_ble_provisioning(&self) -> anyhow::Result<Value> {
+        // The shape micad answers; the switch is the tree's.
+        let auto_when_offline = self
+            .tree
+            .lock()
+            .unwrap()
+            .pointer("/bluetooth/provisioning/autoWhenOffline")
+            .cloned()
+            .unwrap_or(Value::Bool(true));
+        let window = self.ble_window.lock().unwrap().clone();
+        let mut status = serde_json::json!({
+            "state": if window.is_some() { "waiting" } else { "off" },
+            "trigger": window.as_ref().map(|_| "manual"),
+            "expiresAt": window.as_ref().map(|(expires_at, _)| *expires_at),
+            "autoWhenOffline": auto_when_offline,
+            "verifierReady": true,
+            "lockedUntil": null,
+            "wifiLocked": false,
+            "history": [
+                { "at": 1_792_000_000, "trigger": "boot", "outcome": "wifi-connected" },
+            ],
+        });
+        if let Some((_, code)) = window {
+            status["code"] = Value::String(code);
+        }
+        Ok(status)
+    }
+
+    async fn open_ble_provisioning(&self, seconds: u64) -> anyhow::Result<String> {
+        self.update_call(&format!("ble provisioning open {seconds}"))?;
+        let expires_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |now| now.as_secs())
+            + seconds;
+        let code = "20481337".to_string();
+        *self.ble_window.lock().unwrap() = Some((expires_at, code.clone()));
+        Ok(code)
+    }
+
+    async fn close_ble_provisioning(&self) -> anyhow::Result<()> {
+        *self.ble_window.lock().unwrap() = None;
+        self.update_call("ble provisioning close")
     }
 
     async fn pair_bluetooth_device(&self, address: &str) -> anyhow::Result<()> {

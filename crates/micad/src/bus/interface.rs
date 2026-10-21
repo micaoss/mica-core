@@ -95,6 +95,7 @@ impl MicadService {
                 "invalid JSON value: {err}"
             )))
         })?;
+        self.refuse_while_wifi_locked(std::slice::from_ref(&path.to_string()))?;
         self.persist_setting(path, value)
             .await
             .map_err(to_bus_error)?;
@@ -125,6 +126,7 @@ impl MicadService {
             )));
         }
         let writes = parse_writes(&paths, &values_json)?;
+        self.refuse_while_wifi_locked(&paths)?;
         self.persist_settings(&writes).await.map_err(to_bus_error)?;
         for (path, value_json) in paths.iter().zip(&values_json) {
             Self::settings_changed(&emitter, path, value_json)
@@ -163,6 +165,7 @@ impl MicadService {
             )));
         }
         let writes = parse_writes(&paths, &values_json)?;
+        self.refuse_while_wifi_locked(&paths)?;
         self.persist_claim(&writes).await.map_err(to_bus_error)?;
         for (path, value_json) in paths.iter().zip(&values_json) {
             Self::settings_changed(&emitter, path, value_json)
@@ -206,6 +209,49 @@ impl MicadService {
         self.provisioning
             .logged_in(password)
             .map_err(|err| fdo::Error::Failed(format!("BLE provisioning at login: {err:#}")))
+    }
+
+    /// BLE provisioning's state (`docs/ble-provisioning.md`): `state`,
+    /// `trigger`, `expiresAt`, `code` (a manual window's), `autoWhenOffline`,
+    /// `verifierReady`, `lockedUntil`, `wifiLocked` and `history`.
+    pub(super) async fn get_ble_provisioning(&self) -> fdo::Result<String> {
+        self.require_feature(micad_settings::Feature::Bluetooth)?;
+        self.provisioning
+            .status()
+            .await
+            .map(|status| status.to_string())
+            .ok_or_else(|| fdo::Error::Failed("BLE provisioning is not running".to_string()))
+    }
+
+    /// Open a `manual` window for `seconds` (300, 600 or 1800), answering
+    /// its temp code. Refused `AccessDenied` (`not_claimed: …`, `locked: …`)
+    /// on an unclaimed or locked-out device.
+    pub(super) async fn open_ble_provisioning(&self, seconds: u64) -> fdo::Result<String> {
+        self.require_feature(micad_settings::Feature::Bluetooth)?;
+        self.provisioning
+            .open_manual(seconds)
+            .await
+            .map_err(|reason| match reason {
+                "invalid_duration" => fdo::Error::InvalidArgs(
+                    "a provisioning window lasts 300, 600 or 1800 seconds".to_string(),
+                ),
+                "not_claimed" => fdo::Error::AccessDenied(
+                    "not_claimed: an unclaimed device opens its own window at every boot"
+                        .to_string(),
+                ),
+                "locked" => fdo::Error::AccessDenied(
+                    "locked: too many failed attempts; a console login ends the lockout"
+                        .to_string(),
+                ),
+                _ => fdo::Error::Failed("BLE provisioning is not running".to_string()),
+            })
+    }
+
+    /// Close the `manual` window.
+    pub(super) async fn close_ble_provisioning(&self) -> fdo::Result<()> {
+        self.require_feature(micad_settings::Feature::Bluetooth)?;
+        self.provisioning.close_manual().await;
+        Ok(())
     }
 
     /// JSON-encoded task record for `id`.

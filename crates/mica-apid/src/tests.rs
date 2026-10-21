@@ -33,6 +33,7 @@ use tempfile::TempDir;
 use tower::ServiceExt;
 
 mod assets;
+mod ble_provisioning;
 mod bluetooth;
 mod containers;
 mod errors;

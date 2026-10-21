@@ -295,6 +295,23 @@ impl MicadService {
         Ok(generated)
     }
 
+    /// Refuse a bus write that reaches the Wi-Fi settings while a BLE
+    /// provisioning session holds the radio. The session's own writes do
+    /// not come through here.
+    pub(super) fn refuse_while_wifi_locked(&self, paths: &[String]) -> Result<(), SettingsFault> {
+        let reaches_wifi = paths.iter().any(|path| {
+            micad_settings::path_segments(path)
+                .is_none_or(|segments| segments.first().is_none_or(|first| first == "wifi"))
+        });
+        if reaches_wifi && self.provisioning.wifi_locked() {
+            return Err(SettingsFault::WifiLocked(
+                "a Bluetooth provisioning session is changing Wi-Fi; try again when it ends"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Re-run the Bluetooth reconciler: the radio was taken or given back.
     pub(crate) async fn apply_bluetooth(&self) {
         let _apply = self.apply_lock.lock().await;

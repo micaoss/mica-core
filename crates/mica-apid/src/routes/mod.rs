@@ -31,6 +31,7 @@ use crate::session::SessionStore;
 use crate::settings_api::{InvalidTaskPayload, SettingsApi};
 use crate::task_registry::{TaskRecord, TaskRegistry};
 
+mod ble_provisioning;
 mod bluetooth;
 mod claim;
 mod containers;
@@ -64,6 +65,7 @@ mod validate;
 mod web;
 mod wifi;
 mod wifi_ap;
+pub(crate) use ble_provisioning::*;
 pub(crate) use bluetooth::*;
 pub(crate) use claim::*;
 pub(crate) use containers::*;

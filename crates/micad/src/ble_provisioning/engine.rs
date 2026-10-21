@@ -1103,6 +1103,7 @@ impl Engine {
             "autoWhenOffline": self.facts.auto_when_offline,
             "verifierReady": matches!(self.store.verifier(), Ok(Some(_))),
             "lockedUntil": lockout.locked_until.filter(|until| *until > unix),
+            "wifiLocked": self.wifi_locked.load(Ordering::SeqCst),
             "history": self.store.history().iter().rev().collect::<Vec<_>>(),
         });
         if let Some((code, _)) = &self.temp_code {

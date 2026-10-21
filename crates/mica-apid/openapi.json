@@ -1150,6 +1150,363 @@
         }
       }
     },
+    "/api/v1/bluetooth/provisioning": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read BLE provisioning's state.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "operationId": "api_v1_ble_provisioning_read",
+        "responses": {
+          "200": {
+            "description": "The state; `code` only while a `manual` window is open",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvisioningStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "BLE provisioning is not running on this device (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "micad is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Open a `manual` window: a phone authenticates with the temp code the\nanswer carries. Opening it again replaces the code and the length.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "operationId": "api_v1_ble_provisioning_open",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvisioningOpen"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The window is open; the state carries `code`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvisioningStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device has no administrator yet (`not_claimed`), or too many failed attempts locked provisioning (`locked`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`durationSeconds` is not 300, 600 or 1800 (`invalid_duration`), or the body is not this shape (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "BLE provisioning is not running on this device (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Close the `manual` window; its temp code stops working. A window opened\nby boot or by losing the network stays.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "operationId": "api_v1_ble_provisioning_close",
+        "responses": {
+          "204": {
+            "description": "The `manual` window is closed"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bluetooth/provisioning/settings": {
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Switch the offline trigger: whether a claimed device that loses its\ndefault route for 120 seconds opens a window.",
+        "description": "Served only when the product carries the `bluetooth` feature (`GET /api/v1/meta` lists `features`); otherwise every method answers 404 `not_found`.",
+        "operationId": "api_v1_ble_provisioning_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvisioningSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The switch was written; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape (`validation_failed`), or micad rejected the write (`settings_rejected`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/claim": {
       "get": {
         "tags": [
@@ -11355,6 +11712,60 @@
         },
         "additionalProperties": false
       },
+      "ProvisioningEntry": {
+        "type": "object",
+        "description": "One finished connection.",
+        "required": [
+          "at",
+          "trigger",
+          "outcome"
+        ],
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since the epoch.",
+            "minimum": 0
+          },
+          "outcome": {
+            "type": "string",
+            "description": "`claimed`, `finished`, `wifi-connected`, `auth-failed` or `abandoned`."
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ProvisioningTrigger"
+          }
+        }
+      },
+      "ProvisioningOpen": {
+        "type": "object",
+        "description": "How long a `manual` window stays open.",
+        "required": [
+          "durationSeconds"
+        ],
+        "properties": {
+          "durationSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "300, 600 or 1800.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProvisioningSettings": {
+        "type": "object",
+        "description": "The offline trigger's switch.",
+        "required": [
+          "autoWhenOffline"
+        ],
+        "properties": {
+          "autoWhenOffline": {
+            "type": "boolean",
+            "description": "Whether losing the default route for 120 seconds opens a window."
+          }
+        },
+        "additionalProperties": false
+      },
       "ProvisioningStatus": {
         "type": "object",
         "description": "What a provisioning document did to this device.",
@@ -11409,6 +11820,16 @@
             "description": "Whether the device still has no administrator credential.\n\nThe same question `GET /api/v1/session` answers with `state: \"setup\"`,\nasked here because it is what decides whether a document offered on a\nmedium would be applied at all: a claimed device refuses one."
           }
         }
+      },
+      "ProvisioningTrigger": {
+        "type": "string",
+        "description": "What opened the window.",
+        "enum": [
+          "unclaimed",
+          "boot",
+          "offline",
+          "manual"
+        ]
       },
       "RebootOverride": {
         "description": "The armed override, as micad recorded it."

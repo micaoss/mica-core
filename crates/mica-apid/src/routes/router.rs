@@ -255,8 +255,8 @@ pub(super) fn wifi_routes() -> Router<AppState> {
         .route(V1_WIFI_CHANNELS_PATH, get(api_v1_wifi_channels))
 }
 
-/// Bluetooth: one document, one write for the adapter, and the verbs that pair
-/// (`bluetooth`).
+/// Bluetooth: one document, one write for the adapter, the verbs that pair,
+/// and BLE provisioning (`bluetooth`).
 pub(super) fn bluetooth_routes() -> Router<AppState> {
     Router::new()
         .route(
@@ -266,6 +266,16 @@ pub(super) fn bluetooth_routes() -> Router<AppState> {
         .route(
             V1_BLUETOOTH_PAIR_WINDOW_PATH,
             post(api_v1_bluetooth_pair_window_open).delete(api_v1_bluetooth_pair_window_close),
+        )
+        .route(
+            V1_BLUETOOTH_PROVISIONING_PATH,
+            get(api_v1_ble_provisioning_read)
+                .post(api_v1_ble_provisioning_open)
+                .delete(api_v1_ble_provisioning_close),
+        )
+        .route(
+            V1_BLUETOOTH_PROVISIONING_SETTINGS_PATH,
+            put(api_v1_ble_provisioning_settings),
         )
         .route(
             V1_BLUETOOTH_PAIRING_REQUEST_ROUTE,

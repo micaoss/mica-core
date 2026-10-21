@@ -56,6 +56,28 @@ none.
 <arg name="password" type="s" direction="in"/>
 </method>
 <!--
+BLE provisioning's state (`docs/ble-provisioning.md`): `state`,
+`trigger`, `expiresAt`, `code` (a manual window's), `autoWhenOffline`,
+`verifierReady`, `lockedUntil`, `wifiLocked` and `history`.
+-->
+<method name="GetBleProvisioning">
+<arg type="s" direction="out"/>
+</method>
+<!--
+Open a `manual` window for `seconds` (300, 600 or 1800), answering
+its temp code. Refused `AccessDenied` (`not_claimed: …`, `locked: …`)
+on an unclaimed or locked-out device.
+-->
+<method name="OpenBleProvisioning">
+<arg name="seconds" type="t" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Close the `manual` window.
+-->
+<method name="CloseBleProvisioning">
+</method>
+<!--
 JSON-encoded task record for `id`.
 -->
 <method name="GetTask">
