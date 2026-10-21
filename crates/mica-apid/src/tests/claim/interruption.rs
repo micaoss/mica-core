@@ -49,6 +49,21 @@ impl SettingsApi for InterruptOnce {
         self.inner.set_settings(path, value).await
     }
 
+    /// One write: interrupted whole when any of its paths is the chosen one.
+    async fn set_settings_many(
+        &self,
+        writes: &[(String, serde_json::Value)],
+    ) -> anyhow::Result<String> {
+        if writes.iter().any(|(path, _)| path == self.path) {
+            let mut fired = self.fired.lock().unwrap();
+            if !*fired {
+                *fired = true;
+                return Err(anyhow::anyhow!("interrupted before the commit"));
+            }
+        }
+        self.inner.set_settings_many(writes).await
+    }
+
     async fn get_task(&self, id: &str) -> anyhow::Result<crate::task_registry::TaskRecord> {
         self.inner
             .get_task(id)
@@ -166,6 +181,14 @@ pub(super) async fn an_interrupted_claim_writes_nothing_and_the_retry_mints_one_
     );
     assert!(access.get("claim").is_none(), "{access}");
     assert!(access.get("apiTokens").is_none(), "{access}");
+    assert_eq!(
+        api.inner
+            .get_settings("wifi.ap.psk")
+            .await
+            .unwrap_or_default(),
+        serde_json::Value::Null,
+        "an interrupted claim set the access point's key"
+    );
     let device_id = api
         .inner
         .get_settings("provisioning.deviceId")
@@ -223,7 +246,7 @@ pub(super) async fn a_claim_that_committed_but_was_never_answered_is_refused_on_
     );
     assert_eq!(
         fake.set_paths(),
-        vec!["access".to_string()],
+        vec!["access".to_string(), "wifi.ap.psk".to_string()],
         "the refused retry wrote something"
     );
     let probe = get(&router, "/api/v1/meta", Some(&cookie)).await;

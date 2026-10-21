@@ -61,4 +61,34 @@ describe('first-run setup', () => {
     await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/setup')).toBe(true))
     expect(screen.queryByText(/token/i)).toBeNull()
   })
+
+  /// A key the device generated is readable nowhere else, so the console
+  /// stops on it; a typed one is sent and not shown back.
+  it('shows a generated access point key once before entering', async () => {
+    const fetch = stubFetch({ 'POST /api/v1/setup': { csrfToken: 'csrf-token', apPsk: 'K7QM2XWD9HC4TR8N' } })
+    renderPanel(withTheme(<SetupView />))
+
+    await userEvent.type(screen.getByLabelText('Admin password'), 'correct-horse')
+    await userEvent.type(screen.getByLabelText('Confirm password'), 'correct-horse')
+    await userEvent.click(screen.getByRole('button', { name: 'Configure device' }))
+
+    expect(await screen.findByText('K7QM2XWD9HC4TR8N')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Continue to the console' })).toBeTruthy()
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as Record<string, unknown>
+    expect(body.apPsk).toBeUndefined()
+  })
+
+  it('sends a typed access point key', async () => {
+    const fetch = stubFetch({ 'POST /api/v1/setup': { csrfToken: 'csrf-token' } })
+    renderPanel(withTheme(<SetupView />))
+
+    await userEvent.type(screen.getByLabelText('Admin password'), 'correct-horse')
+    await userEvent.type(screen.getByLabelText('Confirm password'), 'correct-horse')
+    await userEvent.type(screen.getByLabelText('Wi-Fi access point key'), 'harbour-key-7')
+    await userEvent.click(screen.getByRole('button', { name: 'Configure device' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled())
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as Record<string, unknown>
+    expect(body.apPsk).toBe('harbour-key-7')
+  })
 })

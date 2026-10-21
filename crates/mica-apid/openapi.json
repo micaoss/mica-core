@@ -4782,7 +4782,7 @@
           "actions"
         ],
         "summary": "First-run setup: set the admin password and, optionally, a hostname and\nnetwork entries.",
-        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, `access.webAdmin`.\n\nAnswers **201** with the browser session's CSRF token and nothing else. It\nmints no API token: see [`SetupResult`].",
+        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, then `access` with `wifi.ap.psk` as\none write.\n\nOn a product with Wi-Fi the claim sets the access point's key: `apPsk`\nwhen the body carries one, otherwise a generated key answered once as\n`apPsk`.\n\nAnswers **201** with the browser session's CSRF token and that generated\nkey. It mints no API token: see [`SetupResult`].",
         "operationId": "api_v1_setup",
         "requestBody": {
           "content": {
@@ -11403,6 +11403,13 @@
           "password"
         ],
         "properties": {
+          "apPsk": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The access point's key from now on (`wifi.ap.psk`), on a product with\nWi-Fi. Absent, the device generates one and answers it once in\n[`SetupResult::ap_psk`]. Either way the key derived for the label is\nnot used after the claim (`docs/factory-ap-key.md`)."
+          },
           "hostname": {
             "type": [
               "string",
@@ -11436,6 +11443,13 @@
           "csrfToken"
         ],
         "properties": {
+          "apPsk": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The access-point key the device generated, when the request carried\nnone: answered here once and readable nowhere else."
+          },
           "csrfToken": {
             "type": "string",
             "description": "CSRF token for the browser session created by setup."

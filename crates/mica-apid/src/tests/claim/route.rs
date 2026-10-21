@@ -6,11 +6,12 @@ use serde_json::json;
 use super::*;
 
 /// The credential and the record of how the device was claimed reach the bus
-/// as ONE write of ONE subtree.
+/// as ONE write of ONE subtree, with the access point's key beside it in the
+/// same `SetSettingsMany`.
 ///
 /// The assertion is the write LIST and not the resulting tree, because the
 /// resulting tree looks identical whether it took one write or two. micad
-/// turns one `SetSettings` into one `Store::save`, so "one write here" is
+/// turns one `SetSettingsMany` into one `Store::save`, so "one write here" is
 /// exactly "one commit point on the device".
 #[tokio::test]
 pub(super) async fn a_route_claim_commits_the_credential_and_the_record_in_one_write() {
@@ -21,8 +22,8 @@ pub(super) async fn a_route_claim_commits_the_credential_and_the_record_in_one_w
 
     assert_eq!(
         fake.set_paths(),
-        vec!["access".to_string()],
-        "the claim must be one write of one subtree"
+        vec!["access".to_string(), "wifi.ap.psk".to_string()],
+        "the claim must be one write of one subtree and the key"
     );
     let access = access_of(&fake).await;
     assert!(access["webAdmin"]["password_hash"].as_str().is_some());

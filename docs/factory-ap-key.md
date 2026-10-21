@@ -67,7 +67,11 @@ The access point's key is, in order:
 3. the per-device key generated on STATE at first boot (`"generated"`).
 
 An open access point uses no key, and `pskSource` is `null`. Once an administrator exists, the
-derived key is never used. A configuration reset keeps the administrator and `wifi.ap.psk`. A
+derived key is never used. The claim through `POST /api/v1/setup` sets `wifi.ap.psk` in the same
+write as the administrator, on a product with Wi-Fi: the key the body carries as `apPsk`, or 16
+random characters of the alphabet, which the answer carries once as `apPsk` and the console shows
+before it enters. A claim by provisioning document sets no key, so its device falls back to the
+generated one. A configuration reset keeps the administrator and `wifi.ap.psk`. A
 factory reset clears both, which makes the derived key apply again. The default SSID is the
 code's whenever `wifi.ap.ssid` is unset; without a code, it comes from the device identifier.
 

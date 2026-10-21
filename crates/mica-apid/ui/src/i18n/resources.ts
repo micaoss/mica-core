@@ -124,8 +124,13 @@ export const en = {
       passwordHint: 'At least 8 characters.',
       confirmPassword: 'Confirm password',
       mismatch: 'Passwords do not match.',
+      apPsk: 'Wi-Fi access point key',
+      apPskHint: 'Optional, on a device with Wi-Fi: 8 to 63 characters. Leave it empty and the device generates one. The key on the label stops working either way.',
       pending: 'Configuring…',
       submit: 'Configure device',
+      generatedTitle: 'Your Wi-Fi access point key',
+      generatedCopy: 'The access point uses this key from now on. It is shown only this once: write it down. If you are connected through the access point, reconnect with it.',
+      continue: 'Continue to the console',
     },
   },
   task: {

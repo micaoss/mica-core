@@ -14,6 +14,9 @@ use serde_json::Value;
 
 use super::*;
 
+/// The access point's key, which the claim sets.
+const AP_PSK_PATH: &str = "wifi.ap.psk";
+
 /// `POST /api/v1/setup` request body.
 ///
 /// No `confirm` member, unlike the form the wizard posts: that field exists so
@@ -42,6 +45,12 @@ pub(crate) struct SetupRequest {
     #[serde(default)]
     #[schema(value_type = Option<std::collections::BTreeMap<String, NetworkInterface>>)]
     pub(super) network: Option<NetworkEntries>,
+    /// The access point's key from now on (`wifi.ap.psk`), on a product with
+    /// Wi-Fi. Absent, the device generates one and answers it once in
+    /// [`SetupResult::ap_psk`]. Either way the key derived for the label is
+    /// not used after the claim (`docs/factory-ap-key.md`).
+    #[serde(default, rename = "apPsk")]
+    pub(super) ap_psk: Option<String>,
 }
 
 /// `POST /api/v1/setup` response body.
@@ -55,6 +64,30 @@ pub(crate) struct SetupRequest {
 pub(crate) struct SetupResult {
     /// CSRF token for the browser session created by setup.
     pub(super) csrf_token: String,
+    /// The access-point key the device generated, when the request carried
+    /// none: answered here once and readable nowhere else.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) ap_psk: Option<String>,
+}
+
+/// Characters of a generated access-point key: 80 bits.
+const GENERATED_AP_PSK_CHARS: usize = 16;
+/// The alphabet a generated key is drawn from, the device code's: no `0`,
+/// `O`, `1` or `I` to misread off a screen. 32 divides 256, so a byte folds
+/// into it without bias.
+const AP_PSK_ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/// A fresh access-point key from the system CSPRNG.
+fn generate_ap_psk() -> anyhow::Result<String> {
+    use aws_lc_rs::rand::{SecureRandom, SystemRandom};
+    let mut bytes = [0u8; GENERATED_AP_PSK_CHARS];
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| anyhow::anyhow!("the system random source failed"))?;
+    Ok(bytes
+        .iter()
+        .map(|byte| char::from(AP_PSK_ALPHABET[usize::from(byte % 32)]))
+        .collect())
 }
 
 // The write order fails safe: nothing before `access.webAdmin` takes the
@@ -69,10 +102,15 @@ pub(crate) struct SetupResult {
 ///
 /// Everything is validated before anything is written; a rejected request
 /// leaves the device untouched and still in setup mode. On success the writes
-/// run in the order hostname, network, `access.webAdmin`.
+/// run in the order hostname, network, then `access` with `wifi.ap.psk` as
+/// one write.
 ///
-/// Answers **201** with the browser session's CSRF token and nothing else. It
-/// mints no API token: see [`SetupResult`].
+/// On a product with Wi-Fi the claim sets the access point's key: `apPsk`
+/// when the body carries one, otherwise a generated key answered once as
+/// `apPsk`.
+///
+/// Answers **201** with the browser session's CSRF token and that generated
+/// key. It mints no API token: see [`SetupResult`].
 #[utoipa::path(
     post,
     path = V1_SETUP_PATH,
@@ -165,6 +203,20 @@ pub(crate) async fn api_v1_setup(
             ApiError::apid("validation_failed", HOSTNAME_RULES.to_string()).at("hostname"),
         );
     }
+    let wifi = state.features.has(micad_settings::Feature::Wifi);
+    if let Some(psk) = request.ap_psk.as_deref() {
+        let refusal = if wifi {
+            micad_settings::validate_wifi_psk(psk).err()
+        } else {
+            Some("this product has no Wi-Fi access point".to_string())
+        };
+        if let Some(message) = refusal {
+            return api_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiError::apid("validation_failed", message).at(AP_PSK_PATH),
+            );
+        }
+    }
     // The candidate tree and not the submitted entries, for the reason the
     // pane's comment gives and the network routes act on: every relational rule is
     // about two entries at once, so a submitted bridge port may legitimately
@@ -238,6 +290,24 @@ pub(crate) async fn api_v1_setup(
         }
     };
 
+    let generated_ap_psk = match (wifi, &request.ap_psk) {
+        (true, None) => match generate_ap_psk() {
+            Ok(psk) => Some(psk),
+            Err(err) => {
+                tracing::error!(error = %err, "access-point key generation failed");
+                return api_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiError::apid(
+                        "hash_failed",
+                        "no access-point key could be generated; nothing was written".to_string(),
+                    )
+                    .at(AP_PSK_PATH),
+                );
+            }
+        },
+        _ => None,
+    };
+
     // The writes. `hostname` and `network` come first and are their own calls:
     // neither takes the device out of the unclaimed state, so a failure in
     // either leaves an unclaimed, still-claimable device and the caller may
@@ -285,11 +355,27 @@ pub(crate) async fn api_v1_setup(
         Err(response) => return *response,
     };
     subtree.insert("claim".to_string(), claim);
-    if let Err(err) = state
-        .api
-        .set_settings(ACCESS_PATH, &Value::Object(subtree))
-        .await
-    {
+    // The access point's key lands with the claim and not beside it: either
+    // order of two writes leaves, on a failure between them, a device whose
+    // access point runs a key nobody was shown.
+    let written = match request.ap_psk.clone().or_else(|| generated_ap_psk.clone()) {
+        Some(psk) => {
+            state
+                .api
+                .set_settings_many(&[
+                    (ACCESS_PATH.to_string(), Value::Object(subtree)),
+                    (AP_PSK_PATH.to_string(), Value::String(psk)),
+                ])
+                .await
+        }
+        None => {
+            state
+                .api
+                .set_settings(ACCESS_PATH, &Value::Object(subtree))
+                .await
+        }
+    };
+    if let Err(err) = written {
         return bus_api_error(&err, Some(ACCESS_PATH));
     }
     // The device just left setup mode, and the gate must not keep believing
@@ -311,6 +397,7 @@ pub(crate) async fn api_v1_setup(
         ],
         Json(SetupResult {
             csrf_token: session.csrf_token,
+            ap_psk: generated_ap_psk,
         }),
     )
         .into_response()

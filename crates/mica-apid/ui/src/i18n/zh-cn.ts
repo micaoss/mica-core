@@ -75,8 +75,13 @@ export const zhCN: Translation = {
       passwordHint: '至少 8 个字符。',
       confirmPassword: '确认密码',
       mismatch: '两次输入的密码不一致。',
+      apPsk: 'Wi-Fi 热点密钥',
+      apPskHint: '可选，仅适用于带 Wi-Fi 的设备：8 到 63 个字符。留空则由设备生成。无论哪种方式，标签上的密钥都将失效。',
       pending: '正在配置…',
       submit: '配置设备',
+      generatedTitle: '你的 Wi-Fi 热点密钥',
+      generatedCopy: '热点从现在起使用此密钥。它只显示这一次，请记下来。如果你正通过热点连接，请用它重新连接。',
+      continue: '进入控制台',
     },
   },
   task: {
