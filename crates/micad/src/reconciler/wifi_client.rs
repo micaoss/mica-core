@@ -229,6 +229,9 @@ fn render_config(client: &WifiClientSettings) -> Result<String> {
             out.push_str("\tscan_ssid=1\n");
         }
         out.push_str(&format!("\tpriority={}\n", network.priority));
+        if network.auto_connect == Some(false) {
+            out.push_str("\tdisabled=1\n");
+        }
         match &network.psk {
             Some(psk) => {
                 let encoded = encode_psk(psk)
@@ -398,6 +401,7 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiClientReconciler<C, R>
                     "ssid": network.ssid,
                     "hidden": network.hidden,
                     "priority": network.priority,
+                    "autoConnect": network.auto_connect != Some(false),
                     "secured": network.psk.is_some(),
                 })
             })

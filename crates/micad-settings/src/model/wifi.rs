@@ -51,6 +51,14 @@ pub struct WifiNetwork {
     /// Selection preference; higher wins.
     #[serde(default)]
     pub priority: i32,
+    /// Whether the station joins this network by itself; absent is true. A
+    /// network with false is kept and never joined.
+    #[serde(
+        rename = "autoConnect",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auto_connect: Option<bool>,
 }
 
 /// Characters a raw 256-bit pre-shared key occupies, spelled in hex.

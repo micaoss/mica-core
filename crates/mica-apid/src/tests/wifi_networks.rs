@@ -388,6 +388,7 @@ pub(super) fn the_wifi_schema_matches_the_settings_model() {
         psk: Some("hunter2hunter2".to_string()),
         hidden: true,
         priority: 7,
+        auto_connect: Some(false),
     })
     .expect("a network serializes");
     let mut fields: Vec<String> = model

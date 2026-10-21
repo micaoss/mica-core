@@ -162,6 +162,25 @@ pub(super) fn hidden_is_the_only_thing_that_emits_scan_ssid() {
 }
 
 #[test]
+pub(super) fn a_network_without_auto_connect_is_kept_disabled() {
+    let off = WifiNetwork {
+        auto_connect: Some(false),
+        ..network("lab", None, false, 0)
+    };
+    let on = WifiNetwork {
+        auto_connect: Some(true),
+        ..network("lab", None, false, 0)
+    };
+    let off = render_config(&client(true, vec![off])).unwrap();
+    let on = render_config(&client(true, vec![on])).unwrap();
+    let absent = render_config(&client(true, vec![network("lab", None, false, 0)])).unwrap();
+
+    assert!(off.contains("\tdisabled=1\n"), "{off}");
+    assert!(!on.contains("disabled"), "{on}");
+    assert_eq!(on, absent);
+}
+
+#[test]
 pub(super) fn a_hostile_ssid_cannot_inject_configuration() {
     // A quote to close the string, a brace to close the block, and a
     // newline to start a directive of its own — the whole escape.

@@ -10467,6 +10467,13 @@
           "priority"
         ],
         "properties": {
+          "autoConnect": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the station joins this network by itself; absent is true."
+          },
           "hidden": {
             "type": "boolean",
             "description": "Whether the network hides its SSID."

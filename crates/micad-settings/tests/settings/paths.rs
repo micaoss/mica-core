@@ -234,12 +234,14 @@ pub(super) fn dot_path_reaches_every_new_leaf() {
                 psk: Some("hunter2hunter2".to_string()),
                 hidden: true,
                 priority: 10,
+                auto_connect: None,
             },
             WifiNetwork {
                 ssid: "open-ap".to_string(),
                 psk: None,
                 hidden: false,
                 priority: 0,
+                auto_connect: None,
             },
         ]
     );

@@ -123,6 +123,7 @@ fn network(ssid: &str, psk: Option<&str>, hidden: bool, priority: i32) -> WifiNe
         psk: psk.map(str::to_string),
         hidden,
         priority,
+        auto_connect: None,
     }
 }
 

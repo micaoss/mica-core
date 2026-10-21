@@ -39,7 +39,7 @@ pub(super) async fn the_psk_reaches_the_config_file_and_nothing_else() {
     );
     assert_eq!(
         state["networks"],
-        json!([{ "ssid": "office", "hidden": true, "priority": 4, "secured": true }]),
+        json!([{ "ssid": "office", "hidden": true, "priority": 4, "autoConnect": true, "secured": true }]),
         "the live state reports that a key exists, never what it is"
     );
 }

@@ -32,6 +32,9 @@ pub(crate) struct WifiNetworkEntry {
     pub(super) hidden: bool,
     /// Selection preference; higher wins.
     pub(super) priority: i32,
+    /// Whether the station joins this network by itself; absent is true.
+    #[serde(rename = "autoConnect", skip_serializing_if = "Option::is_none")]
+    pub(super) auto_connect: Option<bool>,
 }
 
 /// The stored WiFi networks, or the error envelope for whatever prevented reading
