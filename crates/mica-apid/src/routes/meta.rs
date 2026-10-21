@@ -26,6 +26,9 @@ pub(crate) struct ApiMeta {
     pub(super) features: Vec<&'static str>,
     /// The init system the product runs: `systemd` or `openrc`.
     pub(super) init: &'static str,
+    /// Who reaches the API (`access.web.mode`): `network`, or `local`, when
+    /// only root on the device does, through apid's local socket.
+    pub(super) web_mode: &'static str,
 }
 
 /// List the API major versions this build serves.
@@ -87,6 +90,7 @@ pub(crate) async fn api_v1_meta(
             daemon: "apid",
             features: state.features.words(),
             init: state.init.as_str(),
+            web_mode: state.web_mode.as_str(),
         },
     )
 }

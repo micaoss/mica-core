@@ -74,15 +74,18 @@ trait Micad {
     fn get_state(&self, path: &str) -> zbus::Result<String>;
 }
 
-/// `mica-apid --healthcheck` against `https_addr`, bounded so that an apid that
+/// `mica-apid --healthcheck` against the local socket at `socket`, with
+/// `listeners` as the rendered `access.web`, bounded so that an apid that
 /// ignored the flag and started serving cannot hang the test.
-fn healthcheck(https_addr: &str) -> anyhow::Result<bool> {
+fn healthcheck(socket: &std::path::Path, listeners: &std::path::Path) -> anyhow::Result<bool> {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mica-apid"))
         .arg("--healthcheck")
         .env_clear()
-        .env("APID_HTTPS_ADDR", https_addr)
+        .env("APID_LOCAL_SOCKET", socket)
+        .env("APID_LISTENERS_FILE", listeners)
         .env("APID_STATE_DIR", "/nonexistent/apid-healthcheck")
         .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()?;
     for _ in 0..200 {
         if let Some(status) = child.try_wait()? {

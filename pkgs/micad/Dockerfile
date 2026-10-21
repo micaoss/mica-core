@@ -38,10 +38,8 @@ RUN set -eu; \
     install -D -m 0644 /in/bin/openapi.json         ${t}/usr/share/mica-apid/openapi.json; \
     install -D -m 0644 /in/copyright                ${t}/usr/share/doc/micad/copyright; \
     install -d -m 0755 ${t}/etc/systemd/system/multi-user.target.wants ${t}/etc/runlevels/default; \
-    for unit in micad apid; do \
-        ln -s /usr/lib/systemd/system/${unit}.service ${t}/etc/systemd/system/multi-user.target.wants/${unit}.service; \
-        ln -s /etc/init.d/${unit} ${t}/etc/runlevels/default/${unit}; \
-    done; \
+    ln -s /usr/lib/systemd/system/micad.service ${t}/etc/systemd/system/multi-user.target.wants/micad.service; \
+    ln -s /etc/init.d/micad ${t}/etc/runlevels/default/micad; \
     u=/stage/ui; \
     install -d -m 0755 ${u}/usr/share/mica-apid; \
     cp -R /in/ui ${u}/usr/share/mica-apid/ui; \

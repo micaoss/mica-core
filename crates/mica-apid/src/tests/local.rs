@@ -119,3 +119,23 @@ pub(super) async fn the_socket_is_root_s_alone() {
     let _listener = crate::bind_local_socket(&path).expect("bound again");
     assert_eq!(mode(&path), 0o600);
 }
+
+/// Root on the device is already where `micad web network` runs, so the SSH
+/// rule for leaving the network does not hold it.
+#[tokio::test]
+pub(super) async fn root_may_take_the_api_off_the_network_without_ssh() {
+    let (router, fake) = local_router(unclaimed());
+    let response = local(
+        &router,
+        Some(0),
+        "PUT",
+        "/api/v1/web",
+        Some(r#"{"mode":"off","httpPort":8080,"httpsEnabled":false,"httpsPort":8443}"#),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        fake.get_settings("access.web").await.unwrap()["mode"],
+        json!("off")
+    );
+}

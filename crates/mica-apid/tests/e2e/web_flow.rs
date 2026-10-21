@@ -50,6 +50,8 @@ pub(super) async fn web_flow_end_to_end() -> anyhow::Result<()> {
         .env("APID_UI_DIR", console(dir.path())?)
         .env("APID_HTTPS_ADDR", "127.0.0.1:0")
         .env("APID_HTTP_ADDR", "127.0.0.1:0")
+        .env("APID_LOCAL_SOCKET", dir.path().join("apid.sock"))
+        .env("APID_LISTENERS_FILE", dir.path().join("apid.json"))
         .stdout(Stdio::piped())
         .spawn()?;
     let apid_stdout = apid_child.stdout.take().expect("piped stdout");
@@ -66,13 +68,28 @@ pub(super) async fn web_flow_end_to_end() -> anyhow::Result<()> {
     let http_addr = field("http")?;
     let https_base = format!("https://{https_addr}");
 
-    // The boot health gate's probe: TLS to apid answering /healthz succeeds;
-    // the plain-HTTP redirect listener is not an HTTPS apid and fails.
-    assert!(healthcheck(&https_addr)?, "healthcheck against live apid");
+    // The boot health gate's probe: apid answering /healthz on its local
+    // socket succeeds; a socket nobody serves fails, unless the configuration
+    // turned apid off.
+    // The socket is bound after the TCP marker is printed.
+    let listeners = dir.path().join("apid.json");
+    let mut answered = false;
+    for _ in 0..100 {
+        answered = healthcheck(&dir.path().join("apid.sock"), &listeners)?;
+        if answered {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(answered, "healthcheck against live apid");
+    let absent = dir.path().join("absent.sock");
     assert!(
-        !healthcheck(&http_addr)?,
-        "healthcheck against the HTTP listener"
+        !healthcheck(&absent, &listeners)?,
+        "healthcheck against no apid"
     );
+    let off = dir.path().join("off.json");
+    std::fs::write(&off, r#"{ "mode": "off" }"#)?;
+    assert!(healthcheck(&absent, &off)?, "healthcheck with apid off");
 
     let connection = zbus::connection::Builder::address(address.as_str())
         .build()

@@ -486,7 +486,7 @@ pub(super) fn only_the_reconcilers_that_start_no_service_run_before_the_name() {
             .copied()
             .filter(|name| !DEFERRED.contains(name))
             .collect();
-        assert_eq!(before, ["hostname", "network", "web"], "{init:?}");
+        assert_eq!(before, ["hostname", "network"], "{init:?}");
         for name in DEFERRED {
             assert!(names.contains(&name), "{name} under {init:?}");
         }

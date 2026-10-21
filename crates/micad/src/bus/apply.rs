@@ -295,11 +295,13 @@ impl MicadService {
 
 /// The reconcilers that start or restart another service. Their apply can wait
 /// on that service: the container reconciler waits for mica-containerd, and on
-/// OpenRC `rc-service start` waits for the service and what it needs -- the
-/// MQTT units need micad itself, mica-ntpd needs the network. Their startup
-/// apply runs after micad claims its bus name, so micad's readiness waits on
-/// none of them; the ones that run before it only render files and bus calls.
-pub(super) const DEFERRED: [&str; 9] = [
+/// OpenRC `rc-service start` waits for the service and what it needs -- apid
+/// and the MQTT units need micad itself, mica-ntpd needs the network. Their
+/// startup apply runs after micad claims its bus name, so micad's readiness
+/// waits on none of them; the ones that run before it only render files and
+/// bus calls.
+pub(super) const DEFERRED: [&str; 10] = [
+    "web",
     "dns",
     "sshd",
     "wifiClient",

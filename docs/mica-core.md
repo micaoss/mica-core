@@ -32,7 +32,7 @@ root hash with the product's key.
 
 | Component | What it holds | systemd | OpenRC | Started |
 | --- | --- | --- | --- | --- |
-| `micad` | The management daemon and its D-Bus policy, and the API, `/usr/bin/mica-apid` (a link to `micad`, the same as `micad apid`), with the OpenAPI document; the update command `/usr/bin/mica-update` (a link, the same as `micad update`) and the containers command `/usr/bin/mica-ctr` (a link, the same as `micad ctr`); feature `micad` | `micad.service`, `apid.service` | `/etc/init.d/micad`, `/etc/init.d/apid` | At boot (the component links both) |
+| `micad` | The management daemon and its D-Bus policy, and the API, `/usr/bin/mica-apid` (a link to `micad`, the same as `micad apid`), with the OpenAPI document; the update command `/usr/bin/mica-update` (a link, the same as `micad update`) and the containers command `/usr/bin/mica-ctr` (a link, the same as `micad ctr`); feature `micad` | `micad.service`, `apid.service` | `/etc/init.d/micad`, `/etc/init.d/apid` | micad at boot (the component links it); apid by micad (`access.web.mode`) |
 | `mica-apid-ui` | The web console at `/usr/share/mica-apid/ui`; feature `ui`, at micad's exact version | -- | -- | Served by apid; optional |
 
 The rest are Debian packages built into the root:
@@ -43,17 +43,16 @@ The rest are Debian packages built into the root:
 | `mica-lifecycle` | `mica-runkit`, static, which the assembly packs into the signed kernel | -- | -- | PID 1 of the initramfs and the exit ramdisk |
 
 **Each component and package carries the start-up files of its own services, for both inits, and
-none of another's.** micad and apid enable themselves: a `multi-user.target.wants` link and an
-`/etc/runlevels/default` link each, in the micad component (mica-openrc keeps runlevel links it
-finds). The MQTT daemons of mica-pkgs are enabled on neither init;
-micad starts them after writing their configuration.
+none of another's.** micad enables itself: a `multi-user.target.wants` link and an
+`/etc/runlevels/default` link, in the micad component (mica-openrc keeps runlevel links it
+finds). apid and the MQTT daemons of mica-pkgs are enabled on neither init; micad starts them
+after writing their configuration, apid unless `access.web.mode` is `off`.
 
 On OpenRC the scripts run under `supervise-daemon` with their output in syslog, and
 `/etc/init.d/micad` reports micad started only once it owns `com.mica.micad` on the system bus
 (waiting up to `micad_ready_timeout`, 90 s), which is what `Type=dbus` does under systemd, and
 `/etc/init.d/apid` only once `mica-apid --healthcheck` answers (up to `apid_ready_timeout`, 90 s),
-so the health gate that runs after every service never asks an apid still making its first TLS
-identity.
+so an apid reported started already answers, its first TLS identity made.
 
 ## 3. micad
 
@@ -120,7 +119,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `hostname` | The hostname |
 | `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes; a `can` entry has its block alone (below) |
 | `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
-| `access` | SSH (switch, listen addresses, authorized keys), the console, the API's listeners (`web`), the admin password hash, the device credential, API tokens, claim state |
+| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
 | `container` | The engine switch (`enabled`) and the declared Compose projects (`projects`, section 3.9) |
 | `bluetooth` | The switch (on by default), the trust list, and `provisioning.autoWhenOffline` (BLE provisioning, `docs/ble-provisioning.md`; on by default). Documents that still carry `discoverable`, `alias` or `pin` load, and the keys are dropped at the next save |
@@ -198,7 +197,7 @@ live-state tree under its name.
 | `container` | Starts `mica-containerd.service` and declares the projects as one set; switched off, stops every container, then stops the service (section 3.9) | the same, `mica-containerd` |
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
 | `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
-| `web` | `access.web` into `/run/mica/apid.json`; a running `apid.service` restarted when it changed | the same, `apid` |
+| `web` | `access.web` into `/run/mica/apid.json`; `apid.service` started for `mode` `network` or `local` (restarted when the file changed) and stopped for `off` | the same, `apid` |
 | `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
 | `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. A BLE provisioning window keeps the adapter powered while Bluetooth is switched off | the same through `mica-bluetoothd` |
 
@@ -508,12 +507,29 @@ report it; exit 0 done, 1 failed, 2 misused.
 The same executable as micad, run as `mica-apid` or `micad apid`: the API and the console. It holds
 no configuration of its own; every read and change goes through micad.
 
-It listens where `access.web` says (`GET`/`PUT /api/v1/web`, the console's access page), read at
-start from `/run/mica/apid.json`: by default plain HTTP on 8080 and no HTTPS, so it takes neither
-80 nor 443 from another service. With `httpsEnabled` it serves HTTPS on `httpsPort` (default 8443)
-with its self-signed identity and the HTTP port only redirects there; the session cookie is
-`Secure` exactly then. A port another enabled listener (SSH, MQTT) holds is refused. A change
-restarts apid on the new listeners; `mica-apid --healthcheck` probes the same listener.
+`access.web.mode` decides who reaches it, and `GET /meta` reports it as `webMode`:
+
+| Mode | apid | Serves |
+| --- | --- | --- |
+| `network` (default) | Running | The listeners below and the local socket |
+| `local` | Running | The local socket alone: root on the device |
+| `off` | Not running | Nothing |
+
+Out of `network` there is no console, no HTTP API, no setup page on the access point and no
+bearer token in use; micad and what it drives (the health gate, updates, SSH, MQTT, BLE
+provisioning, the `micad` commands, the user's services) are unchanged. A remote caller may take
+the mode away from `network` only while SSH is on with an authorized key (409
+`web_mode_needs_ssh`): `micad web network` over SSH is the way back. Root on the device is not
+held to it.
+
+Under `network` apid listens where `access.web` says (`GET`/`PUT /api/v1/web`, the console's
+access page), read at start from `/run/mica/apid.json`: by default plain HTTP on 8080 and no HTTPS,
+so it takes neither 80 nor 443 from another service. With `httpsEnabled` it serves HTTPS on
+`httpsPort` (default 8443) with its self-signed identity and the HTTP port only redirects there;
+the session cookie is `Secure` exactly then. A port another enabled listener (SSH, MQTT) holds is
+refused; out of `network` the ports hold none. A change restarts apid on the new listeners, or
+stops it. `mica-apid --healthcheck` asks `/healthz` on the local socket, and passes without
+asking when the mode is `off`.
 
 The HTTPS identity is `identity.pem` in the state directory, the chain and its key in one 0600
 file, generated self-signed (`mica`, `localhost`, `127.0.0.1`) the first time HTTPS serves.
@@ -555,8 +571,8 @@ password for an HMAC-signed, HttpOnly session cookie and send the session's CSRF
 mutation; automation uses bearer tokens `mica_<id>_<secret>`, stored as digests. Passwords are
 argon2id, failed logins back off persistently, and security-relevant actions go to an audit ring.
 
-**The local socket.** apid also serves the API on `/run/mica/apid.sock`, whatever `access.web`
-says, for the device itself. A caller there carries no credential: the kernel's peer credentials
+**The local socket.** apid also serves the API on `/run/mica/apid.sock`, whenever it runs, for
+the device itself. A caller there carries no credential: the kernel's peer credentials
 name its uid, and only root may call the API, all of it, which is how a command line on the device
 configures it, before the device is claimed too; any other uid is 403 `not_allowed`. The socket is
 `0600`, so nobody else can connect. The forced rotation of a bootstrap claim binds a local caller

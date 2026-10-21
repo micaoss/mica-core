@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use micad_settings::{APID_LISTENERS_PATH, APID_LOCAL_SOCKET_PATH, WebSettings};
+use micad_settings::{APID_LISTENERS_PATH, APID_LOCAL_SOCKET_PATH, WebMode, WebSettings};
 
 /// Where apid keeps its TLS identity, session key, login backoff and audit ring.
 pub const DEFAULT_STATE_DIR: &str = "/var/lib/mica/apid";
@@ -53,10 +53,7 @@ impl Config {
             std::env::var("APID_UI_DIR")
                 .unwrap_or_else(|_| crate::assets::builtin::DEFAULT_DIR.to_string()),
         );
-        let local_socket = PathBuf::from(
-            std::env::var("APID_LOCAL_SOCKET")
-                .unwrap_or_else(|_| APID_LOCAL_SOCKET_PATH.to_string()),
-        );
+        let local_socket = local_socket();
         Ok(Self {
             listeners,
             state_dir,
@@ -67,10 +64,19 @@ impl Config {
     }
 }
 
+/// The socket services on this device call the API on (`APID_LOCAL_SOCKET`).
+pub fn local_socket() -> PathBuf {
+    PathBuf::from(
+        std::env::var("APID_LOCAL_SOCKET").unwrap_or_else(|_| APID_LOCAL_SOCKET_PATH.to_string()),
+    )
+}
+
 /// Where apid listens, resolved once for the daemon and for `--healthcheck`,
 /// so the probe asks the listener the daemon bound.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Listeners {
+    /// Who reaches the API: only `network` binds the TCP listeners below.
+    pub mode: WebMode,
     /// The HTTP listener: the console, or only a redirect to HTTPS when
     /// `https` is set.
     pub http_addr: String,
@@ -98,6 +104,7 @@ impl Listeners {
     /// The listeners `web` describes, on every address.
     pub fn of(web: &WebSettings) -> Self {
         Self {
+            mode: web.mode,
             http_addr: format!("0.0.0.0:{}", web.http_port),
             https_addr: web
                 .https_enabled
@@ -134,6 +141,7 @@ mod tests {
         assert_eq!(
             Listeners::of(&missing),
             Listeners {
+                mode: WebMode::Network,
                 http_addr: "0.0.0.0:8080".to_string(),
                 https_addr: None,
             }
@@ -146,12 +154,13 @@ mod tests {
         let path = dir.path().join("apid.json");
         std::fs::write(
             &path,
-            r#"{ "httpPort": 8081, "httpsEnabled": true, "httpsPort": 9443 }"#,
+            r#"{ "mode": "local", "httpPort": 8081, "httpsEnabled": true, "httpsPort": 9443 }"#,
         )
         .unwrap();
         assert_eq!(
             Listeners::of(&read_web(&path)),
             Listeners {
+                mode: WebMode::Local,
                 http_addr: "0.0.0.0:8081".to_string(),
                 https_addr: Some("0.0.0.0:9443".to_string()),
             }

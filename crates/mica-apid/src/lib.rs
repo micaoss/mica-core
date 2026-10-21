@@ -183,10 +183,10 @@ async fn serve() -> anyhow::Result<()> {
     let config = config::Config::from_env()?;
     tls::ensure_state_dir(&config.state_dir)
         .with_context(|| format!("create state dir {}", config.state_dir.display()))?;
-    // The TLS identity only when HTTPS is enabled: a first boot without it
+    // The TLS identity only when HTTPS is served: a first boot without it
     // listens without spending the key generation first.
     let rustls_config = match config.listeners.https_addr {
-        Some(_) => {
+        Some(_) if config.listeners.mode == micad_settings::WebMode::Network => {
             let certificate = tls::load_or_generate_certificate(&config.state_dir)?;
             Some(
                 RustlsConfig::from_pem(
@@ -197,7 +197,7 @@ async fn serve() -> anyhow::Result<()> {
                 .context("build rustls server config")?,
             )
         }
-        None => None,
+        _ => None,
     };
     let signing_key = tls::load_or_generate_session_key(&config.state_dir)?;
 
@@ -210,6 +210,7 @@ async fn serve() -> anyhow::Result<()> {
         .with_builtin_ui(&config.ui_dir)
         .with_features(product_features())
         .with_init(product_init())
+        .with_web_mode(config.listeners.mode)
         .with_secure_cookies(config.listeners.https_addr.is_some())
         .with_data_reserve(routes::data_reserve(
             std::fs::read_to_string(routes::BOOT_POLICY_PATH)
@@ -232,30 +233,42 @@ async fn serve() -> anyhow::Result<()> {
         state.audit().clone(),
     ));
 
-    let https_listener = match &config.listeners.https_addr {
-        Some(addr) => {
-            let listener = std::net::TcpListener::bind(addr)
-                .with_context(|| format!("bind https listener on {addr}"))?;
-            listener.set_nonblocking(true)?;
-            Some(listener)
-        }
-        None => None,
-    };
-    let https_addr = https_listener
-        .as_ref()
-        .map(std::net::TcpListener::local_addr)
-        .transpose()?;
-    let http_listener = tokio::net::TcpListener::bind(&config.listeners.http_addr)
-        .await
-        .with_context(|| format!("bind http listener on {}", config.listeners.http_addr))?;
-    let http_addr = http_listener.local_addr()?;
+    // Out of `network` apid binds no TCP port: the local socket is all it
+    // serves.
+    let tcp = if config.listeners.mode == micad_settings::WebMode::Network {
+        let https_listener = match &config.listeners.https_addr {
+            Some(addr) => {
+                let listener = std::net::TcpListener::bind(addr)
+                    .with_context(|| format!("bind https listener on {addr}"))?;
+                listener.set_nonblocking(true)?;
+                Some(listener)
+            }
+            None => None,
+        };
+        let https_addr = https_listener
+            .as_ref()
+            .map(std::net::TcpListener::local_addr)
+            .transpose()?;
+        let http_listener = tokio::net::TcpListener::bind(&config.listeners.http_addr)
+            .await
+            .with_context(|| format!("bind http listener on {}", config.listeners.http_addr))?;
+        let http_addr = http_listener.local_addr()?;
 
-    // The one machine-readable startup marker; everything else goes to stderr.
-    match https_addr {
-        Some(https_addr) => println!("APID_LISTENING https={https_addr} http={http_addr}"),
-        None => println!("APID_LISTENING http={http_addr}"),
-    }
-    tracing::info!(?https_addr, %http_addr, "apid serving");
+        // The one machine-readable startup marker; everything else goes to stderr.
+        match https_addr {
+            Some(https_addr) => println!("APID_LISTENING https={https_addr} http={http_addr}"),
+            None => println!("APID_LISTENING http={http_addr}"),
+        }
+        tracing::info!(?https_addr, %http_addr, "apid serving");
+        Some((https_listener, https_addr, http_listener))
+    } else {
+        println!("APID_LISTENING local={}", config.local_socket.display());
+        tracing::info!(
+            mode = config.listeners.mode.as_str(),
+            "apid serving the local socket alone"
+        );
+        None
+    };
 
     // The ordering is the requirement rather than a detail: bundle
     // discovery and the compatibility re-check happen **after** the listeners
@@ -286,38 +299,40 @@ async fn serve() -> anyhow::Result<()> {
     // `with_connect_info` installs the peer address the audit trail reads
     // (`audit::Source`); without it every audit line would say `unknown`.
     // Both listeners also add `local_addr::LocalAddr`.
-    let app = routes::app(state);
-    match (https_listener, https_addr, rustls_config) {
-        (Some(https_listener), Some(https_addr), Some(rustls_config)) => {
-            let acceptor = axum_server::tls_rustls::RustlsAcceptor::new(rustls_config)
-                .acceptor(local_addr::LocalAddrAcceptor);
-            let https = axum_server::from_tcp(https_listener)?
-                .acceptor(acceptor)
-                .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>());
-            // With HTTPS on, plain HTTP only redirects: no login crosses the
-            // network in the clear.
-            let http = axum::serve(
-                http_listener,
-                routes::redirect_app(https_addr.port()).into_make_service(),
-            );
-            tokio::spawn(async move {
-                if let Err(err) = https.await {
-                    tracing::error!(error = %err, "https server failed");
-                }
-            });
-            tokio::spawn(async move {
-                if let Err(err) = http.await {
-                    tracing::error!(error = %err, "http redirect server failed");
-                }
-            });
-        }
-        _ => {
-            let http = local_addr::serve_http(http_listener, app);
-            tokio::spawn(async move {
-                if let Err(err) = http.await {
-                    tracing::error!(error = %err, "http server failed");
-                }
-            });
+    if let Some((https_listener, https_addr, http_listener)) = tcp {
+        let app = routes::app(state);
+        match (https_listener, https_addr, rustls_config) {
+            (Some(https_listener), Some(https_addr), Some(rustls_config)) => {
+                let acceptor = axum_server::tls_rustls::RustlsAcceptor::new(rustls_config)
+                    .acceptor(local_addr::LocalAddrAcceptor);
+                let https = axum_server::from_tcp(https_listener)?
+                    .acceptor(acceptor)
+                    .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>());
+                // With HTTPS on, plain HTTP only redirects: no login crosses the
+                // network in the clear.
+                let http = axum::serve(
+                    http_listener,
+                    routes::redirect_app(https_addr.port()).into_make_service(),
+                );
+                tokio::spawn(async move {
+                    if let Err(err) = https.await {
+                        tracing::error!(error = %err, "https server failed");
+                    }
+                });
+                tokio::spawn(async move {
+                    if let Err(err) = http.await {
+                        tracing::error!(error = %err, "http redirect server failed");
+                    }
+                });
+            }
+            _ => {
+                let http = local_addr::serve_http(http_listener, app);
+                tokio::spawn(async move {
+                    if let Err(err) = http.await {
+                        tracing::error!(error = %err, "http server failed");
+                    }
+                });
+            }
         }
     }
 

@@ -8682,8 +8682,8 @@
         "tags": [
           "resources"
         ],
-        "summary": "Move the console: its ports, and whether it serves HTTPS.",
-        "description": "**A `PUT` replaces the whole subtree.** Answers the apply task's id; the\n`web` reconciler then restarts apid on the new listeners, so this\nconnection ends and the console is reached at the new address. With HTTPS\nenabled the HTTP port only redirects to it.",
+        "summary": "Move the console: who reaches the API, its ports, and whether it serves\nHTTPS.",
+        "description": "**A `PUT` replaces the whole subtree.** Answers the apply task's id; the\n`web` reconciler then restarts apid on the new listeners, or stops it for\n`off`, so this connection ends and the console is reached at the new\naddress, or no longer at all. With HTTPS enabled the HTTP port only\nredirects to it.",
         "operationId": "api_v1_web_write",
         "requestBody": {
           "content": {
@@ -8738,6 +8738,16 @@
           },
           "405": {
             "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The mode leaves `network` while SSH is off or has no authorized key (`web_mode_needs_ssh`); only a remote caller is held to it",
             "content": {
               "application/json": {
                 "schema": {
@@ -10326,7 +10336,8 @@
           "settingsSchemaVersion",
           "daemon",
           "features",
-          "init"
+          "init",
+          "webMode"
         ],
         "properties": {
           "api": {
@@ -10350,6 +10361,10 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "webMode": {
+            "type": "string",
+            "description": "Who reaches the API (`access.web.mode`): `network`, or `local`, when\nonly root on the device does, through apid's local socket."
           }
         }
       },
@@ -12528,6 +12543,7 @@
         "type": "object",
         "description": "The `access.web` subtree as the device holds it.\n\nEvery field is required on a write: a `PUT` replaces the subtree.",
         "required": [
+          "mode",
           "httpPort",
           "httpsEnabled",
           "httpsPort"
@@ -12548,9 +12564,22 @@
             "format": "int32",
             "description": "TCP port of the HTTPS listener. Default 8443.",
             "minimum": 0
+          },
+          "mode": {
+            "$ref": "#/components/schemas/WebModeValue",
+            "description": "Who reaches the API. `network`: the console and the API on the ports\nbelow. `local`: only root on the device, through apid's local socket.\n`off`: nobody; apid does not run. Leaving `network` from here needs\nSSH on with an authorized key, the way back (`micad web network`)."
           }
         },
         "additionalProperties": false
+      },
+      "WebModeValue": {
+        "type": "string",
+        "description": "`access.web.mode`.",
+        "enum": [
+          "network",
+          "local",
+          "off"
+        ]
       },
       "WifiAccessPoint": {
         "type": "object",

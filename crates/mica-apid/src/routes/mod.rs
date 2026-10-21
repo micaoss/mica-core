@@ -180,6 +180,8 @@ pub struct AppState {
     pub(crate) features: micad_settings::Features,
     /// The init system the product runs.
     pub(crate) init: micad_settings::Init,
+    /// Who reaches the API, as micad rendered it when apid started.
+    pub(crate) web_mode: micad_settings::WebMode,
     /// The bytes an extracted UI bundle leaves free on DATA: the signed boot
     /// policy's DATA reserve, the one the deployment client keeps.
     data_reserve: u64,
@@ -256,6 +258,7 @@ impl AppState {
             builtin: Arc::new(None),
             features: micad_settings::Features::all(),
             init: micad_settings::Init::Systemd,
+            web_mode: micad_settings::WebMode::Network,
             data_reserve: DEFAULT_DATA_RESERVE,
             secure_cookies: true,
             identity: Arc::new(crate::tls::IdentityStore::new(
@@ -301,6 +304,13 @@ impl AppState {
     #[must_use]
     pub fn with_init(mut self, init: micad_settings::Init) -> Self {
         self.init = init;
+        self
+    }
+
+    /// Report `mode` as who reaches the API.
+    #[must_use]
+    pub fn with_web_mode(mut self, mode: micad_settings::WebMode) -> Self {
+        self.web_mode = mode;
         self
     }
 

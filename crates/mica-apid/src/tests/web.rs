@@ -18,7 +18,8 @@ fn web_tree(web: serde_json::Value) -> serde_json::Value {
 
 #[tokio::test]
 pub(super) async fn the_web_read_answers_the_stored_listeners() {
-    let web = json!({ "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 });
+    let web =
+        json!({ "mode": "network", "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 });
     let (router, _fake) = test_app(web_tree(web.clone()));
     let cookie = login(&router, "hunter2secret").await;
 
@@ -31,10 +32,11 @@ pub(super) async fn the_web_read_answers_the_stored_listeners() {
 #[tokio::test]
 pub(super) async fn the_web_write_commits_the_whole_subtree_in_one_write() {
     let (router, fake) = test_app(web_tree(
-        json!({ "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 }),
+        json!({ "mode": "network", "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 }),
     ));
     let (cookie, csrf) = mqtt_session(&router).await;
-    let moved = json!({ "httpPort": 8081, "httpsEnabled": true, "httpsPort": 9443 });
+    let moved =
+        json!({ "mode": "network", "httpPort": 8081, "httpsEnabled": true, "httpsPort": 9443 });
 
     let response = json_request(
         &router,
@@ -56,11 +58,11 @@ pub(super) async fn the_web_write_commits_the_whole_subtree_in_one_write() {
 #[tokio::test]
 pub(super) async fn the_web_write_refuses_port_zero_and_a_partial_body() {
     let (router, fake) = test_app(web_tree(
-        json!({ "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 }),
+        json!({ "mode": "network", "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 }),
     ));
     let (cookie, csrf) = mqtt_session(&router).await;
     for body in [
-        json!({ "httpPort": 0, "httpsEnabled": false, "httpsPort": 8443 }),
+        json!({ "mode": "network", "httpPort": 0, "httpsEnabled": false, "httpsPort": 8443 }),
         json!({ "httpPort": 8080 }),
     ] {
         let response =
@@ -68,6 +70,55 @@ pub(super) async fn the_web_write_refuses_port_zero_and_a_partial_body() {
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
     assert!(fake.set_paths().is_empty());
+}
+
+/// Leaving `network` from afar needs SSH on with a key: it is the way back.
+#[tokio::test]
+pub(super) async fn leaving_the_network_needs_ssh_with_a_key() {
+    let mut tree = web_tree(
+        json!({ "mode": "network", "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 }),
+    );
+    let (router, fake) = test_app(tree.clone());
+    let (cookie, csrf) = mqtt_session(&router).await;
+    let local =
+        json!({ "mode": "local", "httpPort": 8080, "httpsEnabled": false, "httpsPort": 8443 });
+
+    for ssh in [
+        json!({ "enabled": false, "authorizedKeys": ["ssh-ed25519 AAAA a"] }),
+        json!({ "enabled": true, "authorizedKeys": [] }),
+    ] {
+        fake.set_settings("access.ssh", &ssh).await.unwrap();
+        let response = json_request(
+            &router,
+            "PUT",
+            WEB_PATH,
+            local.clone(),
+            Some(&cookie),
+            Some(&csrf),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            body_json(response).await["error"]["code"],
+            json!("web_mode_needs_ssh")
+        );
+    }
+    assert!(!fake.set_paths().contains(&"access.web".to_string()));
+
+    tree["access"]["ssh"] = json!({ "enabled": true, "authorizedKeys": ["ssh-ed25519 AAAA a"] });
+    let (router, fake) = test_app(tree);
+    let (cookie, csrf) = mqtt_session(&router).await;
+    let response = json_request(
+        &router,
+        "PUT",
+        WEB_PATH,
+        local.clone(),
+        Some(&cookie),
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(fake.get_settings("access.web").await.unwrap(), local);
 }
 
 /// Over plain HTTP a `Secure` cookie would be dropped by the browser, so the

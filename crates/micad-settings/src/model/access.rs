@@ -144,6 +144,8 @@ pub struct ConsoleSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct WebSettings {
+    /// Who reaches the API: the network, the device alone, or nobody.
+    pub mode: WebMode,
     /// TCP port of the HTTP listener.
     pub http_port: u16,
     /// Whether apid serves HTTPS.
@@ -161,9 +163,35 @@ pub const APID_LISTENERS_PATH: &str = "/run/mica/apid.json";
 /// it tells apart by their uid rather than by a credential they carry.
 pub const APID_LOCAL_SOCKET_PATH: &str = "/run/mica/apid.sock";
 
+/// Who reaches the API (`access.web.mode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebMode {
+    /// apid serves its TCP listeners and the local socket.
+    #[default]
+    Network,
+    /// apid serves the local socket alone.
+    Local,
+    /// apid does not run.
+    Off,
+}
+
+impl WebMode {
+    /// The setting's value as it is written.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Network => "network",
+            Self::Local => "local",
+            Self::Off => "off",
+        }
+    }
+}
+
 impl Default for WebSettings {
     fn default() -> Self {
         Self {
+            mode: WebMode::Network,
             http_port: 8080,
             https_enabled: false,
             https_port: 8443,
@@ -188,9 +216,12 @@ pub(crate) fn validate_listeners(
     ssh: &SshSettings,
     mqtt: &super::MqttSettings,
 ) -> Result<(), String> {
-    let mut claimed = vec![("access.web.httpPort", web.http_port)];
-    if web.https_enabled {
-        claimed.push(("access.web.httpsPort", web.https_port));
+    let mut claimed = Vec::new();
+    if web.mode == WebMode::Network {
+        claimed.push(("access.web.httpPort", web.http_port));
+        if web.https_enabled {
+            claimed.push(("access.web.httpsPort", web.https_port));
+        }
     }
     if ssh.enabled {
         claimed.push(("access.ssh.port", ssh.port));
