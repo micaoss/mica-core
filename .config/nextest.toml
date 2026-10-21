@@ -1,12 +1,12 @@
-# The Bluetooth agent tests each start a private dbus-daemon. They answer in
-# milliseconds, but under the full parallel gate the daemon can be starved, so
-# they run one at a time and a hang is ended rather than holding the gate.
+# The Bluetooth agent's registration test starts a private dbus-daemon. It
+# answers in milliseconds, but under the full parallel gate the daemon can be
+# starved, so it runs alone and a hang is ended rather than holding the gate.
 # Every other test keeps nextest's default of no limit, as some legitimately
 # take half a minute on a slow runner.
 [test-groups]
 private-bus = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'package(micad) and test(/^bluetooth::tests::agent::the_agent_(serves_the_recorded_interface|registers_each_time_bluetoothd_appears)$/)'
+filter = 'package(micad) and test(/^bluetooth::tests::agent::the_agent_registers_each_time_bluetoothd_appears$/)'
 test-group = 'private-bus'
 slow-timeout = { period = "60s", terminate-after = 2 }
