@@ -565,7 +565,10 @@ the uid, the capabilities and the files' own permissions are all that confine it
 its data, its own processes' files and what is world-writable (`/tmp`), reads what is
 world-readable, and opens a device whose node lets its uid or group, so a device's group gives it
 every node of that group. The first-run hook of an app
-of its own user runs as it too, with no capabilities and `HOME` its data.
+of its own user runs as it too, with no capabilities. `setpriv` runs as root, so it gets none of
+the app's variables: for a service and for the hook it runs `/usr/bin/env -i` as the app, which
+sets `PATH`, `HOME` (the app's data), the `APP_*` variables and the manifest's `env`, and then runs
+the app's file.
 
 **Install and upgrade.** A bundle is checked before it is taken: its manifest, its units and what
 is installed, so a broken one is refused with every rule it breaks and nothing changes. The
@@ -575,8 +578,8 @@ that the filesystem has room for what it unpacks to, flushed and renamed into pl
 stops the units the running version has, installs the new version's (and an OpenRC script's `conf.d`, `units/openrc/conf.d/<name>`),
 removes those it no longer ships, points `/mica/apps/<name>/current` at the version in one
 rename, and writes `/mica/apps/<name>/app.env`: `APP_NAME`, `APP_VERSION`, `APP_DIR` (`current`),
-`APP_DATA` and the manifest's `env`, which the units read; the services of an app of its own user
-get `HOME` its data too. The first-run hook runs once per version, in the version's directory as
+`APP_DATA` and the manifest's `env`, which a root app's units read; the services of an app of its
+own user get the same variables through `env -i` instead. The first-run hook runs once per version, in the version's directory as
 the app runs, with only `PATH` and that environment, for at most 300 s; its output is kept in `first-run.log` beside `app.env` and sent to syslog tagged
 `mica-app-<name>`. Then each unit is enabled or disabled as the manifest says and the enabled ones
 are started; one left `failed` fails the install. A failed upgrade switches back to the version

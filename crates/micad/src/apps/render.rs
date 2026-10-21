@@ -1,7 +1,9 @@
 //! The units micad writes for the services of an app that runs as its own
 //! user. Each runs through `setpriv` as the app's uid, keeping only the
 //! capabilities the app declares, with no new privileges; under systemd in a
-//! sandbox besides, where it writes only its data directory.
+//! sandbox besides, where it writes only its data directory. `setpriv` runs as
+//! root, so it is given none of the app's variables: `env -i` sets them once
+//! it has dropped to the app's uid.
 
 use std::collections::BTreeMap;
 
@@ -12,6 +14,30 @@ use super::manifest::{self, Service};
 
 /// Where `setpriv` is on a device.
 pub const SETPRIV: &str = "/usr/bin/setpriv";
+/// Where `env` is on a device.
+pub const ENV: &str = "/usr/bin/env";
+/// The `PATH` an app's processes start with.
+pub const PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/// What follows setpriv's `--` for `file`: `env -i` with `PATH`, `HOME` (the
+/// app's data) and `vars`, then `file`. Run as the app's uid, so nothing the
+/// app sets reaches a process of root's.
+pub fn env_args(file: String, vars: &[(String, String)]) -> anyhow::Result<Vec<String>> {
+    let home = vars
+        .iter()
+        .find(|(key, _)| key == "APP_DATA")
+        .map(|(_, value)| value)
+        .context("APP_DATA")?;
+    let mut args = vec![
+        ENV.to_string(),
+        "-i".to_string(),
+        format!("PATH={PATH}"),
+        format!("HOME={home}"),
+    ];
+    args.extend(vars.iter().map(|(key, value)| format!("{key}={value}")));
+    args.push(file);
+    Ok(args)
+}
 
 /// Who an app's processes run as.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,8 +92,8 @@ fn plain(value: &str) -> anyhow::Result<&str> {
     Ok(value)
 }
 
-/// What a service of `app` runs: setpriv, then its file and arguments with
-/// `vars` expanded.
+/// What a service of `app` runs: setpriv, `env` with `vars`, then its file
+/// and arguments with `vars` expanded.
 fn command(
     service: &Service,
     account: &Account,
@@ -78,7 +104,8 @@ fn command(
     let file = exec.next().context("the service runs nothing")?;
     let mut args = vec![SETPRIV.to_string()];
     args.extend(setpriv_args(account));
-    args.push(format!("{dir}/{file}"));
+    let pairs: Vec<(String, String)> = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    args.extend(env_args(format!("{dir}/{file}"), &pairs)?);
     for arg in exec {
         args.push(manifest::expand(arg, vars).with_context(|| format!("expand {arg:?}"))?);
     }
@@ -126,8 +153,6 @@ pub fn unit(
                  RequiresMountsFor={app_dir} {data}\n\
                  \n\
                  [Service]\n\
-                 EnvironmentFile={app_dir}/app.env\n\
-                 Environment=\"HOME={data}\"\n\
                  WorkingDirectory={data}\n\
                  ExecStart={exec}\n\
                  SyslogIdentifier={name}\n\
@@ -157,12 +182,7 @@ pub fn unit(
         }
         Init::Openrc => {
             let quote = |arg: &str| format!("'{arg}'");
-            let mut daemon = vec![format!("--chdir {}", quote(data))];
-            daemon.extend(
-                std::iter::once(("HOME", data.as_str()))
-                    .chain(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-                    .map(|(key, value)| format!("-e {}", quote(&format!("{key}={value}")))),
-            );
+            let daemon = format!("--chdir {}", quote(data));
             let rest: Vec<String> = args[1..].iter().map(|arg| quote(arg)).collect();
             format!(
                 "#!/sbin/openrc-run\n\
@@ -181,7 +201,6 @@ pub fn unit(
                 uid = account.uid,
                 name = service.name,
                 rest = rest.join(" "),
-                daemon = daemon.join(" "),
             )
         }
     })
@@ -256,7 +275,7 @@ mod tests {
         )
         .unwrap();
         for line in [
-            "ExecStart=\"/usr/bin/setpriv\" \"--reuid=30000\" \"--regid=30000\" \"--clear-groups\" \"--bounding-set=-all,+net_admin,+net_raw\" \"--inh-caps=-all,+net_admin,+net_raw\" \"--ambient-caps=-all,+net_admin,+net_raw\" \"--no-new-privs\" \"--\" \"/mica/apps/tailscale/current/files/tailscaled\" \"--state=/srv/apps/tailscale/tailscaled.state\" \"--socket=/srv/apps/tailscale/tailscaled.sock\" \"--port=41641\"",
+            "ExecStart=\"/usr/bin/setpriv\" \"--reuid=30000\" \"--regid=30000\" \"--clear-groups\" \"--bounding-set=-all,+net_admin,+net_raw\" \"--inh-caps=-all,+net_admin,+net_raw\" \"--ambient-caps=-all,+net_admin,+net_raw\" \"--no-new-privs\" \"--\" \"/usr/bin/env\" \"-i\" \"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\" \"HOME=/srv/apps/tailscale\" \"APP_DATA=/srv/apps/tailscale\" \"APP_DIR=/mica/apps/tailscale/current\" \"APP_NAME=tailscale\" \"APP_VERSION=1.104.2\" \"TS_SOCKET=/srv/apps/tailscale/tailscaled.sock\" \"/mica/apps/tailscale/current/files/tailscaled\" \"--state=/srv/apps/tailscale/tailscaled.state\" \"--socket=/srv/apps/tailscale/tailscaled.sock\" \"--port=41641\"",
             "SyslogIdentifier=tailscaled",
             "NoNewPrivileges=yes",
             "ProtectSystem=strict",
@@ -266,10 +285,29 @@ mod tests {
             "CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_NET_ADMIN CAP_NET_RAW",
             "DevicePolicy=closed",
             "DeviceAllow=/dev/net/tun rw",
-            "Environment=\"HOME=/srv/apps/tailscale\"",
             "WantedBy=multi-user.target",
         ] {
             assert!(text.lines().any(|l| l == line), "{line}\n{text}");
+        }
+    }
+
+    /// setpriv runs as root: nothing the app sets may reach it, so its
+    /// variables are set by `env -i` after the drop, never by the unit.
+    #[test]
+    fn the_apps_variables_are_set_after_the_drop() {
+        let (service, account, mut vars) = tailscaled();
+        vars.insert("LD_PRELOAD".into(), "/srv/apps/tailscale/x.so".into());
+        for init in [Init::Systemd, Init::Openrc] {
+            let text = unit(init, "tailscale", &service, &account, &[], &vars).unwrap();
+            assert!(!text.contains("EnvironmentFile"), "{text}");
+            assert!(!text.contains("Environment="), "{text}");
+            assert!(!text.contains(" -e "), "{text}");
+            let drop = text.find("--no-new-privs").unwrap();
+            let preload = text.find("LD_PRELOAD").unwrap();
+            assert!(
+                text[drop..].contains("/usr/bin/env")
+                    && preload > text.find("/usr/bin/env").unwrap()
+            );
         }
     }
 
@@ -298,10 +336,13 @@ mod tests {
         for line in [
             "supervisor=supervise-daemon",
             "command=/usr/bin/setpriv",
-            "command_args=\"'--reuid=30000' '--regid=30000' '--clear-groups' '--bounding-set=-all,+net_admin,+net_raw' '--inh-caps=-all,+net_admin,+net_raw' '--ambient-caps=-all,+net_admin,+net_raw' '--no-new-privs' '--' '/mica/apps/tailscale/current/files/tailscaled' '--state=/srv/apps/tailscale/tailscaled.state' '--socket=/srv/apps/tailscale/tailscaled.sock' '--port=41641'\"",
+            "command_args=\"'--reuid=30000' '--regid=30000' '--clear-groups' '--bounding-set=-all,+net_admin,+net_raw' '--inh-caps=-all,+net_admin,+net_raw' '--ambient-caps=-all,+net_admin,+net_raw' '--no-new-privs' '--' '/usr/bin/env' '-i' 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' 'HOME=/srv/apps/tailscale' 'APP_DATA=/srv/apps/tailscale' 'APP_DIR=/mica/apps/tailscale/current' 'APP_NAME=tailscale' 'APP_VERSION=1.104.2' 'TS_SOCKET=/srv/apps/tailscale/tailscaled.sock' '/mica/apps/tailscale/current/files/tailscaled' '--state=/srv/apps/tailscale/tailscaled.state' '--socket=/srv/apps/tailscale/tailscaled.sock' '--port=41641'\"",
         ] {
             assert!(text.lines().any(|l| l == line), "{line}\n{text}");
         }
-        assert!(text.contains("--chdir '/srv/apps/tailscale' -e 'HOME=/srv/apps/tailscale' -e 'APP_DATA=/srv/apps/tailscale'"));
+        assert!(
+            text.lines()
+                .any(|l| l == "supervise_daemon_args=\"--chdir '/srv/apps/tailscale'\"")
+        );
     }
 }

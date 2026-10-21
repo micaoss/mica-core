@@ -580,6 +580,9 @@ impl Apps {
         account: Option<&Account>,
     ) -> anyhow::Result<()> {
         let manifest = bundle::read_manifest(dir).map_err(|err| anyhow::anyhow!("{err}"))?;
+        let vars = self.env_of(name, &manifest)?;
+        // setpriv runs as root, so it gets PATH alone; `env -i` sets the
+        // app's variables once it runs as the app.
         let mut command = match account {
             Some(account) => {
                 let mut command = tokio::process::Command::new(&self.setpriv);
@@ -588,23 +591,22 @@ impl Apps {
                         capabilities: Vec::new(),
                         ..account.clone()
                     }))
-                    .arg(dir.join(hook));
+                    .args(render::env_args(
+                        dir.join(hook).to_string_lossy().into_owned(),
+                        &vars,
+                    )?);
                 command
             }
             None => tokio::process::Command::new(dir.join(hook)),
         };
-        let vars = self.env_of(name, &manifest)?;
-        command.current_dir(dir).env_clear().env(
-            "PATH",
-            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        );
-        if account.is_some()
-            && let Some((_, data)) = vars.iter().find(|(key, _)| key == "APP_DATA")
-        {
-            command.env("HOME", data);
+        command
+            .current_dir(dir)
+            .env_clear()
+            .env("PATH", render::PATH);
+        if account.is_none() {
+            command.envs(vars);
         }
         let run = command
-            .envs(vars)
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true)
             .output();
