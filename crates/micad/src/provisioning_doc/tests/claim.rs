@@ -105,7 +105,13 @@ pub(super) fn an_injected_identity_is_the_one_first_boot_seeds_from() {
     let mut settings = Settings::default();
 
     import(&store, &mut settings, &root).expect("import");
-    crate::provisioning::ensure_provisioned(&store, dir.path(), &mut settings).expect("seed");
+    crate::provisioning::ensure_provisioned(
+        &store,
+        dir.path(),
+        &mut settings,
+        &micad_settings::Features::only(&[]),
+    )
+    .expect("seed");
 
     assert_eq!(
         settings.provisioning.device_id.as_deref(),
@@ -135,7 +141,13 @@ pub(super) fn a_refused_document_leaves_a_working_unclaimed_appliance() {
     ));
     // Seeding still runs and still works, which is what "does not block
     // boot" means for the daemon that follows.
-    crate::provisioning::ensure_provisioned(&store, dir.path(), &mut settings).expect("seed");
+    crate::provisioning::ensure_provisioned(
+        &store,
+        dir.path(),
+        &mut settings,
+        &micad_settings::Features::only(&[]),
+    )
+    .expect("seed");
     assert_eq!(settings.provisioning.state, ProvisioningState::Complete);
     assert!(
         settings.access.web_admin.is_none(),

@@ -203,8 +203,13 @@ async fn serve() -> anyhow::Result<()> {
         // and no device credential, so there is no usable device to serve. A
         // loud exit is better than a daemon that quietly serves an
         // unprovisioned tree the operator cannot log in to.
-        let outcome = provisioning::ensure_provisioned(&store, &state_dir, &mut settings)
-            .context("first-boot provisioning")?;
+        let outcome = provisioning::ensure_provisioned(
+            &store,
+            &state_dir,
+            &mut settings,
+            &product_features(std::path::Path::new(micad_settings::PRODUCT_FILE)),
+        )
+        .context("first-boot provisioning")?;
         tracing::info!(?outcome, state_dir = %state_dir.display(), "provisioning checked");
         // After provisioning, so a provisioning document's entry is the tree's
         // and the board's default never overrides it.
