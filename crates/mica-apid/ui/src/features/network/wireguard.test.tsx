@@ -37,19 +37,24 @@ describe('the WireGuard tab', () => {
     expect(hostRoute('fd00::1/64')).toBe('fd00::1/128')
   })
 
-  it('adds a peer straight to the device', async () => {
+  it('adds a named peer with a pre-shared key straight to the device', async () => {
     const fetch = stubFetch({ ...networkRoutes(), 'POST /api/v1/network/wg0/peers': () => jsonResponse({ publicKey: NEW_PEER, allowedIps: ['10.8.0.3/32'] }) })
     open('tab=wireguard&tunnel=wg0')
     await screen.findByText(`${PEER_KEY.slice(0, 8)}…${PEER_KEY.slice(-6)}`)
     await userEvent.click(screen.getByRole('button', { name: 'Add peer' }))
     const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Skipper laptop')
     await userEvent.type(within(dialog).getByLabelText('Public key'), NEW_PEER)
+    await userEvent.type(within(dialog).getByLabelText('Pre-shared key'), 'short')
+    expect(within(dialog).getByText('A WireGuard key is 44 base64 characters.')).toBeTruthy()
+    await userEvent.clear(within(dialog).getByLabelText('Pre-shared key'))
+    await userEvent.type(within(dialog).getByLabelText('Pre-shared key'), PEER_KEY)
     await userEvent.type(within(dialog).getByLabelText('Allowed IPs'), '10.8.0.3/32')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
 
     await waitFor(() => {
       const call = fetch.mock.calls.find(([input, init]) => String(input) === '/api/v1/network/wg0/peers' && (init as RequestInit | undefined)?.method === 'POST')
-      expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ publicKey: NEW_PEER, allowedIps: ['10.8.0.3/32'] })
+      expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ name: 'Skipper laptop', publicKey: NEW_PEER, presharedKey: PEER_KEY, allowedIps: ['10.8.0.3/32'] })
     })
     expect((await screen.findAllByText('Peer added.')).length).toBeGreaterThan(0)
   })

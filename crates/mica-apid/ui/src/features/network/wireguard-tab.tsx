@@ -27,6 +27,8 @@ import type { NetworkData } from './use-network'
 import { computeStatus } from './view'
 
 const KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/
+const MAX_PEER_NAME = 64
+const EMPTY_PEER = { name: '', publicKey: '', presharedKey: '', allowedIps: '', endpoint: '', keepalive: '' }
 const shortKey = (key: string) => `${key.slice(0, 8)}…${key.slice(-6)}`
 
 /// `10.10.0.2/24` as the route to that one host, `10.10.0.2/32`.
@@ -103,7 +105,7 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
   const [draft, setDraft] = useState<{ address: string; port: string }>()
   useEffect(() => { onEditing(draft !== undefined); return () => onEditing(false) }, [draft, onEditing])
   const [adding, setAdding] = useState(false)
-  const [peer, setPeer] = useState({ publicKey: '', allowedIps: '', endpoint: '', keepalive: '' })
+  const [peer, setPeer] = useState(EMPTY_PEER)
   const peers = useQuery({ queryKey: ['wireguard-peers', name], queryFn: () => api<WireguardPeer[]>(`/api/v1/network/${encodeURIComponent(name)}/peers`) })
   const invalidatePeers = () => {
     void queryClient.invalidateQueries({ queryKey: ['wireguard-peers', name] })
@@ -147,7 +149,9 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
     setDraft(undefined)
     notifySuccess(t('network.edit.staged'))
   }
-  const peerErrors: { publicKey?: string; allowedIps?: string; endpoint?: string; keepalive?: string } = {}
+  const peerErrors: { name?: string; publicKey?: string; presharedKey?: string; allowedIps?: string; endpoint?: string; keepalive?: string } = {}
+  if (peer.name.trim().length > MAX_PEER_NAME) peerErrors.name = t('network.wireguard.nameLong', { count: MAX_PEER_NAME })
+  if (peer.presharedKey && !KEY_PATTERN.test(peer.presharedKey)) peerErrors.presharedKey = t('network.wireguard.keyFormat')
   const allowed = peer.allowedIps.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean)
   if (!KEY_PATTERN.test(peer.publicKey)) peerErrors.publicKey = t('network.wireguard.keyFormat')
   else if (peers.data?.some((each) => each.publicKey === peer.publicKey)) peerErrors.publicKey = t('network.wireguard.keyTaken')
@@ -155,12 +159,14 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
   if (peer.endpoint && !/^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+):\d{1,5}$/.test(peer.endpoint)) peerErrors.endpoint = t('network.wireguard.endpointFormat')
   if (peer.keepalive && !(Number(peer.keepalive) >= 1 && Number(peer.keepalive) <= 65535)) peerErrors.keepalive = t('network.wireguard.keepaliveRange')
   const addPeer = () => api<WireguardPeer>(`/api/v1/network/${encodeURIComponent(name)}/peers`, json('POST', {
+    ...(peer.name.trim() ? { name: peer.name.trim() } : {}),
     publicKey: peer.publicKey,
+    ...(peer.presharedKey ? { presharedKey: peer.presharedKey } : {}),
     allowedIps: allowed,
     ...(peer.endpoint ? { endpoint: peer.endpoint } : {}),
     ...(peer.keepalive ? { persistentKeepalive: Number(peer.keepalive) } : {}),
   })).then(() => {
-    setPeer({ publicKey: '', allowedIps: '', endpoint: '', keepalive: '' })
+    setPeer(EMPTY_PEER)
     invalidatePeers()
   })
 
@@ -232,7 +238,12 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
             isPending={peers.isPending}
             empty={t('network.wireguard.noPeers')}
             columns={[
-              { id: 'key', header: t('network.wireguard.publicKey'), cell: (each) => <span className="font-mono text-[0.8125rem]" title={each.publicKey}>{shortKey(each.publicKey)}</span> },
+              { id: 'key', header: t('network.wireguard.peer'), cell: (each) => (
+                <span className="grid">
+                  <strong className={each.name ? undefined : 'font-normal text-muted-foreground'}>{each.name || t('network.wireguard.unnamed')}</strong>
+                  <span className="text-[0.8125rem] text-muted-foreground"><span className="font-mono" title={each.publicKey}>{shortKey(each.publicKey)}</span>{each.presharedKey ? <span> · {t('network.wireguard.withPsk')}</span> : null}</span>
+                </span>
+              ) },
               { id: 'endpoint', header: t('network.wireguard.endpoint'), cell: (each) => each.endpoint ? <span className="font-mono text-[0.8125rem]">{each.endpoint}</span> : <span className="text-muted-foreground">{t('network.wireguard.waiting')}</span> },
               { id: 'allowed', header: t('network.wireguard.allowed'), cell: (each) => <span className="font-mono text-[0.8125rem]">{each.allowedIps.join(', ')}</span> },
               { id: 'keepalive', header: t('network.wireguard.keepalive'), cell: (each) => each.persistentKeepalive ? t('network.values.seconds', { count: each.persistentKeepalive }) : '—' },
@@ -263,8 +274,14 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
         onSubmit={addPeer}
         submitDisabled={Object.keys(peerErrors).length > 0}
       >
+        <FormField label={t('network.wireguard.name')} hint={peerErrors.name ? <span className="text-destructive">{peerErrors.name}</span> : t('network.wireguard.nameHint')}>
+          {(id) => <Input id={id} value={peer.name} onChange={(event) => setPeer({ ...peer, name: event.target.value })} />}
+        </FormField>
         <FormField label={t('network.wireguard.publicKey')} hint={peer.publicKey && peerErrors.publicKey ? <span className="text-destructive">{peerErrors.publicKey}</span> : t('network.wireguard.keyHint')}>
           {(id) => <Input id={id} className="font-mono" value={peer.publicKey} onChange={(event) => setPeer({ ...peer, publicKey: event.target.value.trim() })} required />}
+        </FormField>
+        <FormField label={t('network.wireguard.presharedKey')} hint={peerErrors.presharedKey ? <span className="text-destructive">{peerErrors.presharedKey}</span> : t('network.wireguard.presharedHint')}>
+          {(id) => <Input id={id} className="font-mono" value={peer.presharedKey} placeholder={t('network.wireguard.presharedNone')} onChange={(event) => setPeer({ ...peer, presharedKey: event.target.value.trim() })} />}
         </FormField>
         <FormField label={t('network.wireguard.endpoint')} hint={peerErrors.endpoint ? <span className="text-destructive">{peerErrors.endpoint}</span> : t('network.wireguard.endpointHint')}>
           {(id) => <Input id={id} className="font-mono" value={peer.endpoint} placeholder="vpn.example.com:51820" onChange={(event) => setPeer({ ...peer, endpoint: event.target.value.trim() })} />}

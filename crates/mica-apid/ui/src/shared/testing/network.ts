@@ -62,6 +62,6 @@ export function networkRoutes(map: Record<string, unknown> = configured(), statu
     '/api/v1/wifi/ap': accessPoint(),
     '/api/v1/wifi/client/networks': [{ ssid: 'marina', psk: '<redacted>', hidden: false, priority: 10 }],
     '/api/v1/state/network': { wg0: { publicKey: 'Q2hhbmdlTWVQbGVhc2VDaGFuZ2VNZVBsZWFzZTAwMDA=' } },
-    '/api/v1/network/wg0/peers': [{ publicKey: PEER_KEY, allowedIps: ['10.8.0.2/32'], persistentKeepalive: 25 }],
+    '/api/v1/network/wg0/peers': [{ name: 'Harbour office', publicKey: PEER_KEY, presharedKey: '<redacted>', allowedIps: ['10.8.0.2/32'], persistentKeepalive: 25 }],
   } as Record<string, unknown>
 }

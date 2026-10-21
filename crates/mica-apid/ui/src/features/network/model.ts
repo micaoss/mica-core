@@ -6,7 +6,9 @@ export type IfaceKind = 'physical' | 'vlan' | 'bridge' | 'wireguard' | 'can'
 /// device reports and nobody declared.
 export type ViewKind = IfaceKind | 'wifi'
 
-export interface WireguardPeer { publicKey: string; allowedIps: string[]; endpoint?: string; persistentKeepalive?: number }
+/// `presharedKey` reads as the redaction sentinel; sent back, it keeps the
+/// stored key.
+export interface WireguardPeer { name?: string; publicKey: string; presharedKey?: string; allowedIps: string[]; endpoint?: string; persistentKeepalive?: number }
 export interface StaticRoute { destination: string; gateway?: string; metric?: number }
 /// `dns` is absent when no server is announced: the device does not write an
 /// empty list.
