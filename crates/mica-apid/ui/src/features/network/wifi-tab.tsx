@@ -98,25 +98,20 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
   const saved = t(modeChanged ? 'network.wifi.switched' : turningOff ? 'network.wifi.turnedOff' : 'network.wifi.configSaved')
   const send = async () => {
     if (!draft) return
-    // The role switch is one write of both roles: one radio, one role.
-    const roles = (client: boolean, apMode: WifiAccessPoint['mode']) => api<TaskAccepted>('/api/v1/settings', json('PATCH', { 'wifi.client.enabled': client, 'wifi.ap.mode': apMode }))
+    // The role and its configuration are one write: one radio, one role.
+    const role = (body: object) => api<TaskAccepted>('/api/v1/wifi', json('PUT', body))
     try {
       if (!draft.enabled) {
-        await roles(false, 'off')
+        await role({ enabled: false, mode: draft.mode })
       } else if (draft.mode === 'client') {
         if (client && client.interface !== radio) await api<TaskAccepted>('/api/v1/wifi/client', json('PUT', { enabled: client.enabled, interface: radio }))
-        if (!client?.enabled || (ap && ap.mode !== 'off')) await roles(true, 'off')
-        if (!sameEntry(draft.addressing, stored)) await api<TaskAccepted>(`/api/v1/network/${encodeURIComponent(radio)}`, json('PUT', draft.addressing))
+        await role({ enabled: true, mode: 'client', ...(sameEntry(draft.addressing, stored) ? {} : { client: { addressing: draft.addressing } }) })
       } else {
-        if (draft.psk !== '' || apChanged || !ap) {
-          // The stored key reads as the redaction sentinel; absent keeps it.
-          const body: Partial<WifiAccessPoint> = { ...ap, mode: ap?.mode ?? 'off', interface: radio, ...apFields(draft) }
-          delete body.psk
-          if (!body.ssid) delete body.ssid
-          if (draft.psk && draft.security !== 'open') body.psk = draft.psk
-          await api<TaskAccepted>('/api/v1/wifi/ap', json('PUT', body))
-        }
-        if (client?.enabled || ap?.mode !== draft.start) await roles(false, draft.start)
+        // The stored key reads as the redaction sentinel; absent keeps it.
+        const config: Record<string, unknown> = { start: draft.start, interface: radio, holdDownSeconds: ap?.holdDownSeconds ?? 120, graceSeconds: ap?.graceSeconds ?? 60, ...apFields(draft), countryConfirmed: draft.countryConfirmed }
+        if (!config.ssid) delete config.ssid
+        if (draft.psk && draft.security !== 'open') config.psk = draft.psk
+        await role({ enabled: true, mode: 'ap', ap: config })
       }
       setDraft(undefined)
     } finally {

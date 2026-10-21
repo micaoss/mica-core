@@ -268,7 +268,7 @@ describe('the Wi-Fi tab', () => {
   })
 
   it('starts the access point with one write of both roles', async () => {
-    const fetch = stubFetch({ ...networkRoutes(), 'PATCH /api/v1/settings': () => jsonResponse({ taskId: 'roles' }, 202) })
+    const fetch = stubFetch({ ...networkRoutes(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'roles' }, 202) })
     open('wifi')
     await screen.findByText('marina')
     // The saved network's row comes first; the radio's own card is last.
@@ -279,15 +279,14 @@ describe('the Wi-Fi tab', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: 'The device operates in this country' }))
     await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
 
-    await waitFor(() => expect(bodyOf(fetch, 'PATCH', '/api/v1/settings')).toEqual({ 'wifi.client.enabled': false, 'wifi.ap.mode': 'always' }))
-    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'ap', ap: { start: 'always', interface: 'wlan0', holdDownSeconds: 120, graceSeconds: 60, ssid: 'mica-lab', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', security: 'wpa2-psk', countryConfirmed: true } }))
+    expect(fetch.mock.calls.filter(([, init]) => ['PUT', 'PATCH'].includes((init as RequestInit | undefined)?.method ?? ''))).toHaveLength(1)
   })
 
   it('writes the access point\'s security, pool and lease without sending its stored key', async () => {
     const fetch = stubFetch({
       ...networkRoutes(),
-      'PUT /api/v1/wifi/ap': () => jsonResponse({ taskId: 'ap' }),
-      'PATCH /api/v1/settings': () => jsonResponse({ taskId: 'roles' }, 202),
+      'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'roles' }, 202),
     })
     open('wifi')
     await screen.findByText('marina')
@@ -307,19 +306,18 @@ describe('the Wi-Fi tab', () => {
     await userEvent.type(screen.getByLabelText('Lease (seconds)'), '3600')
     await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
 
-    await waitFor(() => expect(bodyOf(fetch, 'PATCH', '/api/v1/settings')).toEqual({ 'wifi.client.enabled': false, 'wifi.ap.mode': 'always' }))
-    const body = bodyOf(fetch, 'PUT', '/api/v1/wifi/ap')!
-    expect(body.psk).toBeUndefined()
-    expect(body).toMatchObject({ mode: 'off', interface: 'wlan0', ssid: 'mica-lab', countryCode: 'DE', channel: 6, address: '192.168.4.1/24', security: 'wpa2-psk', pool: { offset: 100, size: 50 }, leaseSeconds: 3600 })
-    const order = fetch.mock.calls.filter(([, init]) => ['PUT', 'PATCH'].includes((init as RequestInit | undefined)?.method ?? '')).map(([input]) => String(input))
-    expect(order).toEqual(['/api/v1/wifi/ap', '/api/v1/settings'])
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toBeTruthy())
+    const body = bodyOf(fetch, 'PUT', '/api/v1/wifi')!
+    expect(body).toMatchObject({ enabled: true, mode: 'ap' })
+    expect((body.ap as Record<string, unknown>).psk).toBeUndefined()
+    expect(body.ap).toMatchObject({ start: 'always', interface: 'wlan0', ssid: 'mica-lab', countryCode: 'DE', countryConfirmed: true, channel: 6, address: '192.168.4.1/24', security: 'wpa2-psk', pool: { offset: 100, size: 50 }, leaseSeconds: 3600 })
   })
 
   it('asks before switching a running access point to the client, and lets go of the radio first', async () => {
     const fetch = stubFetch({
       ...networkRoutes(),
       '/api/v1/wifi/ap': accessPoint('always'),
-      'PATCH /api/v1/settings': () => jsonResponse({ taskId: 'roles' }, 202),
+      'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'roles' }, 202),
     })
     open('wifi')
     expect(await screen.findByText('No clients are connected.')).toBeTruthy()
@@ -331,8 +329,8 @@ describe('the Wi-Fi tab', () => {
     expect(within(confirm).getByText('Switch to client?')).toBeTruthy()
     await userEvent.click(within(confirm).getByRole('button', { name: 'Switch and save' }))
 
-    await waitFor(() => expect(bodyOf(fetch, 'PATCH', '/api/v1/settings')).toEqual({ 'wifi.client.enabled': true, 'wifi.ap.mode': 'off' }))
-    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client' }))
+    expect(fetch.mock.calls.filter(([, init]) => ['PUT', 'PATCH'].includes((init as RequestInit | undefined)?.method ?? ''))).toHaveLength(1)
   })
 })
 
@@ -368,7 +366,7 @@ describe('the Wi-Fi tab as a client', () => {
   })
 
   it('stages nothing and asks before turning the radio off', async () => {
-    const fetch = stubFetch({ ...joined(), 'PATCH /api/v1/settings': () => jsonResponse({ taskId: 'off' }, 202) })
+    const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'off' }, 202) })
     open('wifi')
     await screen.findByText('-52 dBm')
     await userEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!)
@@ -376,11 +374,11 @@ describe('the Wi-Fi tab as a client', () => {
     await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
     const confirm = await screen.findByRole('alertdialog')
     await userEvent.click(within(confirm).getByRole('button', { name: 'Turn off' }))
-    await waitFor(() => expect(bodyOf(fetch, 'PATCH', '/api/v1/settings')).toEqual({ 'wifi.client.enabled': false, 'wifi.ap.mode': 'off' }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: false, mode: 'client' }))
   })
 
   it('writes the radio\'s own addressing as an interface', async () => {
-    const fetch = stubFetch({ ...joined(), 'PUT /api/v1/network/wlan0': () => jsonResponse({ taskId: 'w' }) })
+    const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'w' }) })
     open('wifi')
     await screen.findByText('-52 dBm')
     await userEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!)
@@ -393,7 +391,7 @@ describe('the Wi-Fi tab as a client', () => {
     await userEvent.clear(screen.getByLabelText('Gateway'))
     await userEvent.type(screen.getByLabelText('Gateway'), '192.168.30.1')
     await userEvent.click(within(bar).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/network/wlan0')).toEqual({ dhcp: false, static: { address: '192.168.30.5/24', gateway: '192.168.30.1', dns: [] } }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client', client: { addressing: { dhcp: false, static: { address: '192.168.30.5/24', gateway: '192.168.30.1', dns: [] } } } }))
   })
 })
 
