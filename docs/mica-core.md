@@ -148,6 +148,15 @@ is not waited for, and one the apply creates must appear. When one fails or time
 previous units go back, the devices whose `.netdev` changed are deleted, networkd reloads, the
 task fails naming the interface, and the stored network map goes back to the one last applied.
 
+**VLAN parent adoption.** A network write whose VLAN names a parent the map does not declare
+declares that parent with the entry that keeps what the image's own `.network` gives it, and a
+dry run lists it in `adopted`. micad observes that entry per link as `adoption`: the file
+networkd chose for the link and its drop-ins (micad's own global-DNS drop-in left out), read for
+`DHCP=` (IPv4), one `Address=` with its `Gateway=` and `DNS=`. `[Match]` is not read: networkd
+already matched the file to the link, so `Name=eth*` adopts like `Name=eth1`. Anything else (another
+section or key, DHCP for IPv6, servers or an address beside DHCP) is refused as
+`vlan_parent_unsupported`, naming it.
+
 **CAN interfaces.** `kind: "can"` is a CAN controller the kernel registered (`can0`); its
 `can` block:
 
