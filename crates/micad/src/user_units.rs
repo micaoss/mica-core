@@ -75,6 +75,16 @@ impl UserUnits {
         )
     }
 
+    /// The init the units are for.
+    pub(crate) fn init(&self) -> Init {
+        self.init
+    }
+
+    /// The init's control the units are driven through.
+    pub(crate) fn control(&self) -> &dyn UnitControl {
+        self.control.as_ref()
+    }
+
     fn path(&self, absolute: &str) -> PathBuf {
         self.root.join(absolute.trim_start_matches('/'))
     }
@@ -106,7 +116,7 @@ impl UserUnits {
     }
 
     /// Whether the root ships `name`, where `mica-unit` looks.
-    fn shipped(&self, name: &str) -> bool {
+    pub(crate) fn shipped(&self, name: &str) -> bool {
         let dirs: &[&str] = match self.init {
             Init::Systemd => &[
                 "/etc/systemd/system",
@@ -121,7 +131,7 @@ impl UserUnits {
 
     /// The name the init's control knows `name` by: OpenRC's maps a
     /// `.service` onto its script.
-    fn control_name(&self, name: &str) -> String {
+    pub(crate) fn control_name(&self, name: &str) -> String {
         match self.init {
             Init::Systemd => name.to_string(),
             Init::Openrc => format!("{name}.service"),
@@ -172,14 +182,14 @@ impl UserUnits {
         Ok(())
     }
 
-    async fn mica_unit(&self, args: &[&str]) -> Result<String> {
+    pub(crate) async fn mica_unit(&self, args: &[&str]) -> Result<String> {
         let output = self.commands.run(PROGRAM, args).await?;
         let line = format!("mica-unit {}", args.join(" "));
         Ok(output.success(&line)?.stdout)
     }
 
     /// The units in `mica-unit`'s directory and whether each is enabled.
-    async fn listed(&self) -> Result<BTreeMap<String, bool>> {
+    pub(crate) async fn listed(&self) -> Result<BTreeMap<String, bool>> {
         Ok(self
             .mica_unit(&["list"])
             .await?
@@ -207,7 +217,7 @@ impl UserUnits {
     }
 
     /// `mica-unit install` `text` as `file` (`--conf` for a conf).
-    async fn install(&self, file: &str, text: &str, conf: bool) -> Result<()> {
+    pub(crate) async fn install(&self, file: &str, text: &str, conf: bool) -> Result<()> {
         use std::io::Write;
         use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 

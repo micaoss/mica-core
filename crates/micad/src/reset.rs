@@ -66,6 +66,9 @@ const APID_IDENTITY: &str = "apid/identity.pem";
 /// configuration tiers remove it with the settings, so the board's defaults
 /// come back.
 const BOARD_DEFAULTS_RECORD: &str = "mica/seeded-defaults.json";
+/// micad's record of the image's app seeds it took, relative to STATE. The
+/// application tiers remove it with the apps, so the seeds come back.
+const APP_SEEDS_RECORD: &str = "mica/seeded-apps.json";
 
 /// The STATE directories holding application enrolment records.
 ///
@@ -243,6 +246,19 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
         }
     }
 
+    if matches!(
+        intent.tier,
+        ResetTier::ApplicationData | ResetTier::FullFactory
+    ) {
+        let path = roots.state.join(APP_SEEDS_RECORD);
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| format!("remove {}", path.display()));
+            }
+        }
+    }
     if matches!(
         intent.tier,
         ResetTier::Configuration | ResetTier::FullFactory

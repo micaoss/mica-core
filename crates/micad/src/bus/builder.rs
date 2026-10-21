@@ -206,6 +206,13 @@ impl MicadService {
         self
     }
 
+    /// Attach the apps (`GetApps` and the app flows).
+    #[must_use]
+    pub fn with_apps(mut self, apps: Arc<crate::apps::Apps>) -> Self {
+        self.apps = apps;
+        self
+    }
+
     /// Attach the failure-evidence source (`GetFailureEvidence`).
     #[must_use]
     pub fn with_failure_evidence(

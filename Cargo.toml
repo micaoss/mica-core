@@ -83,6 +83,10 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 rustix = { version = "1", features = ["fs"] }
 zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# App bundles are gzip tars: the reader, without xattrs, on the zlib-rs
+# backend the zip reader already resolves.
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 
 # Every shipped executable is stripped: nothing on a device reads a symbol
 # table. A backtrace from a device is resolved against an unstripped build of

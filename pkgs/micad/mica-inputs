@@ -12,6 +12,7 @@ path crates/mica-apid
 path crates/micad-settings
 path crates/mica-busname
 path crates/mica-ui-bundle
+path crates/mica-deploy
 path Cargo.toml
 path Cargo.lock
 path .cargo/config.toml

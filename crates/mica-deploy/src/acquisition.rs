@@ -21,6 +21,18 @@ mod transfer;
 pub use sets::*;
 use transfer::*;
 
+/// One bounded GET of `url` into `path`, over the deployment client's TLS
+/// roots, redirects and pacing. Nothing it fetches is trusted: the caller
+/// checks what arrived.
+///
+/// # Errors
+///
+/// A URL other than http or https, a failed transfer, or more than `limit`
+/// bytes.
+pub fn download_to(url: &str, path: &Path, limit: u64) -> Result<()> {
+    download(url, path, limit, false)
+}
+
 pub struct Acquisition<'a> {
     pub root: PathBuf,
     pub store: &'a DeploymentStore,

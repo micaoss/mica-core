@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 mod apply_queue;
+mod apps;
 pub mod ble_provisioning;
 mod bluetooth;
 mod board_defaults;
@@ -350,7 +351,14 @@ async fn serve() -> anyhow::Result<()> {
             service = service.with_dns_probe(Arc::clone(probe));
         }
         service = service.with_logs(Arc::new(logs::HostLogs::production(init)));
-        service = service.with_user_units(Arc::new(user_units::UserUnits::production(init)));
+        let units = Arc::new(user_units::UserUnits::production(init));
+        let apps = Arc::new(apps::Apps::production(Arc::clone(&units)));
+        // apid takes uploads there, and binds it at start: made before the
+        // web reconciler starts apid.
+        if let Err(err) = std::fs::create_dir_all(apps::INCOMING) {
+            tracing::warn!(dir = apps::INCOMING, %err, "the app uploads directory could not be made");
+        }
+        service = service.with_user_units(units).with_apps(apps);
         service = service.with_storage_status(Arc::new(storage_status::HostStorage::production()));
         // The diagnostic observers, on the same rule: each reads the host
         // (sysfs, /etc, the journal), so a dry-run daemon is never given one.
@@ -505,6 +513,16 @@ async fn serve() -> anyhow::Result<()> {
         .with_context(|| format!("request name {}", bus::BUS_NAME))?;
     tracing::info!(bus = bus_kind, name = bus::BUS_NAME, "serving");
     tokio::spawn(deferred.run());
+    // The image's app seeds, then the daily update check. Never under
+    // dry-run, whose daemon keeps no apps.
+    if !dry_run {
+        let service_ref = connection
+            .object_server()
+            .interface::<_, bus::MicadService>(bus::OBJECT_PATH)
+            .await
+            .context("look up served MicadService")?;
+        tokio::spawn(bus::app_upkeep(service_ref));
+    }
     if let Some(probe) = dns_probe {
         tokio::spawn(probe.run());
     }

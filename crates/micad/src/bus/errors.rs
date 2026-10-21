@@ -133,3 +133,54 @@ pub(super) fn refusal_to_fdo(refusal: Refusal) -> fdo::Error {
 pub(super) fn transient_to_fdo(err: anyhow::Error) -> fdo::Error {
     fdo::Error::Failed(format!("set transient root password: {err:#}"))
 }
+
+/// D-Bus error name for an app bundle that breaks a rule; the description is
+/// JSON, `{"message", "details": [{"rule", "detail"}]}`.
+pub const APP_INVALID_ERROR: &str = "com.mica.micad1.Error.AppInvalid";
+/// D-Bus error name for an app request while another app flow runs.
+pub const APP_BUSY_ERROR: &str = "com.mica.micad1.Error.AppBusy";
+/// D-Bus error name for an install of the version that is installed.
+pub const APP_INSTALLED_ERROR: &str = "com.mica.micad1.Error.AppInstalled";
+
+/// Reply error of the app methods: a name and its description.
+#[derive(Debug)]
+pub(super) struct AppFault {
+    name: &'static str,
+    message: String,
+}
+
+impl From<crate::apps::AppError> for AppFault {
+    fn from(err: crate::apps::AppError) -> Self {
+        use crate::apps::AppError;
+        let message = err.to_string();
+        let name = match &err {
+            AppError::Invalid(problems) => {
+                return Self {
+                    name: APP_INVALID_ERROR,
+                    message: serde_json::json!({ "message": message, "details": problems })
+                        .to_string(),
+                };
+            }
+            AppError::Busy => APP_BUSY_ERROR,
+            AppError::NotFound(_) => NOT_FOUND_ERROR,
+            AppError::Installed(_) => APP_INSTALLED_ERROR,
+            AppError::Refused(_) => "org.freedesktop.DBus.Error.InvalidArgs",
+            AppError::Failed(_) => "org.freedesktop.DBus.Error.Failed",
+        };
+        Self { name, message }
+    }
+}
+
+impl zbus::DBusError for AppFault {
+    fn name(&self) -> zbus::names::ErrorName<'_> {
+        zbus::names::ErrorName::from_static_str_unchecked(self.name)
+    }
+
+    fn description(&self) -> Option<&str> {
+        Some(&self.message)
+    }
+
+    fn create_reply(&self, call: &Header<'_>) -> zbus::Result<zbus::message::Message> {
+        zbus::message::Message::error(call, self.name()).build(&self.message)
+    }
+}

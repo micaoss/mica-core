@@ -30,6 +30,7 @@ use crate::update_lifecycle::{DEFAULT_WORKSPACE_ROOT, LifecycleHost, NoClient, U
 use crate::update_policy::PolicyStore;
 
 mod apply;
+mod apps;
 mod builder;
 mod errors;
 mod interface;
@@ -38,6 +39,7 @@ mod power;
 mod provisioning;
 mod served;
 
+pub use apps::app_upkeep;
 pub use errors::*;
 pub use served::*;
 
@@ -212,6 +214,9 @@ pub struct MicadService {
     /// check a write of `services.units` is held to. The default has no
     /// `mica-unit`, so nothing is installed and every write is refused.
     user_units: Arc<crate::user_units::UserUnits>,
+    /// The user's apps (`GetApps` and the app flows). The default keeps none,
+    /// so every change is refused.
+    apps: Arc<crate::apps::Apps>,
     /// The update lifecycle (check/fetch machine, policy, reboot gate).
     /// Constructed with [`NoClient`] and a fileless policy store, so a
     /// dry-run daemon can neither spawn the update client nor read a host
@@ -326,6 +331,7 @@ impl MicadService {
             failure_evidence: Arc::new(UnavailableFailureEvidence),
             logs: Arc::new(crate::logs::NoLogs),
             user_units: Arc::new(crate::user_units::UserUnits::unavailable()),
+            apps: Arc::new(crate::apps::Apps::unavailable()),
             engine: Arc::new(crate::containers::NoEngine),
             bluetooth: Arc::new(crate::bluetooth::NoAdapter),
             agent: Arc::new(BluetoothAgent::default()),

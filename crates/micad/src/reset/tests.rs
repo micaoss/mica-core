@@ -100,6 +100,7 @@ fn populated_roots() -> (TempDir, Roots) {
         &roots.state.join(BOARD_DEFAULTS_RECORD),
         r#"{"network":["can0"]}"#,
     );
+    write(&roots.state.join(APP_SEEDS_RECORD), "{}");
     (dir, roots)
 }
 
@@ -222,6 +223,7 @@ fn tier_one_reseeds_the_settings_and_keeps_the_management_credential() {
         !exists(&roots.state.join(BOARD_DEFAULTS_RECORD)),
         "the board's defaults come back with the settings"
     );
+    assert!(exists(&roots.state.join(APP_SEEDS_RECORD)), "the apps stay");
 
     // The record is gone, and the tree on STATE is the tree in hand.
     assert_eq!(settings.reset, None);
@@ -256,6 +258,10 @@ fn tier_two_clears_the_application_layer_and_keeps_the_platform() {
     assert!(!exists(&roots.state.join("containerd/web.json")));
     assert!(!exists(&roots.state.join("systemd-units/vendor.service")));
     assert!(!exists(&roots.state.join("openrc-local/init.d")));
+    assert!(
+        !exists(&roots.state.join(APP_SEEDS_RECORD)),
+        "the image's app seeds come back with the apps"
+    );
 
     // RE-SEEDED and not deleted: the directories are still there at the
     // modes `mica-data-layout` gave them, so nothing that writes into them
@@ -453,6 +459,7 @@ fn tier_three_returns_the_device_to_first_boot_and_keeps_its_identity() {
         !exists(&roots.state.join(BOARD_DEFAULTS_RECORD)),
         "the board's defaults come back with the settings"
     );
+    assert!(!exists(&roots.state.join(APP_SEEDS_RECORD)));
     assert_eq!(settings.provisioning.state, ProvisioningState::Pending);
 
     assert_eq!(settings.reset, None);

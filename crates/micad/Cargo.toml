@@ -20,6 +20,12 @@ mica-fs = { workspace = true }
 lifecycle-sys = { path = "../lifecycle-sys" }
 # The API daemon, which this executable runs when it is started as `mica-apid`.
 mica-apid = { path = "../mica-apid" }
+# An app's update check downloads like the deployment client, and compares
+# versions in dpkg's order like it.
+mica-deploy = { path = "../mica-deploy" }
+url = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
 # The one `com.mica.*` bus-name rule: the service registry takes
 # it rather than restating it.
 mica-busname = { workspace = true }

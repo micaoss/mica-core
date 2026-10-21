@@ -198,8 +198,9 @@ The last `tail` lines (1 to 1000) of one declared service's log,
 </method>
 <!--
 JSON: the user's services, every one declared or in `mica-unit`'s
-directory, with whether micad manages it, whether it is enabled and
-what the init says of it: `{init, available, units}`.
+directory, with whether micad manages it, whether it is enabled, what
+the init says of it and the app it is part of: `{init, available,
+units}`.
 -->
 <method name="GetUnits">
 <arg type="s" direction="out"/>
@@ -227,6 +228,86 @@ JSON: an installed user service's newest log lines, as `GetLog`
 answers one of the device's.
 -->
 <method name="GetUnitLog">
+<arg name="name" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON: every installed app, `{available, arch, apps}`.
+-->
+<method name="GetApps">
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON: one installed app.
+-->
+<method name="GetApp">
+<arg name="name" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Install or upgrade the bundle at `path`; answers the task's id.
+`reinstall` installs the installed version again, `upgrade` refuses
+an app that is not installed. The bundle's manifest is checked before
+the answer.
+-->
+<method name="InstallApp">
+<arg name="path" type="s" direction="in"/>
+<arg name="reinstall" type="b" direction="in"/>
+<arg name="upgrade" type="b" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Switch an app to its previous version; answers the task's id.
+-->
+<method name="RollbackApp">
+<arg name="name" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Remove an app; `purge` deletes its data too. Answers the task's id.
+-->
+<method name="RemoveApp">
+<arg name="name" type="s" direction="in"/>
+<arg name="purge" type="b" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Read an app's version file now; answers the task's id.
+-->
+<method name="CheckAppUpdate">
+<arg name="name" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Fetch and install the newer version an app's version file offers;
+answers the task's id.
+-->
+<method name="UpdateApp">
+<arg name="name" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Start every unit of an app.
+-->
+<method name="StartApp">
+<arg name="name" type="s" direction="in"/>
+</method>
+<!--
+Stop them.
+-->
+<method name="StopApp">
+<arg name="name" type="s" direction="in"/>
+</method>
+<!--
+Restart them.
+-->
+<method name="RestartApp">
+<arg name="name" type="s" direction="in"/>
+</method>
+<!--
+JSON: an app's units' newest log lines and its last first-run output.
+-->
+<method name="GetAppLog">
 <arg name="name" type="s" direction="in"/>
 <arg type="s" direction="out"/>
 </method>

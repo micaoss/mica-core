@@ -22,8 +22,8 @@ const MAX_TASKS: usize = 128;
 pub struct TaskRecord {
     pub id: String,
     pub operation: String,
-    /// `network.apply` when the apply reaches the network, else
-    /// `settings.apply`.
+    /// `network.apply` when the apply reaches the network, `app.apply` for
+    /// an app flow, else `settings.apply`.
     pub kind: String,
     pub dot_path: String,
     pub source: String,
@@ -210,6 +210,48 @@ impl ApplyQueue {
         }
     }
 
+    /// Record a task the caller runs itself, outside the queue: an app flow.
+    /// It is `queued` until [`Self::start`].
+    pub async fn open(
+        &self,
+        operation: &str,
+        kind: &str,
+        dot_path: &str,
+        source: &str,
+    ) -> TaskRecord {
+        let mut state = self.state.lock().await;
+        if state.records.len() >= MAX_TASKS
+            && let Some(index) = state
+                .order
+                .iter()
+                .position(|id| state.records.get(id).is_some_and(TaskRecord::terminal))
+            && let Some(id) = state.order.remove(index)
+        {
+            state.records.remove(&id);
+        }
+        state.next_id += 1;
+        let id = format!("{}-{:x}", state.boot_id, state.next_id);
+        let record = TaskRecord {
+            id: id.clone(),
+            operation: operation.to_string(),
+            kind: kind.to_string(),
+            dot_path: dot_path.to_string(),
+            source: source.to_string(),
+            status: "queued".to_string(),
+            phase: "saved".to_string(),
+            enqueued_at: timestamp(),
+            started_at: None,
+            finished_at: None,
+            outcome: None,
+            message: None,
+            interfaces: Vec::new(),
+            folded_count: 0,
+        };
+        state.order.push_back(id.clone());
+        state.records.insert(id, record.clone());
+        record
+    }
+
     pub fn wake(&self) {
         self.ready.notify_one();
     }
@@ -307,6 +349,23 @@ mod tests {
         ));
         assert!(!path_subsumes("network.eth0", "network.eth01"));
         assert!(!path_subsumes("hostname", "network"));
+    }
+
+    #[tokio::test]
+    async fn an_opened_task_is_recorded_but_never_queued() {
+        let queue = ApplyQueue::new();
+        let app = queue
+            .open("app.install", "app.apply", "apps.demo", ":1.7")
+            .await;
+        let settings = queue.enqueue("settings-write", "hostname", ":1.7").await;
+        assert_eq!(queue.next().await.id, settings.record.id);
+        assert_eq!(queue.snapshot().await, [app.clone(), settings.record]);
+        assert_eq!(
+            (app.kind.as_str(), app.status.as_str()),
+            ("app.apply", "queued")
+        );
+        let started = queue.start(&app.id).await.unwrap();
+        assert_eq!(started.status, "running");
     }
 
     #[tokio::test]
