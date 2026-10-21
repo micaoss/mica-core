@@ -354,6 +354,17 @@ pub(super) const V1_UNIT_LOG_ROUTE: &str = "/v1/units/{name}/logs";
 /// The settings dot-path the user's services live at.
 pub(super) const UNITS_SETTINGS_PATH: &str = "services.units";
 
+/// The user's apps: every one, one, its actions and its log. The actions are
+/// POST-only, as the services' are.
+pub(super) const V1_APPS_PATH: &str = "/v1/apps";
+pub(super) const V1_APP_ROUTE: &str = "/v1/apps/{name}";
+pub(super) const V1_APP_ACTION_ROUTE: &str = "/v1/apps/{name}/{action}";
+pub(super) const V1_APP_LOG_ROUTE: &str = "/v1/apps/{name}/logs";
+
+/// Where an uploaded app bundle lands, on a device: the directory micad
+/// takes an upload from.
+pub(super) const APP_UPLOADS_DIR: &str = "/mica/apps/.incoming";
+
 /// Each root's three spellings as one tuple, for the test that holds them
 /// together.
 #[cfg(test)]
@@ -375,6 +386,12 @@ pub(super) const MICAD_ALREADY_CLAIMED: &str = "com.mica.micad1.Error.AlreadyCla
 pub(super) const MICAD_WIFI_LOCKED: &str = "com.mica.micad1.Error.WifiLocked";
 pub(super) const FDO_ACCESS_DENIED: &str = "org.freedesktop.DBus.Error.AccessDenied";
 pub(super) const FDO_INVALID_ARGS: &str = "org.freedesktop.DBus.Error.InvalidArgs";
+/// micad's refusal of an app bundle that breaks a rule; the message is JSON.
+pub(super) const MICAD_APP_INVALID: &str = "com.mica.micad1.Error.AppInvalid";
+/// micad's refusal while another app flow runs.
+pub(super) const MICAD_APP_BUSY: &str = "com.mica.micad1.Error.AppBusy";
+/// micad's refusal of the version that is installed.
+pub(super) const MICAD_APP_INSTALLED: &str = "com.mica.micad1.Error.AppInstalled";
 pub(super) const FDO_IO_ERROR: &str = "org.freedesktop.DBus.Error.IOError";
 pub(super) const FDO_FAILED: &str = "org.freedesktop.DBus.Error.Failed";
 

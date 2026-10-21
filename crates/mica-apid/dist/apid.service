@@ -54,14 +54,16 @@ RuntimeDirectory=mica
 RuntimeDirectoryPreserve=yes
 
 # The filesystem, read-only independently of dm-verity. apid writes exactly
-# four trees: its StateDirectory (TLS material, the session signing key, the
-# login-backoff counters, the audit ring), the UI and diagnostics stores, and
-# /run/mica, where its only write is the removal of a spent presence assertion.
-# StateDirectory=mica/apid and RuntimeDirectory=mica above already exempt
-# /var/lib/mica/apid and /run/mica from strict. mica-data-layout creates the two
-# DATA directories before this unit starts.
+# five trees: its StateDirectory (TLS material, the session signing key, the
+# login-backoff counters, the audit ring), the UI and diagnostics stores, the
+# app uploads, and /run/mica, where its only write is the removal of a spent
+# presence assertion. StateDirectory=mica/apid and RuntimeDirectory=mica above
+# already exempt /var/lib/mica/apid and /run/mica from strict. mica-data-layout
+# creates the UI and diagnostics directories before this unit starts; micad
+# makes /mica/apps/.incoming before it starts apid, and `-` lets apid start
+# without it, refusing uploads.
 ProtectSystem=strict
-ReadWritePaths=/mica/ui /mica/diagnostics
+ReadWritePaths=/mica/ui /mica/diagnostics -/mica/apps/.incoming
 
 [Install]
 WantedBy=multi-user.target

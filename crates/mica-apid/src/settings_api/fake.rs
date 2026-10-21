@@ -466,6 +466,81 @@ impl SettingsApi for FakeSettings {
         }))
     }
 
+    async fn get_apps(&self) -> anyhow::Result<Value> {
+        Ok(serde_json::json!({ "available": true, "arch": "arm64", "apps": [fake_app()] }))
+    }
+
+    async fn get_app(&self, name: &str) -> anyhow::Result<Value> {
+        fake_app_named(name)?;
+        Ok(fake_app())
+    }
+
+    /// A bundle whose bytes begin `bad` is refused as micad refuses one that
+    /// breaks a rule; `busy`, as while another app flow runs. micad takes the
+    /// file either way.
+    async fn install_app(&self, path: &str, reinstall: bool) -> anyhow::Result<String> {
+        let bytes = std::fs::read(path)?;
+        let _ = std::fs::remove_file(path);
+        self.container_calls
+            .lock()
+            .unwrap()
+            .push(format!("app install {} reinstall={reinstall}", bytes.len()));
+        if bytes.starts_with(b"bad") {
+            let details = serde_json::json!({
+                "message": "the bundle is refused: setuid: files/su is setuid or setgid",
+                "details": [{ "rule": "setuid", "detail": "files/su is setuid or setgid" }],
+            });
+            return Err(bus_error(
+                "com.mica.micad1.Error.AppInvalid",
+                &details.to_string(),
+            ));
+        }
+        if bytes.starts_with(b"busy") {
+            return Err(bus_error(
+                "com.mica.micad1.Error.AppBusy",
+                "another app change is running",
+            ));
+        }
+        Ok(self.completed_task("app.install", "apps.demo"))
+    }
+
+    async fn app_flow(&self, name: &str, flow: &str) -> anyhow::Result<String> {
+        fake_app_named(name)?;
+        self.container_calls
+            .lock()
+            .unwrap()
+            .push(format!("app {flow} {name}"));
+        Ok(self.completed_task(&format!("app.{flow}"), &format!("apps.{name}")))
+    }
+
+    async fn remove_app(&self, name: &str, purge: bool) -> anyhow::Result<String> {
+        fake_app_named(name)?;
+        self.container_calls
+            .lock()
+            .unwrap()
+            .push(format!("app remove {name} purge={purge}"));
+        Ok(self.completed_task("app.remove", &format!("apps.{name}")))
+    }
+
+    async fn app_action(&self, name: &str, action: &str) -> anyhow::Result<()> {
+        fake_app_named(name)?;
+        self.container_calls
+            .lock()
+            .unwrap()
+            .push(format!("app {action} {name}"));
+        Ok(())
+    }
+
+    async fn app_log(&self, name: &str) -> anyhow::Result<Value> {
+        fake_app_named(name)?;
+        Ok(serde_json::json!({
+            "name": name,
+            "units": [{ "unit": "demo.service", "source": "demo.service", "available": true,
+                        "lines": ["started", "password=hunter2"], "truncated": false }],
+            "firstRun": ["joined", "token=hunter2"],
+        }))
+    }
+
     async fn container_log(&self, name: &str, tail: u32) -> anyhow::Result<String> {
         self.container_calls
             .lock()
@@ -805,4 +880,51 @@ impl SettingsApi for FakeSettings {
         // to a question the library already answers once.
         Ok(patch.clone())
     }
+}
+
+/// The one app the fake has installed.
+#[cfg(test)]
+fn fake_app() -> Value {
+    serde_json::json!({
+        "name": "demo",
+        "version": "1.1",
+        "description": "A demo app",
+        "arch": ["all"],
+        "sha256": "0".repeat(64),
+        "source": "upload",
+        "installedAt": "2026-10-21T08:00:00Z",
+        "previous": "1.0",
+        "units": [{ "name": "demo.service", "enabled": true, "active": "active" }],
+        "last": { "action": "upgrade", "outcome": "ok", "at": "2026-10-21T08:00:00Z" },
+        "update": { "url": "https://apps.example/demo/latest.json", "auto": false,
+                    "available": "1.2", "checkedAt": "2026-10-21T08:00:00Z", "error": null },
+        "seed": null,
+    })
+}
+
+/// micad's not-found for any app but the fake's.
+#[cfg(test)]
+fn fake_app_named(name: &str) -> anyhow::Result<()> {
+    if name == "demo" {
+        return Ok(());
+    }
+    Err(bus_error(
+        "com.mica.micad1.Error.NotFound",
+        &format!("no app named {name:?} is installed"),
+    ))
+}
+
+/// An error reply of `name` carrying `message`, as micad sends one.
+#[cfg(test)]
+fn bus_error(name: &'static str, message: &str) -> anyhow::Error {
+    let reply_to = zbus::message::Message::method_call("/com/mica/micad", "InstallApp")
+        .build(&())
+        .expect("an empty body serialises");
+    let name = zbus::names::ErrorName::try_from(name).expect("a well-formed error name");
+    zbus::Error::from(
+        zbus::message::Message::error(&reply_to.header(), name)
+            .build(&(message,))
+            .expect("an error reply serialises"),
+    )
+    .into()
 }

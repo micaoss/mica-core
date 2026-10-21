@@ -5,6 +5,7 @@
 //! real D-Bus client against a fake micad on a private bus, because what they
 //! assert lives below the fake backend's trait.
 
+mod apps;
 mod broken_classes;
 mod claim;
 mod credential_rotation;

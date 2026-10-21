@@ -506,6 +506,655 @@
         }
       }
     },
+    "/api/v1/apps": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Every installed app.",
+        "operationId": "api_v1_apps_read",
+        "responses": {
+          "200": {
+            "description": "`available` (whether this daemon keeps apps), `arch` and `apps`: each with `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `last` (`action`, `outcome`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` (`version`, `policy`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Install or upgrade an app from its bundle: the manifest's name decides\nwhich. micad checks the manifest before it answers and unpacks the rest\nin the task.",
+        "operationId": "api_v1_app_install",
+        "parameters": [
+          {
+            "name": "reinstall",
+            "in": "path",
+            "description": "Install the version that is installed again.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The app bundle, a gzip tar",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The bundle was taken and its install queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The upload was interrupted (`app_upload_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another app change is running (`app_busy`), or this version is installed and `reinstall` is not set (`app_installed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The bundle is above 256 MiB (`app_too_large`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/octet-stream` (`app_upload_type`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The bundle breaks a rule (`app_invalid`, each in `rules`), or cannot be installed here (`app_refused`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "The upload could not be written (`app_storage_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/apps/{name}": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "One installed app, as the list shows it.",
+        "operationId": "api_v1_app_read",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The app, as an entry of `GET /api/v1/apps`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No app of this name is installed (`app_not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Remove an app: its units are stopped and removed with its versions.",
+        "operationId": "api_v1_app_remove",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "purge",
+            "in": "path",
+            "description": "Delete `/srv/apps/<name>` too.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The removal was queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No app of this name is installed (`app_not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another app change is running (`app_busy`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/apps/{name}/logs": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "An app's newest lines: each unit's log and the last first-run hook's\noutput, every line scrubbed as a service log's is.",
+        "operationId": "api_v1_app_log",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`name`, `units` (each with `unit`, `available` and the scrubbed `lines`, or `detail`) and `firstRun` (the scrubbed lines, or null)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No app of this name is installed (`app_not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/apps/{name}/{action}": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "One action on an app: `rollback` to its previous version, `check` its\nupdate URL or `update` from it, each a task; or `start`, `stop` or\n`restart` its units.",
+        "operationId": "api_v1_app_action",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The app",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "`rollback`, `check`, `update`, `start`, `stop` or `restart`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "`rollback`, `check` or `update` was queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "The init carried out `start`, `stop` or `restart`"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No app of this name is installed (`app_not_found`), or the path names no action (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another app change is running (`app_busy`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The app cannot do it: no previous version, no update URL, nothing newer (`app_refused`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The init refused the verb (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/bluetooth": {
       "get": {
         "tags": [
@@ -10282,6 +10931,16 @@
             },
             "description": "Every problem of a refused Compose file (`compose_invalid`), by\nservice and field."
           },
+          "rules": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/AppRule"
+            },
+            "description": "Every rule a refused app bundle breaks (`app_invalid`)."
+          },
           "source": {
             "type": "string"
           }
@@ -10409,6 +11068,24 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "AppRule": {
+        "type": "object",
+        "description": "One rule a refused bundle breaks.",
+        "required": [
+          "rule",
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "What broke it."
+          },
+          "rule": {
+            "type": "string",
+            "description": "`path_outside`, `link_outside`, `special_file`, `setuid`,\n`unit_shipped_by_root`, `unit_taken`, `arch`, `init`, `manifest`,\n`too_large` or `too_many`."
           }
         }
       },

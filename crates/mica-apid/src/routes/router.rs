@@ -60,6 +60,10 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
         )
         .route(V1_UNIT_LOG_ROUTE, get(api_v1_unit_log))
         .route(V1_UNIT_ACTION_ROUTE, post(api_v1_unit_action))
+        .route(V1_APPS_PATH, get(api_v1_apps_read).post(api_v1_app_install))
+        .route(V1_APP_ROUTE, get(api_v1_app_read).delete(api_v1_app_remove))
+        .route(V1_APP_LOG_ROUTE, get(api_v1_app_log))
+        .route(V1_APP_ACTION_ROUTE, post(api_v1_app_action))
         .route(
             V1_SETTINGS_ROUTE,
             get(api_v1_settings).put(api_v1_settings_write),

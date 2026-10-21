@@ -108,6 +108,17 @@ trait Micad {
     fn stop_unit(&self, name: &str) -> zbus::Result<()>;
     fn restart_unit(&self, name: &str) -> zbus::Result<()>;
     fn get_unit_log(&self, name: &str) -> zbus::Result<String>;
+    fn get_apps(&self) -> zbus::Result<String>;
+    fn get_app(&self, name: &str) -> zbus::Result<String>;
+    fn install_app(&self, path: &str, reinstall: bool, upgrade: bool) -> zbus::Result<String>;
+    fn rollback_app(&self, name: &str) -> zbus::Result<String>;
+    fn remove_app(&self, name: &str, purge: bool) -> zbus::Result<String>;
+    fn check_app_update(&self, name: &str) -> zbus::Result<String>;
+    fn update_app(&self, name: &str) -> zbus::Result<String>;
+    fn start_app(&self, name: &str) -> zbus::Result<()>;
+    fn stop_app(&self, name: &str) -> zbus::Result<()>;
+    fn restart_app(&self, name: &str) -> zbus::Result<()>;
+    fn get_app_log(&self, name: &str) -> zbus::Result<String>;
     fn reboot(&self) -> zbus::Result<()>;
     fn power_off(&self) -> zbus::Result<()>;
     fn get_update_state(&self) -> zbus::Result<String>;
@@ -665,6 +676,56 @@ impl SettingsApi for BusSettings {
     async fn unit_log(&self, name: &str) -> anyhow::Result<Value> {
         let proxy = self.proxy().await?;
         let json = self.call("GetUnitLog", proxy.get_unit_log(name)).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    async fn get_apps(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetApps", proxy.get_apps()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    async fn get_app(&self, name: &str) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetApp", proxy.get_app(name)).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    async fn install_app(&self, path: &str, reinstall: bool) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call("InstallApp", proxy.install_app(path, reinstall, false))
+            .await
+    }
+
+    async fn app_flow(&self, name: &str, flow: &str) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        match flow {
+            "rollback" => self.call("RollbackApp", proxy.rollback_app(name)).await,
+            "check" => {
+                self.call("CheckAppUpdate", proxy.check_app_update(name))
+                    .await
+            }
+            _ => self.call("UpdateApp", proxy.update_app(name)).await,
+        }
+    }
+
+    async fn remove_app(&self, name: &str, purge: bool) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call("RemoveApp", proxy.remove_app(name, purge)).await
+    }
+
+    async fn app_action(&self, name: &str, action: &str) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        match action {
+            "start" => self.call("StartApp", proxy.start_app(name)).await,
+            "stop" => self.call("StopApp", proxy.stop_app(name)).await,
+            _ => self.call("RestartApp", proxy.restart_app(name)).await,
+        }
+    }
+
+    async fn app_log(&self, name: &str) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetAppLog", proxy.get_app_log(name)).await?;
         Ok(serde_json::from_str(&json)?)
     }
 

@@ -242,6 +242,39 @@ pub trait SettingsApi: Send + Sync {
     async fn unit_log(&self, _name: &str) -> anyhow::Result<Value> {
         anyhow::bail!("this build reads no service log")
     }
+    /// Every installed app (`GetApps`): `{available, arch, apps}`.
+    async fn get_apps(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no apps")
+    }
+    /// One installed app (`GetApp`).
+    async fn get_app(&self, _name: &str) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no apps")
+    }
+    /// Install or upgrade the bundle apid wrote at `path` (`InstallApp`),
+    /// answering the task id. micad takes the file.
+    async fn install_app(&self, _path: &str, _reinstall: bool) -> anyhow::Result<String> {
+        anyhow::bail!("this build installs no apps")
+    }
+    /// `rollback`, `check` or `update` an app (`RollbackApp`,
+    /// `CheckAppUpdate`, `UpdateApp`), answering the task id.
+    async fn app_flow(&self, _name: &str, _flow: &str) -> anyhow::Result<String> {
+        anyhow::bail!("this build changes no apps")
+    }
+    /// Remove an app, its data too when `purge` (`RemoveApp`), answering the
+    /// task id.
+    async fn remove_app(&self, _name: &str, _purge: bool) -> anyhow::Result<String> {
+        anyhow::bail!("this build changes no apps")
+    }
+    /// `start`, `stop` or `restart` an app's units (`StartApp` and its
+    /// siblings).
+    async fn app_action(&self, _name: &str, _action: &str) -> anyhow::Result<()> {
+        anyhow::bail!("this build drives no apps")
+    }
+    /// An app's units' newest log lines and its first-run output
+    /// (`GetAppLog`).
+    async fn app_log(&self, _name: &str) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no app log")
+    }
     /// The complete update state (`GetUpdateState`): micad reads native deployment records and
     /// re-derives the lifecycle before answering, so this is never stale.
     async fn get_update_state(&self) -> anyhow::Result<Value>;

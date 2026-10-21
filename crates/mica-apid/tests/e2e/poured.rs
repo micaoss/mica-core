@@ -102,6 +102,10 @@ pub(super) fn probe_urls(path: &str, task_id: &str, snapshot_id: &str) -> Vec<St
         // A service's log: one this device does not have, which is refused
         // before any log is read.
         "/api/v1/units/{name}/logs" => owned(&["/api/v1/units/x.service/logs"]),
+        // An app this device does not have, which micad refuses before it
+        // reads anything.
+        "/api/v1/apps/{name}" => owned(&["/api/v1/apps/demo"]),
+        "/api/v1/apps/{name}/logs" => owned(&["/api/v1/apps/demo/logs"]),
         "/api/v1/tasks/{id}" => vec![format!("/api/v1/tasks/{task_id}")],
         "/api/v1/diagnostics/snapshots/{id}" => {
             vec![format!("/api/v1/diagnostics/snapshots/{snapshot_id}")]

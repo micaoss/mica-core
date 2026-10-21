@@ -31,6 +31,7 @@ use crate::session::SessionStore;
 use crate::settings_api::{InvalidTaskPayload, SettingsApi};
 use crate::task_registry::{TaskRecord, TaskRegistry};
 
+mod apps;
 mod ble_provisioning;
 mod bluetooth;
 mod claim;
@@ -65,6 +66,7 @@ mod validate;
 mod web;
 mod wifi;
 mod wifi_ap;
+pub(crate) use apps::*;
 pub(crate) use ble_provisioning::*;
 pub(crate) use bluetooth::*;
 pub(crate) use claim::*;
@@ -156,6 +158,9 @@ pub struct AppState {
     /// outside this directory, so the two agree on one location and neither
     /// takes the other's word for it.
     pub(crate) update_uploads: Arc<std::path::PathBuf>,
+    /// Where an uploaded app bundle is streamed before micad takes it:
+    /// `/mica/apps/.incoming` on a device, a temporary directory in tests.
+    pub(crate) app_uploads: Arc<std::path::PathBuf>,
     /// The diagnostic snapshot store: `/mica/diagnostics` on a
     /// device, a temporary directory in tests. A path and no syscall until
     /// the first publish.
@@ -246,6 +251,7 @@ impl AppState {
                 micad_settings::configuration::DEFAULT_FLEET_PATH,
             )),
             update_uploads: Arc::new(std::path::PathBuf::from(UPDATE_UPLOADS_DIR)),
+            app_uploads: Arc::new(std::path::PathBuf::from(APP_UPLOADS_DIR)),
             diagnostics: Arc::new(SnapshotStore::at_default()),
             collecting: Arc::new(tokio::sync::Mutex::new(())),
             rotation: Arc::new(tokio::sync::Mutex::new(())),
@@ -470,6 +476,13 @@ impl AppState {
     #[cfg(test)]
     pub fn with_update_uploads(mut self, uploads: impl Into<std::path::PathBuf>) -> Self {
         self.update_uploads = Arc::new(uploads.into());
+        self
+    }
+
+    /// Point the app upload directory at an isolated test fixture.
+    #[cfg(test)]
+    pub fn with_app_uploads(mut self, uploads: impl Into<std::path::PathBuf>) -> Self {
+        self.app_uploads = Arc::new(uploads.into());
         self
     }
 
