@@ -409,7 +409,7 @@ pub(super) async fn a_preshared_key_is_redacted_and_the_sentinel_keeps_it() {
 
     let mut map = body["configured"].clone();
     map["wg0"]["wireguard"]["listenPort"] = json!(51900);
-    let response = bearer_json(&router, "PUT", "/api/v1/network", &token, &map.to_string()).await;
+    let response = put_network_map(&router, &token, &map).await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     let stored = fake.get_settings("network").await.unwrap();
     assert_eq!(
@@ -439,7 +439,7 @@ pub(super) async fn the_sentinel_for_a_peer_with_no_stored_key_is_refused() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let mut map = kinds_tree("unused")["network"].clone();
     map["wg0"] = entry;
-    let response = bearer_json(&router, "PUT", "/api/v1/network", &token, &map.to_string()).await;
+    let response = put_network_map(&router, &token, &map).await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(fake.set_paths().is_empty(), "a refused entry was written");
 }

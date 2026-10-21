@@ -324,17 +324,10 @@ pub(super) async fn an_unreadable_network_entry_stops_every_route_in_the_cluster
     }
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
 
-    // The whole-map `PUT` is the exception, and deliberately: it does not read
-    // the stored map at all, because the map it sends is the map that ends up
-    // stored. It is also the only way out of this state through the API.
-    let response = bearer_json(
-        &router,
-        "PUT",
-        NETWORK_MAP_PATH,
-        &token,
-        &json!({ "eth0": { "dhcp": true } }).to_string(),
-    )
-    .await;
+    // The whole-map `PUT` is the exception, and deliberately: it reads the
+    // stored map only as a version, because the map it sends is the map that
+    // ends up stored. It is also the only way out of this state through the API.
+    let response = put_network_map(&router, &token, &json!({ "eth0": { "dhcp": true } })).await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
 }
 

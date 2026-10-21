@@ -30,6 +30,17 @@ pub(super) async fn stored_network_map(fake: &FakeSettings) -> serde_json::Value
     fake.get_settings(NETWORK_DOT_PATH).await.unwrap()
 }
 
+// The whole map, written at the version a read just answered.
+pub(super) async fn put_network_map(
+    router: &Router,
+    token: &str,
+    map: &serde_json::Value,
+) -> axum::response::Response {
+    let read = body_json(bearer(router, "GET", NETWORK_MAP_PATH, token).await).await;
+    let body = json!({ "baseVersion": read["version"], "configured": map });
+    bearer_json(router, "PUT", NETWORK_MAP_PATH, token, &body.to_string()).await
+}
+
 // A syntactically valid X25519 public key whose base64 spelling carries a
 // `/`, which the standard alphabet really does contain.
 //
@@ -306,16 +317,13 @@ pub(super) async fn the_whole_map_put_replaces_atomically_and_validates_relation
 
     // Refused as one tree: `br9` names a port that this very body does not
     // declare either.
-    let response = bearer_json(
+    let response = put_network_map(
         &router,
-        "PUT",
-        NETWORK_MAP_PATH,
         &token,
         &json!({
             "eth0": { "dhcp": true },
             "br9": { "kind": "bridge", "dhcp": true, "bridge": { "ports": ["eth7"] } },
-        })
-        .to_string(),
+        }),
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -325,16 +333,13 @@ pub(super) async fn the_whole_map_put_replaces_atomically_and_validates_relation
 
     // Accepted as one tree: the same bridge, with its port declared in the
     // same body. Neither entry is legal without the other.
-    let response = bearer_json(
+    let response = put_network_map(
         &router,
-        "PUT",
-        NETWORK_MAP_PATH,
         &token,
         &json!({
             "eth7": { "dhcp": false },
             "br9": { "kind": "bridge", "dhcp": true, "bridge": { "ports": ["eth7"] } },
-        })
-        .to_string(),
+        }),
     )
     .await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
@@ -348,12 +353,10 @@ pub(super) async fn the_whole_map_put_replaces_atomically_and_validates_relation
     );
 
     // A key that is not an interface name is 422, and it names the key.
-    let response = bearer_json(
+    let response = put_network_map(
         &router,
-        "PUT",
-        NETWORK_MAP_PATH,
         &token,
-        &json!({ "waytoolongiface016": { "dhcp": true } }).to_string(),
+        &json!({ "waytoolongiface016": { "dhcp": true } }),
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -364,7 +367,12 @@ pub(super) async fn the_whole_map_put_replaces_atomically_and_validates_relation
     for (body, status) in [
         ("[]", StatusCode::UNPROCESSABLE_ENTITY),
         (
-            "{\"eth0\":{\"nosuchfield\":1}}",
+            "{\"baseVersion\":\"x\",\"configured\":{\"eth0\":{\"nosuchfield\":1}}}",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        // The bare map, without the version it was read at.
+        (
+            "{\"eth0\":{\"dhcp\":true}}",
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
         ("{", StatusCode::BAD_REQUEST),
@@ -409,16 +417,13 @@ pub(super) async fn the_typed_network_writes_refuse_an_address_that_is_not_a_cid
 
     // The map route: one bad entry refuses the whole body, and the error envelope
     // names that entry rather than the map, because that is what failed.
-    let response = bearer_json(
+    let response = put_network_map(
         &router,
-        "PUT",
-        NETWORK_MAP_PATH,
         &token,
         &json!({
             "eth0": { "dhcp": true },
             "eth1": { "dhcp": false, "static": { "address": "10.0.0.5/33" } },
-        })
-        .to_string(),
+        }),
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -574,4 +579,123 @@ pub(super) async fn a_can_interface_out_of_its_rules_is_422_and_writes_nothing()
         );
     }
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
+}
+
+// A write names the version it was read at: once the map moves, the same
+// version is 409 and nothing is written.
+#[tokio::test]
+pub(super) async fn the_whole_map_put_names_the_version_it_was_read_at() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    let response = bearer(&router, "GET", NETWORK_MAP_PATH, &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let version = body_json(response).await["version"].clone();
+    assert!(version.as_str().is_some_and(|version| !version.is_empty()));
+
+    let put = |body: serde_json::Value| {
+        let (router, token) = (router.clone(), token.clone());
+        async move { bearer_json(&router, "PUT", NETWORK_MAP_PATH, &token, &body.to_string()).await }
+    };
+    let response =
+        put(json!({ "baseVersion": version, "configured": { "eth0": { "dhcp": true } } })).await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let accepted = body_json(response).await;
+    assert!(accepted["taskId"].is_string(), "{accepted}");
+    assert_ne!(accepted["version"], version, "{accepted}");
+    let read = body_json(bearer(&router, "GET", NETWORK_MAP_PATH, &token).await).await;
+    assert_eq!(read["version"], accepted["version"]);
+    let after = stored_network_map(&fake).await;
+
+    let response =
+        put(json!({ "baseVersion": version, "configured": { "eth1": { "dhcp": true } } })).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let error = envelope(response).await;
+    assert_eq!(error["code"], "version_conflict");
+    assert_eq!(error["path"], json!(NETWORK_DOT_PATH));
+    assert_eq!(stored_network_map(&fake).await, after);
+}
+
+// A dry run validates and answers what would change, writing nothing.
+#[tokio::test]
+pub(super) async fn a_dry_run_answers_the_difference_and_writes_nothing() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    let read = body_json(bearer(&router, "GET", NETWORK_MAP_PATH, &token).await).await;
+    let mut map = read["configured"].clone();
+    map.as_object_mut().unwrap().remove("wg0");
+    map["eth9"] = json!({ "dhcp": true });
+    map["eth0.100"]["static"]["address"] = json!("192.168.100.3/24");
+    let body = json!({ "baseVersion": read["version"], "configured": map });
+
+    let url = format!("{NETWORK_MAP_PATH}?dryRun=true");
+    let response = bearer_json(&router, "PUT", &url, &token, &body.to_string()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let answer = body_json(response).await;
+    assert_eq!(answer["adopted"], json!([]));
+    assert_eq!(answer["warnings"], json!([]));
+    let diff = answer["diff"].as_array().unwrap();
+    assert!(
+        diff.contains(&json!({ "interface": "eth9", "change": "added" })),
+        "{answer}"
+    );
+    assert!(
+        diff.contains(&json!({ "interface": "wg0", "change": "removed" })),
+        "{answer}"
+    );
+    assert!(
+        diff.contains(&json!({ "interface": "eth0.100", "change": "modified" })),
+        "{answer}"
+    );
+    assert_eq!(diff.len(), 3, "{answer}");
+    assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
+
+    // A dry run refuses what the write would.
+    let body = json!({ "baseVersion": read["version"], "configured": { "eth0": { "dhcp": false, "static": { "address": "10.0.0.5/33" } } } });
+    let response = bearer_json(&router, "PUT", &url, &token, &body.to_string()).await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+// While a network task has not finished, another network write is 409 busy.
+#[tokio::test]
+pub(super) async fn a_network_write_waits_for_the_running_network_task() {
+    let (tree, token) = with_token(kinds_tree("hunter2secret"));
+    let fake = std::sync::Arc::new(FakeSettings::new(tree));
+    let state = crate::routes::AppState::new(fake.clone(), SIGNING_KEY);
+    let registry = state.task_registry().clone();
+    registry.subscribed();
+    let task = |id: &str, dot_path: &str, status: &str| crate::task_registry::TaskRecord {
+        id: id.to_string(),
+        operation: "settings-write".to_string(),
+        dot_path: dot_path.to_string(),
+        source: ":1.9".to_string(),
+        status: status.to_string(),
+        enqueued_at: "2026-10-21T00:00:00.000Z".to_string(),
+        started_at: None,
+        finished_at: None,
+        outcome: None,
+        message: None,
+        folded_count: 0,
+    };
+    // Another subtree's task holds nothing back.
+    registry.update(task("t1", "access.ssh.enabled", "running"));
+    let router = crate::routes::app(state);
+    let response = put_network_map(&router, &token, &json!({ "eth0": { "dhcp": true } })).await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    registry.update(task("t2", "network", "queued"));
+    let response = put_network_map(&router, &token, &json!({ "eth1": { "dhcp": true } })).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(envelope(response).await["code"], "busy");
+    let response = bearer_json(
+        &router,
+        "PUT",
+        &iface_url("eth1"),
+        &token,
+        &json!({ "dhcp": true }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(fake.set_paths().len(), 1, "{:?}", fake.set_paths());
+
+    registry.update(task("t2", "network", "finished"));
+    let response = put_network_map(&router, &token, &json!({ "eth1": { "dhcp": true } })).await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 }

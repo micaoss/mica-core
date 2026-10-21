@@ -2,7 +2,7 @@
 
 use crate::redact;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use micad_settings::IfaceSettings;
@@ -17,7 +17,7 @@ use super::*;
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "Configured interfaces and the current systemd-networkd observation", body = NetworkOverview),
+        (status = 200, description = "Configured interfaces, the stored map's version and the current systemd-networkd observation", body = NetworkOverview),
         (status = 401, description = "No API credential was supplied", body = ApiError),
         (status = 500, description = "The configured network map could not be read", body = ApiError),
         (status = 503, description = "micad is unavailable", body = ApiError),
@@ -28,8 +28,11 @@ pub(crate) async fn api_v1_network_read(
     _credential: ApiCredential,
     State(state): State<AppState>,
 ) -> Response {
-    let configured = match state.api.get_settings(NETWORK_SETTINGS_PATH).await {
-        Ok(value) => redact::redact(value, NETWORK_SETTINGS_PATH),
+    let (configured, version) = match state.api.get_settings(NETWORK_SETTINGS_PATH).await {
+        Ok(value) => {
+            let version = network_version(&value);
+            (redact::redact(value, NETWORK_SETTINGS_PATH), version)
+        }
         Err(err) => return bus_api_error(&err, Some(NETWORK_SETTINGS_PATH)),
     };
     let configured_count = configured.as_object().map_or(0, serde_json::Map::len);
@@ -71,6 +74,7 @@ pub(crate) async fn api_v1_network_read(
         NetworkOverview {
             configured,
             configured_count,
+            version,
             observed,
         },
     )
@@ -82,20 +86,26 @@ pub(crate) async fn api_v1_network_read(
 /// bridge and its ports through the per-interface route means declaring the
 /// ports first, because a bridge naming an undeclared port is refused.
 ///
-/// Answers **422** with the failing rule's own message when the map does not
-/// validate; nothing is written in that case.
+/// The body names the version `GET` answered: a map changed since then is
+/// **409** `version_conflict`, and so is any write while a network task has
+/// not finished (`busy`). Answers **422** with the failing rule's own message
+/// when the map does not validate. Nothing is written in either case.
+/// `?dryRun=true` validates and answers what the write would change.
 #[utoipa::path(
     put,
     path = V1_NETWORK_PATH,
     context_path = API,
     tag = "resources",
-    request_body = std::collections::BTreeMap<String, NetworkInterface>,
+    params(NetworkWriteQuery),
+    request_body = NetworkMapWrite,
     responses(
-        (status = 202, description = "The map was replaced and the reconcile queued; the body carries the task id", body = TaskAccepted),
+        (status = 200, description = "A dry run: what the write would change; nothing was written", body = NetworkDryRun),
+        (status = 202, description = "The map was replaced and the reconcile queued; the body carries the task id and the new version", body = NetworkAccepted),
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
-        (status = 422, description = "The body is not a map of interfaces, a key is not an interface name, an entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses it -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 409, description = "`baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)", body = ApiError),
+        (status = 422, description = "`dryRun` is not a boolean, the body is not a version and a map of interfaces, a key is not an interface name, an entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses it -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -105,12 +115,46 @@ pub(crate) async fn api_v1_network_read(
 pub(crate) async fn api_v1_network_write(
     _credential: ApiCredential,
     State(state): State<AppState>,
+    query: Result<Query<NetworkWriteQuery>, axum::extract::rejection::QueryRejection>,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
-    let mut entries: NetworkEntries = match json_body(body, Some(NETWORK_SETTINGS_PATH)) {
-        Ok(entries) => entries,
+    let dry_run = match query {
+        Ok(Query(query)) => query.dry_run.unwrap_or(false),
+        Err(rejection) => {
+            return api_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiError::apid("validation_failed", rejection.body_text())
+                    .at(NETWORK_SETTINGS_PATH),
+            );
+        }
+    };
+    let NetworkMapWrite {
+        base_version,
+        configured: mut entries,
+    } = match json_body(body, Some(NETWORK_SETTINGS_PATH)) {
+        Ok(write) => write,
         Err(response) => return *response,
     };
+    let stored = match state.api.get_settings(NETWORK_SETTINGS_PATH).await {
+        Ok(value) => value,
+        Err(err) => return bus_api_error(&err, Some(NETWORK_SETTINGS_PATH)),
+    };
+    // The check and the write are two bus calls, so a write landing between
+    // them is not caught.
+    if network_version(&stored) != base_version {
+        return api_response(
+            StatusCode::CONFLICT,
+            ApiError::apid(
+                "version_conflict",
+                "the network map changed since it was read; read it again and reapply the changes"
+                    .to_string(),
+            )
+            .at(NETWORK_SETTINGS_PATH),
+        );
+    }
+    if !dry_run && let Err(response) = check_network_idle(&state) {
+        return *response;
+    }
     if carries_redacted_psk(entries.values()) {
         let stored = match api_network_entries(&state).await {
             Ok(stored) => stored,
@@ -146,12 +190,31 @@ pub(crate) async fn api_v1_network_write(
             return *response;
         }
     }
-    // No read first, deliberately: this route's whole contract is that the map
-    // it sends is the map that ends up stored, so a read-modify-write would be
-    // reading something it is about to discard.
-    match write_network_map(&state, &entries).await {
-        Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
-        Err(response) => *response,
+    if dry_run {
+        // Entries this build cannot read count as removed: the write drops them.
+        let (current, _unreadable) = parse_network(&stored);
+        return api_response(
+            StatusCode::OK,
+            NetworkDryRun {
+                adopted: Vec::new(),
+                warnings: Vec::new(),
+                diff: network_diff(&current, &entries),
+            },
+        );
+    }
+    let task_id = match write_network_map(&state, &entries).await {
+        Ok(task_id) => task_id,
+        Err(response) => return *response,
+    };
+    match state.api.get_settings(NETWORK_SETTINGS_PATH).await {
+        Ok(value) => api_response(
+            StatusCode::ACCEPTED,
+            NetworkAccepted {
+                task_id,
+                version: network_version(&value),
+            },
+        ),
+        Err(err) => bus_api_error(&err, Some(NETWORK_SETTINGS_PATH)),
     }
 }
 
@@ -178,6 +241,7 @@ pub(crate) async fn api_v1_network_write(
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 409, description = "A network task has not finished (`busy`)", body = ApiError),
         (status = 422, description = "The name is not an interface name, the body is not an interface, the entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses the resulting map (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
@@ -199,6 +263,9 @@ pub(crate) async fn api_v1_network_iface_write(
         Ok(cfg) => cfg,
         Err(response) => return *response,
     };
+    if let Err(response) = check_network_idle(&state) {
+        return *response;
+    }
     let mut candidate = match api_network_entries(&state).await {
         Ok(entries) => entries,
         Err(response) => return *response,
@@ -254,6 +321,7 @@ pub(crate) async fn api_v1_network_iface_write(
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 404, description = "No `network` entry has that name (`settings_not_found`). Well-formed and absent, which is a different answer from malformed", body = ApiError),
+        (status = 409, description = "A network task has not finished (`busy`)", body = ApiError),
         (status = 422, description = "The name is not an interface name, or removing the entry breaks a relational rule -- a bridge still lists it as a port, a VLAN still names it as a parent (`validation_failed`)", body = ApiError),
         (status = 500, description = "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
@@ -276,6 +344,9 @@ pub(crate) async fn api_v1_network_iface_remove(
     };
     if candidate.remove(&iface).is_none() {
         return item_not_found(NETWORK_SETTINGS_PATH, &iface);
+    }
+    if let Err(response) = check_network_idle(&state) {
+        return *response;
     }
     if let Err(response) = relational_refusal(&candidate, &path) {
         return *response;

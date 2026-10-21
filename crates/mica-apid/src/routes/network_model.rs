@@ -444,6 +444,114 @@ pub(super) async fn write_network_map(
         .map_err(|err| Box::new(bus_api_error(&err, Some(NETWORK_SETTINGS_PATH))))
 }
 
+/// The version of a stored network map: the HMAC-SHA256 of its JSON under a
+/// key drawn when apid starts, in hex. Keyed because the map carries
+/// pre-shared keys the read redacts, and a plain digest would let a reader
+/// check a guess at one. `GET /api/v1/network` answers it, and a whole-map
+/// `PUT` names it as `baseVersion`.
+pub(super) fn network_version(map: &Value) -> String {
+    static KEY: std::sync::OnceLock<aws_lc_rs::hmac::Key> = std::sync::OnceLock::new();
+    let key = KEY.get_or_init(|| {
+        aws_lc_rs::hmac::Key::new(
+            aws_lc_rs::hmac::HMAC_SHA256,
+            &micad_settings::random_bytes::<32>(),
+        )
+    });
+    hex::encode(aws_lc_rs::hmac::sign(key, map.to_string().as_bytes()))
+}
+
+/// Refuse with 409 `busy` while a network task has not finished: one network
+/// apply at a time.
+pub(super) fn check_network_idle(state: &AppState) -> Result<(), Box<Response>> {
+    if !state
+        .task_registry()
+        .unfinished_under(NETWORK_SETTINGS_PATH)
+    {
+        return Ok(());
+    }
+    Err(Box::new(api_response(
+        StatusCode::CONFLICT,
+        ApiError::apid(
+            "busy",
+            "a network change is still being applied; try again when it finishes".to_string(),
+        )
+        .at(NETWORK_SETTINGS_PATH),
+    )))
+}
+
+/// The whole-map write: the map and the version it was read at.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NetworkMapWrite {
+    /// The `version` `GET /api/v1/network` answered; another stored version is
+    /// 409 `version_conflict`.
+    pub(super) base_version: String,
+    /// The whole map that replaces the stored one.
+    #[schema(value_type = std::collections::BTreeMap<String, NetworkInterface>)]
+    pub(super) configured: NetworkEntries,
+}
+
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NetworkWriteQuery {
+    /// Validate and answer what would change; write nothing.
+    pub(super) dry_run: Option<bool>,
+}
+
+/// A whole-map write that was accepted.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NetworkAccepted {
+    /// Poll this id at `GET /api/v1/tasks/{id}`.
+    pub(super) task_id: String,
+    /// The stored map's version after the write.
+    pub(super) version: String,
+}
+
+/// What a whole-map write would do.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NetworkDryRun {
+    /// Interfaces the write would declare on the operator's behalf; none.
+    pub(super) adopted: Vec<String>,
+    /// What the operator should know before writing; none.
+    pub(super) warnings: Vec<String>,
+    /// Each interface the write adds, changes or removes, by name.
+    pub(super) diff: Vec<NetworkChange>,
+}
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NetworkChange {
+    pub(super) interface: String,
+    /// `added`, `modified` or `removed`.
+    pub(super) change: &'static str,
+}
+
+/// The interfaces `next` adds, changes or removes against `stored`, by name.
+pub(super) fn network_diff(stored: &NetworkEntries, next: &NetworkEntries) -> Vec<NetworkChange> {
+    let as_value = |cfg: &IfaceSettings| serde_json::to_value(cfg).ok();
+    let mut changes = Vec::new();
+    for (name, cfg) in next {
+        let change = match stored.get(name) {
+            None => "added",
+            Some(old) if as_value(old) != as_value(cfg) => "modified",
+            Some(_) => continue,
+        };
+        changes.push(NetworkChange {
+            interface: name.clone(),
+            change,
+        });
+    }
+    for name in stored.keys().filter(|name| !next.contains_key(*name)) {
+        changes.push(NetworkChange {
+            interface: name.clone(),
+            change: "removed",
+        });
+    }
+    changes
+}
+
 #[derive(serde::Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NetworkOverview {
@@ -451,6 +559,9 @@ pub(crate) struct NetworkOverview {
     /// link health.
     pub(super) configured: Value,
     pub(super) configured_count: usize,
+    /// The stored map's version: name it as `baseVersion` on
+    /// `PUT /api/v1/network` to replace only this map.
+    pub(super) version: String,
     /// The current view reported by systemd-networkd.
     pub(super) observed: ObservedNetwork,
 }

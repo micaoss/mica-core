@@ -3023,7 +3023,7 @@
         "operationId": "api_v1_network_read",
         "responses": {
           "200": {
-            "description": "Configured interfaces and the current systemd-networkd observation",
+            "description": "Configured interfaces, the stored map's version and the current systemd-networkd observation",
             "content": {
               "application/json": {
                 "schema": {
@@ -3079,31 +3079,49 @@
           "resources"
         ],
         "summary": "Replace the whole interface map, validated as one tree.",
-        "description": "The only way to make two interdependent entries legal in one step: adding a\nbridge and its ports through the per-interface route means declaring the\nports first, because a bridge naming an undeclared port is refused.\n\nAnswers **422** with the failing rule's own message when the map does not\nvalidate; nothing is written in that case.",
+        "description": "The only way to make two interdependent entries legal in one step: adding a\nbridge and its ports through the per-interface route means declaring the\nports first, because a bridge naming an undeclared port is refused.\n\nThe body names the version `GET` answered: a map changed since then is\n**409** `version_conflict`, and so is any write while a network task has\nnot finished (`busy`). Answers **422** with the failing rule's own message\nwhen the map does not validate. Nothing is written in either case.\n`?dryRun=true` validates and answers what the write would change.",
         "operationId": "api_v1_network_write",
+        "parameters": [
+          {
+            "name": "dryRun",
+            "in": "path",
+            "description": "Validate and answer what would change; write nothing.",
+            "required": true,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/NetworkInterface"
-                },
-                "propertyNames": {
-                  "type": "string"
-                }
+                "$ref": "#/components/schemas/NetworkMapWrite"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "202": {
-            "description": "The map was replaced and the reconcile queued; the body carries the task id",
+          "200": {
+            "description": "A dry run: what the write would change; nothing was written",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskAccepted"
+                  "$ref": "#/components/schemas/NetworkDryRun"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The map was replaced and the reconcile queued; the body carries the task id and the new version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkAccepted"
                 }
               }
             }
@@ -3148,8 +3166,18 @@
               }
             }
           },
+          "409": {
+            "description": "`baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "422": {
-            "description": "The body is not a map of interfaces, a key is not an interface name, an entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses it -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "`dryRun` is not a boolean, the body is not a version and a map of interfaces, a key is not an interface name, an entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses it -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3343,6 +3371,16 @@
               }
             }
           },
+          "409": {
+            "description": "A network task has not finished (`busy`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "422": {
             "description": "The name is not an interface name, the body is not an interface, the entry declares a static address that is not IPv4 CIDR notation, or a relational rule refuses the resulting map (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
@@ -3439,6 +3477,16 @@
           },
           "405": {
             "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A network task has not finished (`busy`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3685,7 +3733,7 @@
             }
           },
           "409": {
-            "description": "A stored peer already carries that public key (`peer_exists`); the key is this collection's identity, so the entry is not replaced silently",
+            "description": "A stored peer already carries that public key (`peer_exists`); the key is this collection's identity, so the entry is not replaced silently. Or a network task has not finished (`busy`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3801,6 +3849,16 @@
           },
           "405": {
             "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A network task has not finished (`busy`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -10432,6 +10490,72 @@
           }
         }
       },
+      "NetworkAccepted": {
+        "type": "object",
+        "description": "A whole-map write that was accepted.",
+        "required": [
+          "taskId",
+          "version"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "description": "Poll this id at `GET /api/v1/tasks/{id}`."
+          },
+          "version": {
+            "type": "string",
+            "description": "The stored map's version after the write."
+          }
+        }
+      },
+      "NetworkChange": {
+        "type": "object",
+        "required": [
+          "interface",
+          "change"
+        ],
+        "properties": {
+          "change": {
+            "type": "string",
+            "description": "`added`, `modified` or `removed`."
+          },
+          "interface": {
+            "type": "string"
+          }
+        }
+      },
+      "NetworkDryRun": {
+        "type": "object",
+        "description": "What a whole-map write would do.",
+        "required": [
+          "adopted",
+          "warnings",
+          "diff"
+        ],
+        "properties": {
+          "adopted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Interfaces the write would declare on the operator's behalf; none."
+          },
+          "diff": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkChange"
+            },
+            "description": "Each interface the write adds, changes or removes, by name."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the operator should know before writing; none."
+          }
+        }
+      },
       "NetworkInterface": {
         "type": "object",
         "description": "One `network` entry, as the document describes it.",
@@ -10519,11 +10643,37 @@
           }
         }
       },
+      "NetworkMapWrite": {
+        "type": "object",
+        "description": "The whole-map write: the map and the version it was read at.",
+        "required": [
+          "baseVersion",
+          "configured"
+        ],
+        "properties": {
+          "baseVersion": {
+            "type": "string",
+            "description": "The `version` `GET /api/v1/network` answered; another stored version is\n409 `version_conflict`."
+          },
+          "configured": {
+            "type": "object",
+            "description": "The whole map that replaces the stored one.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "NetworkOverview": {
         "type": "object",
         "required": [
           "configured",
           "configuredCount",
+          "version",
           "observed"
         ],
         "properties": {
@@ -10537,6 +10687,10 @@
           "observed": {
             "$ref": "#/components/schemas/ObservedNetwork",
             "description": "The current view reported by systemd-networkd."
+          },
+          "version": {
+            "type": "string",
+            "description": "The stored map's version: name it as `baseVersion` on\n`PUT /api/v1/network` to replace only this map."
           }
         }
       },

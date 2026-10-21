@@ -102,6 +102,17 @@ impl TaskRegistry {
         })
     }
 
+    /// Whether a task the mirror holds at `dot_path` or under it has not
+    /// finished. Without a live subscription the mirror knows of none.
+    pub fn unfinished_under(&self, dot_path: &str) -> bool {
+        let inner = self.lock();
+        let under = format!("{dot_path}.");
+        inner.synchronised
+            && inner.tasks.values().any(|task| {
+                !task.terminal() && (task.dot_path == dot_path || task.dot_path.starts_with(&under))
+            })
+    }
+
     pub fn generation(&self) -> u64 {
         self.lock().generation
     }
