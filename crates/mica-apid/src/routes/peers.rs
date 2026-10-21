@@ -136,7 +136,7 @@ pub(super) async fn api_write_peers(
             ApiError::apid("validation_failed", message).at(&path),
         )));
     }
-    check_network_idle(state)?;
+    check_network_idle(state).await?;
     // Infallible: a peer is a struct of strings and integers.
     let value = encode(peers)?;
     if let Err(err) = state.api.set_settings(&path, &value).await {

@@ -153,7 +153,7 @@ pub(crate) async fn api_v1_network_write(
             .at(NETWORK_SETTINGS_PATH),
         );
     }
-    if !dry_run && let Err(response) = check_network_idle(&state) {
+    if !dry_run && let Err(response) = check_network_idle(&state).await {
         return *response;
     }
     if carries_redacted_psk(entries.values()) {
@@ -248,7 +248,7 @@ pub(crate) async fn api_v1_network_iface_write(
         Ok(cfg) => cfg,
         Err(response) => return *response,
     };
-    if let Err(response) = check_network_idle(&state) {
+    if let Err(response) = check_network_idle(&state).await {
         return *response;
     }
     let mut candidate = match api_network_entries(&state).await {
@@ -324,7 +324,7 @@ pub(crate) async fn api_v1_network_iface_remove(
     if candidate.remove(&iface).is_none() {
         return item_not_found(NETWORK_SETTINGS_PATH, &iface);
     }
-    if let Err(response) = check_network_idle(&state) {
+    if let Err(response) = check_network_idle(&state).await {
         return *response;
     }
     let refs = references_to(&candidate, &iface);

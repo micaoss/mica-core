@@ -315,6 +315,11 @@ impl FakeSettings {
         }
     }
 
+    /// Hold `task` among micad's tasks.
+    pub fn insert_task(&self, task: TaskRecord) {
+        self.tasks.lock().unwrap().insert(task.id.clone(), task);
+    }
+
     /// Insert `value` at top-level `key` of the live-state tree.
     pub fn set_state_entry(&self, key: &str, value: Value) {
         self.state

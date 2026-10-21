@@ -655,7 +655,7 @@ async fn radio_addressing(
         )));
     };
     let path = iface_settings_path(&radio);
-    check_network_idle(state)?;
+    check_network_idle(state).await?;
     let mut candidate = api_network_entries(state).await?;
     candidate.insert(radio.clone(), cfg.clone());
     map_refusal(&candidate, &[radio.as_str()], &path)?;

@@ -664,6 +664,7 @@ pub(super) async fn a_network_write_waits_for_the_running_network_task() {
     let state = crate::routes::AppState::new(fake.clone(), SIGNING_KEY);
     let registry = state.task_registry().clone();
     registry.subscribed();
+    registry.fill_list(registry.generation(), Vec::new());
     let task = |id: &str, dot_path: &str, status: &str| crate::task_registry::TaskRecord {
         id: id.to_string(),
         operation: "settings-write".to_string(),
@@ -709,4 +710,11 @@ pub(super) async fn a_network_write_waits_for_the_running_network_task() {
     registry.update(task("t2", "network", "finished"));
     let response = put_network_map(&router, &token, &json!({ "eth1": { "dhcp": true } })).await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
+
+    // Without the task subscription, micad's own task list says.
+    registry.lapsed();
+    fake.insert_task(task("t3", "network", "running"));
+    let response = put_network_map(&router, &token, &json!({ "eth2": { "dhcp": true } })).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(envelope(response).await["code"], "busy");
 }

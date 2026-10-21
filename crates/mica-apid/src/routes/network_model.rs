@@ -460,12 +460,16 @@ pub(super) fn network_version(map: &Value) -> String {
 }
 
 /// Refuse with 409 `busy` while a network task has not finished: one network
-/// apply at a time.
-pub(super) fn check_network_idle(state: &AppState) -> Result<(), Box<Response>> {
-    if !state
-        .task_registry()
-        .unfinished_under(NETWORK_SETTINGS_PATH)
-    {
+/// apply at a time. The tasks come from the signal mirror, or from micad
+/// while the subscription is down; when micad cannot say, the write goes on
+/// and meets the same micad.
+pub(super) async fn check_network_idle(state: &AppState) -> Result<(), Box<Response>> {
+    let busy = state.task_records().await.is_ok_and(|tasks| {
+        tasks
+            .iter()
+            .any(|task| !task.terminal() && task.kind == "network.apply")
+    });
+    if !busy {
         return Ok(());
     }
     Err(Box::new(api_response(
