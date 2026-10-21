@@ -345,6 +345,42 @@ test('captures taking the API off the network', async ({ page }, testInfo) => {
   await page.screenshot({ path: testInfo.outputPath('api-gone.png') })
 })
 
+test('captures the apps on the services page', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/api/v1/apps', (route) => route.request().method() === 'GET'
+    ? route.fulfill(json({ available: true, arch: 'arm64', apps: [TAILSCALE] }))
+    : route.fulfill(json({ error: {
+      code: 'app_invalid',
+      message: 'the bundle breaks 2 rules',
+      rules: [
+        { rule: 'arch', detail: 'the bundle is for amd64; this device is arm64' },
+        { rule: 'unit_shipped_by_root', detail: 'sshd.service is shipped by the root' },
+      ],
+    } }, 422)))
+  await page.route('**/api/v1/apps/tailscale/logs', (route) => route.fulfill(json({
+    name: 'tailscale',
+    units: [{ unit: 'tailscaled.service', available: true, lines: [
+      '2026-10-21T09:12:03Z tailscaled: logtail started',
+      '2026-10-21T09:12:04Z tailscaled: magicsock: home is now derp-14 (ams)',
+      '2026-10-21T09:12:05Z tailscaled: health(warnable=login-state): ok',
+    ] }],
+    firstRun: ['tailscale: state directory /srv/apps/tailscale ready'],
+  })))
+  await page.goto('./services')
+  await expect(page.getByRole('link', { name: 'tailscale' })).toBeVisible()
+  await page.locator('input[type=file]').setInputFiles({ name: 'tailscale-amd64.tar.gz', mimeType: 'application/gzip', buffer: Buffer.from('bundle') })
+  await page.getByRole('button', { name: 'Install', exact: true }).click()
+  await expect(page.getByText('sshd.service is shipped by the root')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('services-apps.png'), animations: 'disabled', fullPage: true })
+  // A fresh load, so the refusal's toast is not over the detail page.
+  await page.goto('./services/apps/tailscale')
+  await expect(page.getByRole('heading', { name: 'tailscale' })).toBeVisible()
+  await expect(page.getByText('magicsock')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('app-detail.png'), animations: 'disabled', fullPage: true })
+})
+
 test('keeps a tall dialog inside a short appliance screen', async ({ page }, testInfo) => {
   await mockNetworkBench(page)
   test.skip(testInfo.project.name !== 'chromium', 'one browser covers the geometry')
@@ -493,6 +529,7 @@ function payload(path: string, method: string): unknown {
     capabilities: { wifi: { supported: false, interfaces: [] }, bluetooth: { supported: false, adapters: [] }, cellular: { supported: false, interfaces: [] } },
   }
   if (path === '/api/v1/ui/bundles') return { bundles: [], retentionLimit: 32 }
+  if (path === '/api/v1/apps') return { available: true, arch: 'arm64', apps: [] }
   return {}
 }
 
@@ -511,6 +548,21 @@ async function mockNetworkBench(page: Page) {
     if (body === undefined) return route.fallback()
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
+}
+
+const TAILSCALE = {
+  name: 'tailscale',
+  version: '1.88.3',
+  description: 'Tailscale node for remote access to this device',
+  arch: ['amd64', 'arm64'],
+  sha256: '9f2c4e1a7b3d5f60c8e2a4b6d8f0123456789abcdef0123456789abcdef01234',
+  source: 'upload',
+  installedAt: '2026-10-20T16:40:00Z',
+  previous: '1.88.1',
+  units: [{ name: 'tailscaled.service', enabled: true, active: 'active' }],
+  last: { action: 'upgrade', outcome: 'ok', at: '2026-10-20T16:40:12Z' },
+  update: { url: 'https://pkgs.example.eu/mica/tailscale/latest.json', auto: false, available: '1.90.0', checkedAt: '2026-10-21T06:00:00Z', error: null },
+  seed: null,
 }
 
 const PEER = { name: 'Harbour office', publicKey: 'cmVtb3RlUGVlcktleXJlbW90ZVBlZXJLZXlyZW1vdGU=', presharedKey: '<redacted>', allowedIps: ['10.10.0.1/32'], endpoint: 'vpn.example.eu:51820', persistentKeepalive: 25 }

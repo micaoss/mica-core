@@ -6,7 +6,7 @@ export interface TaskAccepted {
 export interface TaskRecord {
   id: string
   operation: string
-  /// `network.apply` or `settings.apply`.
+  /// `network.apply`, `app.apply` or `settings.apply`.
   kind: string
   dotPath: string
   source: string
@@ -706,4 +706,37 @@ export interface UnitLog {
   lines?: string[]
   truncated?: boolean
   detail?: string
+}
+
+/// Every app micad keeps.
+export interface AppsOverview {
+  /// Whether this daemon keeps apps at all.
+  available: boolean
+  arch: string
+  apps: AppEntry[]
+}
+
+/// One installed app.
+export interface AppEntry {
+  name: string
+  version: string
+  description: string
+  arch: string[]
+  sha256: string
+  /// `upload`, `cli`, `url` or `seed`.
+  source: string
+  installedAt: string
+  /// The version a rollback returns to.
+  previous: string | null
+  units: { name: string; enabled: boolean; active: string | null }[]
+  last: { action: string; outcome: string; message?: string; at: string } | null
+  update: { url: string; auto: boolean; available: string | null; checkedAt: string | null; error: string | null } | null
+  seed: { version: string; policy: string | null } | null
+}
+
+/// An app's newest lines: each unit's log and the first-run output.
+export interface AppLog {
+  name: string
+  units: (UnitLog & { unit: string })[]
+  firstRun: string[] | null
 }

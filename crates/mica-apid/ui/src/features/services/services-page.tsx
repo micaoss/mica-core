@@ -12,6 +12,7 @@ import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
 import { serviceCatalog, serviceObserved, type ServiceDefinition } from './service-catalog'
 import { useFeatures } from '@/shared/lib/features'
+import { AppsPanel } from './apps-panel'
 import { UnitsPanel } from './units-panel'
 
 export function ServicesPage() {
@@ -23,6 +24,7 @@ export function ServicesPage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {serviceCatalog.filter((service) => serves(service.id)).map((service) => <ServiceCard key={service.id} service={service} />)}
       </div>
+      <AppsPanel />
       <UnitsPanel />
     </Page>
   )
