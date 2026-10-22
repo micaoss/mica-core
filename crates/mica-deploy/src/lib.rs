@@ -10,6 +10,7 @@ pub mod components;
 pub mod core_set;
 pub mod debian_version;
 pub mod deployments;
+pub mod factory_reset;
 pub mod firmware;
 pub mod fit_env;
 pub mod set_state;

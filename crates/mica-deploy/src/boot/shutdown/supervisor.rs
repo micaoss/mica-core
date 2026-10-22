@@ -122,7 +122,8 @@ impl Supervisor {
         self.last_kick = self.now_ms();
         Ok(())
     }
-    pub(super) fn kick(&mut self) -> Result<()> {
+    /// Feed the watchdog, at most once a second; nothing before it is armed.
+    pub fn kick(&mut self) -> Result<()> {
         if !self.armed {
             return Ok(());
         }

@@ -12,6 +12,7 @@ mod clock;
 mod dm;
 mod quota;
 mod startup;
+mod trim;
 mod ubi;
 pub use clock::clock_synchronized;
 use dm::*;
@@ -20,6 +21,7 @@ pub use quota::{ProjectQuota, project_of, project_quota, set_project_inherit, se
 pub use startup::{
     DmCreated, dm_create, dm_discard_created, dm_load_verity, dm_resume, loop_attach, loop_free,
 };
+pub use trim::trim_free_space;
 pub use ubi::{
     UBI_MAX_RENAME, UBI_MAX_VOLUME_NAME, UbiVolumeKind, mtd_bad_block, ubi_block_create,
     ubi_block_remove, ubi_leb_change, ubi_mkvol, ubi_rename, ubi_rmvol, ubi_volume_update,

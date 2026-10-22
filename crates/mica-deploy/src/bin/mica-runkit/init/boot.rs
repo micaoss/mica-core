@@ -15,6 +15,7 @@ use mica_deploy::{
     },
     components::{component_id, verify_deployment},
     core_set::{self, BootRoot, CoreBoot, device_features},
+    factory_reset,
     ubi::{SysUbi, UbiDevice},
 };
 use std::{
@@ -226,16 +227,17 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     // pending core set is counted there, and the count is spent before the
     // set is tried. Nothing is bound into `/usr` or `/etc` yet, which the
     // composition needs.
-    (|| -> Result<()> {
+    let quotas = (|| -> Result<bool> {
         if let Some(ubi) = &ubi {
             // UBIFS has no project quotas: the policy turns them off.
-            return mount(
+            mount(
                 control,
                 &format!("ubi{}:data", ubi.number()),
                 "/newroot/mnt/data",
                 "ubifs",
                 "rw,noatime",
-            );
+            )?;
+            return Ok(false);
         }
         let data = run(
             control,
@@ -290,6 +292,29 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
                 "rw,noatime"
             },
         )?;
+        Ok(quotas)
+    })()
+    .context(mica_deploy::deployments::SharedDataFailure)?;
+    // A staged factory reset is carried out here, before the projects, the
+    // core composition or the machine identity read DATA, and before any
+    // process of the root exists. An erase the runkit cannot finish leaves
+    // the request in `meta/`, and the next boot resumes it.
+    (|| -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        let supervisor = &mut control.supervisor;
+        if let Some(done) = factory_reset::apply(
+            Path::new("/newroot/mnt/data"),
+            now,
+            &mut || supervisor.kick(),
+            &mut |line| eprintln!("mica-init: {line}"),
+        )? {
+            eprintln!(
+                "mica-init: factory reset done, requested by {:?}, {} entries not removed",
+                done.by, done.unremoved
+            );
+        }
         if quotas {
             data_projects(Path::new("/newroot/mnt/data"))?;
         }
@@ -406,6 +431,12 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
             "backend": backend, "bootVerified": secure_boot
                 || (backend == BootKind::UbootFit && config.board.boot_trust == BootTrust::Fit),
         }))?,
+    )?;
+    // What this runkit does for the running system, apart from the boot
+    // receipt, whose readers refuse fields they do not know.
+    fs::write(
+        factory_reset::CAPABILITIES,
+        serde_json::to_vec(&serde_json::json!({ "factoryReset": true }))?,
     )?;
     fs::write("/run/mica/deployment.json", &envelope)?;
     fs::write(core_set::BOOT_FILE, serde_json::to_vec(&core_boot)?)?;
