@@ -29,6 +29,7 @@ import { LogsPanel } from '@/features/system/logs-panel'
 import { RollbackPanel } from '@/features/system/rollback-panel'
 import { AutomaticUpdatesPanel } from '@/features/system/automatic-updates-panel'
 import { CredentialRecoveryPanel } from '@/features/recovery/credential-recovery-panel'
+import { FactoryResetPanel } from '@/features/recovery/factory-reset-panel'
 import { ResetPanel } from '@/features/recovery/reset-panel'
 
 // The prototype has six tabs: recovery is folded into update, general and
@@ -56,6 +57,7 @@ export function SystemPage() {
           <PageSection title={t('system.ui.title')} description={t('system.ui.description')}><UiPanel /></PageSection>
           <PageSection title={t('system.power.title')} description={t('system.power.description')}><PowerPanel /></PageSection>
           <PageSection title={t('system.recovery.reset.title')} description={t('system.recovery.reset.description')} tone="danger"><ResetPanel /></PageSection>
+          <PageSection title={t('system.factoryReset.title')} description={t('system.factoryReset.description')} tone="danger"><FactoryResetPanel /></PageSection>
         </TabsContent>
         <TabsContent value="information" className="grid gap-6 pt-4"><InformationPanel /></TabsContent>
         <TabsContent value="time" className="grid gap-6 pt-4"><TimePanel /></TabsContent>

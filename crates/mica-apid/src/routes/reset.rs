@@ -138,6 +138,213 @@ pub(crate) async fn api_v1_reset(
     )
 }
 
+/// The audit event of the factory reset.
+pub(super) const FACTORY_RESET_EVENT: &str = "factory-reset";
+
+/// `POST /api/v1/system/factory-reset` request body.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FactoryResetRequest {
+    /// The administrator password, checked whatever the session or token.
+    pub(super) password: String,
+}
+
+/// `POST /api/v1/system/factory-reset` response body.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub(crate) struct FactoryResetStaged {
+    /// Always `reboot`: the device reboots in a few seconds and erases
+    /// before anything else runs.
+    pub(super) applies: &'static str,
+}
+
+/// Why a factory reset cannot run now.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct FactoryResetRefusal {
+    /// `factory_reset_unsupported`, `not_claimed`, `update_in_progress` or
+    /// `trial_pending`.
+    pub(super) code: String,
+    pub(super) message: String,
+}
+
+/// The last completed factory reset.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct FactoryResetDone {
+    /// Unix seconds, as the device's clock read them.
+    pub(super) requested: u64,
+    /// Unix seconds, as the device's clock read them early in the boot that
+    /// erased.
+    pub(super) completed: u64,
+    /// `console`, `api` or `cli`.
+    pub(super) by: String,
+    /// The peer or mechanism that asked.
+    pub(super) source: String,
+    /// Entries the erase could not remove; 0 on a clean erase.
+    pub(super) unremoved: u64,
+}
+
+/// `GET /api/v1/system/factory-reset` response body.
+#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct FactoryResetStatus {
+    /// Whether this device's boot carries out a factory reset.
+    pub(super) supported: bool,
+    /// Why it cannot run now, the password aside; null when it can.
+    pub(super) refusal: Option<FactoryResetRefusal>,
+    /// The last completed reset; null when there was none.
+    pub(super) last: Option<FactoryResetDone>,
+}
+
+/// Whether a factory reset can run now, and the last one.
+#[utoipa::path(
+    get,
+    path = V1_FACTORY_RESET_PATH,
+    context_path = API,
+    tag = "actions",
+    responses(
+        (status = 200, description = "Whether the reset is supported, why it cannot run now, and the last one", body = FactoryResetStatus),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 500, description = "micad answered something else (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_factory_reset_status(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    let value = match state.api.get_factory_reset().await {
+        Ok(value) => value,
+        Err(err) => return bus_api_error(&err, None),
+    };
+    match serde_json::from_value::<FactoryResetStatus>(value) {
+        Ok(status) => api_response(StatusCode::OK, status),
+        Err(err) => api_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::micad("micad_failed", format!("factory reset status: {err}")),
+        ),
+    }
+}
+
+/// Erase everything configured on the device: the administrator and the
+/// claim, settings, networks, keys, apps, containers and all data. The
+/// software stays at its current version. The device reboots a few seconds
+/// after the answer and erases before anything else runs; it then starts as
+/// on its first boot, unclaimed. It is not a certified wipe: the files are
+/// removed and the freed space is discarded where the storage supports it.
+///
+/// **The administrator password is required**, whatever the session or
+/// token. A wrong one counts in the login backoff, the same counter
+/// `POST /api/v1/login` keeps.
+#[utoipa::path(
+    post,
+    path = V1_FACTORY_RESET_PATH,
+    context_path = API,
+    tag = "actions",
+    request_body = FactoryResetRequest,
+    responses(
+        (status = 202, description = "The reset is staged; the device reboots into it in a few seconds", body = FactoryResetStaged),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "The password is not the administrator's (`password_incorrect`), or a browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 409, description = "The reset cannot run now: the device's boot does not carry one out (`factory_reset_unsupported`), the device is not claimed (`not_claimed`), an update is being installed or awaits its reboot (`update_in_progress`), or a deployment or core set is on trial (`trial_pending`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, or the password is empty (`validation_failed`)", body = ApiError),
+        (status = 429, description = "Too many wrong passwords; retry shortly (`login_throttled`)", body = ApiError),
+        (status = 500, description = "micad failed to stage it (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out; the outcome is not confirmed (`micad_timeout`)", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_factory_reset(
+    credential: ApiCredential,
+    State(state): State<AppState>,
+    Source(source): Source,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let request: FactoryResetRequest = match json_body(body, None) {
+        Ok(request) => request,
+        Err(response) => return *response,
+    };
+    if request.password.is_empty() {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "the administrator password is required".to_string(),
+            )
+            .at("password"),
+        );
+    }
+    if !state.guard.begin_attempt() {
+        state
+            .audit
+            .record(FACTORY_RESET_EVENT, "throttled", &source);
+        return api_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            ApiError::apid(
+                "login_throttled",
+                "too many failed attempts; retry shortly".to_string(),
+            ),
+        );
+    }
+    let by = match credential {
+        ApiCredential::Session(_) => "console",
+        ApiCredential::Bearer | ApiCredential::Local => "api",
+    };
+    let Err(err) = state
+        .api
+        .factory_reset(&request.password, by, &source)
+        .await
+    else {
+        state.guard.record_success();
+        state.audit.record(FACTORY_RESET_EVENT, "staged", &source);
+        return api_response(
+            StatusCode::ACCEPTED,
+            FactoryResetStaged { applies: "reboot" },
+        );
+    };
+    let Some((code, status, message)) = factory_reset_refusal(&err) else {
+        return bus_api_error(&err, None);
+    };
+    let outcome = match code {
+        "password_incorrect" => {
+            state.guard.confirm_failure();
+            "wrong-password"
+        }
+        "login_throttled" => "throttled",
+        _ => "refused",
+    };
+    state.audit.record(FACTORY_RESET_EVENT, outcome, &source);
+    let error = ApiError::micad(code, message);
+    api_response(
+        status,
+        if code == "password_incorrect" {
+            error.at("password")
+        } else {
+            error
+        },
+    )
+}
+
+/// micad's `FactoryResetRefused`, as the code, the status it answers and
+/// the message.
+fn factory_reset_refusal(err: &anyhow::Error) -> Option<(&'static str, StatusCode, String)> {
+    let (name, description) = err.downcast_ref::<zbus::Error>().and_then(error_reply)?;
+    if name != "com.mica.micad1.Error.FactoryResetRefused" {
+        return None;
+    }
+    let refusal: FactoryResetRefusal = serde_json::from_str(&description?).ok()?;
+    let (code, status) = match refusal.code.as_str() {
+        "password_incorrect" => ("password_incorrect", StatusCode::FORBIDDEN),
+        "login_throttled" => ("login_throttled", StatusCode::TOO_MANY_REQUESTS),
+        "not_claimed" => ("not_claimed", StatusCode::CONFLICT),
+        "factory_reset_unsupported" => ("factory_reset_unsupported", StatusCode::CONFLICT),
+        "update_in_progress" => ("update_in_progress", StatusCode::CONFLICT),
+        "trial_pending" => ("trial_pending", StatusCode::CONFLICT),
+        _ => return None,
+    };
+    Some((code, status, refusal.message))
+}
+
 /// Recover the management credential: rotate, never reveal.
 ///
 /// **Presence is the authority, and the only one.** An authenticated

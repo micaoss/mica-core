@@ -129,6 +129,17 @@ pub trait SettingsApi: Send + Sync {
     /// private half never leaves micad and there is no accessor that returns
     /// one, so the only thing this call can hand back is the public half.
     async fn rotate_wireguard_key(&self, iface: &str) -> anyhow::Result<String>;
+    /// Stage a factory reset for `by` (`console`, `api`) from `source` once
+    /// micad has checked `password` against the administrator's, and reboot
+    /// into it (`FactoryReset`). Unavailable by default.
+    async fn factory_reset(&self, _password: &str, _by: &str, _source: &str) -> anyhow::Result<()> {
+        anyhow::bail!("this build stages no factory reset")
+    }
+    /// Whether the booted runkit supports a factory reset, why it cannot run
+    /// now, and the last one (`GetFactoryReset`). Unavailable by default.
+    async fn get_factory_reset(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build stages no factory reset")
+    }
     /// This device's code and its source, or why it has none
     /// (`GetDeviceCode`). Unavailable by default.
     async fn get_device_code(&self) -> anyhow::Result<Value> {

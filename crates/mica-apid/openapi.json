@@ -6540,6 +6540,197 @@
         }
       }
     },
+    "/api/v1/system/factory-reset": {
+      "get": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Whether a factory reset can run now, and the last one.",
+        "operationId": "api_v1_factory_reset_status",
+        "responses": {
+          "200": {
+            "description": "Whether the reset is supported, why it cannot run now, and the last one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactoryResetStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad answered something else (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Erase everything configured on the device: the administrator and the\nclaim, settings, networks, keys, apps, containers and all data. The\nsoftware stays at its current version. The device reboots a few seconds\nafter the answer and erases before anything else runs; it then starts as\non its first boot, unclaimed. It is not a certified wipe: the files are\nremoved and the freed space is discarded where the storage supports it.",
+        "description": "**The administrator password is required**, whatever the session or\ntoken. A wrong one counts in the login backoff, the same counter\n`POST /api/v1/login` keeps.",
+        "operationId": "api_v1_factory_reset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactoryResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The reset is staged; the device reboots into it in a few seconds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactoryResetStaged"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The password is not the administrator's (`password_incorrect`), or a browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The reset cannot run now: the device's boot does not carry one out (`factory_reset_unsupported`), the device is not claimed (`not_claimed`), an update is being installed or awaits its reboot (`update_in_progress`), or a deployment or core set is on trial (`trial_pending`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, or the password is empty (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords; retry shortly (`login_throttled`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed to stage it (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out; the outcome is not confirmed (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/system/info": {
       "get": {
         "tags": [
@@ -11917,6 +12108,124 @@
           "params": {
             "type": "object",
             "description": "The values the rule's message names."
+          }
+        }
+      },
+      "FactoryResetDone": {
+        "type": "object",
+        "description": "The last completed factory reset.",
+        "required": [
+          "requested",
+          "completed",
+          "by",
+          "source",
+          "unremoved"
+        ],
+        "properties": {
+          "by": {
+            "type": "string",
+            "description": "`console`, `api` or `cli`."
+          },
+          "completed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds, as the device's clock read them early in the boot that\nerased.",
+            "minimum": 0
+          },
+          "requested": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds, as the device's clock read them.",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string",
+            "description": "The peer or mechanism that asked."
+          },
+          "unremoved": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Entries the erase could not remove; 0 on a clean erase.",
+            "minimum": 0
+          }
+        }
+      },
+      "FactoryResetRefusal": {
+        "type": "object",
+        "description": "Why a factory reset cannot run now.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "`factory_reset_unsupported`, `not_claimed`, `update_in_progress` or\n`trial_pending`."
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "FactoryResetRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/system/factory-reset` request body.",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "The administrator password, checked whatever the session or token."
+          }
+        },
+        "additionalProperties": false
+      },
+      "FactoryResetStaged": {
+        "type": "object",
+        "description": "`POST /api/v1/system/factory-reset` response body.",
+        "required": [
+          "applies"
+        ],
+        "properties": {
+          "applies": {
+            "type": "string",
+            "description": "Always `reboot`: the device reboots in a few seconds and erases\nbefore anything else runs."
+          }
+        }
+      },
+      "FactoryResetStatus": {
+        "type": "object",
+        "description": "`GET /api/v1/system/factory-reset` response body.",
+        "required": [
+          "supported"
+        ],
+        "properties": {
+          "last": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FactoryResetDone",
+                "description": "The last completed reset; null when there was none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refusal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FactoryResetRefusal",
+                "description": "Why it cannot run now, the password aside; null when it can."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "Whether this device's boot carries out a factory reset."
           }
         }
       },

@@ -198,6 +198,10 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
         // POST only, for the reason the power actions are: no GET handler
         // exists, so nothing that merely follows a link can stage a reset.
         .route(V1_RESET_PATH, post(api_v1_reset))
+        .route(
+            V1_FACTORY_RESET_PATH,
+            get(api_v1_factory_reset_status).post(api_v1_factory_reset),
+        )
         // POST only, and with no credential extractor: the authority is
         // physical presence, and an authenticated session is refused rather
         // than admitted.

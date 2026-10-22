@@ -311,6 +311,49 @@ test('captures an access point on the fallback channel', async ({ page }, testIn
   await page.screenshot({ path: testInfo.outputPath('network-acs-fallback.png'), fullPage: true })
 })
 
+test('captures the factory reset, its password and the reboot, in English and Chinese', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const posted: unknown[] = []
+  await page.route('**/api/v1/system/factory-reset', (route) => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        supported: true,
+        refusal: null,
+        last: { requested: 1_760_000_000, completed: 1_760_000_045, by: 'console', source: '192.168.1.40', unremoved: 0 },
+      }) })
+    }
+    const body = route.request().postDataJSON() as { password: string }
+    posted.push(body)
+    return body.password === 'hunter2secret'
+      ? route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ applies: 'reboot' }) })
+      : route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 'password_incorrect', message: 'the password is not the administrator\'s', source: 'micad', path: 'password' } }) })
+  })
+  for (const [locale, suffix, start, field, submit, rebooting] of [
+    ['en', 'en', 'Factory reset…', 'Administrator password', 'Erase and reboot', 'The device is rebooting and erasing.'],
+    ['zh-CN', 'zh', '恢复出厂设置…', '管理员密码', '清除并重启', '设备正在重启并清除数据。'],
+  ] as const) {
+    await page.addInitScript((value) => localStorage.setItem('mica.ui.locale', value), locale)
+    await page.goto('./system#general')
+    // The same address again does not reload, and the locale is read at load.
+    await page.reload()
+    const section = page.locator('section').filter({ has: page.getByRole('button', { name: start }) })
+    await section.scrollIntoViewIfNeeded()
+    await section.screenshot({ path: testInfo.outputPath(`factory-reset-${suffix}.png`), animations: 'disabled' })
+    await page.getByRole('button', { name: start }).click()
+    await page.getByLabel(field).fill('a guess')
+    await page.getByRole('button', { name: submit }).click()
+    await expect(page.getByText('the password is not the administrator\'s').first()).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`factory-reset-wrong-${suffix}.png`), animations: 'disabled' })
+    await page.getByLabel(field).fill('hunter2secret')
+    await page.screenshot({ path: testInfo.outputPath(`factory-reset-dialog-${suffix}.png`), animations: 'disabled' })
+    await page.getByRole('button', { name: submit }).click()
+    await expect(page.getByText(rebooting)).toBeVisible()
+    await section.screenshot({ path: testInfo.outputPath(`factory-reset-rebooting-${suffix}.png`), animations: 'disabled' })
+  }
+  expect(posted).toEqual([{ password: 'a guess' }, { password: 'hunter2secret' }, { password: 'a guess' }, { password: 'hunter2secret' }])
+})
+
 test('uses the mobile navigation drawer', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'mobile navigation contract')
   await page.goto('./')
@@ -493,6 +536,7 @@ function payload(path: string, method: string): unknown {
   if (path === '/api/v1/health') return { apid: 'ok', micad: 'ok', checkedAt: 183900 }
   if (path === '/api/v1/meta') return { api: 'v1', settingsSchemaVersion: 1, daemon: 'micad 0.0.1', init: 'systemd' }
   if (path === '/api/v1/device/code') return { code: 'DFN4-L34C-T8N', source: 'emmc-cid' }
+  if (path === '/api/v1/system/factory-reset') return { supported: true, refusal: null, last: null }
   if (path === '/api/v1/system/info') return {
     machineId: { available: true, id: '4f2e9c1a7b3d4e5f' },
     board: { available: true, model: 'mica-cm4 rev 2', source: 'device-tree' },

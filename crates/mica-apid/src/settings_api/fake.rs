@@ -48,6 +48,11 @@ pub struct FakeSettings {
     pub(super) telemetry: std::sync::Mutex<Value>,
     /// What `get_device_code` answers.
     pub(super) device_code: std::sync::Mutex<Value>,
+    /// What `get_factory_reset` answers; its `refusal`, when not null, is
+    /// what `factory_reset` refuses with.
+    pub(super) factory_reset: std::sync::Mutex<Value>,
+    /// Factory resets staged, as `<by> <source>`.
+    pub(super) factory_resets: std::sync::Mutex<Vec<String>>,
     /// What `get_observed_network` answers; the shape micad's `observed_json`
     /// serves.
     pub(super) observed_network: std::sync::Mutex<Value>,
@@ -138,6 +143,10 @@ impl FakeSettings {
             device_code: std::sync::Mutex::new(
                 serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid" }),
             ),
+            factory_reset: std::sync::Mutex::new(
+                serde_json::json!({ "supported": true, "refusal": null, "last": null }),
+            ),
+            factory_resets: std::sync::Mutex::new(Vec::new()),
             telemetry: std::sync::Mutex::new(serde_json::json!({
                 "thermal": { "available": false, "detail": "fake" },
                 "watchdog": { "available": false, "detail": "fake" },
@@ -258,6 +267,15 @@ impl FakeSettings {
     }
 
     /// Replace what `get_device_code` answers.
+    pub fn set_factory_reset(&self, value: Value) {
+        *self.factory_reset.lock().unwrap() = value;
+    }
+
+    /// Factory resets staged, as `<by> <source>`.
+    pub fn factory_resets(&self) -> Vec<String> {
+        self.factory_resets.lock().unwrap().clone()
+    }
+
     pub fn set_device_code(&self, value: Value) {
         *self.device_code.lock().unwrap() = value;
     }
@@ -681,6 +699,41 @@ impl SettingsApi for FakeSettings {
     async fn reboot(&self) -> anyhow::Result<()> {
         self.power_log.lock().unwrap().push("reboot".to_string());
         Ok(())
+    }
+
+    /// Refuses as micad does: with the scripted refusal, or with
+    /// `password_incorrect` when `password` is not the tree's administrator's.
+    async fn factory_reset(&self, password: &str, by: &str, source: &str) -> anyhow::Result<()> {
+        let refused = |code: &str, message: &str| {
+            bus_error(
+                "com.mica.micad1.Error.FactoryResetRefused",
+                &serde_json::json!({ "code": code, "message": message }).to_string(),
+            )
+        };
+        let refusal = self.factory_reset.lock().unwrap()["refusal"].clone();
+        if let (Some(code), Some(message)) = (refusal["code"].as_str(), refusal["message"].as_str())
+        {
+            return Err(refused(code, message));
+        }
+        let hash = self.tree.lock().unwrap()["access"]["webAdmin"]["password_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        if !micad_settings::verify_password(&hash, password) {
+            return Err(refused(
+                "password_incorrect",
+                "the password is not the administrator's",
+            ));
+        }
+        self.factory_resets
+            .lock()
+            .unwrap()
+            .push(format!("{by} {source}"));
+        Ok(())
+    }
+
+    async fn get_factory_reset(&self) -> anyhow::Result<Value> {
+        Ok(self.factory_reset.lock().unwrap().clone())
     }
 
     async fn power_off(&self) -> anyhow::Result<()> {

@@ -127,6 +127,8 @@ trait Micad {
     fn get_app_log(&self, name: &str) -> zbus::Result<String>;
     fn reboot(&self) -> zbus::Result<()>;
     fn power_off(&self) -> zbus::Result<()>;
+    fn factory_reset(&self, password: &str, by: &str, source: &str) -> zbus::Result<()>;
+    fn get_factory_reset(&self) -> zbus::Result<String>;
     fn get_update_state(&self) -> zbus::Result<String>;
     fn check_update(&self) -> zbus::Result<()>;
     fn fetch_update(&self) -> zbus::Result<()>;
@@ -464,6 +466,20 @@ impl SettingsApi for BusSettings {
     async fn reboot(&self) -> anyhow::Result<()> {
         let proxy = self.proxy().await?;
         self.call("Reboot", proxy.reboot()).await
+    }
+
+    async fn factory_reset(&self, password: &str, by: &str, source: &str) -> anyhow::Result<()> {
+        let proxy = self.proxy().await?;
+        self.call("FactoryReset", proxy.factory_reset(password, by, source))
+            .await
+    }
+
+    async fn get_factory_reset(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self
+            .call("GetFactoryReset", proxy.get_factory_reset())
+            .await?;
+        Ok(serde_json::from_str(&json)?)
     }
 
     async fn power_off(&self) -> anyhow::Result<()> {

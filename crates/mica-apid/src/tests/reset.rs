@@ -11,6 +11,7 @@ use crate::routes::{Assertion, NoPresence, Presence};
 use serde_json::json;
 use std::sync::Arc;
 
+mod factory;
 mod presence;
 mod recovery;
 mod rotation;
