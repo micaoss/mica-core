@@ -306,12 +306,22 @@ impl MicadService {
     }
 
     /// JSON storage status: the fixed tiers, the physical media and the
-    /// low-space policy, observed at call time.
+    /// low-space policy, observed at call time, and the lifecycle decisions,
+    /// `factoryReset` being `supported` where the booted runkit carries one
+    /// out.
     pub(super) async fn get_storage_status(&self) -> Result<String, SettingsFault> {
         let evidence = self.storage_status.observe().await.map_err(|err| {
             SettingsFault::Fdo(fdo::Error::Failed(format!("observe storage: {err:#}")))
         })?;
-        Ok(storage_status::status_json(&evidence, &self.storage_pressure).to_string())
+        let mut status = storage_status::status_json(&evidence, &self.storage_pressure);
+        if self
+            .factory_reset
+            .as_ref()
+            .is_some_and(|reset| reset.supported())
+        {
+            status["lifecycle"]["factoryReset"] = "supported".into();
+        }
+        Ok(status.to_string())
     }
 
     /// JSON snapshot returned by systemd-networkd's live `Describe` method.
@@ -937,6 +947,39 @@ impl MicadService {
     /// call is made.
     pub(super) async fn reboot(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
         self.request_reboot(sender_of(&header)).await
+    }
+
+    /// Stage a factory reset and reboot into it: everything configured on
+    /// the device is erased at the next boot, before anything of the root
+    /// runs, and the software stays at its version. `password` must be the
+    /// administrator's; `by` is `console`, `api` or `cli`, and `source` the
+    /// peer or mechanism, both for the record. Refused with
+    /// `FactoryResetRefused`, whose description is JSON `{code, message}`.
+    pub(super) async fn factory_reset(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        password: String,
+        by: &str,
+        source: &str,
+    ) -> Result<(), ResetFault> {
+        self.request_factory_reset(sender_of(&header), password, by, source)
+            .await
+    }
+
+    /// The factory reset: `supported` (the booted runkit carries one out),
+    /// `refusal` (`{code, message}` while it cannot run now, the password
+    /// aside, else null) and `last` (the last completed reset, or null).
+    pub(super) async fn get_factory_reset(&self) -> fdo::Result<String> {
+        let refusal = self
+            .factory_reset_refusal()
+            .await
+            .map(|refusal| serde_json::json!({ "code": refusal.code, "message": refusal.message }));
+        let mut status = self.factory_reset.as_deref().map_or_else(
+            || serde_json::json!({ "supported": false, "last": null }),
+            crate::factory_reset::status,
+        );
+        status["refusal"] = refusal.into();
+        Ok(status.to_string())
     }
 
     /// Power the appliance off through systemd.

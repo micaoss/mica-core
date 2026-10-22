@@ -195,3 +195,53 @@ impl zbus::DBusError for AppFault {
         zbus::message::Message::error(call, self.name()).build(&self.message)
     }
 }
+
+/// D-Bus error name for a refused factory reset; the description is JSON,
+/// `{"code", "message"}`, `code` being the API's: `not_claimed`,
+/// `factory_reset_unsupported`, `update_in_progress`, `trial_pending`,
+/// `password_incorrect` or `login_throttled`.
+pub const FACTORY_RESET_REFUSED_ERROR: &str = "com.mica.micad1.Error.FactoryResetRefused";
+
+/// Reply error of `FactoryReset`.
+#[derive(Debug)]
+pub(super) enum ResetFault {
+    /// [`FACTORY_RESET_REFUSED_ERROR`].
+    Refused(String),
+    /// Everything else, under its standard fdo name.
+    Fdo(fdo::Error),
+}
+
+impl From<crate::factory_reset::Refusal> for ResetFault {
+    fn from(refusal: crate::factory_reset::Refusal) -> Self {
+        Self::Refused(
+            serde_json::json!({ "code": refusal.code, "message": refusal.message }).to_string(),
+        )
+    }
+}
+
+impl zbus::DBusError for ResetFault {
+    fn name(&self) -> zbus::names::ErrorName<'_> {
+        match self {
+            Self::Refused(_) => {
+                zbus::names::ErrorName::from_static_str_unchecked(FACTORY_RESET_REFUSED_ERROR)
+            }
+            Self::Fdo(err) => err.name(),
+        }
+    }
+
+    fn description(&self) -> Option<&str> {
+        match self {
+            Self::Refused(message) => Some(message),
+            Self::Fdo(err) => err.description(),
+        }
+    }
+
+    fn create_reply(&self, call: &Header<'_>) -> zbus::Result<zbus::message::Message> {
+        match self {
+            Self::Refused(message) => {
+                zbus::message::Message::error(call, self.name()).build(message)
+            }
+            Self::Fdo(err) => err.create_reply(call),
+        }
+    }
+}

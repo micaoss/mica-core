@@ -100,7 +100,9 @@ time and classified by [`crate::time_status::classify`].
 </method>
 <!--
 JSON storage status: the fixed tiers, the physical media and the
-low-space policy, observed at call time.
+low-space policy, observed at call time, and the lifecycle decisions,
+`factoryReset` being `supported` where the booted runkit carries one
+out.
 -->
 <method name="GetStorageStatus">
 <arg type="s" direction="out"/>
@@ -464,6 +466,27 @@ The request is logged and recorded in the live-state tree before the
 call is made.
 -->
 <method name="Reboot">
+</method>
+<!--
+Stage a factory reset and reboot into it: everything configured on
+the device is erased at the next boot, before anything of the root
+runs, and the software stays at its version. `password` must be the
+administrator's; `by` is `console`, `api` or `cli`, and `source` the
+peer or mechanism, both for the record. Refused with
+`FactoryResetRefused`, whose description is JSON `{code, message}`.
+-->
+<method name="FactoryReset">
+<arg name="password" type="s" direction="in"/>
+<arg name="by" type="s" direction="in"/>
+<arg name="source" type="s" direction="in"/>
+</method>
+<!--
+The factory reset: `supported` (the booted runkit carries one out),
+`refusal` (`{code, message}` while it cannot run now, the password
+aside, else null) and `last` (the last completed reset, or null).
+-->
+<method name="GetFactoryReset">
+<arg type="s" direction="out"/>
 </method>
 <!--
 Power the appliance off through systemd.

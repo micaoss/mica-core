@@ -4,7 +4,8 @@ use serde_json::{Value as Json, json};
 
 use super::*;
 
-/// The lifecycle decisions that must be EXPLICIT.
+/// The lifecycle decisions that must be EXPLICIT. `factoryReset` is
+/// `supported` in the bus answer where the booted runkit carries one out.
 pub(super) const LIFECYCLE: &[(&str, &str)] = &[
     ("backupRestore", "unsupported"),
     ("offlineRepair", "unsupported"),

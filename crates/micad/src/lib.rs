@@ -26,6 +26,8 @@ mod deployment;
 pub mod device_code;
 mod diagnostics;
 mod docker;
+mod factory_reset;
+pub mod factory_reset_cli;
 mod fswrite;
 mod identity;
 mod logs;
@@ -371,6 +373,21 @@ async fn serve() -> anyhow::Result<()> {
         service = service.with_system_info(Arc::new(system_info::HostSystemInfo::production()));
         service = service.with_telemetry(Arc::new(telemetry::SysfsTelemetry::production()));
         service = service.with_device_root(std::path::PathBuf::from("/"));
+        // The first boot after a factory reset records it once and discards
+        // the space the erase freed, in the background: the boot does not
+        // wait for it.
+        let factory_reset = Arc::new(factory_reset::FactoryReset::production());
+        match factory_reset.first_boot() {
+            Ok(Some(_)) => {
+                let reset = Arc::clone(&factory_reset);
+                tokio::task::spawn_blocking(move || reset.discard_free_space());
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(error = %format!("{error:#}"), "the factory reset could not be recorded")
+            }
+        }
+        service = service.with_factory_reset(factory_reset);
         // The adapter and the pairing agent. The agent's state is shared with
         // the `org.bluez.Agent1` object registered below: it blocks on a
         // decision the console makes through the bus.

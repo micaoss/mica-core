@@ -11,6 +11,14 @@ use std::time::Duration;
 use zbus::fdo;
 
 use super::*;
+use crate::factory_reset::{self, Refusal};
+
+/// How long after the answer the device reboots into a factory reset.
+const FACTORY_RESET_REBOOT_DELAY: Duration = if cfg!(test) {
+    Duration::from_millis(200)
+} else {
+    Duration::from_secs(3)
+};
 
 impl MicadService {
     /// Log a power request from `sender` and record it in the live-state tree
@@ -80,6 +88,127 @@ impl MicadService {
             .reboot()
             .await
             .map_err(|err| fdo::Error::Failed(format!("reboot: {err}")))
+    }
+
+    /// Why a factory reset cannot run now, the password aside: the booted
+    /// runkit does not carry one out, the device is not claimed, an update is
+    /// being installed or awaits its reboot, or a deployment or core set is on
+    /// trial.
+    pub(super) async fn factory_reset_refusal(&self) -> Option<Refusal> {
+        let supported = self
+            .factory_reset
+            .as_ref()
+            .is_some_and(|reset| reset.supported());
+        if !supported {
+            return Some(Refusal::new(
+                "factory_reset_unsupported",
+                "this device's boot does not carry out a factory reset; it needs a newer kernel \
+                 component",
+            ));
+        }
+        if self.inner.read().await.settings.access.web_admin.is_none() {
+            return Some(Refusal::new(
+                "not_claimed",
+                "the device is not claimed, and nothing on it is configured",
+            ));
+        }
+        if self.installing.load(Ordering::Acquire)
+            || self
+                .factory_reset
+                .as_ref()
+                .is_some_and(|reset| reset.transaction_held())
+        {
+            return Some(Refusal::new(
+                "update_in_progress",
+                "an update is being installed",
+            ));
+        }
+        let status = self.deployment_evidence().await?;
+        match status.phase() {
+            ("reboot-required", reason) => Some(Refusal::new("update_in_progress", reason)),
+            ("validating", reason) => Some(Refusal::new("trial_pending", reason)),
+            _ => None,
+        }
+    }
+
+    /// Stage a factory reset for `by` (`console`, `api` or `cli`) from
+    /// `source`, once `password` is the administrator's, and reboot into it
+    /// a few seconds later, so the answer reaches the caller first.
+    pub(super) async fn request_factory_reset(
+        &self,
+        sender: &str,
+        password: String,
+        by: &str,
+        source: &str,
+    ) -> Result<(), ResetFault> {
+        let Some(by) = factory_reset::requester(by) else {
+            return Err(ResetFault::Fdo(fdo::Error::InvalidArgs(format!(
+                "`{by}` is not a requester: console, api or cli"
+            ))));
+        };
+        if source.len() > 256 || source.chars().any(char::is_control) {
+            return Err(ResetFault::Fdo(fdo::Error::InvalidArgs(
+                "the source is at most 256 printable characters".into(),
+            )));
+        }
+        if let Some(refusal) = self.factory_reset_refusal().await {
+            return Err(refusal.into());
+        }
+        let Some(reset) = self.factory_reset.clone() else {
+            return Err(ResetFault::Fdo(fdo::Error::Failed(
+                "no factory reset".into(),
+            )));
+        };
+        if let Some(refusal) = reset.throttled() {
+            return Err(refusal.into());
+        }
+        let hash = self
+            .inner
+            .read()
+            .await
+            .settings
+            .access
+            .web_admin
+            .as_ref()
+            .map(|admin| admin.password_hash.clone())
+            .unwrap_or_default();
+        let matches =
+            tokio::task::spawn_blocking(move || micad_settings::verify_password(&hash, &password))
+                .await
+                .unwrap_or(false);
+        if !matches {
+            reset.failed();
+            tracing::warn!(sender, source, "factory reset refused: wrong password");
+            return Err(Refusal::new(
+                "password_incorrect",
+                "the password is not the administrator's",
+            )
+            .into());
+        }
+        reset.succeeded();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        reset.stage(by, source, now).map_err(|error| {
+            ResetFault::Fdo(fdo::Error::Failed(format!(
+                "stage the factory reset: {error:#}"
+            )))
+        })?;
+        tracing::warn!(
+            sender,
+            ?by,
+            source,
+            "factory reset staged; rebooting into it"
+        );
+        self.note_power_request("factory_reset", sender, None).await;
+        let power = Arc::clone(&self.power);
+        tokio::spawn(async move {
+            tokio::time::sleep(FACTORY_RESET_REBOOT_DELAY).await;
+            if let Err(error) = power.reboot().await {
+                tracing::error!(%error, "the reboot into the factory reset failed; the next boot carries it out");
+            }
+        });
+        Ok(())
     }
 
     /// Power the machine off on behalf of `sender`.

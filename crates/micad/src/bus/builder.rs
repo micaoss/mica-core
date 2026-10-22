@@ -191,6 +191,13 @@ impl MicadService {
         self
     }
 
+    /// Attach the factory reset (`FactoryReset`, `GetFactoryReset`).
+    #[must_use]
+    pub fn with_factory_reset(mut self, reset: Arc<crate::factory_reset::FactoryReset>) -> Self {
+        self.factory_reset = Some(reset);
+        self
+    }
+
     /// Attach the log reader (`GetLog`).
     #[must_use]
     pub fn with_logs(mut self, logs: Arc<dyn crate::logs::LogReader>) -> Self {

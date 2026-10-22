@@ -119,7 +119,7 @@ enum ContainerAction {
 pub struct MicadService {
     store: Store,
     reconcilers: Arc<Vec<Box<dyn Reconciler>>>,
-    power: Box<dyn PowerControl>,
+    power: Arc<dyn PowerControl>,
     deployments: Arc<dyn DeploymentClient>,
     /// Shared interlock for install admission and reboot refusal.
     installing: Arc<AtomicBool>,
@@ -167,6 +167,9 @@ pub struct MicadService {
     /// The root the device code is read under (`GetDeviceCode`); `None`
     /// reads nothing, on the same rule.
     device_root: Option<std::path::PathBuf>,
+    /// The factory reset (`FactoryReset`); `None` is a daemon that cannot
+    /// stage one, on the same rule.
+    factory_reset: Option<Arc<crate::factory_reset::FactoryReset>>,
     /// Read-only container observation: what the engine says is there.
     ///
     /// Read-only in the strong sense -- the adapter runs `podman images` and
@@ -312,7 +315,7 @@ impl MicadService {
         Self {
             store,
             reconcilers: Arc::new(reconcilers),
-            power,
+            power: Arc::from(power),
             deployments: Arc::new(NativeClient::new(Arc::new(NoClient))),
             installing,
             shadow_path,
@@ -328,6 +331,7 @@ impl MicadService {
             system_info: Arc::new(UnavailableSystemInfo),
             telemetry: Arc::new(UnavailableTelemetry),
             device_root: None,
+            factory_reset: None,
             failure_evidence: Arc::new(UnavailableFailureEvidence),
             logs: Arc::new(crate::logs::NoLogs),
             user_units: Arc::new(crate::user_units::UserUnits::unavailable()),

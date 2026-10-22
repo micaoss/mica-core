@@ -63,6 +63,7 @@ pub(crate) trait Micad {
     fn start_unit(&self, name: &str) -> zbus::Result<()>;
     fn stop_unit(&self, name: &str) -> zbus::Result<()>;
     fn restart_unit(&self, name: &str) -> zbus::Result<()>;
+    fn factory_reset(&self, password: &str, by: &str, source: &str) -> zbus::Result<()>;
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]

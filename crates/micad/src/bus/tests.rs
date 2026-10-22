@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 mod apply;
 mod auto;
 mod bluetooth;
+mod factory_reset;
 mod features;
 mod install;
 mod latest;
