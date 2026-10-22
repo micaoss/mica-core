@@ -52,15 +52,6 @@ pub(crate) struct CredentialRecovered {
     pub(super) generation: u32,
 }
 
-/// Whether a tier may only be reached with physical presence.
-///
-/// The line, and the reason it is drawn there: "a device whose identity and
-/// credentials are gone cannot be handed back to its owner over the network".
-/// Tiers 1 and 2 are authenticated management actions.
-pub(super) fn tier_needs_presence(tier: ResetTier) -> bool {
-    matches!(tier, ResetTier::FullFactory)
-}
-
 /// The refusal, in the error envelope.
 pub(super) fn presence_refusal(reason: &NoPresence) -> Response {
     api_response(
@@ -77,12 +68,10 @@ pub(super) fn presence_refusal(reason: &NoPresence) -> Response {
 /// leaves the device either not asked or asked, never half-reset. micad carries
 /// the tier out before anything else on the next boot and clears the record.
 ///
-/// **Authority.** Tiers 1 and 2 are authenticated management
-/// actions. Tier 3 additionally requires physical presence; the order it
-/// sits at in the decision tree is after credential recovery, so an operator
-/// who reaches it holds a credential as well as standing at the device. There
-/// is no tier 4: `ResetTier` has three members, so `secure-wipe` is a body
-/// this route cannot parse.
+/// **Authority.** Both tiers are authenticated management actions.
+/// `ResetTier` has two members, so `secure-wipe` is a body this route cannot
+/// parse, and `full-factory` is answered with the route that erases the
+/// device, `POST /api/v1/system/factory-reset`.
 ///
 /// A tier staged over another replaces it. Both are audited, so nothing is
 /// silent, and the alternative — refusing until something un-stages the first
@@ -97,9 +86,8 @@ pub(super) fn presence_refusal(reason: &NoPresence) -> Response {
         (status = 202, description = "The tier is staged and runs on the next boot", body = ResetStaged),
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
-        (status = 403, description = "The tier requires physical presence at the device and none is asserted (`presence_required`)", body = ApiError),
         (status = 409, description = "The device was claimed with a bootstrap credential that has not been rotated (`rotation_required`)", body = ApiError),
-        (status = 422, description = "The body is not this shape, or names no tier this device implements (`validation_failed`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, or names no tier this route stages (`validation_failed`); `full-factory` is `POST /api/v1/system/factory-reset`", body = ApiError),
         (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
@@ -112,42 +100,35 @@ pub(crate) async fn api_v1_reset(
     Source(source): Source,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
+    if let Ok(Json(value)) = &body
+        && value["tier"] == "full-factory"
+    {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                format!(
+                    "`full-factory` is not a reset tier; the factory reset is \
+                     `POST {API}{V1_FACTORY_RESET_PATH}`"
+                ),
+            )
+            .at("tier"),
+        );
+    }
     let request: ResetRequest = match json_body(body, Some(RESET_PATH)) {
         Ok(request) => request,
         Err(response) => return *response,
     };
     let event = micad_settings::reset_event(request.tier);
 
-    // Presence BEFORE the write and before anything else this handler does, so
-    // a refused tier 3 is exactly a refused tier 3: nothing staged, nothing
-    // cleared, one audit line.
-    let presence = if tier_needs_presence(request.tier) {
-        match state.presence.assert() {
-            Ok(assertion) => Some(assertion.mechanism),
-            Err(reason) => {
-                state.audit.record(event, "refused", &source);
-                return presence_refusal(&reason);
-            }
-        }
-    } else {
-        None
-    };
-
     let intent = serde_json::json!({
         "tier": request.tier,
         "requested": device_clock_seconds(),
-        "presence": presence,
     });
     if let Err(err) = state.api.set_settings(RESET_PATH, &intent).await {
         return bus_api_error(&err, Some(RESET_PATH));
     }
-    // The mechanism rides in the SOURCE for a presence-gated tier: the audit
-    // line stays at four members, and an audit entry that records a factory
-    // reset without naming what authorized it cannot answer "how did this
-    // device get reset". A tier 1 or 2 has no mechanism, and its source stays
-    // the peer that asked.
-    let staged_source = presence.as_deref().unwrap_or(source.as_str());
-    state.audit.record(event, "staged", staged_source);
+    state.audit.record(event, "staged", &source);
     api_response(
         StatusCode::ACCEPTED,
         ResetStaged {

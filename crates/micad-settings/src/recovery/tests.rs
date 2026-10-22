@@ -32,7 +32,6 @@ fn every_tier_a_board_may_name_maps_to_the_tier_the_flows_run() {
         (TIER_NONE, None),
         ("configuration", Some(ResetTier::Configuration)),
         ("application-data", Some(ResetTier::ApplicationData)),
-        ("full-factory", Some(ResetTier::FullFactory)),
     ] {
         let text = ONE_ACTION.replace("_TIER=none", &format!("_TIER={declared}"));
         let declaration = Declaration::parse(&text);

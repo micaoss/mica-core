@@ -97,7 +97,7 @@ pub(super) fn the_reset_intent_round_trips_through_the_store() {
     let path = dir.path().join("settings.toml");
     let settings = Settings {
         reset: Some(ResetSettings {
-            tier: ResetTier::FullFactory,
+            tier: ResetTier::ApplicationData,
             requested: 1_700_000_000,
             presence: Some("console-attach".to_string()),
         }),
@@ -113,16 +113,15 @@ pub(super) fn the_reset_intent_round_trips_through_the_store() {
     assert!(text.contains("[reset]"), "{text}");
 }
 
-/// The wire spelling every tier serializes to, pinned: apid writes these three
+/// The wire spelling every tier serializes to, pinned: apid writes these two
 /// strings through `SetSettings("reset")` and micad reads them back, so a
 /// rename here would strand an intent a device already committed.
 #[test]
-pub(super) fn the_reset_tiers_have_kebab_case_wire_names_and_there_is_no_fourth() {
+pub(super) fn the_reset_tiers_have_kebab_case_wire_names_and_there_is_no_third() {
     let mut settings = Settings::default();
     for (tier, expected) in [
         (ResetTier::Configuration, "configuration"),
         (ResetTier::ApplicationData, "application-data"),
-        (ResetTier::FullFactory, "full-factory"),
     ] {
         settings.reset = Some(ResetSettings {
             tier,
@@ -134,7 +133,13 @@ pub(super) fn the_reset_tiers_have_kebab_case_wire_names_and_there_is_no_fourth(
         assert!(staged.get("presence").is_none(), "{staged}");
     }
 
-    for spelling in ["secure-wipe", "secureWipe", "secure_wipe", "wipe"] {
+    for spelling in [
+        "full-factory",
+        "secure-wipe",
+        "secureWipe",
+        "secure_wipe",
+        "wipe",
+    ] {
         let err = settings
             .set("reset", json!({ "tier": spelling, "requested": 0 }))
             .unwrap_err();

@@ -173,7 +173,7 @@ pub(crate) const V1_PROVISIONING_STATUS_PATH: &str = "/v1/provisioning/status";
 /// the request that gets audited, and a path segment per tier would make
 /// "which resets does this device offer" a question about the route table
 /// rather than about `ResetTier` — which is where the answer that there is no
-/// fourth tier has to live. Not under `/v1/actions/` for the reason
+/// third tier has to live. Not under `/v1/actions/` for the reason
 /// [`V1_SETUP_PATH`] is not: this writes a device-lifecycle intent, and
 /// calling it an action understates it.
 pub(super) const V1_RESET_PATH: &str = "/v1/reset";
@@ -181,6 +181,12 @@ pub(super) const V1_RESET_PATH: &str = "/v1/reset";
 /// The dot-path the staged intent lives at, which every envelope about it
 /// names.
 pub(super) const RESET_PATH: &str = "reset";
+
+/// The factory reset: everything configured on the device is erased at the
+/// next boot, the software staying at its version. Its own route rather than
+/// a tier of [`V1_RESET_PATH`]: the runkit carries it out, and it asks for
+/// the administrator password.
+pub(super) const V1_FACTORY_RESET_PATH: &str = "/v1/system/factory-reset";
 
 /// Credential recovery, the one operation on
 /// this surface whose authority is physical presence rather than a credential.

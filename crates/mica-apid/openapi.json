@@ -5311,7 +5311,7 @@
           "actions"
         ],
         "summary": "Stage a reset tier.",
-        "description": "**This route stages; micad applies.** A reset is an intent\nrecord plus an idempotent apply, so the whole of this handler's write is\nONE `SetSettings(\"reset\")` — one `Store::save` — after which a power loss\nleaves the device either not asked or asked, never half-reset. micad carries\nthe tier out before anything else on the next boot and clears the record.\n\n**Authority.** Tiers 1 and 2 are authenticated management\nactions. Tier 3 additionally requires physical presence; the order it\nsits at in the decision tree is after credential recovery, so an operator\nwho reaches it holds a credential as well as standing at the device. There\nis no tier 4: `ResetTier` has three members, so `secure-wipe` is a body\nthis route cannot parse.\n\nA tier staged over another replaces it. Both are audited, so nothing is\nsilent, and the alternative — refusing until something un-stages the first\n— is a dead end for an operator who asked for the wrong one.",
+        "description": "**This route stages; micad applies.** A reset is an intent\nrecord plus an idempotent apply, so the whole of this handler's write is\nONE `SetSettings(\"reset\")` — one `Store::save` — after which a power loss\nleaves the device either not asked or asked, never half-reset. micad carries\nthe tier out before anything else on the next boot and clears the record.\n\n**Authority.** Both tiers are authenticated management actions.\n`ResetTier` has two members, so `secure-wipe` is a body this route cannot\nparse, and `full-factory` is answered with the route that erases the\ndevice, `POST /api/v1/system/factory-reset`.\n\nA tier staged over another replaces it. Both are audited, so nothing is\nsilent, and the alternative — refusing until something un-stages the first\n— is a dead end for an operator who asked for the wrong one.",
         "operationId": "api_v1_reset",
         "requestBody": {
           "content": {
@@ -5354,16 +5354,6 @@
               }
             }
           },
-          "403": {
-            "description": "The tier requires physical presence at the device and none is asserted (`presence_required`)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
           "405": {
             "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
             "content": {
@@ -5385,7 +5375,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, or names no tier this device implements (`validation_failed`)",
+            "description": "The body is not this shape, or names no tier this route stages (`validation_failed`); `full-factory` is `POST /api/v1/system/factory-reset`",
             "content": {
               "application/json": {
                 "schema": {

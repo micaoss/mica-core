@@ -149,7 +149,7 @@ fn stage(settings: &mut Settings, tier: ResetTier) {
     settings.reset = Some(ResetSettings {
         tier,
         requested: 1_700_000_000,
-        presence: (tier == ResetTier::FullFactory).then(|| "console-attach".to_string()),
+        presence: None,
     });
 }
 
@@ -379,96 +379,21 @@ fn the_application_tier_clears_the_users_services() {
 }
 
 #[test]
-fn application_and_factory_reset_clear_the_independent_container_namespace() {
-    for tier in [ResetTier::ApplicationData, ResetTier::FullFactory] {
-        let (dir, roots) = populated_roots();
-        let store = store_at(&dir, &roots);
-        let mut settings = fielded_settings();
-        let containers = roots.data.join("containers");
-        write(
-            &containers.join("storage/overlay/layer"),
-            "container payload",
-        );
-        fs::create_dir_all(containers.join("networks")).unwrap();
-        stage(&mut settings, tier);
-        apply_pending(&store, &mut settings, &roots).unwrap();
-        assert!(!containers.join("storage").exists());
-        assert!(containers.join("networks").is_dir());
-        assert!(containers.join("tmp").is_dir());
-    }
-}
-
-/// Tier 3, row 3: the whole mutable state goes; identity,
-/// calibration and the per-device secrets do not.
-#[test]
-fn tier_three_returns_the_device_to_first_boot_and_keeps_its_identity() {
+fn the_application_reset_clears_the_independent_container_namespace() {
     let (dir, roots) = populated_roots();
     let store = store_at(&dir, &roots);
     let mut settings = fielded_settings();
-    stage(&mut settings, ResetTier::FullFactory);
-
-    assert_eq!(
-        apply_pending(&store, &mut settings, &roots).unwrap(),
-        Outcome::Applied(ResetTier::FullFactory)
+    let containers = roots.data.join("containers");
+    write(
+        &containers.join("storage/overlay/layer"),
+        "container payload",
     );
-
-    // CLEARED: settings, management credentials, applications and all
-    // operator data, together.
-    assert_eq!(settings.hostname, Settings::default().hostname);
-    assert_eq!(settings.access.web_admin, None);
-    assert_eq!(settings.access.claim, None);
-    assert!(settings.access.api_tokens.is_empty());
-    assert_eq!(settings.wifi.ap.psk, None);
-    assert_eq!(settings.access.ssh, Default::default());
-    assert!(!exists(&roots.system().join("apps/inventory")));
-    assert!(!exists(&roots.system().join("ui/active")));
-    assert!(!exists(
-        &roots.system().join("updates/verified/deployment.json")
-    ));
-    assert!(!exists(&roots.system().join("home/operator")));
-    assert!(!exists(&roots.user().join("operator")));
-    assert!(!exists(&roots.state.join("containerd/web.json")));
-
-    // RE-SEEDED: `/mica` is exactly the skeleton a virgin device has, every
-    // directory present and every one of them empty.
-    for relative in SYSTEM_SKELETON {
-        let path = roots.system().join(relative);
-        assert!(path.is_dir(), "{relative} is not a directory");
-    }
-    assert_eq!(
-        fs::read_dir(roots.system().join("apps")).unwrap().count(),
-        0
-    );
-    assert_eq!(
-        fs::read_dir(roots.system().join("updates/verified"))
-            .unwrap()
-            .count(),
-        0
-    );
-
-    // PRESERVED: identity, the per-device credential, and the secrets on
-    // STATE. A full factory reset does not re-mint identity — the
-    // operation that does is the whole-disk reflash.
-    assert_eq!(settings.provisioning.device_id.as_deref(), Some(DEVICE_ID));
-    assert_eq!(settings.access.device.generation, 3);
-    assert_eq!(
-        settings.access.device.password_hash,
-        fielded_settings().access.device.password_hash
-    );
-    assert_identity_survived(&roots);
-    assert!(
-        !exists(&roots.state.join(APID_IDENTITY)),
-        "the console's TLS identity is operator configuration"
-    );
-    assert!(
-        !exists(&roots.state.join(BOARD_DEFAULTS_RECORD)),
-        "the board's defaults come back with the settings"
-    );
-    assert!(!exists(&roots.state.join(APP_SEEDS_RECORD)));
-    assert_eq!(settings.provisioning.state, ProvisioningState::Pending);
-
-    assert_eq!(settings.reset, None);
-    assert_eq!(store.load().unwrap(), settings);
+    fs::create_dir_all(containers.join("networks")).unwrap();
+    stage(&mut settings, ResetTier::ApplicationData);
+    apply_pending(&store, &mut settings, &roots).unwrap();
+    assert!(!containers.join("storage").exists());
+    assert!(containers.join("networks").is_dir());
+    assert!(containers.join("tmp").is_dir());
 }
 
 /// The tier that has to survive an interruption, driven the way the record
@@ -483,9 +408,8 @@ fn an_interrupted_tier_replays_to_the_same_device() {
     // filesystem work ran, the save did not, so the record is untouched on
     // the tree the next boot loads.
     let mut interrupted = fielded_settings();
-    stage(&mut interrupted, ResetTier::FullFactory);
+    stage(&mut interrupted, ResetTier::ApplicationData);
     clear_application_state(&roots).unwrap();
-    reseed_tree(&roots.system(), SYSTEM_SKELETON).unwrap();
     assert!(
         interrupted.reset.is_some(),
         "the record must survive the interruption"
@@ -494,14 +418,14 @@ fn an_interrupted_tier_replays_to_the_same_device() {
     // The replay, over a tree half of the work has already been done to.
     assert_eq!(
         apply_pending(&store, &mut interrupted, &roots).unwrap(),
-        Outcome::Applied(ResetTier::FullFactory)
+        Outcome::Applied(ResetTier::ApplicationData)
     );
 
     // And it is the device the uninterrupted path produces.
     let (other_dir, other_roots) = populated_roots();
     let other_store = store_at(&other_dir, &other_roots);
     let mut uninterrupted = fielded_settings();
-    stage(&mut uninterrupted, ResetTier::FullFactory);
+    stage(&mut uninterrupted, ResetTier::ApplicationData);
     apply_pending(&other_store, &mut uninterrupted, &other_roots).unwrap();
     assert_eq!(interrupted, uninterrupted);
 }
@@ -538,7 +462,7 @@ fn reset_refuses_excessive_depth_before_removing_any_payload() {
     fs::create_dir_all(&deep).unwrap();
     write(&deep.join("retained"), "deep payload");
     let mut settings = fielded_settings();
-    stage(&mut settings, ResetTier::FullFactory);
+    stage(&mut settings, ResetTier::ApplicationData);
     let error = apply_pending(&store, &mut settings, &roots).unwrap_err();
     assert!(format!("{error:#}").contains("depth"));
     assert!(roots.system().join("apps/inventory/db.sqlite").is_file());
@@ -624,7 +548,7 @@ fn reset_and_installer_share_one_data_transaction_lock() {
     let lock = fs::File::create(roots.data.join("meta/transaction.lock")).unwrap();
     lock.try_lock().unwrap();
     let mut settings = fielded_settings();
-    stage(&mut settings, ResetTier::FullFactory);
+    stage(&mut settings, ResetTier::ApplicationData);
     assert!(apply_pending(&store, &mut settings, &roots).is_err());
     assert!(roots.system().join("apps/inventory/db.sqlite").exists());
     drop(lock);
@@ -645,17 +569,15 @@ fn reset_rejects_nested_binds_even_on_the_same_device() {
 /// configuration tier, which does not reach it, runs.
 #[test]
 fn a_running_dockerd_refuses_the_tiers_that_clear_its_storage() {
-    for tier in [ResetTier::ApplicationData, ResetTier::FullFactory] {
-        let (dir, roots) = populated_roots();
-        let store = store_at(&dir, &roots);
-        let mut settings = fielded_settings();
-        write(&roots.docker_pid, &std::process::id().to_string());
-        stage(&mut settings, tier);
-        let err = apply_pending(&store, &mut settings, &roots).unwrap_err();
-        assert!(err.to_string().contains("dockerd is running"), "{err}");
-        assert!(exists(&roots.containers().join("overlay/layer")));
-        assert!(settings.reset.is_some());
-    }
+    let (dir, roots) = populated_roots();
+    let store = store_at(&dir, &roots);
+    let mut settings = fielded_settings();
+    write(&roots.docker_pid, &std::process::id().to_string());
+    stage(&mut settings, ResetTier::ApplicationData);
+    let err = apply_pending(&store, &mut settings, &roots).unwrap_err();
+    assert!(err.to_string().contains("dockerd is running"), "{err}");
+    assert!(exists(&roots.containers().join("overlay/layer")));
+    assert!(settings.reset.is_some());
     let (dir, roots) = populated_roots();
     let store = store_at(&dir, &roots);
     let mut settings = fielded_settings();

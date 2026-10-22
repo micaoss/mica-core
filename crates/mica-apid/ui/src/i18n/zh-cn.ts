@@ -1243,8 +1243,6 @@ export const zhCN: Translation = {
         pending: '{{tier}}已暂存，将在下次启动时执行。',
         pendingAt: '请求时间 {{time}} UTC。',
         replaces: '暂存另一个层级会替换它。',
-        presenceShort: '需要物理在场',
-        presenceUnavailable: '完全恢复出厂设置需要在设备处进行物理在场断言。此构建带有该校验门，但不带断言方：其中没有任何代码写入在场断言，因此设备会拒绝所有这类请求。此处没有控件，是因为该操作无法完成。',
         noSecureWipe: '不存在安全擦除层级。没有任何板卡验证过设备级擦除原语，因此对于数据绝不能被恢复的介质，只能销毁而不是擦除。',
         tiers: {
           configuration: {
@@ -1254,10 +1252,6 @@ export const zhCN: Translation = {
           'application-data': {
             name: '应用数据重置',
             effect: '移除运维方的应用及其数据：清空 /srv，并将 /mica 下的应用区域重建为空。平台自身的配置和凭据会保留。',
-          },
-          'full-factory': {
-            name: '完全恢复出厂设置',
-            effect: '将设备恢复到首次启动状态：设置、应用、运维数据和管理凭据全部清除。设备标识、校准数据和两个已安装的系统槽不受影响。',
           },
         },
       },

@@ -9,10 +9,7 @@ import { RowItem, RowList } from '@/shared/components/row-item'
 import { failureDetail } from '@/shared/feedback/toast'
 import { formatDeviceClock } from '@/shared/components/fact'
 
-/// The tiers an authenticated management session may stage. Tier 3
-/// (`full-factory`) is listed beside them and deliberately carries no control:
-/// it is gated on a physical-presence assertion, and nothing in this build
-/// writes one, so a button here would promise an operation that always fails.
+/// The tiers an authenticated management session may stage.
 const REACHABLE_TIERS = ['configuration', 'application-data'] as const
 
 type ReachableTier = (typeof REACHABLE_TIERS)[number]
@@ -75,13 +72,7 @@ export function ResetPanel() {
             )}
           />
         ))}
-        <RowItem
-          title={tierLabel('full-factory', t)}
-          description={t('system.recovery.reset.tiers.full-factory.effect')}
-          actions={<span className="text-xs text-muted-foreground">{t('system.recovery.reset.presenceShort')}</span>}
-        />
       </RowList>
-      <Callout tone="warning" title={t('system.recovery.reset.presenceUnavailable')} />
       <Callout title={t('system.recovery.reset.noSecureWipe')} />
       {staged.error && !nothingStaged ? <Callout tone="danger" title={failureDetail(staged.error, t('common.requestFailed'))} /> : null}
     </Panel>
@@ -91,6 +82,5 @@ export function ResetPanel() {
 function tierLabel(tier: string, t: ReturnType<typeof useTranslation>['t']) {
   if (tier === 'configuration') return t('system.recovery.reset.tiers.configuration.name')
   if (tier === 'application-data') return t('system.recovery.reset.tiers.application-data.name')
-  if (tier === 'full-factory') return t('system.recovery.reset.tiers.full-factory.name')
   return tier
 }

@@ -176,7 +176,7 @@ first-boot provisioning (3.7), micad takes each entry it declares that STATE's r
 `seeded-defaults.json` does not name: one the tree does not declare is added and saved to DATA,
 and either way the name is recorded. So a provisioning document's entry is the tree's, a device
 that updates onto a board with a new default gets it, an added entry is edited like any other,
-and one the operator deleted stays deleted. A `configuration` or `full-factory` reset removes the
+and one the operator deleted stays deleted. A `configuration` reset removes the
 record, and the defaults come back. A defaults document that does not parse or validate is
 logged and adds nothing. cx3576 ships `can0` with `bitrate` 250 000, `restartMs` 100 and `fd`
 false.
@@ -285,12 +285,12 @@ absence is reported with its reason rather than as a healthy reading:
   `check`, `install` and `rollback`, the last two rebooting only with `--reboot`. Nothing
   installs without `install`.
 - **Power, reset and recovery.** Reboot and power-off are recorded with their caller before they
-  run. A staged reset applies one tier: `configuration`, `application-data` or `full-factory`
-  (which keeps identity). `application-data` and `full-factory` also clear DATA/state
+  run. A staged reset applies one tier: `configuration` or `application-data`.
+  `application-data` also clears DATA/state
   `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10) and
   `accounts` (the apps' accounts, then `mica-accounts build`), remove
   the record of the image's app seeds (section 3.11), and
-  refuse to run while `/run/docker.pid` names a live dockerd, whose storage they would clear
+  refuses to run while `/run/docker.pid` names a live dockerd, whose storage it would clear
   under it. A board-declared physical recovery action at boot maps to a tier. A
   transient root password lives in `/etc/shadow` until the next boot and in no setting.
 - **Service registry.** Other `com.mica.*` names are recorded as they appear and vanish; the name
@@ -683,7 +683,7 @@ and asks about first) or
 /api/v1/apps/{name}/logs` is the log, each line scrubbed of secrets. The console lists the apps
 on its services page, with the upload, and gives each its own page.
 
-**A reset** of application data or a full-factory reset clears `/mica/apps` and `/srv`, with the
+**A reset** of application data clears `/mica/apps` and `/srv`, with the
 apps' data, and removes the seed record, so the image's seeds are installed again at the next
 boot.
 
@@ -727,7 +727,7 @@ file, generated self-signed (`mica`, `localhost`, `127.0.0.1`) the first time HT
 `/api/v1/web/certificate` describes it (never the key) and replaces it with an uploaded chain and
 key, which must match and be inside their validity; `.../certificate/generate` replaces it with a
 fresh self-signed one for the names and days given. Either takes effect on the next connection,
-with no restart. A configuration or full-factory reset removes it.
+with no restart. A configuration reset removes it.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |

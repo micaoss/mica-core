@@ -161,8 +161,8 @@ async fn serve() -> anyhow::Result<()> {
         // BEFORE both of the steps below, and before every reconciler: a
         // staged reset is what the operator asked this boot to do, so the rest
         // of the boot has to see the device the reset produced rather than
-        // reconcile settings that are about to be taken away. Tiers 1 and 3
-        // hand the seeded values back to `ensure_provisioned` below by putting
+        // reconcile settings that are about to be taken away. Tier 1
+        // hands the seeded values back to `ensure_provisioned` below by putting
         // `provisioning.state` to `Pending`, which is why this call comes
         // first and not merely early.
         match recovery::apply_boot_intent(&store, &mut settings, &recovery::Paths::from_env()) {
@@ -176,13 +176,7 @@ async fn serve() -> anyhow::Result<()> {
         match reset::apply_pending(&store, &mut settings, &reset::Roots::from_env()) {
             Ok(outcome) => {
                 tracing::info!(?outcome, "staged reset checked");
-                if matches!(
-                    outcome,
-                    reset::Outcome::Applied(
-                        micad_settings::ResetTier::ApplicationData
-                            | micad_settings::ResetTier::FullFactory
-                    )
-                ) {
+                if outcome == reset::Outcome::Applied(micad_settings::ResetTier::ApplicationData) {
                     apps::rebuild_accounts();
                 }
             }

@@ -263,7 +263,7 @@ RECOVERY_BOOT_MENU_RECOVERY_TIER=none
 RECOVERY_BOOT_MENU_FACTORY_INTENT=factory
 RECOVERY_BOOT_MENU_FACTORY_MECHANISM=boot-menu-factory
 RECOVERY_BOOT_MENU_FACTORY_CHANNEL=/dev/tty0
-RECOVERY_BOOT_MENU_FACTORY_TIER=full-factory
+RECOVERY_BOOT_MENU_FACTORY_TIER=application-data
 ";
 
     /// What both shipped mica boards declare.
@@ -386,12 +386,12 @@ RECOVERY_BOOT_MENU_FACTORY_TIER=full-factory
             Outcome::Asserted {
                 action: "BOOT_MENU_FACTORY".to_string(),
                 mechanism: "boot-menu-factory".to_string(),
-                tier: Some(ResetTier::FullFactory),
+                tier: Some(ResetTier::ApplicationData),
             }
         );
 
         let staged = device.staged().expect("the tier is staged");
-        assert_eq!(staged.tier, ResetTier::FullFactory);
+        assert_eq!(staged.tier, ResetTier::ApplicationData);
         assert_eq!(
             staged.presence.as_deref(),
             Some("boot-menu-factory"),
@@ -406,7 +406,7 @@ RECOVERY_BOOT_MENU_FACTORY_TIER=full-factory
                     "BOOT_MENU_FACTORY".to_string(),
                 ),
                 (
-                    "reset-full-factory".to_string(),
+                    "reset-application-data".to_string(),
                     "staged".to_string(),
                     "BOOT_MENU_FACTORY".to_string(),
                 ),

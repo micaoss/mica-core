@@ -110,9 +110,6 @@ pub enum ResetTier {
     Configuration,
     /// Tier 2: remove operator applications and their data.
     ApplicationData,
-    /// Tier 3: return the device to its first-boot state, keeping identity,
-    /// calibration, META and both system slots.
-    FullFactory,
 }
 
 /// Characters a device identifier occupies: 16 bytes spelled in lowercase hex.

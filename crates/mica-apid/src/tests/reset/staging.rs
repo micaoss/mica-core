@@ -80,37 +80,10 @@ pub(super) async fn staging_a_configuration_reset_leaves_the_management_credenti
     assert_eq!(probe.status(), StatusCode::OK);
 }
 
-/// Tier 3 is refused without presence, and the refusal writes nothing.
-///
-/// A credential alone is not enough: the line is drawn where the operation
-/// stops being self-serviceable, and a device whose identity and credentials
-/// are gone cannot be handed back to its owner over the network.
+/// `full-factory` is not a tier any more: the answer names the route that
+/// erases the device, and nothing is written or audited.
 #[tokio::test]
-pub(super) async fn a_full_factory_reset_is_refused_without_presence() {
-    let (router, fake, dir, token) = device(FakePresence::absent());
-
-    let response = bearer_json(
-        &router,
-        "POST",
-        RESET_PATH,
-        &token,
-        &json!({ "tier": "full-factory" }).to_string(),
-    )
-    .await;
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    assert_eq!(envelope(response).await["code"], "presence_required");
-    assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
-    assert_eq!(
-        audit_events(&audit_lines(dir.path())),
-        [("reset-full-factory".to_string(), "refused".to_string())]
-    );
-}
-
-/// With presence asserted it is staged, and the record names the mechanism
-/// that authorized it.
-#[tokio::test]
-pub(super) async fn a_full_factory_reset_is_staged_when_presence_is_asserted() {
+pub(super) async fn the_full_factory_tier_points_to_the_factory_reset() {
     let (router, fake, dir, token) = device(FakePresence::present());
 
     let response = bearer_json(
@@ -121,19 +94,22 @@ pub(super) async fn a_full_factory_reset_is_staged_when_presence_is_asserted() {
         &json!({ "tier": "full-factory" }).to_string(),
     )
     .await;
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
 
-    assert_eq!(fake.set_paths(), vec!["reset".to_string()]);
-    let staged = fake.get_settings("reset").await.unwrap();
-    assert_eq!(staged["tier"], json!("full-factory"));
-    assert_eq!(staged["presence"], json!(FIXTURE_MECHANISM));
-    assert_eq!(
-        audit_events(&audit_lines(dir.path())),
-        [("reset-full-factory".to_string(), "staged".to_string())]
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let envelope = envelope(response).await;
+    assert_eq!(envelope["code"], "validation_failed");
+    assert!(
+        envelope["message"]
+            .as_str()
+            .unwrap()
+            .contains("POST /api/v1/system/factory-reset"),
+        "{envelope}"
     );
+    assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
+    assert!(!dir.path().join("audit.log").exists());
 }
 
-/// **Tier 4 does not exist in any form.** No spelling of secure wipe is a tier
+/// **Tier 3 does not exist in any form.** No spelling of secure wipe is a tier
 /// this device accepts, and the refusal happens before anything is written.
 ///
 /// Asserted rather than assumed because the absence is the position: every cell of that row bench-dependent on a
@@ -141,7 +117,7 @@ pub(super) async fn a_full_factory_reset_is_staged_when_presence_is_asserted() {
 /// then is to destroy the medium — not to offer a tier that cannot keep its
 /// promise.
 #[tokio::test]
-pub(super) async fn no_spelling_of_a_fourth_tier_is_accepted() {
+pub(super) async fn no_spelling_of_a_third_tier_is_accepted() {
     let (router, fake, dir, token) = device(FakePresence::present());
 
     for spelling in ["secure-wipe", "secureWipe", "secure_wipe", "wipe", "4"] {
@@ -175,7 +151,7 @@ pub(super) async fn no_spelling_of_a_fourth_tier_is_accepted() {
 pub(super) async fn the_reset_route_refuses_an_unauthenticated_caller() {
     let (router, fake, _dir, _token) = device(FakePresence::present());
 
-    for tier in ["configuration", "application-data", "full-factory"] {
+    for tier in ["configuration", "application-data"] {
         let response = post_json(
             &router,
             RESET_PATH,

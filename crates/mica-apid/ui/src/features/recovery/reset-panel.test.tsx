@@ -33,15 +33,12 @@ describe('the reset tiers', () => {
     expect(screen.getByText(/reboot the device to apply it/)).toBeTruthy()
   })
 
-  it('offers no control for the full factory reset and says why', async () => {
+  it('stages two tiers and has no full factory tier', async () => {
     stubFetch({ '/api/v1/settings/reset': nothingStaged })
     renderPanel(<ResetPanel />)
 
-    expect(await screen.findByText('full factory reset')).toBeTruthy()
-    expect(screen.getByText('requires physical presence')).toBeTruthy()
-    expect(screen.getByText(/nothing in this build writes one, so the device refuses every such request/)).toBeTruthy()
-    // Two reachable tiers, two controls. A third would promise tier 3.
-    expect(screen.getAllByRole('button', { name: 'Stage reset' })).toHaveLength(2)
+    expect(await screen.findAllByRole('button', { name: 'Stage reset' })).toHaveLength(2)
+    expect(screen.queryByText('full factory reset')).toBeNull()
   })
 
   it('answers a request for a secure wipe rather than leaving the absence to be inferred', async () => {

@@ -1455,8 +1455,6 @@ export const en = {
         pending: 'A {{tier}} is staged and runs on the next boot.',
         pendingAt: 'Requested at {{time}} UTC.',
         replaces: 'Staging another tier replaces it.',
-        presenceShort: 'requires physical presence',
-        presenceUnavailable: 'A full factory reset requires a physical-presence assertion at the device. The gate ships and the assertion does not: nothing in this build writes one, so the device refuses every such request. There is no control here because there is no way to complete the operation.',
         noSecureWipe: 'There is no secure-wipe tier. No board has evidenced a device-level erase primitive, so a medium whose data must not be recoverable has to be destroyed rather than wiped.',
         tiers: {
           configuration: {
@@ -1466,10 +1464,6 @@ export const en = {
           'application-data': {
             name: 'application-data reset',
             effect: 'Removes operator applications and their data: /srv is cleared and the application areas of /mica are recreated empty. The platform\'s own configuration and credentials survive.',
-          },
-          'full-factory': {
-            name: 'full factory reset',
-            effect: 'Returns the device to its first-boot state: settings, applications, operator data and the management credentials all go. Device identity, calibration and both installed system slots do not.',
           },
         },
       },

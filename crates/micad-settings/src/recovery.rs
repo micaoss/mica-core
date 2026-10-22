@@ -99,13 +99,12 @@ pub fn credential_recovery_event(mechanism: &str) -> String {
 ///
 /// One name per tier, shared by the API route that stages one and by the
 /// boot-time action that stages one, so an operator greps a device's history
-/// for `reset-full-factory` and finds both.
+/// for `reset-application-data` and finds both.
 #[must_use]
 pub fn reset_event(tier: ResetTier) -> &'static str {
     match tier {
         ResetTier::Configuration => "reset-configuration",
         ResetTier::ApplicationData => "reset-application-data",
-        ResetTier::FullFactory => "reset-full-factory",
     }
 }
 
@@ -335,7 +334,6 @@ fn tier_from(value: &str) -> Option<Option<ResetTier>> {
         TIER_NONE => Some(None),
         "configuration" => Some(Some(ResetTier::Configuration)),
         "application-data" => Some(Some(ResetTier::ApplicationData)),
-        "full-factory" => Some(Some(ResetTier::FullFactory)),
         _ => None,
     }
 }
@@ -387,7 +385,7 @@ fn action_from(values: &[(String, String)], name: &str) -> Result<RecoveryAction
     let Some(tier) = tier_from(&tier_value) else {
         return Err(format!(
             "RECOVERY_{name}_TIER is `{tier_value}`; it is one of {TIER_NONE}, configuration, \
-             application-data, full-factory"
+             application-data"
         ));
     };
 

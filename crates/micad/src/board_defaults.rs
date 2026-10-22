@@ -5,8 +5,8 @@
 //! entry it declares that STATE's record does not name is added when the tree
 //! lacks it and is then recorded, so a device that updates onto a board with
 //! a new default gets it, an entry the tree already had is the tree's, and an
-//! entry the operator deleted stays deleted. A configuration or full-factory
-//! reset removes the record with the settings, and the defaults come back.
+//! entry the operator deleted stays deleted. A configuration reset removes
+//! the record with the settings, and the defaults come back.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

@@ -174,11 +174,6 @@ fn preflight_reset(roots: &Roots, tier: ResetTier) -> Result<()> {
             )
             .chain([roots.user(), roots.containers()])
             .collect(),
-        ResetTier::FullFactory => STATE_APPLICATION_DIRS
-            .iter()
-            .map(|dir| roots.state.join(dir))
-            .chain([roots.system(), roots.user(), roots.containers()])
-            .collect(),
     };
     let mut traversal = Traversal::new();
     for target in targets {
@@ -238,20 +233,9 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
             clear_contents(&config).with_context(|| format!("clear {}", config.display()))?;
         }
         ResetTier::ApplicationData => clear_application_state(roots)?,
-        ResetTier::FullFactory => {
-            clear_application_state(roots)?;
-            // `config` is in SYSTEM_SKELETON, so the re-seed empties it with
-            // every other declared directory: tier 3 needs no clause of its
-            // own for the namespace.
-            reseed_tree(&roots.system(), SYSTEM_SKELETON)
-                .with_context(|| format!("re-seed {}", roots.system().display()))?;
-        }
     }
 
-    if matches!(
-        intent.tier,
-        ResetTier::ApplicationData | ResetTier::FullFactory
-    ) {
+    if intent.tier == ResetTier::ApplicationData {
         let path = roots.state.join(APP_SEEDS_RECORD);
         match fs::remove_file(&path) {
             Ok(()) => {}
@@ -261,10 +245,7 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
             }
         }
     }
-    if matches!(
-        intent.tier,
-        ResetTier::Configuration | ResetTier::FullFactory
-    ) {
+    if intent.tier == ResetTier::Configuration {
         for file in [APID_IDENTITY, BOARD_DEFAULTS_RECORD] {
             let path = roots.state.join(file);
             match fs::remove_file(&path) {
@@ -281,9 +262,7 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
     // replaced only after the save has returned, so no caller observes a tree
     // that is not on STATE.
     let mut applied = match intent.tier {
-        ResetTier::Configuration | ResetTier::FullFactory => {
-            reseeded_settings(settings, intent.tier)
-        }
+        ResetTier::Configuration => reseeded_settings(settings),
         // Tier 2 keeps the operator's configuration and takes their
         // applications. A declared container IS an operator application --
         // the entry is what micad declares to mica-containerd and what brings
@@ -319,12 +298,12 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
     Ok(Outcome::Applied(intent.tier))
 }
 
-/// The tree a settings-clearing tier leaves behind.
-fn reseeded_settings(before: &Settings, tier: ResetTier) -> Settings {
+/// The tree the configuration tier leaves behind.
+fn reseeded_settings(before: &Settings) -> Settings {
     let mut after = Settings {
-        // The identity record, PRESERVED by both tiers (footnote
-        // `[^identity]`), with `state` put back so first-boot provisioning
-        // re-seeds the hostname from it and the SSH default.
+        // The identity record, PRESERVED (footnote `[^identity]`), with
+        // `state` put back so first-boot provisioning re-seeds the hostname
+        // from it and the SSH default.
         provisioning: micad_settings::ProvisioningSettings {
             state: ProvisioningState::Pending,
             ..before.provisioning.clone()
@@ -333,26 +312,23 @@ fn reseeded_settings(before: &Settings, tier: ResetTier) -> Settings {
     };
     // The per-device credential and its generation: a first-boot secret, not a
     // management credential, and `identity::ensure_identity` would re-mint it
-    // if it were dropped. the `identity: preserved` covers it on both tiers.
+    // if it were dropped. the `identity: preserved` covers it.
     after.access.device = before.access.device.clone();
-
-    if tier == ResetTier::Configuration {
-        // footnote `[^cfg]`: tier 1 keeps the apid management credential.
-        // A configuration reset that dropped it would be a lockout dressed as
-        // a settings action, and a remote credential-clearing primitive —
-        // credential recovery is where a credential is deliberately replaced, under the authority and nowhere else.
-        after.access.web_admin = before.access.web_admin.clone();
-        after.access.claim = before.access.claim;
-        after.access.api_tokens = before.access.api_tokens.clone();
-        // The access-point key set at the claim: without it a claimed device
-        // would fall back to a key nobody was shown
-        // (`docs/factory-ap-key.md`).
-        after.wifi.ap.psk = before.wifi.ap.psk.clone();
-    }
+    // footnote `[^cfg]`: tier 1 keeps the apid management credential.
+    // A configuration reset that dropped it would be a lockout dressed as
+    // a settings action, and a remote credential-clearing primitive —
+    // credential recovery is where a credential is deliberately replaced, under the authority and nowhere else.
+    after.access.web_admin = before.access.web_admin.clone();
+    after.access.claim = before.access.claim;
+    after.access.api_tokens = before.access.api_tokens.clone();
+    // The access-point key set at the claim: without it a claimed device
+    // would fall back to a key nobody was shown
+    // (`docs/factory-ap-key.md`).
+    after.wifi.ap.psk = before.wifi.ap.psk.clone();
     after
 }
 
-/// Tier 2's whole scope, and tier 3's share of it: the application layer's
+/// Tier 2's whole scope: the application layer's
 /// enrolment records on STATE, its subtrees under `/mica`, and `/srv`.
 fn clear_application_state(roots: &Roots) -> Result<()> {
     for dir in STATE_APPLICATION_DIRS {
