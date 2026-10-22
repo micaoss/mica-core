@@ -38,7 +38,10 @@ impl Device for FakeDevice {
         self.facts.lock().unwrap().clone()
     }
     async fn status(&self) -> Value {
-        json!({ "wifiMode": "ap", "connected": false, "ssid": null, "ip": null })
+        json!({ "wifiMode": "ap", "connected": false, "ssid": null, "ip": null, "interfaces": [
+            { "name": "eth0", "kind": "ethernet", "carrier": true, "address": "10.0.0.5/24" },
+            { "name": "wlan0", "kind": "wifi", "carrier": false, "address": "192.168.1.40/24" },
+        ] })
     }
     async fn scan(&self) -> Result<Vec<Value>, &'static str> {
         Err("ap_active")
@@ -61,7 +64,7 @@ impl Device for FakeDevice {
     }
     async fn set_network(&self, interface: &str, entry: &Value) -> Result<Value, &'static str> {
         if interface != "eth0" {
-            return Err("invalid_interface");
+            return Err("unknown_interface");
         }
         self.calls
             .lock()
@@ -73,11 +76,11 @@ impl Device for FakeDevice {
         &self,
         _interface: &str,
         entry: &Value,
-    ) -> Result<(bool, Option<String>), &'static str> {
+    ) -> Result<Option<String>, &'static str> {
         let address = entry["static"]["address"]
             .as_str()
             .unwrap_or("192.168.1.41/24");
-        Ok((true, Some(address.to_string())))
+        Ok(Some(address.to_string()))
     }
     async fn restore_network(&self, previous: Vec<(String, Value)>) {
         self.calls
@@ -496,7 +499,14 @@ async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
     let finished = bench.command(json!({ "op": "finish" })).await;
     assert_eq!(
         finished,
-        vec![json!({ "id": 3, "event": "finished", "claimed": true, "hostname": "deck-7" })]
+        vec![json!({
+            "id": 3,
+            "event": "finished",
+            "claimed": true,
+            "hostname": "deck-7",
+            "interface": { "name": "wlan0", "kind": "wifi", "address": "192.168.1.40/24" },
+            "consoleUrls": ["http://192.168.1.40", "http://deck-7.local"],
+        })]
     );
     assert_eq!(bench.calls(), vec!["join Harbour", "claim harbour-pw-1"]);
     assert_eq!(*bench.radio.disconnected.lock().unwrap(), vec![PHONE]);
@@ -523,12 +533,11 @@ async fn a_start_that_asks_for_the_status_gets_it_after_ready() {
     );
     bench.start_none_with(json!({ "status": true })).await;
     bench.pump().await;
-    assert_eq!(
-        bench.events(),
-        vec![
-            json!({ "event": "status", "wifiMode": "ap", "connected": false, "ssid": null, "ip": null })
-        ]
-    );
+    let pushed = bench.events();
+    assert_eq!(pushed.len(), 1);
+    assert_eq!(pushed[0]["event"], "status");
+    assert_eq!(pushed[0]["wifiMode"], "ap");
+    assert!(pushed[0].get("id").is_none());
     let status = bench.command(json!({ "op": "getStatus" })).await;
     assert_eq!(status[0]["id"], 1, "the commands' records follow it");
 
@@ -579,7 +588,13 @@ async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
     let refused = bench
         .command(json!({ "op": "setNetwork", "interface": "wlan0", "dhcp": true }))
         .await;
-    assert_eq!(refused[0]["reason"], "invalid_interface");
+    assert_eq!(
+        refused,
+        vec![
+            json!({ "id": 6, "event": "applying" }),
+            json!({ "id": 6, "event": "failed", "reason": "unknown_interface" }),
+        ]
+    );
 
     let set = bench
         .command(json!({
@@ -590,16 +605,21 @@ async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
         .await;
     assert_eq!(
         set,
-        vec![json!({
-            "id": 7,
-            "event": "networkSet",
-            "interface": "eth0",
-            "carrier": true,
-            "address": "10.0.0.5/24",
-        })]
+        vec![
+            json!({ "id": 7, "event": "applying" }),
+            json!({ "id": 7, "event": "up", "interface": "eth0", "address": "10.0.0.5/24" }),
+        ]
     );
     let finished = bench.command(json!({ "op": "finish" })).await;
     assert_eq!(finished[0]["event"], "finished");
+    assert_eq!(
+        finished[0]["interface"],
+        json!({ "name": "eth0", "kind": "ethernet", "address": "10.0.0.5/24" })
+    );
+    assert_eq!(
+        finished[0]["consoleUrls"],
+        json!(["http://10.0.0.5", "http://mica-a4e2e69e.local"])
+    );
     bench.pump().await;
     assert_eq!(
         bench.calls(),

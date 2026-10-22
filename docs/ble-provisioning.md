@@ -59,6 +59,10 @@ and an authentication mode:
   15 ms (a phone starts at 30 to 50 ms), where its kernel lets it set the range. Each write and
   each notification waits for an interval, so the fewer and larger they are, the faster a session
   is: `maxWrite` is the largest write the ATT MTU allows, and notifications fill the MTU.
+- The device's journal has one line per step, `ble step=<step> ms=<n> at=<n> mtu=<n>`: the
+  step (`info`, `start`, `share`, `confirm`, or the operation), its time on the device, the time
+  since the phone connected, and the ATT MTU. `ble interval=11.25-15ms` says the range above is
+  set.
 
 ### `info`
 
@@ -202,7 +206,8 @@ of a record is one UTF-8 JSON object.
 
 The page writes `{"id":n,"op":"<name>",…}` to `command`; `id` is an integer the page chooses and the
 device echoes. The device answers with events `{"id":n,"event":"<name>",…}`. Every operation ends
-with exactly one final event; `connecting` is the only non-final one. One operation runs at a time;
+with exactly one final event; `connecting` (`setWifi`) and `applying` (`setNetwork`) are the only
+non-final ones. One operation runs at a time;
 another sent meanwhile gets `failed` with `busy`.
 
 Reasons any operation can fail with: `busy`, `bad_request` (a missing or malformed member),
@@ -217,8 +222,8 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 | `scanWifi` | — | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}` | `ap_active`, `no_radio`, `scan_failed` |
 | `claim` | `password`, `hostname` (optional), `apPsk` (optional) | `claimStaged` | `not_allowed`, `already_claimed`, `invalid_password`, `invalid_hostname`, `invalid_ap_psk` |
 | `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `not_claimed`, `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
-| `setNetwork` | `interface`, and `dhcp: true` or `static` | `networkSet`: `interface`, `carrier`, `address` (or null) | `not_claimed`, `already_claimed`, `invalid_interface`, `invalid_address`, `invalid_network`, `dhcp_timeout` |
-| `finish` | — | `finished`: `claimed`, `hostname` | `already_claimed`, `not_claimed` |
+| `setNetwork` | `interface`, and `dhcp: true` or `static` | `up`: `interface`, `address` (or null) | listed under `setNetwork` |
+| `finish` | — | `finished`: `claimed`, `hostname`, `interface` (or null), `consoleUrls` | `already_claimed`, `not_claimed` |
 
 `getStatus`
 - `interfaces[]` lists the physical ports, by name: `{name, kind, carrier, address}`. `kind` is
@@ -254,20 +259,44 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 - `connect_failed` covers what the device cannot tell apart.
 
 `setNetwork`
-- `interface`: an `ethernet` port of `getStatus`; any other name is `invalid_interface`. Exactly
-  one of `dhcp: true` or `static: {address, gateway, dns}`, otherwise `bad_request`. `static` has
-  the shape of the network settings' `static`: `address` an IPv4 address with its prefix
-  (`10.0.0.5/24`), `gateway` an IPv4 address (optional), `dns` a list of IP addresses (optional).
-  Anything else in it is `invalid_address`.
-- The entry is written through the same rules as the console's network settings, replacing the
-  port's addressing and keeping the rest of its entry; a refusal by those rules is
-  `invalid_network`.
-- In a `none` session it needs a staged claim (`not_claimed`), and fails with `already_claimed` if
-  the device was claimed meanwhile, as `setWifi` does.
-- `networkSet` comes once the port has its address: the `static` one, or one from a DHCP lease
-  within 30 seconds (`dhcp_timeout` otherwise). Without a carrier it comes at once, with `carrier:
-  false` and no address: the entry is saved and applies when a cable is plugged in.
+- `interface`: an `ethernet` port of `getStatus`. Exactly one of `dhcp: true` or `static:
+  {address, gateway, dns}`, otherwise `bad_request`. `static` has the shape of the network
+  settings' `static`: `address` an IPv4 address with its prefix (`10.0.0.5/24`), `gateway` an IPv4
+  address (optional), `dns` a list of IP addresses (optional).
+- The entry replaces the port's addressing and keeps the rest of its entry. It is held to the rules
+  the console's network settings hold a write to, and a refusal carries the code those settings
+  answer `422` with.
+- In a `none` session it needs a staged claim, as `setWifi` does.
+- The device sends `{"id":n,"event":"applying"}` once it has started, then `up` or `failed`. `up`
+  comes once the port has its address: the `static` one, or one from a DHCP lease within 30
+  seconds. `address` is null when the device cannot read the port's addresses.
 - It leaves Wi-Fi as it is.
+
+`setNetwork`'s `failed` reasons, besides `busy` and `bad_request`:
+
+| `reason` | Meaning |
+| --- | --- |
+| `not_claimed` | a `none` session with no staged claim |
+| `already_claimed` | the device was claimed meanwhile |
+| `unknown_interface` | `interface` is not an `ethernet` port of the device |
+| `invalid_address` | `static.address` is missing or not an IPv4 address with its prefix |
+| `invalid_gateway` | `static.gateway` is not an IPv4 address |
+| `invalid_dns` | `static.dns` is not a list of IP addresses |
+| `validation_failed` | the network settings refuse the entry for another reason, or could not save it |
+| `name_invalid` | the port's name is not one the network settings accept |
+| `gateway_out_of_subnet` | the gateway is not in the address's subnet |
+| `address_overlap` | the address's subnet overlaps another interface's |
+| `metric_duplicate` | another interface's default route has the same metric |
+| `vlan_duplicate` | two VLANs on the same parent have the same id |
+| `vlan_parent_invalid` | a VLAN's parent is not a network entry, or is a CAN interface |
+| `bridge_port_invalid` | a bridge's port is not a network entry, or is a CAN interface |
+| `bridge_port_addressed` | the port is a bridge's port, and a bridge port has no addressing of its own |
+| `bridge_port_taken` | the port is in more than one bridge |
+| `no_carrier` | no cable is plugged in; the entry is saved and applies when one is |
+| `dhcp_timeout` | no DHCP lease within 30 seconds; the entry is saved |
+
+The codes from `validation_failed` to `bridge_port_taken` are the network settings' `422` detail
+codes, one to one.
 
 `finish`
 - `finish` follows `setWifi`, `setNetwork`, or neither.
@@ -280,6 +309,13 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
   switched off at the claim; the console asks for a key when it is switched on again. The
   access-point setup (`POST /setup`) still sets a key, since its user is on the access point.
 - In a `password` or `temp-code` session it only ends the session (`claimed: true`).
+- `finished` carries what the page's last screen shows: `hostname`, the device's hostname after
+  the claim; `interface`, `{name, kind, address}` of the port the session brought up (the
+  `ethernet` port of `up`, or the `wifi` port after `connected`), else of the first port with an
+  address, Ethernet first, or null; and `consoleUrls`, `http://<address>` when there is an
+  address and `http://<hostname>.local`.
+- The access point is off after a claim over Wi-Fi or the wired port. Its key is set on the
+  console's Wi-Fi page when the access point is switched on.
 - After `finished` the device closes the window and disconnects.
 
 ## Sessions

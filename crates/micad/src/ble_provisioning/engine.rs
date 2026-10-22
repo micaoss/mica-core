@@ -148,13 +148,13 @@ pub trait Device: Send + Sync + 'static {
     /// `interface`'s addressing: the entry it had before (null for none), or
     /// a `failed` reason.
     async fn set_network(&self, interface: &str, entry: &Value) -> Result<Value, &'static str>;
-    /// Wait until `interface` has the address `entry` gives it: its carrier
-    /// and IPv4 address (none without a carrier), or a `failed` reason.
+    /// Wait until `interface` has the address `entry` gives it: the IPv4
+    /// address (none when nothing observes it), or a `failed` reason.
     async fn await_network(
         &self,
         interface: &str,
         entry: &Value,
-    ) -> Result<(bool, Option<String>), &'static str>;
+    ) -> Result<Option<String>, &'static str>;
     /// Put back the entries `setNetwork` replaced.
     async fn restore_network(&self, previous: Vec<(String, Value)>);
     /// A phone connected: begin what it is likely to ask for, so that it is
@@ -280,6 +280,15 @@ struct Connection {
     command_at: Option<Instant>,
     /// `start` asked for a `status` event once the session is ready.
     push_status: bool,
+    /// How the session last brought the device onto a network.
+    reached: Option<Reached>,
+}
+
+/// A network a session brought the device onto.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Reached {
+    Wifi,
+    Wired(String),
 }
 
 /// The Wi-Fi and the wired entries a session changed, kept until the
@@ -487,7 +496,8 @@ impl Engine {
                 step,
                 ms = millis(started),
                 at = millis(connection.since),
-                "bluetooth: provisioning step"
+                mtu = connection.mtu,
+                "ble"
             );
         }
     }
@@ -530,6 +540,7 @@ impl Engine {
             since: Instant::now(),
             command_at: None,
             push_status: false,
+            reached: None,
         });
         if let Some(hold) = &mut self.hold {
             hold.away_since = None;
@@ -1080,6 +1091,7 @@ impl Engine {
         let device = Arc::clone(&self.device);
         let tx = self.tx.clone();
         let serial = self.current_serial().unwrap_or_default();
+        let id_ack = id.clone();
         self.spawn_op(id, "setNetwork", async move {
             match device.set_network(&interface, &entry).await {
                 Ok(previous) => {
@@ -1092,44 +1104,45 @@ impl Engine {
                 Err(reason) => return json!({ "event": "failed", "reason": reason }),
             }
             match device.await_network(&interface, &entry).await {
-                Ok((carrier, address)) => json!({
-                    "event": "networkSet",
-                    "interface": interface,
-                    "carrier": carrier,
-                    "address": address,
-                }),
+                Ok(address) => json!({ "event": "up", "interface": interface, "address": address }),
                 Err(reason) => json!({ "event": "failed", "reason": reason }),
             }
         });
+        self.send_event(&json!({ "id": id_ack, "event": "applying" }))
+            .await;
     }
 
     async fn finish(&mut self, id: Value) {
-        let auth = self.session_auth();
-        if auth != Some(Auth::None) {
-            let event =
-                json!({ "event": "finished", "claimed": true, "hostname": self.facts.hostname });
-            let serial = self.current_serial().unwrap_or_default();
-            return self.done_op(serial, id, "finish", event).await;
-        }
-        let Some(staged) = self
-            .connection
-            .as_ref()
-            .and_then(|connection| connection.staged.clone())
-        else {
-            return self.failed(id, "not_claimed").await;
+        let Some(connection) = &self.connection else {
+            return;
         };
+        let (staged, reached) = (connection.staged.clone(), connection.reached.clone());
+        if self.session_auth() == Some(Auth::None) && staged.is_none() {
+            return self.failed(id, "not_claimed").await;
+        }
         let device = Arc::clone(&self.device);
         self.spawn_op(id, "finish", async move {
-            match device.claim(&staged).await {
-                Ok(()) => {
-                    let hostname = match staged.hostname {
-                        Some(name) => name,
-                        None => device.facts().await.hostname,
-                    };
-                    json!({ "event": "finished", "claimed": true, "hostname": hostname })
+            let hostname = match staged {
+                Some(staged) => {
+                    if let Err(reason) = device.claim(&staged).await {
+                        return json!({ "event": "failed", "reason": reason });
+                    }
+                    staged.hostname
                 }
-                Err(reason) => json!({ "event": "failed", "reason": reason }),
-            }
+                None => None,
+            };
+            let hostname = match hostname {
+                Some(name) => name,
+                None => device.facts().await.hostname,
+            };
+            let (interface, urls) = console(&device.status().await, reached.as_ref(), &hostname);
+            json!({
+                "event": "finished",
+                "claimed": true,
+                "hostname": hostname,
+                "interface": interface,
+                "consoleUrls": urls,
+            })
         });
     }
 
@@ -1143,6 +1156,13 @@ impl Engine {
         let Some(connection) = self.connection.as_mut().filter(|c| c.serial == serial) else {
             return;
         };
+        match (op, event["event"].as_str(), event["interface"].as_str()) {
+            ("setWifi", Some("connected"), _) => connection.reached = Some(Reached::Wifi),
+            ("setNetwork", Some("up"), Some(name)) => {
+                connection.reached = Some(Reached::Wired(name.to_string()));
+            }
+            _ => {}
+        }
         connection.op = None;
         connection.last_active = self.clock.uptime();
         if let Some(started) = connection.command_at.take() {
@@ -1331,6 +1351,32 @@ impl Engine {
         }
         status
     }
+}
+
+/// The interface `finished` names, from `getStatus`'s `status`: the one the
+/// session brought up, else the first with an address, Ethernet first; and
+/// the console's addresses on it.
+fn console(status: &Value, reached: Option<&Reached>, hostname: &str) -> (Value, Vec<String>) {
+    let interfaces = status["interfaces"].as_array().cloned().unwrap_or_default();
+    let found = match reached {
+        Some(Reached::Wired(name)) => interfaces.iter().find(|link| link["name"] == name.as_str()),
+        Some(Reached::Wifi) => interfaces.iter().find(|link| link["kind"] == "wifi"),
+        None => interfaces
+            .iter()
+            .filter(|link| link["address"].is_string())
+            .min_by_key(|link| link["kind"] != "ethernet"),
+    };
+    let mut urls = Vec::new();
+    if let Some(address) = found.and_then(|link| link["address"].as_str()) {
+        let host = address.split('/').next().unwrap_or(address);
+        urls.push(format!("http://{host}"));
+    }
+    urls.push(format!("http://{hostname}.local"));
+    let interface = found.map_or(
+        Value::Null,
+        |link| json!({ "name": link["name"], "kind": link["kind"], "address": link["address"] }),
+    );
+    (interface, urls)
 }
 
 /// Milliseconds since `since`.

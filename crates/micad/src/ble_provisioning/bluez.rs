@@ -466,7 +466,14 @@ impl Radio for BluezRadio {
                 {
                     let dir = Path::new(DEBUGFS).join(hci);
                     match set_interval(&dir, FAST_INTERVAL) {
-                        Ok(before) => wanted.interval = Some((dir, before)),
+                        Ok(before) => {
+                            let (min, max) = FAST_INTERVAL;
+                            tracing::info!(
+                                interval = %format!("{}-{}ms", f64::from(min) * 1.25, f64::from(max) * 1.25),
+                                "ble"
+                            );
+                            wanted.interval = Some((dir, before));
+                        }
                         Err(err) => tracing::info!(
                             error = %err,
                             "bluetooth: the connection interval stays the kernel's"

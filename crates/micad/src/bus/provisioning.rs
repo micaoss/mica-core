@@ -179,8 +179,9 @@ impl MicadService {
         })
     }
 
-    /// `setNetwork`: `entry` as `interface`'s addressing, held to the
-    /// network rules every write is; the entry it replaced, or null.
+    /// `setNetwork`: `entry` as `interface`'s addressing, held to the rules
+    /// apid's network routes hold a write to, whose codes are its reasons;
+    /// the entry it replaced, or null.
     async fn provisioning_set_network(
         &self,
         emitter: &SignalEmitter<'_>,
@@ -191,13 +192,13 @@ impl MicadService {
             .iter()
             .any(|link| link.name == interface && link.kind == "ethernet")
         {
-            return Err("invalid_interface");
+            return Err("unknown_interface");
         }
         let mut network = self.inner.read().await.settings.network.clone();
         let previous = network.get(interface).cloned();
         let mut next = previous.clone().unwrap_or_default();
         if next.kind != IfaceKind::Physical {
-            return Err("invalid_interface");
+            return Err("unknown_interface");
         }
         next.dns.clear();
         match wired_static(entry)? {
@@ -211,16 +212,16 @@ impl MicadService {
             }
         }
         network.insert(interface.to_string(), next);
-        if let Err(message) = micad_settings::validate_topology(&network) {
-            tracing::warn!(interface, %message, "a provisioned wired entry was refused");
-            return Err("invalid_network");
+        if let Some(violation) = micad_settings::map_violations(&network, &[interface]).first() {
+            tracing::warn!(interface, message = %violation.message, "a provisioned wired entry was refused");
+            return Err(violation.code);
         }
-        let written = serde_json::to_value(&network).map_err(|_| "invalid_network")?;
+        let written = serde_json::to_value(&network).map_err(|_| "validation_failed")?;
         self.provisioning_write(emitter, &[("network".to_string(), written)], false)
             .await
             .map_err(|err| {
                 tracing::warn!(error = %err, interface, "the provisioned wired entry could not be written");
-                "invalid_network"
+                "validation_failed"
             })?;
         Ok(previous.map_or(Value::Null, |previous| {
             serde_json::to_value(previous).unwrap_or(Value::Null)
@@ -492,36 +493,35 @@ fn wired_static(entry: &Value) -> Result<Option<StaticConfig>, &'static str> {
     let Some(addressing) = entry.get("static") else {
         return Ok(None);
     };
-    let text = |value: &Value| value.as_str().map(str::to_string);
-    let address = text(&addressing["address"]).ok_or("invalid_address")?;
-    let ipv4_cidr = address.split_once('/').is_some_and(|(ip, prefix)| {
-        ip.parse::<std::net::Ipv4Addr>().is_ok()
-            && prefix
-                .parse::<u8>()
-                .is_ok_and(|prefix| (1..=32).contains(&prefix))
-    });
+    let address = addressing["address"]
+        .as_str()
+        .filter(|address| micad_settings::valid_cidr(address))
+        .ok_or("invalid_address")?
+        .to_string();
     let gateway = match &addressing["gateway"] {
         Value::Null => None,
-        value => Some(text(value).ok_or("invalid_address")?),
+        value => Some(
+            value
+                .as_str()
+                .filter(|gateway| micad_settings::valid_ipv4(gateway))
+                .ok_or("invalid_gateway")?
+                .to_string(),
+        ),
     };
     let dns = match &addressing["dns"] {
         Value::Null => Vec::new(),
         Value::Array(servers) => servers
             .iter()
-            .map(|server| text(server).ok_or("invalid_address"))
+            .map(|server| {
+                server
+                    .as_str()
+                    .filter(|server| server.parse::<std::net::IpAddr>().is_ok())
+                    .map(str::to_string)
+                    .ok_or("invalid_dns")
+            })
             .collect::<Result<Vec<_>, _>>()?,
-        _ => return Err("invalid_address"),
+        _ => return Err("invalid_dns"),
     };
-    let valid = ipv4_cidr
-        && gateway
-            .as_deref()
-            .is_none_or(|gateway| gateway.parse::<std::net::Ipv4Addr>().is_ok())
-        && dns
-            .iter()
-            .all(|server| server.parse::<std::net::IpAddr>().is_ok());
-    if !valid {
-        return Err("invalid_address");
-    }
     Ok(Some(StaticConfig {
         address,
         gateway,
@@ -643,7 +643,7 @@ impl Device for InterfaceRef<MicadService> {
         &self,
         interface: &str,
         entry: &Value,
-    ) -> Result<(bool, Option<String>), &'static str> {
+    ) -> Result<Option<String>, &'static str> {
         let wanted = entry["static"]["address"].as_str().map(str::to_string);
         let started = tokio::time::Instant::now();
         loop {
@@ -651,11 +651,11 @@ impl Device for InterfaceRef<MicadService> {
                 .iter()
                 .any(|link| link.name == interface && link.carrier);
             if !carrier {
-                return Ok((false, None));
+                return Err("no_carrier");
             }
             // Without an observer there is nothing to wait on.
             let Some(addresses) = self.get().await.ipv4_addresses().await else {
-                return Ok((true, None));
+                return Ok(None);
             };
             let found = addresses
                 .get(interface)
@@ -664,12 +664,12 @@ impl Device for InterfaceRef<MicadService> {
                     None => source == "DHCPv4",
                 });
             if let Some((address, _)) = found {
-                return Ok((true, Some(address.clone())));
+                return Ok(Some(address.clone()));
             }
             if started.elapsed() >= WIRED_TIMEOUT {
                 return match wanted {
                     None => Err("dhcp_timeout"),
-                    Some(_) => Ok((true, None)),
+                    Some(_) => Ok(None),
                 };
             }
             tokio::time::sleep(NETWORK_POLL).await;
@@ -753,18 +753,27 @@ mod tests {
                 dns: vec!["10.0.0.1".into(), "2001:db8::1".into()],
             }))
         );
-        for refused in [
-            json!({ "address": "10.0.0.5" }),
-            json!({ "address": "10.0.0.5/33" }),
-            json!({ "address": "fd00::5/64" }),
-            json!({ "address": "10.0.0.5/24", "gateway": "router" }),
-            json!({ "address": "10.0.0.5/24", "dns": "10.0.0.1" }),
-            json!({ "address": "10.0.0.5/24", "dns": ["dns.example"] }),
-            json!({}),
+        for (refused, reason) in [
+            (json!({ "address": "10.0.0.5" }), "invalid_address"),
+            (json!({ "address": "10.0.0.5/33" }), "invalid_address"),
+            (json!({ "address": "fd00::5/64" }), "invalid_address"),
+            (json!({}), "invalid_address"),
+            (
+                json!({ "address": "10.0.0.5/24", "gateway": "router" }),
+                "invalid_gateway",
+            ),
+            (
+                json!({ "address": "10.0.0.5/24", "dns": "10.0.0.1" }),
+                "invalid_dns",
+            ),
+            (
+                json!({ "address": "10.0.0.5/24", "dns": ["dns.example"] }),
+                "invalid_dns",
+            ),
         ] {
             assert_eq!(
                 wired_static(&json!({ "static": refused })),
-                Err("invalid_address"),
+                Err(reason),
                 "{refused}"
             );
         }
