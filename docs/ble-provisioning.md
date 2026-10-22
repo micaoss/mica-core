@@ -237,12 +237,13 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 | `scanWifi` | — | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}` | `ap_active`, `no_radio`, `scan_failed` |
 | `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
 | `setNetwork` | `interface`, and `dhcp: true` or `static` | `up`: `interface`, `address` (or null) | listed under `setNetwork` |
-| `finish` | `hostname` (optional) | `finished`: `claimed`, `hostname`, `interface` (or null), `consoleUrls` | `already_claimed`, `invalid_hostname` |
+| `finish` | `hostname` (optional) | `finished`: `claimed`, `hostname`, `interface` (or null), `consoleUrls`, `ap` | `already_claimed`, `invalid_hostname` |
 
 `getStatus`
 - `interfaces[]` lists the physical ports, by name: `{name, kind, carrier, address}`. `kind` is
   `ethernet` or `wifi`; `carrier` whether a link is up; `address` the IPv4 address with its prefix
-  (`192.168.1.40/24`), or null. A page offers "wired" for an `ethernet` port and "Wi-Fi" for the
+  (`192.168.1.40/24`), or null. The addresses are networkd's where it runs and the kernel's
+  (rtnetlink) otherwise, so an OpenRC device reports them too. A page offers "wired" for an `ethernet` port and "Wi-Fi" for the
   rest of the flow.
 
 `scanWifi`
@@ -274,7 +275,9 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 - In a `none` session it fails with `already_claimed` if the device was claimed meanwhile.
 - The device sends `{"id":n,"event":"applying"}` once it has started, then `up` or `failed`. `up`
   comes once the port has its address: the `static` one, or one from a DHCP lease within 30
-  seconds. `address` is null when the device cannot read the port's addresses.
+  seconds (where networkd does not run, the device cannot tell a leased address from another, and
+  any IPv4 address on the port counts). `address` is null when the device cannot read the port's
+  addresses.
 - It leaves Wi-Fi as it is.
 
 `setNetwork`'s `failed` reasons, besides `busy` and `bad_request`:
@@ -314,9 +317,12 @@ codes, one to one.
   `interface`, `{name, kind, address}` of the port the session brought up (the
   `ethernet` port of `up`, or the `wifi` port after `connected`), else of the first port with an
   address, Ethernet first, or null; and `consoleUrls`, `http://<address>` when there is an
-  address and `http://<hostname>.local`.
-- After `setWifi` the radio is a client and the access point is off. After `setNetwork` alone an
-  unclaimed device's access point stays as it was, on the key derived from its device code.
+  address and `http://<hostname>.local`; and `ap`, `on` or `off`, whether the device's access
+  point is on, so the page can tell the user.
+- The access point: after `setWifi` the radio is a client and the access point is off (`ap:
+  off`). After a wired-only session on an unclaimed device the access point stays on, with the key
+  derived from the device code, until the device is claimed in the console (`ap: on`); the claim
+  sets its own key.
 - After `finished` the device closes the window and disconnects.
 
 ## Sessions

@@ -159,3 +159,34 @@ fn a_dump_reply_is_split_into_its_messages() {
     assert_eq!(found[0].2, b"abcd");
     assert_eq!(found[1].0, NLMSG_DONE);
 }
+
+fn address_body(family: u8, prefix: u8, scope: u8, local: [u8; 4], label: &str) -> Vec<u8> {
+    let mut body = vec![family, prefix, 0, scope];
+    body.extend(7u32.to_ne_bytes());
+    body.extend(attribute(1, &local));
+    body.extend(attribute(IFA_LOCAL, &local));
+    body.extend(attribute(IFA_LABEL, &name_payload(label)));
+    body
+}
+
+#[test]
+fn an_ipv4_address_is_its_interface_and_the_address_with_its_prefix() {
+    assert_eq!(
+        ipv4_address(&address_body(2, 24, 0, [10, 0, 0, 5], "eth0")),
+        Some(("eth0".to_string(), "10.0.0.5/24".to_string()))
+    );
+    assert_eq!(
+        ipv4_address(&address_body(2, 24, 0, [10, 0, 0, 6], "eth0:1")),
+        Some(("eth0".to_string(), "10.0.0.6/24".to_string())),
+        "an alias label names its interface"
+    );
+    assert_eq!(
+        ipv4_address(&address_body(2, 8, 254, [127, 0, 0, 1], "lo")),
+        None
+    );
+    assert_eq!(
+        ipv4_address(&address_body(10, 64, 0, [0, 0, 0, 0], "eth0")),
+        None
+    );
+    assert_eq!(ipv4_address(&[2, 24]), None);
+}

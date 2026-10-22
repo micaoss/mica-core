@@ -1,8 +1,10 @@
-//! The two reads the network observation makes over netlink, because no tool
+//! The reads the network observation makes over netlink, because no tool
 //! the image carries answers them: a CAN controller's state and counters
 //! (rtnetlink; `ip -details -statistics` needs iproute2, which Base leaves
-//! out of the floor) and a WireGuard device's peers (generic netlink; `wg
-//! show` needs wireguard-tools, which no image ships).
+//! out of the floor), a WireGuard device's peers (generic netlink; `wg
+//! show` needs wireguard-tools, which no image ships), and the kernel's
+//! IPv4 addresses (rtnetlink), which BLE provisioning reads whatever
+//! configures them.
 //!
 //! Both are one request and the replies to it, on a socket that lives for
 //! that exchange. The parsers take the reply bytes, so they are tested
@@ -31,6 +33,13 @@ const NLM_F_DUMP: u16 = 0x300;
 const NLA_TYPE_MASK: u16 = 0x3fff;
 
 const RTM_GETLINK: u16 = 18;
+const RTM_NEWADDR: u16 = 20;
+const RTM_GETADDR: u16 = 22;
+const IFADDRMSG: usize = 8;
+const AF_INET: u8 = 2;
+const RT_SCOPE_HOST: u8 = 254;
+const IFA_LOCAL: u16 = 2;
+const IFA_LABEL: u16 = 3;
 const IFINFOMSG: usize = 16;
 const IFLA_IFNAME: u16 = 3;
 const IFLA_LINKINFO: u16 = 18;
@@ -283,6 +292,49 @@ pub fn can_link(interface: &str) -> io::Result<Option<Value>> {
     body.extend(attribute(IFLA_IFNAME, &name_payload(interface)));
     let replies = exchange(None, &message(RTM_GETLINK, 0, &body))?;
     Ok(replies.iter().find_map(|(_, body)| can_json(body)))
+}
+
+// ---- IPv4 addresses --------------------------------------------------------
+
+/// An `RTM_NEWADDR` body's IPv4 address: its interface, from the label
+/// without an alias suffix, and the address with its prefix. `None` for
+/// another family, a host-scope address, or a body without both.
+pub fn ipv4_address(body: &[u8]) -> Option<(String, String)> {
+    let header = body.get(..IFADDRMSG)?;
+    if header[0] != AF_INET || header[3] == RT_SCOPE_HOST {
+        return None;
+    }
+    let attributes = attributes(body.get(IFADDRMSG..)?);
+    let local = attributes
+        .iter()
+        .find(|(kind, _)| *kind == IFA_LOCAL)
+        .and_then(|(_, payload)| <[u8; 4]>::try_from(*payload).ok())?;
+    let label = attributes
+        .iter()
+        .find(|(kind, _)| *kind == IFA_LABEL)
+        .and_then(|(_, payload)| std::str::from_utf8(payload).ok())?
+        .trim_end_matches('\0');
+    let name = label.split(':').next().unwrap_or(label);
+    Some((
+        name.to_string(),
+        format!("{}/{}", std::net::Ipv4Addr::from(local), header[1]),
+    ))
+}
+
+/// The kernel's IPv4 addresses, the first of each interface, by name.
+pub fn ipv4_addresses() -> io::Result<std::collections::BTreeMap<String, String>> {
+    let mut body = vec![0u8; IFADDRMSG];
+    body[0] = AF_INET;
+    let replies = exchange(None, &message(RTM_GETADDR, NLM_F_DUMP, &body))?;
+    let mut found = std::collections::BTreeMap::new();
+    for (kind, body) in &replies {
+        if *kind == RTM_NEWADDR
+            && let Some((name, address)) = ipv4_address(body)
+        {
+            found.entry(name).or_insert(address);
+        }
+    }
+    Ok(found)
 }
 
 // ---- WireGuard -------------------------------------------------------------

@@ -104,9 +104,30 @@ impl MicadService {
         (state, ssid, ip)
     }
 
-    /// Each interface's IPv4 address with its prefix and where it came from,
-    /// from the network observer; none when it observes no interfaces.
-    async fn ipv4_addresses(&self) -> Option<std::collections::BTreeMap<String, (String, String)>> {
+    /// Each interface's IPv4 address with its prefix and, from networkd, where
+    /// it came from; from the kernel over rtnetlink where networkd does not
+    /// answer (OpenRC), with no source. None when neither answers.
+    async fn ipv4_addresses(
+        &self,
+    ) -> Option<std::collections::BTreeMap<String, (String, Option<String>)>> {
+        if let Some(observed) = self.networkd_ipv4_addresses().await {
+            return Some(observed);
+        }
+        let kernel = tokio::task::spawn_blocking(crate::netlink::ipv4_addresses)
+            .await
+            .ok()?
+            .ok()?;
+        Some(
+            kernel
+                .into_iter()
+                .map(|(name, address)| (name, (address, None)))
+                .collect(),
+        )
+    }
+
+    async fn networkd_ipv4_addresses(
+        &self,
+    ) -> Option<std::collections::BTreeMap<String, (String, Option<String>)>> {
         let observed = self.network_state.observe().await.ok()?;
         let entries = observed.pointer("/interfaces/entries")?.as_array()?;
         Some(
@@ -125,10 +146,7 @@ impl MicadService {
                                 address["address"].as_str()?,
                                 address["prefixLength"].as_u64()?
                             ),
-                            address["configSource"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .to_string(),
+                            address["configSource"].as_str().map(str::to_string),
                         ),
                     ))
                 })
@@ -602,7 +620,7 @@ impl Device for InterfaceRef<MicadService> {
             if !carrier {
                 return Err("no_carrier");
             }
-            // Without an observer there is nothing to wait on.
+            // Without a reading of the addresses there is nothing to wait on.
             let Some(addresses) = self.get().await.ipv4_addresses().await else {
                 return Ok(None);
             };
@@ -610,7 +628,8 @@ impl Device for InterfaceRef<MicadService> {
                 .get(interface)
                 .filter(|(address, source)| match &wanted {
                     Some(wanted) => address == wanted,
-                    None => source == "DHCPv4",
+                    // The kernel does not say where an address came from.
+                    None => source.as_deref().is_none_or(|source| source == "DHCPv4"),
                 });
             if let Some((address, _)) = found {
                 return Ok(Some(address.clone()));

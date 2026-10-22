@@ -1022,13 +1022,15 @@ impl Engine {
             }
             let facts = device.facts().await;
             let hostname = hostname.unwrap_or(facts.hostname);
-            let (interface, urls) = console(&device.status().await, reached.as_ref(), &hostname);
+            let status = device.status().await;
+            let (interface, urls) = console(&status, reached.as_ref(), &hostname);
             json!({
                 "event": "finished",
                 "claimed": facts.claimed,
                 "hostname": hostname,
                 "interface": interface,
                 "consoleUrls": urls,
+                "ap": if status["wifiMode"] == "ap" { "on" } else { "off" },
             })
         });
     }

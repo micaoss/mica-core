@@ -38,7 +38,14 @@ impl Device for FakeDevice {
         self.facts.lock().unwrap().clone()
     }
     async fn status(&self) -> Value {
-        json!({ "wifiMode": "ap", "connected": false, "ssid": null, "ip": null, "interfaces": [
+        let joined = self
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call.starts_with("join"));
+        let mode = if joined { "client" } else { "ap" };
+        json!({ "wifiMode": mode, "connected": false, "ssid": null, "ip": null, "interfaces": [
             { "name": "eth0", "kind": "ethernet", "carrier": true, "address": "10.0.0.5/24" },
             { "name": "wlan0", "kind": "wifi", "carrier": false, "address": "192.168.1.40/24" },
         ] })
@@ -497,6 +504,7 @@ async fn an_unclaimed_device_joins_wi_fi_and_stays_unclaimed() {
             "hostname": "deck-7",
             "interface": { "name": "wlan0", "kind": "wifi", "address": "192.168.1.40/24" },
             "consoleUrls": ["http://192.168.1.40", "http://deck-7.local"],
+            "ap": "off",
         })]
     );
     assert_eq!(bench.calls(), vec!["join Harbour", "hostname deck-7"]);
@@ -585,6 +593,10 @@ async fn an_unclaimed_device_is_set_up_over_its_wired_port() {
     let finished = bench.command(json!({ "op": "finish" })).await;
     assert_eq!(finished[0]["event"], "finished");
     assert_eq!(finished[0]["claimed"], false);
+    assert_eq!(
+        finished[0]["ap"], "on",
+        "a wired session leaves the access point on"
+    );
     assert_eq!(
         finished[0]["interface"],
         json!({ "name": "eth0", "kind": "ethernet", "address": "10.0.0.5/24" })
