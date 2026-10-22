@@ -418,7 +418,7 @@ pub fn check_fields(manifest: &Manifest, init: Init, arch: &str) -> Vec<Problem>
         );
     }
     if let Some(update) = &manifest.update
-        && !update.url.starts_with("https://")
+        && url::Url::parse(&update.url).map_or(true, |url| url.scheme() != "https")
     {
         fail("manifest", "update.url is an https URL".into());
     }
@@ -639,6 +639,26 @@ mod tests {
     fn a_whole_manifest_breaks_no_rule() {
         let dir = bundle_dir();
         assert_eq!(check(&manifest(), dir.path(), Init::Systemd, "arm64"), []);
+    }
+
+    #[test]
+    fn the_update_url_is_https_by_its_parsed_scheme() {
+        let dir = bundle_dir();
+        for (url, passes) in [
+            ("https://apps.example/v.json", true),
+            ("HTTPS://apps.example/v.json", true),
+            ("http://apps.example/v.json", false),
+            ("ftp://apps.example/v.json", false),
+            ("apps.example/v.json", false),
+        ] {
+            let mut with_update = manifest();
+            with_update.update = Some(UpdateSpec {
+                url: url.into(),
+                auto: false,
+            });
+            let problems = check(&with_update, dir.path(), Init::Systemd, "arm64");
+            assert_eq!(problems.is_empty(), passes, "{url}: {problems:?}");
+        }
     }
 
     #[test]
