@@ -1,9 +1,21 @@
 # BLE provisioning protocol, version 1
 
 A phone sends a mica device the Wi-Fi network to join, or the addressing of its Ethernet port, over
-Bluetooth Low Energy, without joining the device's access point. A device that is still unclaimed is claimed in the same session. The phone
+Bluetooth Low Energy, without joining the device's access point. The phone
 side is a web page that uses Web Bluetooth. This document is the contract between that page and
 micad. Every value below is part of protocol 1; a change to any of them is a new protocol version.
+
+## What BLE is for
+
+BLE configures the device's network and nothing else: `getStatus`, `scanWifi`, `setWifi`,
+`setNetwork` and `finish`, which may name the hostname. No operation sets a password or an
+access-point key, claims the device, resets it, or touches its services or apps, and none will.
+
+A device stays unclaimed after BLE provisioning. It is claimed afterwards in the console, on the
+network BLE set up, as on its access point: the console's setup asks for the device code from the
+label and the administrator password (`POST /api/v1/setup`, `docs/mica-core.md` section 4). The
+`manual` window on a claimed device exists so that a device that went offline can be put back on a
+network on site.
 
 ## Versioning
 
@@ -31,6 +43,9 @@ and an authentication mode:
   still no default route.
 - `offline` is only for claimed devices, and only while the console setting `autoWhenOffline` is on
   (the default).
+- A device provisioned over BLE is still unclaimed, so its `unclaimed` window opens again at every
+  boot until it is claimed in the console. A phone that connects then sees `claimed: false` and
+  `auth: none`, and `getStatus` shows the network it is on; it may change it again.
 - While a window is open the adapter is powered even if Bluetooth is switched off; it returns to its
   setting when the window closes.
 - A closed window stops advertising and accepts no new connection. A session already authenticated
@@ -70,7 +85,7 @@ A read returns one UTF-8 JSON object (long reads are allowed; it is not fragment
 
 ```json
 {"protocol":1,"model":"mica cx3576","hostname":"mica-a4e2e69e","claimed":false,"auth":"none",
- "ops":["getStatus","scanWifi","claim","setWifi","setNetwork","finish"],"maxWrite":182}
+ "ops":["getStatus","scanWifi","setWifi","setNetwork","finish"],"maxWrite":182}
 ```
 
 | Member | Meaning |
@@ -183,8 +198,8 @@ hours on each further lockout. Counts and lockouts survive reboots. A successful
 the consecutive count; an administrator's console login resets both. A lockout also closes a
 `manual` window and voids its code. Every failure is audited.
 
-**Verifiers.** The `password` verifier is made when the device is claimed (by `finish` or by the
-console's setup), when the administrator password is changed, and at a console login when none
+**Verifiers.** The `password` verifier is made when the device is claimed in the console's
+setup, when the administrator password is changed, and at a console login when none
 exists yet. Each change replaces the record, so the old password stops working. The `temp-code`
 verifier is made when a `manual` window opens and is destroyed when it closes.
 
@@ -220,10 +235,9 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 | --- | --- | --- | --- |
 | `getStatus` | — | `status`: `wifiMode` (`client`, `ap` or `off`), `connected`, `ssid` (or null), `ip` (or null), `interfaces` | — |
 | `scanWifi` | — | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}` | `ap_active`, `no_radio`, `scan_failed` |
-| `claim` | `password`, `hostname` (optional), `apPsk` (optional) | `claimStaged` | `not_allowed`, `already_claimed`, `invalid_password`, `invalid_hostname`, `invalid_ap_psk` |
-| `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `not_claimed`, `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
+| `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
 | `setNetwork` | `interface`, and `dhcp: true` or `static` | `up`: `interface`, `address` (or null) | listed under `setNetwork` |
-| `finish` | — | `finished`: `claimed`, `hostname`, `interface` (or null), `consoleUrls` | `already_claimed`, `not_claimed` |
+| `finish` | `hostname` (optional) | `finished`: `claimed`, `hostname`, `interface` (or null), `consoleUrls` | `already_claimed`, `invalid_hostname` |
 
 `getStatus`
 - `interfaces[]` lists the physical ports, by name: `{name, kind, carrier, address}`. `kind` is
@@ -240,22 +254,13 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 - While the device runs its access point it cannot scan: `ap_active`, and the page asks for the
   network name instead.
 
-`claim` (only in a `none` session; otherwise `not_allowed`)
-- `password`: 8 to 1024 bytes. `hostname`: 1-63 letters, digits or hyphens, not starting or ending
-  with a hyphen. `apPsk`: the access point's key after the claim, as the console's setup takes it
-  (8-63 printable ASCII characters without `"` or `\`, or 64 hex digits). A device without Wi-Fi
-  refuses `apPsk` with `invalid_ap_psk`.
-- Nothing is written: the claim is staged. A second `claim` replaces it. `already_claimed` when the
-  device was claimed meanwhile.
-
 `setWifi`
 - `ssid`: 1-32 bytes. `psk`: `""`, 8-63 printable ASCII characters, or 64 hex digits; a `psk` is
   tried as WPA2-PSK and WPA3-SAE. `hidden`: the network does not broadcast its name.
-- In a `none` session it needs a staged claim (`not_claimed`), and fails with `already_claimed` if
-  the device was claimed meanwhile.
+- In a `none` session it fails with `already_claimed` if the device was claimed meanwhile.
 - The device saves the network first in its list, switches the radio to client mode (stopping its
   access point) and connects. It sends `{"id":n,"event":"connecting"}` once it has started, then
-  `connected` or `failed`. `hostname` in `connected` is the staged one when a claim is staged.
+  `connected` or `failed`. `hostname` in `connected` is the device's hostname.
 - `connect_failed` covers what the device cannot tell apart.
 
 `setNetwork`
@@ -266,7 +271,7 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 - The entry replaces the port's addressing and keeps the rest of its entry. It is held to the rules
   the console's network settings hold a write to, and a refusal carries the code those settings
   answer `422` with.
-- In a `none` session it needs a staged claim, as `setWifi` does.
+- In a `none` session it fails with `already_claimed` if the device was claimed meanwhile.
 - The device sends `{"id":n,"event":"applying"}` once it has started, then `up` or `failed`. `up`
   comes once the port has its address: the `static` one, or one from a DHCP lease within 30
   seconds. `address` is null when the device cannot read the port's addresses.
@@ -276,8 +281,7 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 
 | `reason` | Meaning |
 | --- | --- |
-| `not_claimed` | a `none` session with no staged claim |
-| `already_claimed` | the device was claimed meanwhile |
+| `already_claimed` | a `none` session, and the device was claimed meanwhile |
 | `unknown_interface` | `interface` is not an `ethernet` port of the device |
 | `invalid_address` | `static.address` is missing or not an IPv4 address with its prefix |
 | `invalid_gateway` | `static.gateway` is not an IPv4 address |
@@ -300,22 +304,19 @@ codes, one to one.
 
 `finish`
 - `finish` follows `setWifi`, `setNetwork`, or neither.
-- In a `none` session it commits the staged claim: administrator, hostname, the `apPsk` of the
-  claim if it had one, and the claim channel `ble`. `already_claimed` when another channel claimed
-  first; the staged claim is dropped. `not_claimed` when nothing is staged.
-- The device generates no access-point key at a BLE claim, and `finished` carries none: after
-  `setWifi` the radio is a client and the access point is off. The key derived from the device
-  code is the unclaimed device's only, so an access point still on without a key of its own is
-  switched off at the claim; the console asks for a key when it is switched on again. The
-  access-point setup (`POST /setup`) still sets a key, since its user is on the access point.
-- In a `password` or `temp-code` session it only ends the session (`claimed: true`).
-- `finished` carries what the page's last screen shows: `hostname`, the device's hostname after
-  the claim; `interface`, `{name, kind, address}` of the port the session brought up (the
+- `hostname`: 1-63 letters, digits or hyphens, not starting or ending with a hyphen; it becomes
+  the device's hostname. Absent, the hostname stays.
+- It claims nothing: `claimed` is `false` after a `none` session, and the page's last screen sends
+  the user to the console to claim the device ("open the console to set the administrator
+  password"). In a `password` or `temp-code` session `claimed` is `true`.
+- In a `none` session it fails with `already_claimed` if the device was claimed meanwhile.
+- `finished` carries what the page's last screen shows: `hostname`, the device's hostname;
+  `interface`, `{name, kind, address}` of the port the session brought up (the
   `ethernet` port of `up`, or the `wifi` port after `connected`), else of the first port with an
   address, Ethernet first, or null; and `consoleUrls`, `http://<address>` when there is an
   address and `http://<hostname>.local`.
-- The access point is off after a claim over Wi-Fi or the wired port. Its key is set on the
-  console's Wi-Fi page when the access point is switched on.
+- After `setWifi` the radio is a client and the access point is off. After `setNetwork` alone an
+  unclaimed device's access point stays as it was, on the key derived from its device code.
 - After `finished` the device closes the window and disconnects.
 
 ## Sessions
@@ -325,8 +326,8 @@ codes, one to one.
 - Before it disconnects on its own the device may notify `{"event":"closing","reason":…}` with no
   `id`: `idle`, or `claimed_elsewhere` when another channel claimed the device during a `none`
   session.
-- An unclaimed device drops a staged claim as soon as the connection drops. A reconnecting phone
-  starts again from `start`.
+- An unclaimed device's session ends with its connection too. A reconnecting phone starts again
+  from `start`.
 - A claimed device's session also ends with its connection. A reconnecting phone authenticates again
   and continues with `getStatus`.
 

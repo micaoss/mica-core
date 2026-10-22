@@ -5,7 +5,7 @@
 //! Everything reaches it as an [`Input`]: BlueZ's reads and writes, the
 //! default route, the console's requests, and the operations it started
 //! finishing. What it does to the world goes through [`Radio`] (advertise,
-//! notify, disconnect) and [`Device`] (settings, Wi-Fi, the claim), so a test
+//! notify, disconnect) and [`Device`] (settings, Wi-Fi, the wired port), so a test
 //! drives it with no Bluetooth and no network.
 
 use std::sync::Arc;
@@ -30,18 +30,9 @@ pub const IDLE_SECONDS: u64 = 120;
 /// How long the Wi-Fi a session changed waits for the phone to come back.
 pub const RECONNECT_SECONDS: u64 = 120;
 /// The operations this device accepts.
-pub const OPS: [&str; 6] = [
-    "getStatus",
-    "scanWifi",
-    "claim",
-    "setWifi",
-    "setNetwork",
-    "finish",
-];
+pub const OPS: [&str; 5] = ["getStatus", "scanWifi", "setWifi", "setNetwork", "finish"];
 /// The ATT MTU assumed until a request says otherwise.
 const DEFAULT_MTU: usize = 23;
-/// The administrator password's bounds in a `claim`.
-const PASSWORD_BYTES: std::ops::RangeInclusive<usize> = 8..=1024;
 
 /// The characteristics the engine notifies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +57,7 @@ pub enum Refused {
     Closed,
 }
 
-/// What the device is, as `info` and the claim rules need it.
+/// What the device is, as `info` and the session rules need it.
 #[derive(Debug, Clone, Default)]
 pub struct Facts {
     pub claimed: bool,
@@ -74,56 +65,6 @@ pub struct Facts {
     pub model: String,
     pub auto_when_offline: bool,
     pub has_wifi: bool,
-}
-
-/// A claim staged by `claim`, committed by `finish`.
-#[derive(Clone)]
-pub struct StagedClaim {
-    pub password: String,
-    pub hostname: Option<String>,
-    pub ap_psk: Option<String>,
-    /// The password's hash, begun when the claim is staged so that `finish`
-    /// does not wait for it.
-    hash: Arc<tokio::sync::OnceCell<Option<String>>>,
-}
-
-impl StagedClaim {
-    #[must_use]
-    pub fn new(password: String, hostname: Option<String>, ap_psk: Option<String>) -> Self {
-        let staged = Self {
-            password,
-            hostname,
-            ap_psk,
-            hash: Arc::new(tokio::sync::OnceCell::new()),
-        };
-        let early = staged.clone();
-        tokio::spawn(async move { early.password_hash().await });
-        staged
-    }
-
-    /// The password's hash for `access.webAdmin`; none when it could not be
-    /// made.
-    pub async fn password_hash(&self) -> Option<String> {
-        let password = self.password.clone();
-        self.hash
-            .get_or_init(|| async move {
-                tokio::task::spawn_blocking(move || micad_settings::hash_password(&password).ok())
-                    .await
-                    .ok()
-                    .flatten()
-            })
-            .await
-            .clone()
-    }
-}
-
-impl std::fmt::Debug for StagedClaim {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("StagedClaim")
-            .field("hostname", &self.hostname)
-            .finish_non_exhaustive()
-    }
 }
 
 /// The device side of the operations.
@@ -160,8 +101,8 @@ pub trait Device: Send + Sync + 'static {
     /// A phone connected: begin what it is likely to ask for, so that it is
     /// ready when it does (a Wi-Fi scan).
     async fn warm(&self);
-    /// Commit a staged claim, or a `failed` reason.
-    async fn claim(&self, staged: &StagedClaim) -> Result<(), &'static str>;
+    /// `finish`'s `hostname`, or a `failed` reason.
+    async fn set_hostname(&self, hostname: &str) -> Result<(), &'static str>;
 }
 
 /// The Bluetooth side.
@@ -268,11 +209,9 @@ struct Connection {
     session_in: Reassembly,
     command_in: Reassembly,
     phase: Phase,
-    staged: Option<StagedClaim>,
     op: Option<&'static str>,
     last_active: u64,
     finished: bool,
-    claimed: bool,
     failed: bool,
     /// When the phone connected, and when the command in hand arrived: the
     /// step log's times.
@@ -531,11 +470,9 @@ impl Engine {
             session_in: Reassembly::default(),
             command_in: Reassembly::default(),
             phase: Phase::Idle,
-            staged: None,
             op: None,
             last_active: self.clock.uptime(),
             finished: false,
-            claimed: false,
             failed: false,
             since: Instant::now(),
             command_at: None,
@@ -882,10 +819,9 @@ impl Engine {
         match command["op"].as_str() {
             Some("getStatus") => self.spawn_status(id),
             Some("scanWifi") => self.spawn_scan(id),
-            Some("claim") => self.claim(id, &command).await,
             Some("setWifi") => self.set_wifi(id, &command).await,
             Some("setNetwork") => self.set_network(id, &command).await,
-            Some("finish") => self.finish(id).await,
+            Some("finish") => self.finish(id, &command).await,
             Some(_) => self.failed(id, "unknown_op").await,
             None => self.failed(id, "bad_request").await,
         }
@@ -952,54 +888,14 @@ impl Engine {
         });
     }
 
-    async fn claim(&mut self, id: Value, command: &Value) {
-        if self.session_auth() != Some(Auth::None) {
-            return self.failed(id, "not_allowed").await;
-        }
-        if self.device.facts().await.claimed {
-            return self.failed(id, "already_claimed").await;
-        }
-        let Some(password) = command["password"].as_str() else {
-            return self.failed(id, "bad_request").await;
-        };
-        if !PASSWORD_BYTES.contains(&password.len()) {
-            return self.failed(id, "invalid_password").await;
-        }
-        let hostname = match &command["hostname"] {
-            Value::Null => None,
-            Value::String(name) if is_label(name) => Some(name.clone()),
-            Value::String(_) => return self.failed(id, "invalid_hostname").await,
-            _ => return self.failed(id, "bad_request").await,
-        };
-        let ap_psk = match &command["apPsk"] {
-            Value::Null => None,
-            Value::String(psk)
-                if self.facts.has_wifi && micad_settings::validate_wifi_psk(psk).is_ok() =>
-            {
-                Some(psk.clone())
-            }
-            Value::String(_) => return self.failed(id, "invalid_ap_psk").await,
-            _ => return self.failed(id, "bad_request").await,
-        };
-        if let Some(connection) = &mut self.connection {
-            connection.staged = Some(StagedClaim::new(password.to_string(), hostname, ap_psk));
-        }
-        self.send_event(&json!({ "id": id, "event": "claimStaged" }))
-            .await;
-    }
-
     async fn set_wifi(&mut self, id: Value, command: &Value) {
         let (Some(ssid), Some(psk)) = (command["ssid"].as_str(), command["psk"].as_str()) else {
             return self.failed(id, "bad_request").await;
         };
         let hidden = command["hidden"].as_bool().unwrap_or(false);
-        if let Err(reason) = self.claim_staged().await {
+        if let Err(reason) = self.still_unclaimed().await {
             return self.failed(id, reason).await;
         }
-        let staged = self
-            .connection
-            .as_ref()
-            .and_then(|connection| connection.staged.clone());
         if ssid.is_empty() || ssid.len() > 32 {
             return self.failed(id, "invalid_ssid").await;
         }
@@ -1017,9 +913,7 @@ impl Engine {
             let snapshot = self.device.wifi_snapshot().await;
             self.hold().snapshot = Some(snapshot);
         }
-        let hostname = staged
-            .and_then(|staged| staged.hostname)
-            .unwrap_or_else(|| self.facts.hostname.clone());
+        let hostname = self.facts.hostname.clone();
         let device = Arc::clone(&self.device);
         let tx = self.tx.clone();
         let serial = self.current_serial().unwrap_or_default();
@@ -1044,20 +938,13 @@ impl Engine {
             .await;
     }
 
-    /// In a `none` session, a change to the network needs a staged claim on
-    /// a device still unclaimed.
-    async fn claim_staged(&self) -> Result<(), &'static str> {
-        if self.session_auth() != Some(Auth::None) {
-            return Ok(());
-        }
-        if self.device.facts().await.claimed {
+    /// A `none` session is for a device still unclaimed: one claimed
+    /// meanwhile changes nothing over it.
+    async fn still_unclaimed(&self) -> Result<(), &'static str> {
+        if self.session_auth() == Some(Auth::None) && self.device.facts().await.claimed {
             return Err("already_claimed");
         }
-        let staged = self
-            .connection
-            .as_ref()
-            .is_some_and(|connection| connection.staged.is_some());
-        if staged { Ok(()) } else { Err("not_claimed") }
+        Ok(())
     }
 
     /// The session's hold on what it changes, begun if it was not.
@@ -1084,7 +971,7 @@ impl Engine {
             }
             _ => return self.failed(id, "bad_request").await,
         };
-        if let Err(reason) = self.claim_staged().await {
+        if let Err(reason) = self.still_unclaimed().await {
             return self.failed(id, reason).await;
         }
         self.hold();
@@ -1112,33 +999,33 @@ impl Engine {
             .await;
     }
 
-    async fn finish(&mut self, id: Value) {
+    async fn finish(&mut self, id: Value, command: &Value) {
+        let hostname = match &command["hostname"] {
+            Value::Null => None,
+            Value::String(name) if is_label(name) => Some(name.clone()),
+            Value::String(_) => return self.failed(id, "invalid_hostname").await,
+            _ => return self.failed(id, "bad_request").await,
+        };
+        if let Err(reason) = self.still_unclaimed().await {
+            return self.failed(id, reason).await;
+        }
         let Some(connection) = &self.connection else {
             return;
         };
-        let (staged, reached) = (connection.staged.clone(), connection.reached.clone());
-        if self.session_auth() == Some(Auth::None) && staged.is_none() {
-            return self.failed(id, "not_claimed").await;
-        }
+        let reached = connection.reached.clone();
         let device = Arc::clone(&self.device);
         self.spawn_op(id, "finish", async move {
-            let hostname = match staged {
-                Some(staged) => {
-                    if let Err(reason) = device.claim(&staged).await {
-                        return json!({ "event": "failed", "reason": reason });
-                    }
-                    staged.hostname
-                }
-                None => None,
-            };
-            let hostname = match hostname {
-                Some(name) => name,
-                None => device.facts().await.hostname,
-            };
+            if let Some(hostname) = &hostname
+                && let Err(reason) = device.set_hostname(hostname).await
+            {
+                return json!({ "event": "failed", "reason": reason });
+            }
+            let facts = device.facts().await;
+            let hostname = hostname.unwrap_or(facts.hostname);
             let (interface, urls) = console(&device.status().await, reached.as_ref(), &hostname);
             json!({
                 "event": "finished",
-                "claimed": true,
+                "claimed": facts.claimed,
                 "hostname": hostname,
                 "interface": interface,
                 "consoleUrls": urls,
@@ -1172,12 +1059,8 @@ impl Engine {
             return;
         };
         let finished = op == "finish" && event["event"] == "finished";
-        if op == "finish" && event["reason"] == "already_claimed" {
-            connection.staged = None;
-        }
         if finished {
             connection.finished = true;
-            connection.claimed = connection.staged.take().is_some();
         }
         event["id"] = id;
         self.send_event(&event).await;
@@ -1222,9 +1105,7 @@ impl Engine {
         let Some(connection) = self.connection.take() else {
             return;
         };
-        let outcome = if connection.claimed {
-            "claimed"
-        } else if connection.finished {
+        let outcome = if connection.finished {
             "finished"
         } else if self.hold.as_ref().is_some_and(|hold| hold.connected) {
             "wifi-connected"

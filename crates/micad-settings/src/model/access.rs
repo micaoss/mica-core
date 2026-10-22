@@ -67,7 +67,8 @@ pub enum ClaimChannel {
     Setup,
     /// A provisioning document.
     ProvisioningDocument,
-    /// BLE provisioning's `finish` (`docs/ble-provisioning.md`).
+    /// BLE provisioning, which claimed a device up to core 0.0.3: read from
+    /// the records it left, never written.
     Ble,
 }
 

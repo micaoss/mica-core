@@ -4,15 +4,12 @@
 use std::path::Path;
 use std::time::Duration;
 
-use micad_settings::{
-    ApMode, ClaimChannel, ClaimSettings, Feature, IfaceKind, IfaceSettings, StaticConfig,
-    WifiNetwork,
-};
+use micad_settings::{ApMode, Feature, IfaceKind, IfaceSettings, StaticConfig, WifiNetwork};
 use serde_json::{Value, json};
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 
 use super::*;
-use crate::ble_provisioning::engine::{Device, Facts, StagedClaim};
+use crate::ble_provisioning::engine::{Device, Facts};
 
 /// The sender a provisioning write is recorded as.
 const SENDER: &str = "ble-provisioning";
@@ -38,13 +35,8 @@ impl MicadService {
         &self,
         emitter: &SignalEmitter<'_>,
         writes: &[(String, Value)],
-        claim: bool,
     ) -> Result<(), micad_settings::SettingsError> {
-        if claim {
-            self.persist_claim(writes).await?;
-        } else {
-            self.persist_settings(writes).await?;
-        }
+        self.persist_settings(writes).await?;
         for (path, value) in writes {
             let _ = Self::settings_changed(emitter, path, &value.to_string()).await;
         }
@@ -217,7 +209,7 @@ impl MicadService {
             return Err(violation.code);
         }
         let written = serde_json::to_value(&network).map_err(|_| "validation_failed")?;
-        self.provisioning_write(emitter, &[("network".to_string(), written)], false)
+        self.provisioning_write(emitter, &[("network".to_string(), written)])
             .await
             .map_err(|err| {
                 tracing::warn!(error = %err, interface, "the provisioned wired entry could not be written");
@@ -249,7 +241,7 @@ impl MicadService {
             return;
         };
         if let Err(err) = self
-            .provisioning_write(emitter, &[("network".to_string(), written)], false)
+            .provisioning_write(emitter, &[("network".to_string(), written)])
             .await
         {
             tracing::warn!(error = %err, "the wired entries a provisioning session changed could not be restored");
@@ -338,7 +330,7 @@ impl MicadService {
             ("wifi.client.enabled".to_string(), json!(true)),
             ("wifi.ap.mode".to_string(), json!("off")),
         ];
-        self.provisioning_write(emitter, &writes, false)
+        self.provisioning_write(emitter, &writes)
             .await
             .map_err(|err| {
                 tracing::warn!(error = %err, "the provisioned network could not be written");
@@ -374,7 +366,7 @@ impl MicadService {
             ),
             ("wifi.ap.mode".to_string(), snapshot["apMode"].clone()),
         ];
-        if let Err(err) = self.provisioning_write(emitter, &writes, false).await {
+        if let Err(err) = self.provisioning_write(emitter, &writes).await {
             tracing::warn!(error = %err, "the Wi-Fi a provisioning session changed could not be restored");
         }
     }
@@ -383,47 +375,18 @@ impl MicadService {
     /// phone sent one: the radio is a client by now, or the access point is
     /// switched off here, and the console asks for a key when it is switched
     /// on again.
-    async fn provisioning_claim(
+    /// `finish`'s hostname.
+    async fn provisioning_set_hostname(
         &self,
         emitter: &SignalEmitter<'_>,
-        staged: &StagedClaim,
+        hostname: &str,
     ) -> Result<(), &'static str> {
-        let hash = staged.password_hash().await.ok_or("busy")?;
-        let mut access = self.inner.read().await.settings.access.clone();
-        access.web_admin = Some(micad_settings::WebAdminSettings {
-            password_hash: hash,
-        });
-        access.claim = Some(ClaimSettings {
-            via: ClaimChannel::Ble,
-            at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |since| since.as_secs()),
-            rotation_required: false,
-        });
-        let ap = self.inner.read().await.settings.wifi.ap.clone();
-        let mut writes = vec![(
-            "access".to_string(),
-            serde_json::to_value(&access).map_err(|_| "busy")?,
-        )];
-        if let Some(hostname) = &staged.hostname {
-            writes.push(("hostname".to_string(), json!(hostname)));
-        }
-        if self.features.has(Feature::Wifi) {
-            writes.extend(access_point_at_claim(&ap, staged.ap_psk.as_deref()));
-        }
-        match self.provisioning_write(emitter, &writes, true).await {
-            Ok(()) => {}
-            Err(micad_settings::SettingsError::Claimed) => return Err("already_claimed"),
-            Err(err) => {
-                tracing::warn!(error = %err, "the BLE claim could not be written");
-                return Err("busy");
-            }
-        }
-        if let Err(err) = self.provisioning.password_set(staged.password.clone()) {
-            tracing::warn!(error = %format!("{err:#}"), "the BLE verifier could not be made at the claim");
-        }
-        self.provisioning.audit("claim", "completed");
-        Ok(())
+        self.provisioning_write(emitter, &[("hostname".to_string(), json!(hostname))])
+            .await
+            .map_err(|err| {
+                tracing::warn!(error = %err, "the provisioned hostname could not be written");
+                "busy"
+            })
     }
 
     /// Refuse a bus write that reaches the Wi-Fi settings while a BLE
@@ -527,20 +490,6 @@ fn wired_static(entry: &Value) -> Result<Option<StaticConfig>, &'static str> {
         gateway,
         dns,
     }))
-}
-
-/// What a BLE claim writes to the access point: the key the phone sent, or
-/// the access point switched off when it has no key of its own, since the
-/// key derived from the device code is the unclaimed device's only.
-fn access_point_at_claim(
-    ap: &micad_settings::WifiApSettings,
-    psk: Option<&str>,
-) -> Option<(String, Value)> {
-    match psk {
-        Some(psk) => Some(("wifi.ap.psk".to_string(), json!(psk))),
-        None => (ap.psk.is_none() && ap.mode != ApMode::Off)
-            .then(|| ("wifi.ap.mode".to_string(), json!("off"))),
-    }
 }
 
 /// Why a `setWifi` did not connect, from what the station went through.
@@ -690,10 +639,10 @@ impl Device for InterfaceRef<MicadService> {
             .await;
     }
 
-    async fn claim(&self, staged: &StagedClaim) -> Result<(), &'static str> {
+    async fn set_hostname(&self, hostname: &str) -> Result<(), &'static str> {
         self.get()
             .await
-            .provisioning_claim(self.signal_emitter(), staged)
+            .provisioning_set_hostname(self.signal_emitter(), hostname)
             .await
     }
 }
@@ -777,28 +726,6 @@ mod tests {
                 "{refused}"
             );
         }
-    }
-
-    #[test]
-    fn a_ble_claim_leaves_no_access_point_on_the_derived_key() {
-        let ap = |mode: ApMode, psk: Option<&str>| micad_settings::WifiApSettings {
-            mode,
-            psk: psk.map(str::to_string),
-            ..micad_settings::WifiApSettings::default()
-        };
-        assert_eq!(
-            access_point_at_claim(&ap(ApMode::Always, None), None),
-            Some(("wifi.ap.mode".to_string(), json!("off")))
-        );
-        assert_eq!(access_point_at_claim(&ap(ApMode::Off, None), None), None);
-        assert_eq!(
-            access_point_at_claim(&ap(ApMode::Always, Some("kept-key-1")), None),
-            None
-        );
-        assert_eq!(
-            access_point_at_claim(&ap(ApMode::Off, None), Some("typed-key-1")),
-            Some(("wifi.ap.psk".to_string(), json!("typed-key-1")))
-        );
     }
 
     #[test]

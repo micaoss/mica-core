@@ -113,7 +113,7 @@ pub struct Entry {
     pub at: u64,
     /// The window's trigger: `unclaimed`, `boot`, `offline` or `manual`.
     pub trigger: String,
-    /// How it ended: `claimed`, `wifi-connected`, `finished`, `failed`,
+    /// How it ended: `wifi-connected`, `finished`, `failed`,
     /// `auth-failed`, `locked` or `abandoned`.
     pub outcome: String,
 }

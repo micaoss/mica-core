@@ -1,5 +1,5 @@
 //! BLE provisioning, protocol 1 (`docs/ble-provisioning.md`): a phone sends
-//! the Wi-Fi network to join over BLE and, on an unclaimed device, claims it.
+//! a device its network, Wi-Fi or wired, over BLE, and nothing else.
 
 pub mod bluez;
 pub mod channel;

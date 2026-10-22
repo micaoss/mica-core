@@ -97,19 +97,12 @@ impl Device for FakeDevice {
             .unwrap()
             .push(format!("restore {snapshot} remove {remove:?}"));
     }
-    async fn claim(&self, staged: &StagedClaim) -> Result<(), &'static str> {
-        let mut facts = self.facts.lock().unwrap();
-        if facts.claimed {
-            return Err("already_claimed");
-        }
-        facts.claimed = true;
-        if let Some(name) = &staged.hostname {
-            facts.hostname.clone_from(name);
-        }
+    async fn set_hostname(&self, hostname: &str) -> Result<(), &'static str> {
+        self.facts.lock().unwrap().hostname = hostname.to_string();
         self.calls
             .lock()
             .unwrap()
-            .push(format!("claim {}", staged.password));
+            .push(format!("hostname {hostname}"));
         Ok(())
     }
 }
@@ -465,7 +458,7 @@ impl Bench {
 }
 
 #[tokio::test]
-async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
+async fn an_unclaimed_device_joins_wi_fi_and_stays_unclaimed() {
     let mut bench = Bench::new(false).await;
     assert_eq!(bench.last_advert().as_deref(), Some("mica-a4e2e69e"));
     assert!(bench.radio.held.load(Ordering::SeqCst));
@@ -478,10 +471,6 @@ async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
     assert_eq!(bench.last_advert(), None, "one phone at a time");
 
     bench.start_none().await;
-    let staged = bench
-        .command(json!({ "op": "claim", "password": PASSWORD, "hostname": "deck-7" }))
-        .await;
-    assert_eq!(staged, vec![json!({ "id": 1, "event": "claimStaged" })]);
     assert!(bench.wifi_locked.load(Ordering::SeqCst));
 
     *bench.device.wifi.lock().unwrap() = Some(Ok("192.168.1.40".into()));
@@ -490,25 +479,27 @@ async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
             json!({ "op": "setWifi", "ssid": "Harbour", "psk": "sea-breeze-77", "hidden": false }),
         )
         .await;
-    assert_eq!(events[0], json!({ "id": 2, "event": "connecting" }));
+    assert_eq!(events[0], json!({ "id": 1, "event": "connecting" }));
     assert_eq!(
         events[1],
-        json!({ "id": 2, "event": "connected", "ip": "192.168.1.40", "hostname": "deck-7" })
+        json!({ "id": 1, "event": "connected", "ip": "192.168.1.40", "hostname": "mica-a4e2e69e" })
     );
 
-    let finished = bench.command(json!({ "op": "finish" })).await;
+    let finished = bench
+        .command(json!({ "op": "finish", "hostname": "deck-7" }))
+        .await;
     assert_eq!(
         finished,
         vec![json!({
-            "id": 3,
+            "id": 2,
             "event": "finished",
-            "claimed": true,
+            "claimed": false,
             "hostname": "deck-7",
             "interface": { "name": "wlan0", "kind": "wifi", "address": "192.168.1.40/24" },
             "consoleUrls": ["http://192.168.1.40", "http://deck-7.local"],
         })]
     );
-    assert_eq!(bench.calls(), vec!["join Harbour", "claim harbour-pw-1"]);
+    assert_eq!(bench.calls(), vec!["join Harbour", "hostname deck-7"]);
     assert_eq!(*bench.radio.disconnected.lock().unwrap(), vec![PHONE]);
     assert!(!bench.wifi_locked.load(Ordering::SeqCst));
     bench.tick(1).await;
@@ -517,7 +508,7 @@ async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
     assert_eq!(history.len(), 1);
     assert_eq!(
         (history[0].trigger.as_str(), history[0].outcome.as_str()),
-        ("unclaimed", "claimed")
+        ("unclaimed", "finished")
     );
 }
 
@@ -548,19 +539,7 @@ async fn a_start_that_asks_for_the_status_gets_it_after_ready() {
 }
 
 #[tokio::test]
-async fn a_staged_claim_hashes_its_password_before_finish_asks() {
-    let staged = StagedClaim::new(PASSWORD.to_string(), None, None);
-    let hash = staged.password_hash().await.unwrap();
-    assert!(micad_settings::verify_password(&hash, PASSWORD));
-    assert_eq!(
-        staged.clone().password_hash().await,
-        Some(hash),
-        "made once"
-    );
-}
-
-#[tokio::test]
-async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
+async fn an_unclaimed_device_is_set_up_over_its_wired_port() {
     let mut bench = Bench::new(false).await;
     let info = bench.read_info(PHONE).await.unwrap();
     assert!(
@@ -570,13 +549,6 @@ async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
             .contains(&json!("setNetwork"))
     );
     bench.start_none().await;
-    let refused = bench
-        .command(json!({ "op": "setNetwork", "interface": "eth0", "dhcp": true }))
-        .await;
-    assert_eq!(refused[0]["reason"], "not_claimed");
-    bench
-        .command(json!({ "op": "claim", "password": PASSWORD }))
-        .await;
     for malformed in [
         json!({ "op": "setNetwork", "dhcp": true }),
         json!({ "op": "setNetwork", "interface": "eth0" }),
@@ -591,8 +563,8 @@ async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
     assert_eq!(
         refused,
         vec![
-            json!({ "id": 6, "event": "applying" }),
-            json!({ "id": 6, "event": "failed", "reason": "unknown_interface" }),
+            json!({ "id": 4, "event": "applying" }),
+            json!({ "id": 4, "event": "failed", "reason": "unknown_interface" }),
         ]
     );
 
@@ -606,12 +578,13 @@ async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
     assert_eq!(
         set,
         vec![
-            json!({ "id": 7, "event": "applying" }),
-            json!({ "id": 7, "event": "up", "interface": "eth0", "address": "10.0.0.5/24" }),
+            json!({ "id": 5, "event": "applying" }),
+            json!({ "id": 5, "event": "up", "interface": "eth0", "address": "10.0.0.5/24" }),
         ]
     );
     let finished = bench.command(json!({ "op": "finish" })).await;
     assert_eq!(finished[0]["event"], "finished");
+    assert_eq!(finished[0]["claimed"], false);
     assert_eq!(
         finished[0]["interface"],
         json!({ "name": "eth0", "kind": "ethernet", "address": "10.0.0.5/24" })
@@ -625,7 +598,6 @@ async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
         bench.calls(),
         vec![
             r#"network eth0 {"static":{"address":"10.0.0.5/24","dns":["10.0.0.1"],"gateway":"10.0.0.1"}}"#,
-            "claim harbour-pw-1",
         ],
         "a finished session keeps its wired entry and touches no Wi-Fi"
     );
@@ -635,9 +607,6 @@ async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
 async fn an_unfinished_unclaimed_session_puts_its_wired_entry_back() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
-    bench
-        .command(json!({ "op": "claim", "password": PASSWORD }))
-        .await;
     bench
         .command(json!({ "op": "setNetwork", "interface": "eth0", "dhcp": true }))
         .await;
@@ -656,53 +625,32 @@ async fn an_unfinished_unclaimed_session_puts_its_wired_entry_back() {
 }
 
 #[tokio::test]
-async fn wi_fi_needs_a_staged_claim_and_a_disconnect_drops_it() {
+async fn a_device_claimed_meanwhile_takes_no_network_over_a_none_session() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
-    let refused = bench
-        .command(json!({ "op": "setWifi", "ssid": "Harbour", "psk": "", "hidden": false }))
-        .await;
-    assert_eq!(
-        refused,
-        vec![json!({ "id": 1, "event": "failed", "reason": "not_claimed" })]
-    );
-
-    bench
-        .command(json!({ "op": "claim", "password": PASSWORD }))
-        .await;
-    bench
-        .engine
-        .handle(Input::Disconnected {
-            device: PHONE.into(),
-        })
-        .await;
-    bench.phone = Phone::default();
-    bench.start_none().await;
-    let finish = bench.command(json!({ "op": "finish" })).await;
-    assert_eq!(
-        finish,
-        vec![json!({ "id": 1, "event": "failed", "reason": "not_claimed" })]
-    );
+    bench.device.facts.lock().unwrap().claimed = true;
+    for command in [
+        json!({ "op": "setWifi", "ssid": "Harbour", "psk": "", "hidden": false }),
+        json!({ "op": "setNetwork", "interface": "eth0", "dhcp": true }),
+        json!({ "op": "finish" }),
+    ] {
+        let refused = bench.command(command.clone()).await;
+        assert_eq!(refused[0]["reason"], "already_claimed", "{command}");
+    }
+    assert!(bench.calls().is_empty());
 }
 
 #[tokio::test]
-async fn claim_values_are_checked() {
+async fn finish_values_are_checked() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
     for (command, reason) in [
         (
-            json!({ "op": "claim", "password": "short" }),
-            "invalid_password",
-        ),
-        (
-            json!({ "op": "claim", "password": PASSWORD, "hostname": "-deck" }),
+            json!({ "op": "finish", "hostname": "-deck" }),
             "invalid_hostname",
         ),
-        (
-            json!({ "op": "claim", "password": PASSWORD, "apPsk": "short" }),
-            "invalid_ap_psk",
-        ),
-        (json!({ "op": "claim" }), "bad_request"),
+        (json!({ "op": "finish", "hostname": 7 }), "bad_request"),
+        (json!({ "op": "claim", "password": PASSWORD }), "unknown_op"),
         (json!({ "op": "reboot" }), "unknown_op"),
     ] {
         let events = bench.command(command).await;
@@ -714,9 +662,6 @@ async fn claim_values_are_checked() {
 async fn an_unfinished_unclaimed_session_undoes_its_wi_fi_after_two_minutes_away() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
-    bench
-        .command(json!({ "op": "claim", "password": PASSWORD }))
-        .await;
     *bench.device.wifi.lock().unwrap() = Some(Ok("192.168.1.40".into()));
     bench
         .command(
@@ -772,13 +717,10 @@ async fn a_claimed_session_that_never_connected_restores_the_mode_and_keeps_its_
 async fn a_long_connect_does_not_count_as_idle_but_silence_does() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
-    bench
-        .command(json!({ "op": "claim", "password": PASSWORD }))
-        .await;
     let events = bench
         .command(json!({ "op": "setWifi", "ssid": "Harbour", "psk": "", "hidden": false }))
         .await;
-    assert_eq!(events, vec![json!({ "id": 2, "event": "connecting" })]);
+    assert_eq!(events, vec![json!({ "id": 1, "event": "connecting" })]);
     bench.tick(300).await;
     assert!(bench.radio.disconnected.lock().unwrap().is_empty());
 
@@ -820,9 +762,6 @@ async fn a_closed_window_accepts_no_phone() {
 async fn a_claim_elsewhere_ends_the_unauthenticated_session() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
-    bench
-        .command(json!({ "op": "claim", "password": PASSWORD }))
-        .await;
     bench.device.facts.lock().unwrap().claimed = true;
     bench.engine.handle(Input::ClaimedElsewhere).await;
     assert_eq!(
@@ -934,7 +873,7 @@ async fn the_right_password_takes_its_charge_back() {
     let refused = bench
         .command(json!({ "op": "claim", "password": PASSWORD }))
         .await;
-    assert_eq!(refused[0]["reason"], "not_allowed");
+    assert_eq!(refused[0]["reason"], "unknown_op");
 }
 
 #[tokio::test]

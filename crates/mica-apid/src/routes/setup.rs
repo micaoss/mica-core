@@ -328,8 +328,8 @@ pub(crate) async fn api_v1_setup(
     // The access point's key lands with the claim and not beside it: either
     // order of two writes leaves, on a failure between them, a device whose
     // access point runs a key nobody was shown. One `Claim`, which micad
-    // refuses when the device gained an administrator meanwhile -- by BLE
-    // provisioning, which this route's lock does not cover.
+    // refuses when the device gained an administrator meanwhile -- by a
+    // provisioning document, which this route's lock does not cover.
     let mut writes = vec![(ACCESS_PATH.to_string(), Value::Object(subtree))];
     if let Some(psk) = request.ap_psk.clone().or_else(|| generated_ap_psk.clone()) {
         writes.push((AP_PSK_PATH.to_string(), Value::String(psk)));

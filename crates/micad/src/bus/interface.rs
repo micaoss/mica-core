@@ -148,7 +148,7 @@ impl MicadService {
 
     /// Claim the device: [`Self::set_settings_many`] of writes that give it
     /// an administrator, refused with `AlreadyClaimed` when it has one, so
-    /// the console's setup and BLE provisioning cannot both claim it. Then
+    /// two claims cannot both land. Then
     /// the BLE verifier of `password`, the administrator password the writes
     /// carry the hash of.
     pub(super) async fn claim(
