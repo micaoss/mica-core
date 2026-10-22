@@ -223,7 +223,7 @@ directions, because `SettingsChanged` carries setting values.
 | --- | --- |
 | Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
 | Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
-| Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey` |
+| Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `FactoryReset` (the administrator password, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so two claims cannot both land), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
@@ -293,6 +293,27 @@ absence is reported with its reason rather than as a healthy reading:
   refuses to run while `/run/docker.pid` names a live dockerd, whose storage it would clear
   under it. A board-declared physical recovery action at boot maps to a tier. A
   transient root password lives in `/etc/shadow` until the next boot and in no setting.
+- **Factory reset.** The software stays at its current version; everything configured is
+  erased. `FactoryReset` checks the administrator password and stages a request in DATA's
+  `meta/` (`factory-reset.json`), then reboots after 3 s; the runkit erases at the next boot
+  (6.5). Everything on DATA but `meta/` goes: STATE with the settings, the claim, the API
+  tokens, the keys, the SSH host keys and the machine-id, the containers, the apps, `/srv`,
+  `/mica` and the logs kept there. SYSTEM, the boot records and the core set are untouched, and
+  the device code, derived from the hardware, is unchanged, so the device comes back unclaimed,
+  on its factory access point. It is refused, with a `code`, when the booted runkit does not
+  carry it out (`factory_reset_unsupported`: it writes no `/run/mica/runkit.json`), on an
+  unclaimed device (`not_claimed`), while an update is installing, holds the transaction lock or
+  waits for its reboot (`update_in_progress`), while a deployment or set is on trial
+  (`trial_pending`), and on a wrong password (`password_incorrect`). After 3 wrong passwords
+  each one doubles a wait from 5 s to 300 s (`login_throttled`). `micad factory-reset` is the
+  same request as root on the device: it prompts for the password with echo off, or reads it
+  from `--password-file FILE` (`-` for stdin); there is no flag to skip it. The first boot
+  after a reset logs the runkit's record (`factory-reset-done.json`: requested, completed, by,
+  source and the entries it could not remove), keeps a copy on STATE so later boots do not
+  repeat it, and discards DATA's free space in the background (`FITRIM`), skipped where the
+  filesystem or the device does not discard (UBIFS, a card without TRIM). It is not a
+  certified wipe. `GetFactoryReset` answers whether the runkit supports it and the last
+  completed reset; `GetStorageStatus` names it in `lifecycle.factoryReset`.
 - **Service registry.** Other `com.mica.*` names are recorded as they appear and vanish; the name
   rule is `crates/mica-busname`, the rule of `mica-pkgs:docs/mica-pkgs.md` section 3.5.
 
@@ -752,8 +773,8 @@ network, Wi-Fi, containers, the user's services (`/units`, section 3.10), apps (
 information, telemetry, service logs at `/system/logs/{source}`, network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
 fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,
-policy); provisioning status and claim; credential recovery and reset; diagnostic snapshots;
-console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
+policy); provisioning status and claim; credential recovery and reset; the factory reset;
+diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
 `PUT /api/v1/network/{iface}` takes a CAN entry like any other, and the console's network page
 edits a CAN interface's bit rate, restart delay, CAN FD and data bit rate.
 
@@ -766,6 +787,17 @@ once BLE provisioning has put an unclaimed device on a network. A missing one is
 password for an HMAC-signed, HttpOnly session cookie and send the session's CSRF token on every
 mutation; automation uses bearer tokens `mica_<id>_<secret>`, stored as digests. Passwords are
 argon2id, failed logins back off persistently, and security-relevant actions go to an audit ring.
+
+**The factory reset** (section 3.7). `POST /api/v1/system/factory-reset` `{password}` asks for
+the administrator password whatever the caller's credential, and answers 202 `{applies:
+"reboot"}` once micad has staged it. An empty password is 422 at `password`; a wrong one 403
+`password_incorrect` at `password`, counted in the login backoff (429 `login_throttled`, micad's
+own backoff the same code); micad's refusals are 409 with their code. `GET` answers `supported`,
+the current `refusal` and the `last` completed reset. A session's request is recorded as the
+console's, a bearer token's or the local socket's as the API's, each with its source, and the
+audit ring records staged, refused and wrong-password attempts. A request for the
+`full-factory` tier of `/api/v1/reset` is 422 naming this route. The console's system page shows
+what is erased and kept, the last reset, and a password dialog.
 
 **The local socket.** apid also serves the API on `/run/mica/apid.sock`, whenever it runs, for
 the device itself. A caller there carries no credential: the kernel's peer credentials
@@ -816,7 +848,7 @@ A product carries MQTT when its `FEATURES` has `mqtt` and its root holds both pa
 | --- | --- |
 | SYSTEM (`/mnt/system`) | At most two deployments: descriptors, signatures, content-addressed objects under `kernels/` and `roots/`. At most three sets of each kind under `sets/<kind>/` (6.2) |
 | ESP, or the U-Boot environment on a FIT board | The boot records that select a deployment and count trial attempts |
-| DATA `/mnt/data/meta` | Transaction state, catalog checkpoints, the firmware receipt |
+| DATA `/mnt/data/meta` | Transaction state, catalog checkpoints, the firmware receipt, a staged factory reset and the record of the last (`factory-reset.json`, `factory-reset-done.json`); the only directory a factory reset keeps |
 | DATA `/mica/updates` | Downloads and staged objects; an acquisition never writes SYSTEM |
 | DATA project directories | Quotas set by the runkit: `mica` and `srv` project 100, `cache`, `tmp` and `var` project 101 (one eighth of DATA, 32 to 256 MiB, 2048 to 16384 inodes), `containers` project 102 |
 
@@ -1066,8 +1098,15 @@ above, or `ubi`, raw NAND (6.6).
 - **`init`**, PID 1 of the signed initramfs: requires dm-verity signature enforcement, arms the
   watchdog, reads the policy, authenticates the selected deployment, opens root and support as
   signed dm-verity mappings, composes the core components (below), mounts DATA (with `prjquota` and the project directories unless the
-  board turns quotas off), seeds the persistent machine identity, binds modules and firmware, and
+  board turns quotas off), carries out a staged factory reset, seeds the persistent machine identity, binds modules and firmware, and
   hands over to the root's init. No network and no shell exist at this stage.
+  The factory reset removes everything on DATA but `meta/`, without following symlinks or
+  crossing mounts, feeding the watchdog as it goes, and recreates the factory layout
+  (`state`, `cache`, `tmp`, `var`, `mica`, `srv`) before the project directories. The request
+  stays until the erase is done, so an interrupted one starts again at the next boot; an entry it
+  cannot remove is counted in its record and the boot goes on, and an unreadable request is set
+  aside as `factory-reset.json.invalid` without erasing. The runkit writes
+  `/run/mica/runkit.json` (`{"factoryReset": true}`) to say it carries the reset out.
 - **`shutdown`**, PID 1 of a memory-only exit ramdisk that systemd execs at the end of its
   shutdown: releases loops and device-mapper mappings in dependency order within a bounded budget,
   and releases storage only once nothing is mounted, mapped or looped and no page is left to
@@ -1109,7 +1148,7 @@ the component's `requires` (6.2), held only on a root that carries that package.
 
 `crates/lifecycle-sys` is the only crate allowed `unsafe`: typed, bounded wrappers for the
 watchdog, loop devices, device-mapper, ext4 project ids and quotas (`FS_IOC_FSSETXATTR`,
-`quotactl_fd`) and the clock's synchronized bit. The boot/shutdown gate proves every structure
+`quotactl_fd`), the clock's synchronized bit and `FITRIM`. The boot/shutdown gate proves every structure
 and request number against the kernel headers for x86-64 and aarch64
 (`scripts/gate/boot-shutdown/uapi.c`).
 
