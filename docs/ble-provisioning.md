@@ -1,7 +1,7 @@
 # BLE provisioning protocol, version 1
 
-A phone sends a mica device the Wi-Fi network to join, over Bluetooth Low Energy, without joining the
-device's access point. A device that is still unclaimed is claimed in the same session. The phone
+A phone sends a mica device the Wi-Fi network to join, or the addressing of its Ethernet port, over
+Bluetooth Low Energy, without joining the device's access point. A device that is still unclaimed is claimed in the same session. The phone
 side is a web page that uses Web Bluetooth. This document is the contract between that page and
 micad. Every value below is part of protocol 1; a change to any of them is a new protocol version.
 
@@ -62,7 +62,7 @@ A read returns one UTF-8 JSON object (long reads are allowed; it is not fragment
 
 ```json
 {"protocol":1,"model":"mica cx3576","hostname":"mica-a4e2e69e","claimed":false,"auth":"none",
- "ops":["getStatus","scanWifi","claim","setWifi","finish"],"maxWrite":182}
+ "ops":["getStatus","scanWifi","claim","setWifi","setNetwork","finish"],"maxWrite":182}
 ```
 
 | Member | Meaning |
@@ -72,7 +72,7 @@ A read returns one UTF-8 JSON object (long reads are allowed; it is not fragment
 | `hostname` | the current hostname |
 | `claimed` | whether the device has an administrator |
 | `auth` | `none`, `password`, `temp-code`, or `password-unavailable`: claimed, a password window, and no verifier yet (the administrator has not logged in to the console since the device gained this feature). The page says "log in to the console once to enable Bluetooth recovery" and stops |
-| `ops` | the operations this device accepts |
+| `ops` | the operations this device accepts. `setNetwork` is optional in protocol 1: a page offers the wired port only when it is listed |
 | `maxWrite` | the largest write the page may make, header included: the connection's ATT MTU minus 3, between 20 and 512 |
 
 `info` never holds a key, password, salt or verifier.
@@ -202,11 +202,18 @@ Reasons any operation can fail with: `busy`, `bad_request` (a missing or malform
 
 | `op` | Parameters | Final event | Its own `failed` reasons |
 | --- | --- | --- | --- |
-| `getStatus` | — | `status`: `wifiMode` (`client`, `ap` or `off`), `connected`, `ssid` (or null), `ip` (or null) | — |
+| `getStatus` | — | `status`: `wifiMode` (`client`, `ap` or `off`), `connected`, `ssid` (or null), `ip` (or null), `interfaces` | — |
 | `scanWifi` | — | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}` | `ap_active`, `no_radio`, `scan_failed` |
 | `claim` | `password`, `hostname` (optional), `apPsk` (optional) | `claimStaged` | `not_allowed`, `already_claimed`, `invalid_password`, `invalid_hostname`, `invalid_ap_psk` |
 | `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `not_claimed`, `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
+| `setNetwork` | `interface`, and `dhcp: true` or `static` | `networkSet`: `interface`, `carrier`, `address` (or null) | `not_claimed`, `already_claimed`, `invalid_interface`, `invalid_address`, `invalid_network`, `dhcp_timeout` |
 | `finish` | — | `finished`: `claimed`, `hostname` | `already_claimed`, `not_claimed` |
+
+`getStatus`
+- `interfaces[]` lists the physical ports, by name: `{name, kind, carrier, address}`. `kind` is
+  `ethernet` or `wifi`; `carrier` whether a link is up; `address` the IPv4 address with its prefix
+  (`192.168.1.40/24`), or null. A page offers "wired" for an `ethernet` port and "Wi-Fi" for the
+  rest of the flow.
 
 `scanWifi`
 - `security` is `open`, `owe`, `wep`, `wpa-psk`, `wpa2-psk`, `wpa3-sae`, `wpa2-wpa3` or `wpa2-eap`,
@@ -233,7 +240,24 @@ Reasons any operation can fail with: `busy`, `bad_request` (a missing or malform
   `connected` or `failed`. `hostname` in `connected` is the staged one when a claim is staged.
 - `connect_failed` covers what the device cannot tell apart.
 
+`setNetwork`
+- `interface`: an `ethernet` port of `getStatus`; any other name is `invalid_interface`. Exactly
+  one of `dhcp: true` or `static: {address, gateway, dns}`, otherwise `bad_request`. `static` has
+  the shape of the network settings' `static`: `address` an IPv4 address with its prefix
+  (`10.0.0.5/24`), `gateway` an IPv4 address (optional), `dns` a list of IP addresses (optional).
+  Anything else in it is `invalid_address`.
+- The entry is written through the same rules as the console's network settings, replacing the
+  port's addressing and keeping the rest of its entry; a refusal by those rules is
+  `invalid_network`.
+- In a `none` session it needs a staged claim (`not_claimed`), and fails with `already_claimed` if
+  the device was claimed meanwhile, as `setWifi` does.
+- `networkSet` comes once the port has its address: the `static` one, or one from a DHCP lease
+  within 30 seconds (`dhcp_timeout` otherwise). Without a carrier it comes at once, with `carrier:
+  false` and no address: the entry is saved and applies when a cable is plugged in.
+- It leaves Wi-Fi as it is.
+
 `finish`
+- `finish` follows `setWifi`, `setNetwork`, or neither.
 - In a `none` session it commits the staged claim: administrator, hostname, the `apPsk` of the
   claim if it had one, and the claim channel `ble`. `already_claimed` when another channel claimed
   first; the staged claim is dropped. `not_claimed` when nothing is staged.
@@ -263,6 +287,9 @@ session ends — `finish`, 2 minutes without the phone reconnecting, or the wind
 without `finish` restores them even after a successful connection, and removes the networks the
 session added. While a session holds the radio, the console's Wi-Fi routes answer
 `423 wifi_locked`.
+
+**Wired entries after a session.** An unclaimed device whose session ends without `finish` puts
+back each entry `setNetwork` replaced. Otherwise the entries stay, as a change in the console does.
 
 ## Not covered
 

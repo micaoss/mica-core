@@ -57,6 +57,32 @@ impl Device for FakeDevice {
             self.release.notified().await;
         }
     }
+    async fn set_network(&self, interface: &str, entry: &Value) -> Result<Value, &'static str> {
+        if interface != "eth0" {
+            return Err("invalid_interface");
+        }
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("network {interface} {entry}"));
+        Ok(json!({ "dhcp": true }))
+    }
+    async fn await_network(
+        &self,
+        _interface: &str,
+        entry: &Value,
+    ) -> Result<(bool, Option<String>), &'static str> {
+        let address = entry["static"]["address"]
+            .as_str()
+            .unwrap_or("192.168.1.41/24");
+        Ok((true, Some(address.to_string())))
+    }
+    async fn restore_network(&self, previous: Vec<(String, Value)>) {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("restore network {previous:?}"));
+    }
     async fn restore_wifi(&self, snapshot: Value, remove: Vec<String>) {
         self.calls
             .lock()
@@ -468,6 +494,91 @@ async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
     assert_eq!(
         (history[0].trigger.as_str(), history[0].outcome.as_str()),
         ("unclaimed", "claimed")
+    );
+}
+
+#[tokio::test]
+async fn an_unclaimed_device_is_claimed_over_its_wired_port() {
+    let mut bench = Bench::new(false).await;
+    let info = bench.read_info(PHONE).await.unwrap();
+    assert!(
+        info["ops"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("setNetwork"))
+    );
+    bench.start_none().await;
+    let refused = bench
+        .command(json!({ "op": "setNetwork", "interface": "eth0", "dhcp": true }))
+        .await;
+    assert_eq!(refused[0]["reason"], "not_claimed");
+    bench
+        .command(json!({ "op": "claim", "password": PASSWORD }))
+        .await;
+    for malformed in [
+        json!({ "op": "setNetwork", "dhcp": true }),
+        json!({ "op": "setNetwork", "interface": "eth0" }),
+        json!({ "op": "setNetwork", "interface": "eth0", "dhcp": true, "static": {} }),
+    ] {
+        let refused = bench.command(malformed.clone()).await;
+        assert_eq!(refused[0]["reason"], "bad_request", "{malformed}");
+    }
+    let refused = bench
+        .command(json!({ "op": "setNetwork", "interface": "wlan0", "dhcp": true }))
+        .await;
+    assert_eq!(refused[0]["reason"], "invalid_interface");
+
+    let set = bench
+        .command(json!({
+            "op": "setNetwork",
+            "interface": "eth0",
+            "static": { "address": "10.0.0.5/24", "gateway": "10.0.0.1", "dns": ["10.0.0.1"] },
+        }))
+        .await;
+    assert_eq!(
+        set,
+        vec![json!({
+            "id": 7,
+            "event": "networkSet",
+            "interface": "eth0",
+            "carrier": true,
+            "address": "10.0.0.5/24",
+        })]
+    );
+    let finished = bench.command(json!({ "op": "finish" })).await;
+    assert_eq!(finished[0]["event"], "finished");
+    bench.pump().await;
+    assert_eq!(
+        bench.calls(),
+        vec![
+            r#"network eth0 {"static":{"address":"10.0.0.5/24","dns":["10.0.0.1"],"gateway":"10.0.0.1"}}"#,
+            "claim harbour-pw-1",
+        ],
+        "a finished session keeps its wired entry and touches no Wi-Fi"
+    );
+}
+
+#[tokio::test]
+async fn an_unfinished_unclaimed_session_puts_its_wired_entry_back() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    bench
+        .command(json!({ "op": "claim", "password": PASSWORD }))
+        .await;
+    bench
+        .command(json!({ "op": "setNetwork", "interface": "eth0", "dhcp": true }))
+        .await;
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    bench.tick(RECONNECT_SECONDS).await;
+    bench.pump().await;
+    assert_eq!(
+        bench.calls().last().map(String::as_str),
+        Some(r#"restore network [("eth0", Object {"dhcp": Bool(true)})]"#)
     );
 }
 

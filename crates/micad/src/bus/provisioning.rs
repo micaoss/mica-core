@@ -1,9 +1,13 @@
 //! BLE provisioning's device side: what a session reads and changes, through
 //! the same settings writes and observers the bus members use.
 
+use std::path::Path;
 use std::time::Duration;
 
-use micad_settings::{ApMode, ClaimChannel, ClaimSettings, Feature, WifiNetwork};
+use micad_settings::{
+    ApMode, ClaimChannel, ClaimSettings, Feature, IfaceKind, IfaceSettings, StaticConfig,
+    WifiNetwork,
+};
 use serde_json::{Value, json};
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 
@@ -18,6 +22,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 const DHCP_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often it looks.
 const CONNECT_POLL: Duration = Duration::from_secs(2);
+/// How long a `setNetwork` waits for its address.
+const WIRED_TIMEOUT: Duration = Duration::from_secs(30);
+/// How often it looks.
+const NETWORK_POLL: Duration = Duration::from_millis(500);
 
 /// `wpa_state`s that mean the key was being negotiated.
 const HANDSHAKE_STATES: [&str; 2] = ["4WAY_HANDSHAKE", "GROUP_HANDSHAKE"];
@@ -102,6 +110,38 @@ impl MicadService {
         (state, ssid, ip)
     }
 
+    /// Each interface's IPv4 address with its prefix and where it came from,
+    /// from the network observer; none when it observes no interfaces.
+    async fn ipv4_addresses(&self) -> Option<std::collections::BTreeMap<String, (String, String)>> {
+        let observed = self.network_state.observe().await.ok()?;
+        let entries = observed.pointer("/interfaces/entries")?.as_array()?;
+        Some(
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let address = entry["addresses"]
+                        .as_array()?
+                        .iter()
+                        .find(|address| address["family"] == "ipv4")?;
+                    Some((
+                        entry["name"].as_str()?.to_string(),
+                        (
+                            format!(
+                                "{}/{}",
+                                address["address"].as_str()?,
+                                address["prefixLength"].as_u64()?
+                            ),
+                            address["configSource"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                        ),
+                    ))
+                })
+                .collect(),
+        )
+    }
+
     async fn provisioning_status(&self) -> Value {
         let wifi = self.inner.read().await.settings.wifi.clone();
         let mode = if wifi.ap.mode != ApMode::Off {
@@ -116,12 +156,101 @@ impl MicadService {
         } else {
             (None, None, None)
         };
+        let addresses = self.ipv4_addresses().await.unwrap_or_default();
+        let interfaces: Vec<Value> = physical_interfaces(Path::new("/"))
+            .into_iter()
+            .map(|link| {
+                json!({
+                    "name": link.name,
+                    "kind": link.kind,
+                    "carrier": link.carrier,
+                    "address": addresses.get(&link.name).map(|(address, _)| address),
+                })
+            })
+            .collect();
         json!({
             "wifiMode": mode,
             "connected": ssid.is_some() && ip.is_some(),
             "ssid": ssid,
             "ip": ip,
+            "interfaces": interfaces,
         })
+    }
+
+    /// `setNetwork`: `entry` as `interface`'s addressing, held to the
+    /// network rules every write is; the entry it replaced, or null.
+    async fn provisioning_set_network(
+        &self,
+        emitter: &SignalEmitter<'_>,
+        interface: &str,
+        entry: &Value,
+    ) -> Result<Value, &'static str> {
+        if !physical_interfaces(Path::new("/"))
+            .iter()
+            .any(|link| link.name == interface && link.kind == "ethernet")
+        {
+            return Err("invalid_interface");
+        }
+        let mut network = self.inner.read().await.settings.network.clone();
+        let previous = network.get(interface).cloned();
+        let mut next = previous.clone().unwrap_or_default();
+        if next.kind != IfaceKind::Physical {
+            return Err("invalid_interface");
+        }
+        next.dns.clear();
+        match wired_static(entry)? {
+            None => {
+                next.dhcp = true;
+                next.static_ = None;
+            }
+            Some(addressing) => {
+                next.dhcp = false;
+                next.static_ = Some(addressing);
+            }
+        }
+        network.insert(interface.to_string(), next);
+        if let Err(message) = micad_settings::validate_topology(&network) {
+            tracing::warn!(interface, %message, "a provisioned wired entry was refused");
+            return Err("invalid_network");
+        }
+        let written = serde_json::to_value(&network).map_err(|_| "invalid_network")?;
+        self.provisioning_write(emitter, &[("network".to_string(), written)], false)
+            .await
+            .map_err(|err| {
+                tracing::warn!(error = %err, interface, "the provisioned wired entry could not be written");
+                "invalid_network"
+            })?;
+        Ok(previous.map_or(Value::Null, |previous| {
+            serde_json::to_value(previous).unwrap_or(Value::Null)
+        }))
+    }
+
+    /// Put back the wired entries a session replaced; null removes one.
+    async fn provisioning_restore_network(
+        &self,
+        emitter: &SignalEmitter<'_>,
+        previous: &[(String, Value)],
+    ) {
+        let mut network = self.inner.read().await.settings.network.clone();
+        for (interface, entry) in previous {
+            match serde_json::from_value::<IfaceSettings>(entry.clone()) {
+                Ok(entry) => {
+                    network.insert(interface.clone(), entry);
+                }
+                Err(_) => {
+                    network.remove(interface);
+                }
+            }
+        }
+        let Ok(written) = serde_json::to_value(&network) else {
+            return;
+        };
+        if let Err(err) = self
+            .provisioning_write(emitter, &[("network".to_string(), written)], false)
+            .await
+        {
+            tracing::warn!(error = %err, "the wired entries a provisioning session changed could not be restored");
+        }
     }
 
     async fn provisioning_scan(&self) -> Result<Vec<Value>, &'static str> {
@@ -322,6 +451,86 @@ impl MicadService {
     }
 }
 
+/// A physical interface, as `getStatus` lists it.
+struct Link {
+    name: String,
+    /// `ethernet` or `wifi`.
+    kind: &'static str,
+    carrier: bool,
+}
+
+/// The physical Ethernet and Wi-Fi interfaces under `root`'s
+/// `/sys/class/net`, by name.
+fn physical_interfaces(root: &Path) -> Vec<Link> {
+    let net = root.join("sys/class/net");
+    let mut links: Vec<Link> = std::fs::read_dir(&net)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let read = |name: &str| std::fs::read_to_string(path.join(name)).unwrap_or_default();
+            // ARPHRD_ETHER, on a device of its own: no bridge, VLAN or tunnel.
+            if read("type").trim() != "1" || !path.join("device").exists() {
+                return None;
+            }
+            Some(Link {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                kind: if path.join("wireless").exists() || path.join("phy80211").exists() {
+                    "wifi"
+                } else {
+                    "ethernet"
+                },
+                carrier: read("carrier").trim() == "1",
+            })
+        })
+        .collect();
+    links.sort_by(|a, b| a.name.cmp(&b.name));
+    links
+}
+
+/// `setNetwork`'s `static`, checked: none for `{"dhcp":true}`.
+fn wired_static(entry: &Value) -> Result<Option<StaticConfig>, &'static str> {
+    let Some(addressing) = entry.get("static") else {
+        return Ok(None);
+    };
+    let text = |value: &Value| value.as_str().map(str::to_string);
+    let address = text(&addressing["address"]).ok_or("invalid_address")?;
+    let ipv4_cidr = address.split_once('/').is_some_and(|(ip, prefix)| {
+        ip.parse::<std::net::Ipv4Addr>().is_ok()
+            && prefix
+                .parse::<u8>()
+                .is_ok_and(|prefix| (1..=32).contains(&prefix))
+    });
+    let gateway = match &addressing["gateway"] {
+        Value::Null => None,
+        value => Some(text(value).ok_or("invalid_address")?),
+    };
+    let dns = match &addressing["dns"] {
+        Value::Null => Vec::new(),
+        Value::Array(servers) => servers
+            .iter()
+            .map(|server| text(server).ok_or("invalid_address"))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("invalid_address"),
+    };
+    let valid = ipv4_cidr
+        && gateway
+            .as_deref()
+            .is_none_or(|gateway| gateway.parse::<std::net::Ipv4Addr>().is_ok())
+        && dns
+            .iter()
+            .all(|server| server.parse::<std::net::IpAddr>().is_ok());
+    if !valid {
+        return Err("invalid_address");
+    }
+    Ok(Some(StaticConfig {
+        address,
+        gateway,
+        dns,
+    }))
+}
+
 /// What a BLE claim writes to the access point: the key the phone sent, or
 /// the access point switched off when it has no key of its own, since the
 /// key derived from the device code is the unclaimed device's only.
@@ -417,6 +626,57 @@ impl Device for InterfaceRef<MicadService> {
         Err(connect_failure(&seen, scanned.as_deref(), ssid))
     }
 
+    async fn set_network(&self, interface: &str, entry: &Value) -> Result<Value, &'static str> {
+        self.get()
+            .await
+            .provisioning_set_network(self.signal_emitter(), interface, entry)
+            .await
+    }
+
+    async fn await_network(
+        &self,
+        interface: &str,
+        entry: &Value,
+    ) -> Result<(bool, Option<String>), &'static str> {
+        let wanted = entry["static"]["address"].as_str().map(str::to_string);
+        let started = tokio::time::Instant::now();
+        loop {
+            let carrier = physical_interfaces(Path::new("/"))
+                .iter()
+                .any(|link| link.name == interface && link.carrier);
+            if !carrier {
+                return Ok((false, None));
+            }
+            // Without an observer there is nothing to wait on.
+            let Some(addresses) = self.get().await.ipv4_addresses().await else {
+                return Ok((true, None));
+            };
+            let found = addresses
+                .get(interface)
+                .filter(|(address, source)| match &wanted {
+                    Some(wanted) => address == wanted,
+                    None => source == "DHCPv4",
+                });
+            if let Some((address, _)) = found {
+                return Ok((true, Some(address.clone())));
+            }
+            if started.elapsed() >= WIRED_TIMEOUT {
+                return match wanted {
+                    None => Err("dhcp_timeout"),
+                    Some(_) => Ok((true, None)),
+                };
+            }
+            tokio::time::sleep(NETWORK_POLL).await;
+        }
+    }
+
+    async fn restore_network(&self, previous: Vec<(String, Value)>) {
+        self.get()
+            .await
+            .provisioning_restore_network(self.signal_emitter(), &previous)
+            .await;
+    }
+
     async fn restore_wifi(&self, snapshot: Value, remove: Vec<String>) {
         self.get()
             .await
@@ -435,6 +695,74 @@ impl Device for InterfaceRef<MicadService> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_physical_interfaces_are_the_ethernet_and_wi_fi_ports() {
+        let root = tempfile::tempdir().unwrap();
+        let link = |name: &str, kind: &str, device: bool, files: &[(&str, &str)]| {
+            let dir = root.path().join("sys/class/net").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("type"), format!("{kind}\n")).unwrap();
+            if device {
+                std::fs::create_dir(dir.join("device")).unwrap();
+            }
+            for (file, text) in files {
+                if text.is_empty() {
+                    std::fs::create_dir(dir.join(file)).unwrap();
+                } else {
+                    std::fs::write(dir.join(file), text).unwrap();
+                }
+            }
+        };
+        link("eth0", "1", true, &[("carrier", "1\n")]);
+        link("eth1", "1", true, &[]);
+        link("wlan0", "1", true, &[("wireless", ""), ("carrier", "0\n")]);
+        link("br0", "1", false, &[("carrier", "1\n")]);
+        link("can0", "280", true, &[]);
+        link("lo", "772", false, &[]);
+        let links: Vec<_> = physical_interfaces(root.path())
+            .into_iter()
+            .map(|link| (link.name, link.kind, link.carrier))
+            .collect();
+        assert_eq!(
+            links,
+            [
+                ("eth0".to_string(), "ethernet", true),
+                ("eth1".to_string(), "ethernet", false),
+                ("wlan0".to_string(), "wifi", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wired_static_entry_is_an_ipv4_address_with_its_prefix() {
+        assert_eq!(wired_static(&json!({ "dhcp": true })), Ok(None));
+        assert_eq!(
+            wired_static(&json!({ "static": {
+                "address": "10.0.0.5/24", "gateway": "10.0.0.1", "dns": ["10.0.0.1", "2001:db8::1"],
+            } })),
+            Ok(Some(StaticConfig {
+                address: "10.0.0.5/24".into(),
+                gateway: Some("10.0.0.1".into()),
+                dns: vec!["10.0.0.1".into(), "2001:db8::1".into()],
+            }))
+        );
+        for refused in [
+            json!({ "address": "10.0.0.5" }),
+            json!({ "address": "10.0.0.5/33" }),
+            json!({ "address": "fd00::5/64" }),
+            json!({ "address": "10.0.0.5/24", "gateway": "router" }),
+            json!({ "address": "10.0.0.5/24", "dns": "10.0.0.1" }),
+            json!({ "address": "10.0.0.5/24", "dns": ["dns.example"] }),
+            json!({}),
+        ] {
+            assert_eq!(
+                wired_static(&json!({ "static": refused })),
+                Err("invalid_address"),
+                "{refused}"
+            );
+        }
+    }
 
     #[test]
     fn a_ble_claim_leaves_no_access_point_on_the_derived_key() {

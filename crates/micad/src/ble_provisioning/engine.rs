@@ -29,7 +29,14 @@ pub const IDLE_SECONDS: u64 = 120;
 /// How long the Wi-Fi a session changed waits for the phone to come back.
 pub const RECONNECT_SECONDS: u64 = 120;
 /// The operations this device accepts.
-pub const OPS: [&str; 5] = ["getStatus", "scanWifi", "claim", "setWifi", "finish"];
+pub const OPS: [&str; 6] = [
+    "getStatus",
+    "scanWifi",
+    "claim",
+    "setWifi",
+    "setNetwork",
+    "finish",
+];
 /// The ATT MTU assumed until a request says otherwise.
 const DEFAULT_MTU: usize = 23;
 /// The administrator password's bounds in a `claim`.
@@ -89,7 +96,7 @@ impl std::fmt::Debug for StagedClaim {
 #[async_trait::async_trait]
 pub trait Device: Send + Sync + 'static {
     async fn facts(&self) -> Facts;
-    /// `getStatus`: `wifiMode`, `connected`, `ssid`, `ip`.
+    /// `getStatus`: `wifiMode`, `connected`, `ssid`, `ip`, `interfaces`.
     async fn status(&self) -> Value;
     /// `scanWifi`: the networks, or a `failed` reason.
     async fn scan(&self) -> Result<Vec<Value>, &'static str>;
@@ -103,6 +110,19 @@ pub trait Device: Send + Sync + 'static {
     async fn await_wifi(&self, ssid: &str) -> Result<String, &'static str>;
     /// Put the radio's role back and remove the networks named.
     async fn restore_wifi(&self, snapshot: Value, remove: Vec<String>);
+    /// Write `entry` (`{"dhcp":true}` or `{"static":{…}}`) as the wired
+    /// `interface`'s addressing: the entry it had before (null for none), or
+    /// a `failed` reason.
+    async fn set_network(&self, interface: &str, entry: &Value) -> Result<Value, &'static str>;
+    /// Wait until `interface` has the address `entry` gives it: its carrier
+    /// and IPv4 address (none without a carrier), or a `failed` reason.
+    async fn await_network(
+        &self,
+        interface: &str,
+        entry: &Value,
+    ) -> Result<(bool, Option<String>), &'static str>;
+    /// Put back the entries `setNetwork` replaced.
+    async fn restore_network(&self, previous: Vec<(String, Value)>);
     /// Commit a staged claim, or a `failed` reason.
     async fn claim(&self, staged: &StagedClaim) -> Result<(), &'static str>;
 }
@@ -166,6 +186,12 @@ pub enum Input {
         ssid: String,
         added: bool,
     },
+    /// An operation replaced `interface`'s entry, which was `previous`.
+    NetworkSaved {
+        serial: u64,
+        interface: String,
+        previous: Value,
+    },
     /// An operation ended with this final event.
     Done {
         serial: u64,
@@ -211,11 +237,15 @@ struct Connection {
     failed: bool,
 }
 
-/// The Wi-Fi a session changed, kept until the session is over.
+/// The Wi-Fi and the wired entries a session changed, kept until the
+/// session is over.
 struct Hold {
-    snapshot: Value,
+    /// The radio's role before `setWifi`, when it ran.
+    snapshot: Option<Value>,
     added: Vec<String>,
     connected: bool,
+    /// The wired entries `setNetwork` replaced, as they were.
+    replaced: Vec<(String, Value)>,
     unclaimed: bool,
     away_since: Option<u64>,
 }
@@ -370,6 +400,18 @@ impl Engine {
                     && let Some(hold) = &mut self.hold
                 {
                     hold.added.push(ssid);
+                }
+            }
+            Input::NetworkSaved {
+                serial,
+                interface,
+                previous,
+            } => {
+                if self.current_serial() == Some(serial)
+                    && let Some(hold) = &mut self.hold
+                    && !hold.replaced.iter().any(|(name, _)| *name == interface)
+                {
+                    hold.replaced.push((interface, previous));
                 }
             }
             Input::Done {
@@ -728,6 +770,7 @@ impl Engine {
             Some("scanWifi") => self.spawn_scan(id),
             Some("claim") => self.claim(id, &command).await,
             Some("setWifi") => self.set_wifi(id, &command).await,
+            Some("setNetwork") => self.set_network(id, &command).await,
             Some("finish") => self.finish(id).await,
             Some(_) => self.failed(id, "unknown_op").await,
             None => self.failed(id, "bad_request").await,
@@ -833,19 +876,13 @@ impl Engine {
             return self.failed(id, "bad_request").await;
         };
         let hidden = command["hidden"].as_bool().unwrap_or(false);
-        let auth = self.session_auth();
+        if let Err(reason) = self.claim_staged().await {
+            return self.failed(id, reason).await;
+        }
         let staged = self
             .connection
             .as_ref()
             .and_then(|connection| connection.staged.clone());
-        if auth == Some(Auth::None) {
-            if self.device.facts().await.claimed {
-                return self.failed(id, "already_claimed").await;
-            }
-            if staged.is_none() {
-                return self.failed(id, "not_claimed").await;
-            }
-        }
         if ssid.is_empty() || ssid.len() > 32 {
             return self.failed(id, "invalid_ssid").await;
         }
@@ -855,14 +892,13 @@ impl Engine {
         if !self.facts.has_wifi {
             return self.failed(id, "no_radio").await;
         }
-        if self.hold.is_none() {
-            self.hold = Some(Hold {
-                snapshot: self.device.wifi_snapshot().await,
-                added: Vec::new(),
-                connected: false,
-                unclaimed: auth == Some(Auth::None),
-                away_since: None,
-            });
+        if self
+            .hold
+            .as_ref()
+            .is_none_or(|hold| hold.snapshot.is_none())
+        {
+            let snapshot = self.device.wifi_snapshot().await;
+            self.hold().snapshot = Some(snapshot);
         }
         let hostname = staged
             .and_then(|staged| staged.hostname)
@@ -889,6 +925,76 @@ impl Engine {
         });
         self.send_event(&json!({ "id": id, "event": "connecting" }))
             .await;
+    }
+
+    /// In a `none` session, a change to the network needs a staged claim on
+    /// a device still unclaimed.
+    async fn claim_staged(&self) -> Result<(), &'static str> {
+        if self.session_auth() != Some(Auth::None) {
+            return Ok(());
+        }
+        if self.device.facts().await.claimed {
+            return Err("already_claimed");
+        }
+        let staged = self
+            .connection
+            .as_ref()
+            .is_some_and(|connection| connection.staged.is_some());
+        if staged { Ok(()) } else { Err("not_claimed") }
+    }
+
+    /// The session's hold on what it changes, begun if it was not.
+    fn hold(&mut self) -> &mut Hold {
+        let unclaimed = self.session_auth() == Some(Auth::None);
+        self.hold.get_or_insert_with(|| Hold {
+            snapshot: None,
+            added: Vec::new(),
+            connected: false,
+            replaced: Vec::new(),
+            unclaimed,
+            away_since: None,
+        })
+    }
+
+    async fn set_network(&mut self, id: Value, command: &Value) {
+        let Some(interface) = command["interface"].as_str().map(str::to_string) else {
+            return self.failed(id, "bad_request").await;
+        };
+        let entry = match (&command["dhcp"], &command["static"]) {
+            (Value::Bool(true), Value::Null) => json!({ "dhcp": true }),
+            (Value::Null | Value::Bool(false), Value::Object(_)) => {
+                json!({ "static": command["static"] })
+            }
+            _ => return self.failed(id, "bad_request").await,
+        };
+        if let Err(reason) = self.claim_staged().await {
+            return self.failed(id, reason).await;
+        }
+        self.hold();
+        let device = Arc::clone(&self.device);
+        let tx = self.tx.clone();
+        let serial = self.current_serial().unwrap_or_default();
+        self.spawn_op(id, "setNetwork", async move {
+            match device.set_network(&interface, &entry).await {
+                Ok(previous) => {
+                    let _ = tx.send(Input::NetworkSaved {
+                        serial,
+                        interface: interface.clone(),
+                        previous,
+                    });
+                }
+                Err(reason) => return json!({ "event": "failed", "reason": reason }),
+            }
+            match device.await_network(&interface, &entry).await {
+                Ok((carrier, address)) => json!({
+                    "event": "networkSet",
+                    "interface": interface,
+                    "carrier": carrier,
+                    "address": address,
+                }),
+                Err(reason) => json!({ "event": "failed", "reason": reason }),
+            }
+        });
     }
 
     async fn finish(&mut self, id: Value) {
@@ -1012,20 +1118,25 @@ impl Engine {
         }
     }
 
-    /// The session's Wi-Fi is over: put back what it must not leave behind.
+    /// The session's hold is over: put back what it must not leave behind.
     fn end_hold(&mut self, finished: bool) {
         let Some(hold) = self.hold.take() else {
             return;
         };
-        let (restore, remove) = if hold.unclaimed && !finished {
+        let abandoned = hold.unclaimed && !finished;
+        let (restore, remove) = if abandoned {
             (true, hold.added)
         } else {
             (!hold.connected, Vec::new())
         };
-        if restore {
-            let device = Arc::clone(&self.device);
-            let snapshot = hold.snapshot;
+        let device = Arc::clone(&self.device);
+        if let (true, Some(snapshot)) = (restore, hold.snapshot) {
+            let device = Arc::clone(&device);
             tokio::spawn(async move { device.restore_wifi(snapshot, remove).await });
+        }
+        if abandoned && !hold.replaced.is_empty() {
+            let replaced = hold.replaced;
+            tokio::spawn(async move { device.restore_network(replaced).await });
         }
     }
 
