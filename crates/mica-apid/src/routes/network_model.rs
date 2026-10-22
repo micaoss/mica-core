@@ -4,7 +4,6 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use micad_settings::IfaceSettings;
 use serde_json::Value;
-use std::net::IpAddr;
 
 use super::*;
 
@@ -415,74 +414,6 @@ pub(super) fn map_refusal(
     path: &str,
 ) -> Result<(), Box<Response>> {
     violations_refusal(map_violations(entries, carried), path)
-}
-
-/// The routing rules of one entry, as the field and the message of the first
-/// one it breaks.
-///
-/// Two refusals, both about configurations networkd would accept and nothing
-/// could use:
-///
-/// - a route whose destination is not a network, or whose next hop is not an
-///   address;
-/// - a second default route, declared as a `0.0.0.0/0` route beside a
-///   `static.gateway` that already is one.
-///
-/// And `dns`, which replaces a lease's servers, only beside DHCP.
-pub(super) fn routing_problem(cfg: &IfaceSettings) -> Option<(&'static str, String)> {
-    let has_gateway = cfg
-        .static_
-        .as_ref()
-        .is_some_and(|static_| static_.gateway.is_some());
-    for route in &cfg.routes {
-        if !is_ip_or_cidr(&route.destination) {
-            return Some((
-                "routes",
-                format!(
-                    "the route destination {:?} is not a network in CIDR notation, such as `10.20.0.0/16`",
-                    route.destination
-                ),
-            ));
-        }
-        if let Some(gateway) = &route.gateway
-            && gateway.parse::<IpAddr>().is_err()
-        {
-            return Some((
-                "routes",
-                format!(
-                    "the route via {gateway:?} does not name an address; omit the gateway for an on-link route"
-                ),
-            ));
-        }
-        if is_default_destination(&route.destination) && has_gateway {
-            return Some((
-                "routes",
-                format!(
-                    "this entry declares a default route twice: once as `static.gateway` and once as the route to {:?}. Keep one",
-                    route.destination
-                ),
-            ));
-        }
-    }
-    if !cfg.dns.is_empty() {
-        if !cfg.dhcp || cfg.static_.is_some() {
-            return Some(("dns",
-                "`dns` replaces the servers of a DHCP lease, so it needs `dhcp`; a static entry names its servers in `static.dns`"
-                    .to_string(),
-            ));
-        }
-        for dns in &cfg.dns {
-            if dns.parse::<IpAddr>().is_err() {
-                return Some(("dns", format!("the DNS server {dns:?} is not an address")));
-            }
-        }
-    }
-    None
-}
-
-/// Whether a destination is the default route, in either family.
-pub(super) fn is_default_destination(destination: &str) -> bool {
-    matches!(destination, "0.0.0.0/0" | "::/0")
 }
 
 /// A candidate map written back whole, at the `network` root. Answers the id

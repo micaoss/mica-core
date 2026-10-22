@@ -20,6 +20,7 @@ mod error;
 mod features;
 mod model;
 mod network_rules;
+mod network_write;
 mod path;
 mod recovery;
 mod secret;
@@ -73,6 +74,10 @@ pub use network_rules::{
     MAX_CAN_BITRATE, MAX_CAN_DATA_BITRATE, MAX_CAN_RESTART_MS, MAX_IFACE_LEN, NetworkViolation,
     check_iface_name, is_host_port, is_ip_or_cidr, is_wireguard_key, topology_violations,
     validate_can, validate_peers, validate_topology,
+};
+pub use network_write::{
+    entry_violations, is_default_destination, map_violations, references_to, relational_violations,
+    routing_problem, valid_cidr, valid_ipv4, validate_static_address, write_violations,
 };
 pub use path::{json_path_get, path_segments, quote_path_segment};
 pub use recovery::{
