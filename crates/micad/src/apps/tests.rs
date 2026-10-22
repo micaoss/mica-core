@@ -639,6 +639,35 @@ async fn a_device_that_reaches_past_the_app_is_refused() {
     assert_eq!(rules(err), ["device"]);
 }
 
+/// A serial port declared by its stable path or a pattern is granted by its
+/// class, plugged in or not: its drivers' nodes and the dialout group.
+#[tokio::test]
+async fn a_serial_port_is_granted_whether_it_is_plugged_in_or_not() {
+    let rig = Rig::new(Init::Systemd);
+    std::fs::create_dir_all(rig.path("etc")).unwrap();
+    std::fs::write(
+        rig.path("etc/group"),
+        "root:x:0:\ndialout:x:20:\ngpio:x:984:\n",
+    )
+    .unwrap();
+    let own = json!({
+        "privileges": { "devices": ["/dev/serial/by-id/usb-FTDI_FT232R-if00-port0", "/dev/ttyUSB*", "/dev/gpiochip0"] },
+        "services": [{ "name": "demo", "exec": ["files/run"], "enable": true }],
+    });
+    rig.install(&rig.bundle("demo", "1.0", own, None), false)
+        .await
+        .unwrap();
+    let text = rig.mica.text("demo.service");
+    assert!(text.contains("\"--groups=20,984\""), "{text}");
+    for line in [
+        "DeviceAllow=char-ttyUSB rw",
+        "DeviceAllow=char-ttyACM rw",
+        "DeviceAllow=char-gpiochip rw",
+    ] {
+        assert!(text.lines().any(|l| l == line), "{line}\n{text}");
+    }
+}
+
 #[tokio::test]
 async fn a_character_device_of_group_0_is_given() {
     let rig = Rig::new(Init::Systemd);
@@ -656,21 +685,6 @@ async fn a_character_device_of_group_0_is_given() {
         )
         .await
         .unwrap();
-}
-
-#[test]
-fn a_group_that_reaches_past_the_app_or_has_no_name_is_refused() {
-    let groups = "root:x:0:\ndisk:x:6:\nwheel:x:10:\ndialout:x:20:\n";
-    assert_eq!(flow::group_refusal(0, None), None);
-    assert_eq!(flow::group_refusal(20, Some(groups)), None);
-    for (gid, text) in [
-        (6, Some(groups)),
-        (10, Some(groups)),
-        (44, Some(groups)),
-        (20, None),
-    ] {
-        assert!(flow::group_refusal(gid, text).is_some(), "{gid}");
-    }
 }
 
 /// Where mica-accounts is, an app's own uid is named `mica-app-<name>` at

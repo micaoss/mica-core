@@ -536,7 +536,7 @@ directory or a symbolic link, or one there twice refuses it. The manifest:
 | `version` | A version in dpkg's order, at most 64 characters |
 | `arch` | Some of `amd64`, `arm64`, `armhf`, or `all`; the device's must be among them |
 | `description` | Optional |
-| `privileges` | `{"user", "capabilities", "devices"}`: `user` is `app` (default) or `root`; an app of its own user lists the `CAP_*` its services keep and the device nodes under `/dev` they may open. It may keep only `CAP_NET_ADMIN`, `CAP_NET_RAW`, `CAP_NET_BIND_SERVICE`, `CAP_NET_BROADCAST`, `CAP_IPC_LOCK`, `CAP_WAKE_ALARM` and `CAP_BLOCK_SUSPEND`; every other capability reaches past the app and is refused: an app that needs one runs as root. A root app lists neither |
+| `privileges` | `{"user", "capabilities", "devices"}`: `user` is `app` (default) or `root`; an app of its own user lists the `CAP_*` its services keep and the devices under `/dev` they may open, by node, stable path or pattern (Devices, below). It may keep only `CAP_NET_ADMIN`, `CAP_NET_RAW`, `CAP_NET_BIND_SERVICE`, `CAP_NET_BROADCAST`, `CAP_IPC_LOCK`, `CAP_WAKE_ALARM` and `CAP_BLOCK_SUSPEND`; every other capability reaches past the app and is refused: an app that needs one runs as root. A root app lists neither |
 | `services` | An app of its own user's: at most 16 `{"name", "exec", "enable"}`. `name` is 1 to 32 of `[a-z0-9-]`, its unit `<name>.service` or the OpenRC script `<name>`; `exec` a file in `files/`, then its arguments, where `${VAR}` names an `APP_*` or `env` variable and no quote, backslash, backquote or control character appears; `enable` starts it at boot and at install |
 | `units` | A root app's: at most 16 `{"systemd"?, "openrc"?, "enable"}`, each naming its file in `units/<init>/`; a bundle with units has one for the device's init |
 | `env` | At most 64 upper-case variables outside `APP_`, without quotes, backslashes, `$`, backquotes or control characters. Every process on the device can read them, as it can the manifest, so they hold no secret |
@@ -555,14 +555,12 @@ at the purge, and the tool keeps the accounts on DATA/state `accounts` and binds
 `/etc/passwd` and `/etc/group` before micad starts. On a root without the tool the uid has no
 name: micad still shows it as `mica-app-<name>`, and `ps` the number. `/srv/apps/<name>` is the app's, and is given back to root
 should a later version run as root. Each service runs through `setpriv` as that uid, with no
-supplementary groups but those of its devices' nodes (a node that is not a character device, or
-one of group `disk`, `kmem`, `shadow`, `sudo`, `wheel`, `adm`, `tty` or `utmp`, or of a gid with no
-name in `/etc/group`, refuses the bundle: an app that needs one runs as root), its bounding, inheritable and ambient
+supplementary groups but those its devices grant (below), its bounding, inheritable and ambient
 capabilities only the ones it declares, and no new privileges. Under systemd its unit runs it in a
 sandbox besides: `ProtectSystem=strict` with `/srv/apps/<name>` alone writable, `PrivateTmp`,
 `ProtectHome`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectControlGroups`,
-`RestrictSUIDSGID`, `NoNewPrivileges`, `DevicePolicy=closed` with `DeviceAllow=` each declared
-device, and `CapabilityBoundingSet=` the declared capabilities with the three `setpriv` drops
+`RestrictSUIDSGID`, `NoNewPrivileges`, `DevicePolicy=closed` with `DeviceAllow=` what its devices
+grant, and `CapabilityBoundingSet=` the declared capabilities with the three `setpriv` drops
 before it runs the service (`CAP_SETUID`, `CAP_SETGID`, `CAP_SETPCAP`). Under OpenRC the script
 runs it under `supervise-daemon` through the same `setpriv`; OpenRC has no namespaces, so there
 the uid, the capabilities and the files' own permissions are all that confine it: it writes only
@@ -573,6 +571,26 @@ of its own user runs as it too, with no capabilities. `setpriv` runs as root, so
 the app's variables: for a service and for the hook it runs `/usr/bin/env -i` as the app, which
 sets `PATH`, `HOME` (the app's data), the `APP_*` variables and the manifest's `env`, and then runs
 the app's file.
+
+**Devices.** Serial adapters, GPIO chips and buses come and go, so a device is granted by its
+class, never by the node present at install. A serial port (`/dev/tty<name><n>` such as
+`/dev/ttyS1` or `/dev/ttyACM0`, a pattern such as `/dev/ttyUSB*`, or a stable path under
+`/dev/serial/by-id/` or `/dev/serial/by-path/`) grants its driver's nodes (`char-ttyS`,
+`char-ttyUSB`, ...; `char-ttyUSB` and `char-ttyACM` for a stable path) and the group `dialout`; a
+GPIO chip (`/dev/gpiochip*`) `char-gpiochip` and `gpio`; an I2C bus (`/dev/i2c-*`) `char-i2c` and
+`i2c`; an SPI device (`/dev/spidev*`) `char-spi` and `spi`. The groups are read by name from the
+root's `/etc/group` (Base gives these nodes `root:<group>` 0660); a pattern is only of these
+classes. The app opens the path it declared itself, so nothing is resolved when it starts, and a
+port plugged in later opens too. Any other device grants its node, and the node's group when it is
+present and is one of those four. A device that is not there never refuses the bundle; a node
+present at install that is not a character device, or whose group is not `dialout`, `gpio`, `i2c`,
+`spi` or 0, does: an app that needs it runs as root. A device's group gives the app every node of
+that group, and `DeviceAllow=char-<driver>` every node of that driver.
+
+A CAN bus needs no declaration: an `AF_CAN` raw or broadcast-manager socket needs no device node
+and no capability, and the sandbox restricts no address family and no network, so netlink, packet
+and Bluetooth sockets stay open too. The interface stays micad's: its bit rate and state are set
+in the network settings (`kind: "can"`, section 3.3), and the app declares nothing to use it.
 
 **Install and upgrade.** A bundle is checked before it is taken: its manifest, its units and what
 is installed, so a broken one is refused with every rule it breaks and nothing changes. The

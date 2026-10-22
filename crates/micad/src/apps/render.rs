@@ -112,7 +112,12 @@ fn command(
     Ok(args)
 }
 
-/// The unit file or script of `service` for `init`.
+/// The unit file or script of `service` for `init`. `devices` are its
+/// `DeviceAllow=` entries: a node, or `char-<driver>` for a class.
+///
+/// The sandbox leaves the address families and the network alone: an app
+/// reaches a CAN bus through an `AF_CAN` socket, which needs no device node
+/// and no capability, and netlink, packet and Bluetooth sockets the same way.
 ///
 /// # Errors
 ///
@@ -309,6 +314,35 @@ mod tests {
                     && preload > text.find("/usr/bin/env").unwrap()
             );
         }
+    }
+
+    /// SocketCAN, netlink, packet and Bluetooth sockets stay open to the app:
+    /// nothing restricts the address families or the network.
+    #[test]
+    fn the_sandbox_leaves_the_sockets_alone() {
+        let (service, account, vars) = tailscaled();
+        let text = unit(
+            Init::Systemd,
+            "tailscale",
+            &service,
+            &account,
+            &["char-ttyUSB".into()],
+            &vars,
+        )
+        .unwrap();
+        for key in [
+            "RestrictAddressFamilies",
+            "PrivateNetwork",
+            "IPAddressDeny",
+            "SocketBindDeny",
+            "RestrictNetworkInterfaces",
+        ] {
+            assert!(!text.contains(key), "{key}\n{text}");
+        }
+        assert!(
+            text.lines().any(|l| l == "DeviceAllow=char-ttyUSB rw"),
+            "{text}"
+        );
     }
 
     #[test]

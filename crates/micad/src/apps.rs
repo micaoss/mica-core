@@ -6,6 +6,7 @@
 //! image's seeds in `seed` and the update check in `update`.
 
 mod bundle;
+mod devices;
 mod flow;
 mod manifest;
 mod render;

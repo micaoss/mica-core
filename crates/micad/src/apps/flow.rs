@@ -8,6 +8,7 @@ use micad_settings::{Init, ServicesSettings};
 use serde_json::{Value, json};
 
 use super::bundle;
+use super::devices;
 use super::manifest::{self, Manifest, Privileges, Problem, RunAs};
 use super::render::{self, Account};
 use super::{
@@ -23,13 +24,6 @@ const HOOK_LOG: &str = "first-run.log";
 const ENV_FILE: &str = "app.env";
 /// The `ActiveState` of a unit that did not start.
 const FAILED_STATE: &str = "failed";
-
-/// The groups a device node may not have for an app's own user to be given it:
-/// each of these reaches every disk, the memory, the terminals or the
-/// accounts.
-const DENIED_GROUPS: [&str; 8] = [
-    "disk", "kmem", "shadow", "sudo", "wheel", "adm", "tty", "utmp",
-];
 
 /// What an install asks for besides the bundle.
 #[derive(Debug, Clone, Copy, Default)]
@@ -391,7 +385,12 @@ impl Apps {
                     name,
                     service,
                     account.context("a service runs as the app's own user")?,
-                    &to.privileges.devices,
+                    &devices::grants(
+                        self.root().map_err(anyhow_of)?,
+                        &to.privileges.devices,
+                        self.groups_file().as_deref(),
+                    )
+                    .allow,
                     &vars,
                 )?,
                 None => std::fs::read_to_string(units.join(unit))
@@ -461,36 +460,42 @@ impl Apps {
     }
 
     /// The devices of `manifest` an app's own user may not be given: a node
-    /// that is not a character device, or one whose group reaches past it,
-    /// since that group becomes the app's.
+    /// it names now that is not a character device, or whose group is none
+    /// of the device groups, since that group becomes the app's. A device
+    /// that is not there is not refused: it may be plugged in later.
     fn device_problems(&self, manifest: &Manifest) -> Result<Vec<Problem>, AppError> {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
         let root = self.root()?;
+        let groups = self.groups_file();
         let mut problems = Vec::new();
         for device in &manifest.privileges.devices {
-            let Ok(meta) = std::fs::metadata(root.join(device.trim_start_matches('/'))) else {
-                continue;
-            };
-            if let Some(why) = self.device_refusal(&meta) {
-                problems.push(Problem::new(
-                    "device",
-                    format!("{device} {why}; an app that needs it runs as root"),
-                ));
+            for node in devices::present(root, device) {
+                let Ok(meta) = std::fs::metadata(&node) else {
+                    continue;
+                };
+                let why = if meta.file_type().is_char_device() {
+                    devices::group_refusal(meta.gid(), groups.as_deref())
+                } else {
+                    Some("is not a character device".into())
+                };
+                if let Some(why) = why {
+                    let shown = Path::new("/").join(node.strip_prefix(root).unwrap_or(&node));
+                    problems.push(Problem::new(
+                        "device",
+                        format!(
+                            "{} {why}; an app that needs it runs as root",
+                            shown.display()
+                        ),
+                    ));
+                }
             }
         }
         Ok(problems)
     }
 
-    /// Why a node of `meta` may not be an app's own user's, if it may not.
-    fn device_refusal(&self, meta: &std::fs::Metadata) -> Option<String> {
-        use std::os::unix::fs::{FileTypeExt, MetadataExt};
-        if !meta.file_type().is_char_device() {
-            return Some("is not a character device".into());
-        }
-        let groups = self
-            .root()
-            .ok()
-            .and_then(|root| std::fs::read_to_string(root.join("etc/group")).ok());
-        group_refusal(meta.gid(), groups.as_deref())
+    /// The root's `/etc/group`.
+    fn groups_file(&self) -> Option<String> {
+        std::fs::read_to_string(self.root().ok()?.join("etc/group")).ok()
     }
 
     /// Who `manifest`'s processes run as: nobody for a root app, else the
@@ -501,7 +506,6 @@ impl Apps {
         manifest: &Manifest,
         record: &mut Record,
     ) -> Result<Option<Account>, AppError> {
-        use std::os::unix::fs::MetadataExt;
         if manifest.privileges.user == RunAs::Root {
             return Ok(None);
         }
@@ -516,21 +520,14 @@ impl Apps {
                 uid
             }
         };
-        let root = self.root()?;
-        let mut groups: Vec<u32> = manifest
-            .privileges
-            .devices
-            .iter()
-            .filter_map(|device| std::fs::metadata(root.join(device.trim_start_matches('/'))).ok())
-            .filter(|meta| self.device_refusal(meta).is_none())
-            .map(|meta| meta.gid())
-            .filter(|gid| *gid != 0)
-            .collect();
-        groups.sort_unstable();
-        groups.dedup();
+        let grants = devices::grants(
+            self.root()?,
+            &manifest.privileges.devices,
+            self.groups_file().as_deref(),
+        );
         Ok(Some(Account {
             uid,
-            groups,
+            groups: grants.groups,
             capabilities: manifest.privileges.capabilities.clone(),
         }))
     }
@@ -1011,32 +1008,6 @@ async fn send_to_log(logger: &str, tag: &str, log: &[u8]) {
         let _ = stdin.write_all(log).await;
     }
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait()).await;
-}
-
-/// Why a node of group `gid` may not be an app's own user's, given the root's
-/// `/etc/group`: its group is one of [`DENIED_GROUPS`], or has no name there.
-/// Group 0 is never given, so it is never refused.
-pub(super) fn group_refusal(gid: u32, groups: Option<&str>) -> Option<String> {
-    if gid == 0 {
-        return None;
-    }
-    let id = gid.to_string();
-    let name = groups.and_then(|text| {
-        text.lines().find_map(|line| {
-            let mut fields = line.split(':');
-            let name = fields.next()?;
-            (fields.nth(1)? == id).then_some(name)
-        })
-    });
-    match name {
-        None => Some(format!(
-            "belongs to gid {gid}, which has no name in /etc/group"
-        )),
-        Some(name) if DENIED_GROUPS.contains(&name) => Some(format!(
-            "belongs to group {name}, which reaches past the app"
-        )),
-        Some(_) => None,
-    }
 }
 
 /// What an app asks for beyond what it has.

@@ -256,18 +256,21 @@ fn is_bundle_file(path: &str) -> bool {
     })
 }
 
-/// A device node's path: under `/dev`, plain characters, no `..`.
+/// A device node's path: under `/dev`, plain characters, no `..`; or a
+/// pattern, such a path ending with `*`, of a class of devices.
 fn is_device(path: &str) -> bool {
-    path.strip_prefix("/dev/").is_some_and(|rest| {
-        rest.split('/').all(|part| {
-            !part.is_empty()
-                && part != "."
-                && part != ".."
-                && part
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':'))
+    let node = path.strip_suffix('*').unwrap_or(path);
+    (node == path || super::devices::class(path).is_some())
+        && node.strip_prefix("/dev/").is_some_and(|rest| {
+            rest.split('/').all(|part| {
+                !part.is_empty()
+                    && part != "."
+                    && part != ".."
+                    && part.bytes().all(|b| {
+                        b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b':')
+                    })
+            })
         })
-    })
 }
 
 /// Whether `name` can be an app's: 1 to 23 of `[a-z0-9-]`, not starting with
@@ -466,7 +469,12 @@ fn check_privileges(manifest: &Manifest, fail: &mut impl FnMut(&'static str, Str
     }
     for device in &privileges.devices {
         if !is_device(device) {
-            fail("device", format!("{device:?} is not a device under /dev"));
+            fail(
+                "device",
+                format!(
+                    "{device:?} is not a device under /dev, or a pattern of a serial port, a GPIO chip, an I2C or an SPI bus"
+                ),
+            );
         }
     }
     if manifest.services.len() > MAX_SERVICES {
@@ -725,7 +733,11 @@ mod tests {
         let mut bad = own_user();
         bad.units = manifest().units;
         bad.privileges.capabilities = vec!["CAP_SYS_ADMIN".into(), "CAP_FLY".into()];
-        bad.privileges.devices = vec!["/etc/shadow".into(), "/dev/../etc".into()];
+        bad.privileges.devices = vec![
+            "/etc/shadow".into(),
+            "/dev/../etc".into(),
+            "/dev/net/tun*".into(),
+        ];
         bad.services[0].exec[1] = "--socket=${NOPE}".into();
         bad.services.push(Service {
             name: "tailscaled".into(),
@@ -738,6 +750,7 @@ mod tests {
                 "units_need_root",
                 "capability",
                 "capability",
+                "device",
                 "device",
                 "device",
                 "manifest",
