@@ -104,14 +104,6 @@ impl Device for FakeDevice {
             .unwrap()
             .push(format!("restore {snapshot} remove {remove:?}"));
     }
-    async fn set_hostname(&self, hostname: &str) -> Result<(), &'static str> {
-        self.facts.lock().unwrap().hostname = hostname.to_string();
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("hostname {hostname}"));
-        Ok(())
-    }
 }
 
 #[derive(Default)]
@@ -492,22 +484,20 @@ async fn an_unclaimed_device_joins_wi_fi_and_stays_unclaimed() {
         json!({ "id": 1, "event": "connected", "ip": "192.168.1.40", "hostname": "mica-a4e2e69e" })
     );
 
-    let finished = bench
-        .command(json!({ "op": "finish", "hostname": "deck-7" }))
-        .await;
+    let finished = bench.command(json!({ "op": "finish" })).await;
     assert_eq!(
         finished,
         vec![json!({
             "id": 2,
             "event": "finished",
             "claimed": false,
-            "hostname": "deck-7",
+            "hostname": "mica-a4e2e69e",
             "interface": { "name": "wlan0", "kind": "wifi", "address": "192.168.1.40/24" },
-            "consoleUrls": ["http://192.168.1.40", "http://deck-7.local"],
+            "consoleUrls": ["http://192.168.1.40", "http://mica-a4e2e69e.local"],
             "ap": "off",
         })]
     );
-    assert_eq!(bench.calls(), vec!["join Harbour", "hostname deck-7"]);
+    assert_eq!(bench.calls(), vec!["join Harbour"]);
     assert_eq!(*bench.radio.disconnected.lock().unwrap(), vec![PHONE]);
     assert!(!bench.wifi_locked.load(Ordering::SeqCst));
     bench.tick(1).await;
@@ -653,21 +643,26 @@ async fn a_device_claimed_meanwhile_takes_no_network_over_a_none_session() {
 }
 
 #[tokio::test]
-async fn finish_values_are_checked() {
+async fn finish_takes_no_members() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
     for (command, reason) in [
         (
-            json!({ "op": "finish", "hostname": "-deck" }),
-            "invalid_hostname",
+            json!({ "op": "finish", "hostname": "deck-7" }),
+            "bad_request",
         ),
         (json!({ "op": "finish", "hostname": 7 }), "bad_request"),
+        (
+            json!({ "op": "finish", "interface": "eth0" }),
+            "bad_request",
+        ),
         (json!({ "op": "claim", "password": PASSWORD }), "unknown_op"),
         (json!({ "op": "reboot" }), "unknown_op"),
     ] {
         let events = bench.command(command).await;
         assert_eq!(events[0]["reason"], reason, "{events:?}");
     }
+    assert!(bench.calls().is_empty(), "a refused finish sets nothing");
 }
 
 #[tokio::test]

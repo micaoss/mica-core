@@ -389,24 +389,6 @@ impl MicadService {
         }
     }
 
-    /// Commit a claim made over BLE. It sets no access-point key unless the
-    /// phone sent one: the radio is a client by now, or the access point is
-    /// switched off here, and the console asks for a key when it is switched
-    /// on again.
-    /// `finish`'s hostname.
-    async fn provisioning_set_hostname(
-        &self,
-        emitter: &SignalEmitter<'_>,
-        hostname: &str,
-    ) -> Result<(), &'static str> {
-        self.provisioning_write(emitter, &[("hostname".to_string(), json!(hostname))])
-            .await
-            .map_err(|err| {
-                tracing::warn!(error = %err, "the provisioned hostname could not be written");
-                "busy"
-            })
-    }
-
     /// Refuse a bus write that reaches the Wi-Fi settings while a BLE
     /// provisioning session holds the radio. The session's own writes do
     /// not come through here.
@@ -656,13 +638,6 @@ impl Device for InterfaceRef<MicadService> {
             .await
             .provisioning_restore(self.signal_emitter(), &snapshot, &remove)
             .await;
-    }
-
-    async fn set_hostname(&self, hostname: &str) -> Result<(), &'static str> {
-        self.get()
-            .await
-            .provisioning_set_hostname(self.signal_emitter(), hostname)
-            .await
     }
 }
 

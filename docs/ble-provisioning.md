@@ -8,8 +8,9 @@ micad. Every value below is part of protocol 1; a change to any of them is a new
 ## What BLE is for
 
 BLE configures the device's network and nothing else: `getStatus`, `scanWifi`, `setWifi`,
-`setNetwork` and `finish`, which may name the hostname. No operation sets a password or an
-access-point key, claims the device, resets it, or touches its services or apps, and none will.
+`setNetwork` and `finish`. No operation sets a password, an access-point key or the hostname,
+claims the device, resets it, or touches its services or apps, and none will. The hostname is set
+with the claim (`POST /api/v1/setup`) or later in the console.
 
 A device stays unclaimed after BLE provisioning. It is claimed afterwards in the console, on the
 network BLE set up, as on its access point: the console's setup asks for the device code from the
@@ -237,7 +238,7 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 | `scanWifi` | — | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}` | `ap_active`, `no_radio`, `scan_failed` |
 | `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
 | `setNetwork` | `interface`, and `dhcp: true` or `static` | `up`: `interface`, `address` (or null) | listed under `setNetwork` |
-| `finish` | `hostname` (optional) | `finished`: `claimed`, `hostname`, `interface` (or null), `consoleUrls`, `ap` | `already_claimed`, `invalid_hostname` |
+| `finish` | — | `finished`: `claimed`, `hostname`, `interface` (or null), `consoleUrls`, `ap` | `already_claimed` |
 
 `getStatus`
 - `interfaces[]` lists the physical ports, by name: `{name, kind, carrier, address}`. `kind` is
@@ -307,13 +308,15 @@ codes, one to one.
 
 `finish`
 - `finish` follows `setWifi`, `setNetwork`, or neither.
-- `hostname`: 1-63 letters, digits or hyphens, not starting or ending with a hyphen; it becomes
-  the device's hostname. Absent, the hostname stays.
+- It takes no member but `op` and `id`: any other member, `hostname` among them, fails with
+  `bad_request`, an exception to the rule that a receiver ignores members it does not know. It
+  sets nothing; the hostname stays the device's.
 - It claims nothing: `claimed` is `false` after a `none` session, and the page's last screen sends
   the user to the console to claim the device ("open the console to set the administrator
   password"). In a `password` or `temp-code` session `claimed` is `true`.
 - In a `none` session it fails with `already_claimed` if the device was claimed meanwhile.
-- `finished` carries what the page's last screen shows: `hostname`, the device's hostname;
+- `finished` carries what the page's last screen shows: `hostname`, the device's current
+  hostname, for the `.local` address;
   `interface`, `{name, kind, address}` of the port the session brought up (the
   `ethernet` port of `up`, or the `wifi` port after `connected`), else of the first port with an
   address, Ethernet first, or null; and `consoleUrls`, `http://<address>` when there is an

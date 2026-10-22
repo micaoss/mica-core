@@ -101,8 +101,6 @@ pub trait Device: Send + Sync + 'static {
     /// A phone connected: begin what it is likely to ask for, so that it is
     /// ready when it does (a Wi-Fi scan).
     async fn warm(&self);
-    /// `finish`'s `hostname`, or a `failed` reason.
-    async fn set_hostname(&self, hostname: &str) -> Result<(), &'static str>;
 }
 
 /// The Bluetooth side.
@@ -1000,12 +998,13 @@ impl Engine {
     }
 
     async fn finish(&mut self, id: Value, command: &Value) {
-        let hostname = match &command["hostname"] {
-            Value::Null => None,
-            Value::String(name) if is_label(name) => Some(name.clone()),
-            Value::String(_) => return self.failed(id, "invalid_hostname").await,
-            _ => return self.failed(id, "bad_request").await,
-        };
+        // `finish` sets nothing, so it takes no member but `op` and `id`.
+        if command
+            .as_object()
+            .is_some_and(|members| members.keys().any(|key| key != "op" && key != "id"))
+        {
+            return self.failed(id, "bad_request").await;
+        }
         if let Err(reason) = self.still_unclaimed().await {
             return self.failed(id, reason).await;
         }
@@ -1015,13 +1014,8 @@ impl Engine {
         let reached = connection.reached.clone();
         let device = Arc::clone(&self.device);
         self.spawn_op(id, "finish", async move {
-            if let Some(hostname) = &hostname
-                && let Err(reason) = device.set_hostname(hostname).await
-            {
-                return json!({ "event": "failed", "reason": reason });
-            }
             let facts = device.facts().await;
-            let hostname = hostname.unwrap_or(facts.hostname);
+            let hostname = facts.hostname;
             let status = device.status().await;
             let (interface, urls) = console(&status, reached.as_ref(), &hostname);
             json!({
@@ -1270,11 +1264,6 @@ fn millis(since: Instant) -> u64 {
 /// A base64 member, decoded.
 fn binary(value: &Value) -> Option<Vec<u8>> {
     BASE64.decode(value.as_str()?).ok()
-}
-
-/// One DNS label: 1-63 letters, digits or inner hyphens.
-fn is_label(name: &str) -> bool {
-    !name.contains('.') && micad_settings::is_host_name(name)
 }
 
 /// Feed `engine` from `rx`, with a tick every second.
