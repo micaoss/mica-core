@@ -21,7 +21,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long it waits for an address once associated.
 const DHCP_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often it looks.
-const CONNECT_POLL: Duration = Duration::from_secs(2);
+const CONNECT_POLL: Duration = Duration::from_millis(500);
+/// How old a scan a session answers with.
+const SCAN_FRESH: Duration = Duration::from_secs(30);
 /// How long a `setNetwork` waits for its address.
 const WIRED_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often it looks.
@@ -385,11 +387,7 @@ impl MicadService {
         emitter: &SignalEmitter<'_>,
         staged: &StagedClaim,
     ) -> Result<(), &'static str> {
-        let password = staged.password.clone();
-        let hash = tokio::task::spawn_blocking(move || micad_settings::hash_password(&password))
-            .await
-            .map_err(|_| "busy")?
-            .map_err(|_| "busy")?;
+        let hash = staged.password_hash().await.ok_or("busy")?;
         let mut access = self.inner.read().await.settings.access.clone();
         access.web_admin = Some(micad_settings::WebAdminSettings {
             password_hash: hash,
@@ -586,7 +584,15 @@ impl Device for InterfaceRef<MicadService> {
     }
 
     async fn scan(&self) -> Result<Vec<Value>, &'static str> {
-        self.get().await.provisioning_scan().await
+        let service = self.get().await;
+        service
+            .provisioning
+            .scanned(SCAN_FRESH, service.provisioning_scan())
+            .await
+    }
+
+    async fn warm(&self) {
+        let _ = self.scan().await;
     }
 
     async fn wifi_snapshot(&self) -> Value {

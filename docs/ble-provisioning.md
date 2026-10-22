@@ -55,6 +55,10 @@ and an authentication mode:
 - One phone at a time: while a phone is connected the device stops advertising, and a second
   central that connects anyway has every read and write refused with `org.bluez.Error.InProgress`
   (an ATT error, a rejected promise on the page), which the page reports as busy.
+- While a window is open the device asks a connecting phone for a connection interval of 11.25 to
+  15 ms (a phone starts at 30 to 50 ms), where its kernel lets it set the range. Each write and
+  each notification waits for an interval, so the fewer and larger they are, the faster a session
+  is: `maxWrite` is the largest write the ATT MTU allows, and notifications fill the MTU.
 
 ### `info`
 
@@ -112,6 +116,10 @@ Any `session` message may be answered by `{"t":"error","reason":"…"}`:
 | `bad_message` | malformed, out of order, or not valid in this state |
 
 A failed or refused exchange can be started again with a new `start` on the same connection.
+
+`start` may carry `"status": true`. The device then answers `ready` with `"status": true` too, and
+sends a `status` event with no `id` (see Operations) right after it, so the page needs no
+`getStatus` of its own. A `ready` without the member sends none; the page asks with `getStatus`.
 
 ### `none`: X25519
 
@@ -200,6 +208,9 @@ another sent meanwhile gets `failed` with `busy`.
 Reasons any operation can fail with: `busy`, `bad_request` (a missing or malformed member),
 `unknown_op`.
 
+Events with no `id` answer no command: `status`, when `start` asked for it, carries what
+`getStatus`'s does; `closing` is described under Sessions.
+
 | `op` | Parameters | Final event | Its own `failed` reasons |
 | --- | --- | --- | --- |
 | `getStatus` | — | `status`: `wifiMode` (`client`, `ap` or `off`), `connected`, `ssid` (or null), `ip` (or null), `interfaces` | — |
@@ -216,6 +227,8 @@ Reasons any operation can fail with: `busy`, `bad_request` (a missing or malform
   rest of the flow.
 
 `scanWifi`
+- The device begins a scan when a phone connects and answers with networks scanned at most 30
+  seconds ago, so the page's `scanWifi` rarely waits for the radio.
 - `security` is `open`, `owe`, `wep`, `wpa-psk`, `wpa2-psk`, `wpa3-sae`, `wpa2-wpa3` or `wpa2-eap`,
   as the console's scan reports it. `channel` is a number; networks are not merged by name (the
   page merges them).

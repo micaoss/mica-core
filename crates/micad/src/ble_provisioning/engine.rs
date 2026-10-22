@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use aws_lc_rs::agreement;
 use base64::Engine as _;
@@ -76,11 +77,44 @@ pub struct Facts {
 }
 
 /// A claim staged by `claim`, committed by `finish`.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct StagedClaim {
     pub password: String,
     pub hostname: Option<String>,
     pub ap_psk: Option<String>,
+    /// The password's hash, begun when the claim is staged so that `finish`
+    /// does not wait for it.
+    hash: Arc<tokio::sync::OnceCell<Option<String>>>,
+}
+
+impl StagedClaim {
+    #[must_use]
+    pub fn new(password: String, hostname: Option<String>, ap_psk: Option<String>) -> Self {
+        let staged = Self {
+            password,
+            hostname,
+            ap_psk,
+            hash: Arc::new(tokio::sync::OnceCell::new()),
+        };
+        let early = staged.clone();
+        tokio::spawn(async move { early.password_hash().await });
+        staged
+    }
+
+    /// The password's hash for `access.webAdmin`; none when it could not be
+    /// made.
+    pub async fn password_hash(&self) -> Option<String> {
+        let password = self.password.clone();
+        self.hash
+            .get_or_init(|| async move {
+                tokio::task::spawn_blocking(move || micad_settings::hash_password(&password).ok())
+                    .await
+                    .ok()
+                    .flatten()
+            })
+            .await
+            .clone()
+    }
 }
 
 impl std::fmt::Debug for StagedClaim {
@@ -123,6 +157,9 @@ pub trait Device: Send + Sync + 'static {
     ) -> Result<(bool, Option<String>), &'static str>;
     /// Put back the entries `setNetwork` replaced.
     async fn restore_network(&self, previous: Vec<(String, Value)>);
+    /// A phone connected: begin what it is likely to ask for, so that it is
+    /// ready when it does (a Wi-Fi scan).
+    async fn warm(&self);
     /// Commit a staged claim, or a `failed` reason.
     async fn claim(&self, staged: &StagedClaim) -> Result<(), &'static str>;
 }
@@ -192,6 +229,8 @@ pub enum Input {
         interface: String,
         previous: Value,
     },
+    /// An event for connection `serial` that no command asked for.
+    Pushed { serial: u64, event: Value },
     /// An operation ended with this final event.
     Done {
         serial: u64,
@@ -235,6 +274,12 @@ struct Connection {
     finished: bool,
     claimed: bool,
     failed: bool,
+    /// When the phone connected, and when the command in hand arrived: the
+    /// step log's times.
+    since: Instant,
+    command_at: Option<Instant>,
+    /// `start` asked for a `status` event once the session is ready.
+    push_status: bool,
 }
 
 /// The Wi-Fi and the wired entries a session changed, kept until the
@@ -329,10 +374,15 @@ impl Engine {
 
     /// Handle one input.
     pub async fn handle(&mut self, input: Input) {
+        // A phone's reads and writes come many to a message; what the device
+        // is changes with what the rest brings, and on the tick.
+        let refresh = !matches!(input, Input::Read { .. } | Input::Write { .. });
         match input {
             Input::Read { device, mtu, reply } => {
+                let started = Instant::now();
                 let answer = self.admit(&device, mtu).map(|()| self.info());
                 let _ = reply.send(answer);
+                self.step("info", started);
             }
             Input::Write {
                 device,
@@ -414,6 +464,11 @@ impl Engine {
                     hold.replaced.push((interface, previous));
                 }
             }
+            Input::Pushed { serial, event } => {
+                if self.current_serial() == Some(serial) {
+                    self.send_event(&event).await;
+                }
+            }
             Input::Done {
                 serial,
                 id,
@@ -421,7 +476,20 @@ impl Engine {
                 event,
             } => self.done_op(serial, id, op, event).await,
         }
-        self.settle().await;
+        self.settle(refresh).await;
+    }
+
+    /// Log how long `step` took on the device, and when, from the
+    /// connection: the gaps between steps are the link and the phone.
+    fn step(&self, step: &str, started: Instant) {
+        if let Some(connection) = &self.connection {
+            tracing::info!(
+                step,
+                ms = millis(started),
+                at = millis(connection.since),
+                "bluetooth: provisioning step"
+            );
+        }
     }
 
     fn current_serial(&self) -> Option<u64> {
@@ -459,9 +527,16 @@ impl Engine {
             finished: false,
             claimed: false,
             failed: false,
+            since: Instant::now(),
+            command_at: None,
+            push_status: false,
         });
         if let Some(hold) = &mut self.hold {
             hold.away_since = None;
+        }
+        if self.facts.has_wifi {
+            let device = Arc::clone(&self.device);
+            tokio::spawn(async move { device.warm().await });
         }
         Ok(())
     }
@@ -549,16 +624,43 @@ impl Engine {
         let Ok(message) = serde_json::from_slice::<Value>(&message) else {
             return self.session_error("bad_message").await;
         };
+        let started = Instant::now();
         match message["t"].as_str() {
             Some("start") => self.start(&message).await,
             Some("share") => self.share(&message).await,
             Some("confirm") => self.confirm(&message).await,
-            _ => self.session_error("bad_message").await,
+            _ => return self.session_error("bad_message").await,
         }
+        self.step(message["t"].as_str().unwrap_or_default(), started);
+    }
+
+    /// Send `ready`, and after it the `status` the `start` asked for, which
+    /// `ready` then says will come.
+    async fn ready(&mut self, mut ready: Value) {
+        let Some(connection) = &self.connection else {
+            return;
+        };
+        let (push, serial) = (connection.push_status, connection.serial);
+        if push {
+            ready["status"] = json!(true);
+        }
+        self.send_session(&ready).await;
+        if !push {
+            return;
+        }
+        let (device, tx) = (Arc::clone(&self.device), self.tx.clone());
+        tokio::spawn(async move {
+            let mut event = device.status().await;
+            event["event"] = json!("status");
+            let _ = tx.send(Input::Pushed { serial, event });
+        });
     }
 
     async fn start(&mut self, message: &Value) {
         self.abandon_exchange();
+        if let Some(connection) = &mut self.connection {
+            connection.push_status = message["status"] == true;
+        }
         let Some(requested) = message["auth"].as_str() else {
             return self.session_error("bad_message").await;
         };
@@ -623,7 +725,7 @@ impl Engine {
             };
             connection.last_active = self.clock.uptime();
         }
-        self.send_session(&json!({ "t": "ready", "pub": BASE64.encode(public) }))
+        self.ready(json!({ "t": "ready", "pub": BASE64.encode(public) }))
             .await;
     }
 
@@ -736,7 +838,7 @@ impl Engine {
             connection.last_active = self.clock.uptime();
         }
         (self.audit)("ble-auth", "succeeded");
-        self.send_session(&json!({ "t": "ready" })).await;
+        self.ready(json!({ "t": "ready" })).await;
     }
 
     async fn on_command(&mut self, fragment: &[u8]) {
@@ -765,6 +867,7 @@ impl Engine {
         if connection.op.is_some() {
             return self.failed(id, "busy").await;
         }
+        connection.command_at = Some(Instant::now());
         match command["op"].as_str() {
             Some("getStatus") => self.spawn_status(id),
             Some("scanWifi") => self.spawn_scan(id),
@@ -774,6 +877,13 @@ impl Engine {
             Some("finish") => self.finish(id).await,
             Some(_) => self.failed(id, "unknown_op").await,
             None => self.failed(id, "bad_request").await,
+        }
+        // An operation that answered at once; the others log when done.
+        if let Some(connection) = &mut self.connection
+            && connection.op.is_none()
+            && let Some(started) = connection.command_at.take()
+        {
+            self.step(command["op"].as_str().unwrap_or_default(), started);
         }
     }
 
@@ -861,11 +971,7 @@ impl Engine {
             _ => return self.failed(id, "bad_request").await,
         };
         if let Some(connection) = &mut self.connection {
-            connection.staged = Some(StagedClaim {
-                password: password.to_string(),
-                hostname,
-                ap_psk,
-            });
+            connection.staged = Some(StagedClaim::new(password.to_string(), hostname, ap_psk));
         }
         self.send_event(&json!({ "id": id, "event": "claimStaged" }))
             .await;
@@ -1039,6 +1145,12 @@ impl Engine {
         };
         connection.op = None;
         connection.last_active = self.clock.uptime();
+        if let Some(started) = connection.command_at.take() {
+            self.step(op, started);
+        }
+        let Some(connection) = self.connection.as_mut() else {
+            return;
+        };
         let finished = op == "finish" && event["event"] == "finished";
         if op == "finish" && event["reason"] == "already_claimed" {
             connection.staged = None;
@@ -1141,8 +1253,10 @@ impl Engine {
     }
 
     /// Bring the timers, the advertisement and the radio in line with now.
-    async fn settle(&mut self) {
-        self.facts = self.device.facts().await;
+    async fn settle(&mut self, refresh: bool) {
+        if refresh {
+            self.facts = self.device.facts().await;
+        }
         let now = self.clock.uptime();
         let window = self.window();
         if window.is_none_or(|open| open.trigger != Trigger::Manual) {
@@ -1217,6 +1331,11 @@ impl Engine {
         }
         status
     }
+}
+
+/// Milliseconds since `since`.
+fn millis(since: Instant) -> u64 {
+    u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 /// A base64 member, decoded.

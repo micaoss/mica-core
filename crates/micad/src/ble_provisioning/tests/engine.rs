@@ -28,6 +28,8 @@ struct FakeDevice {
     /// `await_wifi`'s answer; `None` waits until released.
     wifi: Mutex<Option<Result<String, &'static str>>>,
     release: tokio::sync::Notify,
+    /// How many connections began a scan.
+    warmed: AtomicU64,
 }
 
 #[async_trait::async_trait]
@@ -82,6 +84,9 @@ impl Device for FakeDevice {
             .lock()
             .unwrap()
             .push(format!("restore network {previous:?}"));
+    }
+    async fn warm(&self) {
+        self.warmed.fetch_add(1, Ordering::SeqCst);
     }
     async fn restore_wifi(&self, snapshot: Value, remove: Vec<String>) {
         self.calls
@@ -345,11 +350,20 @@ impl Bench {
 
     /// Authenticate with `none`.
     async fn start_none(&mut self) {
+        self.start_none_with(json!({})).await;
+    }
+
+    /// Authenticate with `none`, with `extra` members in `start`.
+    async fn start_none_with(&mut self, extra: Value) {
         let key = agreement::PrivateKey::generate(&agreement::X25519).unwrap();
         let public = key.compute_public_key().unwrap();
-        let ready = self
-            .session(json!({ "t": "start", "auth": "none", "pub": BASE64.encode(public.as_ref()) }))
-            .await;
+        let mut start =
+            json!({ "t": "start", "auth": "none", "pub": BASE64.encode(public.as_ref()) });
+        for (name, value) in extra.as_object().unwrap() {
+            start[name] = value.clone();
+        }
+        let ready = self.session(start).await;
+        assert_eq!(ready.get("status"), extra.get("status"), "{ready}");
         assert_eq!(ready["t"], "ready", "{ready}");
         let device = BASE64.decode(ready["pub"].as_str().unwrap()).unwrap();
         let keys = agreement::agree(
@@ -494,6 +508,45 @@ async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
     assert_eq!(
         (history[0].trigger.as_str(), history[0].outcome.as_str()),
         ("unclaimed", "claimed")
+    );
+}
+
+#[tokio::test]
+async fn a_start_that_asks_for_the_status_gets_it_after_ready() {
+    let mut bench = Bench::new(false).await;
+    bench.read_info(PHONE).await.unwrap();
+    bench.pump().await;
+    assert_eq!(
+        bench.device.warmed.load(Ordering::SeqCst),
+        1,
+        "a scan begins at the connection"
+    );
+    bench.start_none_with(json!({ "status": true })).await;
+    bench.pump().await;
+    assert_eq!(
+        bench.events(),
+        vec![
+            json!({ "event": "status", "wifiMode": "ap", "connected": false, "ssid": null, "ip": null })
+        ]
+    );
+    let status = bench.command(json!({ "op": "getStatus" })).await;
+    assert_eq!(status[0]["id"], 1, "the commands' records follow it");
+
+    let mut quiet = Bench::new(false).await;
+    quiet.start_none().await;
+    quiet.pump().await;
+    assert!(quiet.events().is_empty(), "nothing unasked");
+}
+
+#[tokio::test]
+async fn a_staged_claim_hashes_its_password_before_finish_asks() {
+    let staged = StagedClaim::new(PASSWORD.to_string(), None, None);
+    let hash = staged.password_hash().await.unwrap();
+    assert!(micad_settings::verify_password(&hash, PASSWORD));
+    assert_eq!(
+        staged.clone().password_hash().await,
+        Some(hash),
+        "made once"
     );
 }
 

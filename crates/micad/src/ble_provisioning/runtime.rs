@@ -28,6 +28,9 @@ pub struct Provisioning {
     engine: OnceLock<mpsc::UnboundedSender<Input>>,
     /// Whether a session holds the radio: the console's Wi-Fi writes wait.
     wifi_locked: Arc<AtomicBool>,
+    /// The last Wi-Fi scan a session made, and when; held while a scan runs,
+    /// so that a second one waits for it.
+    scan: tokio::sync::Mutex<Option<(std::time::Instant, Vec<Value>)>>,
 }
 
 impl Provisioning {
@@ -147,6 +150,30 @@ impl Provisioning {
     #[must_use]
     pub fn wifi_locked(&self) -> bool {
         self.wifi_locked.load(Ordering::SeqCst)
+    }
+
+    /// The networks a session scanned at most `fresh` ago, or those `scan`
+    /// finds now.
+    ///
+    /// # Errors
+    /// `scan`'s reason.
+    pub async fn scanned<F>(
+        &self,
+        fresh: std::time::Duration,
+        scan: F,
+    ) -> Result<Vec<Value>, &'static str>
+    where
+        F: std::future::Future<Output = Result<Vec<Value>, &'static str>>,
+    {
+        let mut last = self.scan.lock().await;
+        if let Some((at, networks)) = last.as_ref()
+            && at.elapsed() < fresh
+        {
+            return Ok(networks.clone());
+        }
+        let networks = scan.await?;
+        *last = Some((std::time::Instant::now(), networks.clone()));
+        Ok(networks)
     }
 
     /// Hand the running engine's input to this facade.

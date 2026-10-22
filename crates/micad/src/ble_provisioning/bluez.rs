@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::future::poll_fn;
+use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,6 +35,12 @@ const BLUEZ: &str = "org.bluez";
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// How often the default route is looked at.
 const ROUTE_POLL: Duration = Duration::from_secs(2);
+/// Where the kernel keeps each controller's LE connection parameters.
+const DEBUGFS: &str = "/sys/kernel/debug/bluetooth";
+/// The connection interval, in 1.25 ms units, a phone is asked for while a
+/// window is open: 11.25 to 15 ms. A phone connects at 30 to 50 ms, and the
+/// kernel asks a connection outside this range to move into it.
+const FAST_INTERVAL: (u16, u16) = (9, 12);
 
 /// What a characteristic answers BlueZ with.
 #[derive(Debug, zbus::DBusError)]
@@ -277,6 +284,35 @@ pub trait Reconcile: Send + Sync + 'static {
 struct Wanted {
     application: bool,
     advertisement: Option<String>,
+    /// The controller's connection interval range before the window, to put
+    /// back.
+    interval: Option<(PathBuf, (u16, u16))>,
+}
+
+/// Set the LE connection interval range in a controller's debugfs `dir`;
+/// the range it had.
+///
+/// # Errors
+/// The files could not be read or written.
+pub fn set_interval(dir: &Path, (min, max): (u16, u16)) -> std::io::Result<(u16, u16)> {
+    let read = |name: &str| -> std::io::Result<u16> {
+        std::fs::read_to_string(dir.join(name))?
+            .trim()
+            .parse()
+            .map_err(std::io::Error::other)
+    };
+    let write = |name: &str, value: u16| std::fs::write(dir.join(name), format!("{value}\n"));
+    let before = (read("conn_min_interval")?, read("conn_max_interval")?);
+    // The kernel refuses a minimum over the maximum: the bound that keeps
+    // them in order moves first.
+    if min <= before.1 {
+        write("conn_min_interval", min)?;
+        write("conn_max_interval", max)?;
+    } else {
+        write("conn_max_interval", max)?;
+        write("conn_min_interval", min)?;
+    }
+    Ok(before)
 }
 
 /// [`Radio`] on BlueZ.
@@ -425,10 +461,27 @@ impl Radio for BluezRadio {
             self.reconcile.bluetooth().await;
             if let Some(adapter) = self.adapter().await {
                 self.register_application(&adapter).await;
+                if wanted.interval.is_none()
+                    && let Some(hci) = adapter.as_str().rsplit('/').next()
+                {
+                    let dir = Path::new(DEBUGFS).join(hci);
+                    match set_interval(&dir, FAST_INTERVAL) {
+                        Ok(before) => wanted.interval = Some((dir, before)),
+                        Err(err) => tracing::info!(
+                            error = %err,
+                            "bluetooth: the connection interval stays the kernel's"
+                        ),
+                    }
+                }
             }
         } else {
             if let Ok(adapter) = crate::bluetooth::BlueZ::adapter_path(&self.connection).await {
                 self.unregister_application(&adapter).await;
+            }
+            if let Some((dir, before)) = wanted.interval.take()
+                && let Err(err) = set_interval(&dir, before)
+            {
+                tracing::warn!(error = %err, "bluetooth: the connection interval could not be put back");
             }
             super::set_radio_held(false);
             self.reconcile.bluetooth().await;
