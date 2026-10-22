@@ -60,7 +60,9 @@ export const zhCN: Translation = {
     },
     setup: {
       title: '设置你的设备',
-      copy: '设置管理员密码，并可选设置主机名。完成后可在控制台查看网络接口。',
+      copy: '输入设备标签上的设备码，设置管理员密码，并可选设置主机名。完成后可在控制台查看网络接口。',
+      deviceCode: '设备码',
+      deviceCodeHint: '在设备标签上，例如 DFN4-L34C-T8N。用来证明设备在你手中。',
       hostname: '主机名',
       hostnameHint: '可选；仅使用字母、数字和连字符。',
       hostnamePlaceholder: 'mica',

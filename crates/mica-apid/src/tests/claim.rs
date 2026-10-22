@@ -22,7 +22,7 @@ const CHANGE_PASSWORD_PATH: &str = "/api/v1/actions/change-password";
 const PW_SENTINEL: &str = "PW-SENTINEL-claim-bootstrap";
 
 fn claim_body() -> String {
-    json!({ "password": PW_SENTINEL }).to_string()
+    json!({ "deviceCode": "DFN4-L34C-T8N", "password": PW_SENTINEL }).to_string()
 }
 
 /// A device Layer 1 has provisioned and nothing has claimed.

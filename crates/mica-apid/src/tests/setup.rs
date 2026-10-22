@@ -15,6 +15,7 @@ pub(super) const SETUP_PATH: &str = "/api/v1/setup";
 // A body that configures everything the route accepts.
 pub(super) fn full_setup_body() -> String {
     json!({
+        "deviceCode": "DFN4-L34C-T8N",
         "password": "first-boot-pw",
         "hostname": "appliance",
         "network": { "eth0": { "kind": "physical", "dhcp": true } },
@@ -45,6 +46,7 @@ pub(super) async fn the_setup_network_tree_is_merged_with_the_stored_one_before_
     }));
 
     let body = json!({
+        "deviceCode": "DFN4-L34C-T8N",
         "password": "first-boot-pw",
         "network": { "br0": { "kind": "bridge", "dhcp": false, "bridge": { "ports": ["eth1"] } } },
     })
@@ -81,7 +83,7 @@ pub(super) async fn a_rejected_setup_password_is_never_echoed() {
     let response = post_json(
         &router,
         SETUP_PATH,
-        &json!({ "password": "sh0rt!" }).to_string(),
+        &json!({ "deviceCode": "DFN4-L34C-T8N", "password": "sh0rt!" }).to_string(),
         None,
     )
     .await;
@@ -178,7 +180,7 @@ pub(super) async fn the_api_setup_route_records_the_claim_and_no_credential() {
 #[tokio::test]
 pub(super) async fn the_claim_sets_the_access_point_key_typed_or_generated() {
     let (router, fake) = test_app(unconfigured_tree());
-    let body = json!({ "password": "first-boot-pw", "apPsk": "typed-key-1" }).to_string();
+    let body = json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw", "apPsk": "typed-key-1" }).to_string();
     let response = post_json(&router, SETUP_PATH, &body, None).await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let answer: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
@@ -192,7 +194,7 @@ pub(super) async fn the_claim_sets_the_access_point_key_typed_or_generated() {
     );
 
     let (router, fake) = test_app(unconfigured_tree());
-    let body = json!({ "password": "first-boot-pw" }).to_string();
+    let body = json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw" }).to_string();
     let response = post_json(&router, SETUP_PATH, &body, None).await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let answer: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
@@ -216,7 +218,9 @@ pub(super) async fn the_claim_sets_the_access_point_key_typed_or_generated() {
 #[tokio::test]
 pub(super) async fn an_unusable_access_point_key_refuses_the_claim_whole() {
     let (router, fake) = test_app(unconfigured_tree());
-    let body = json!({ "password": "first-boot-pw", "apPsk": "short" }).to_string();
+    let body =
+        json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw", "apPsk": "short" })
+            .to_string();
     let response = post_json(&router, SETUP_PATH, &body, None).await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(envelope(response).await["path"], "wifi.ap.psk");
@@ -234,7 +238,7 @@ pub(super) async fn a_product_without_wifi_claims_without_a_key() {
     let response = post_json(
         &router,
         SETUP_PATH,
-        &json!({ "password": "first-boot-pw" }).to_string(),
+        &json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw" }).to_string(),
         None,
     )
     .await;
@@ -243,7 +247,7 @@ pub(super) async fn a_product_without_wifi_claims_without_a_key() {
     assert!(answer.get("apPsk").is_none(), "{answer}");
     assert_eq!(fake.set_paths(), vec!["access".to_string()]);
 
-    let body = json!({ "password": "first-boot-pw", "apPsk": "typed-key-1" }).to_string();
+    let body = json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw", "apPsk": "typed-key-1" }).to_string();
     let fake = Arc::new(FakeSettings::new(unconfigured_tree()));
     let router =
         app(AppState::new(fake.clone(), SIGNING_KEY)
@@ -251,4 +255,64 @@ pub(super) async fn a_product_without_wifi_claims_without_a_key() {
     let response = post_json(&router, SETUP_PATH, &body, None).await;
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(fake.set_paths().is_empty());
+}
+
+// The claim proves possession with the device code from the label: missing
+// or wrong, nothing is written, and a wrong one counts in the login backoff.
+// A device without a code has nothing to prove it with and is not asked.
+#[tokio::test]
+pub(super) async fn the_claim_asks_for_the_device_code_when_the_device_has_one() {
+    let (router, fake) = test_app(unconfigured_tree());
+    let missing = post_json(
+        &router,
+        SETUP_PATH,
+        &json!({ "password": "first-boot-pw" }).to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(envelope(missing).await["path"], "deviceCode");
+    let wrong = post_json(
+        &router,
+        SETUP_PATH,
+        &json!({ "deviceCode": "DFN4-L34C-T8P", "password": "first-boot-pw" }).to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(wrong.status(), StatusCode::FORBIDDEN);
+    assert_eq!(envelope(wrong).await["code"], "device_code_incorrect");
+    assert!(fake.set_paths().is_empty());
+    let throttled = post_json(
+        &router,
+        SETUP_PATH,
+        &json!({ "deviceCode": "dfn4l34ct8n", "password": "first-boot-pw" }).to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(
+        throttled.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "a wrong code backs off the next attempt"
+    );
+
+    let (router, _) = test_app(unconfigured_tree());
+    let typed = post_json(
+        &router,
+        SETUP_PATH,
+        &json!({ "deviceCode": "dfn4 l34c t8n", "password": "first-boot-pw" }).to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(typed.status(), StatusCode::CREATED, "any case, any spacing");
+
+    let (router, fake) = test_app(unconfigured_tree());
+    fake.set_device_code(json!({ "code": null, "reason": "no source" }));
+    let response = post_json(
+        &router,
+        SETUP_PATH,
+        &json!({ "password": "first-boot-pw" }).to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
 }

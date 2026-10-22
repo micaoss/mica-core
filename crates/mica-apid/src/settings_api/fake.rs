@@ -46,6 +46,8 @@ pub struct FakeSettings {
     pub(super) ble_window: std::sync::Mutex<Option<(u64, String)>>,
     /// What `get_telemetry` answers; the shape micad's `telemetry_json` serves.
     pub(super) telemetry: std::sync::Mutex<Value>,
+    /// What `get_device_code` answers.
+    pub(super) device_code: std::sync::Mutex<Value>,
     /// What `get_observed_network` answers; the shape micad's `observed_json`
     /// serves.
     pub(super) observed_network: std::sync::Mutex<Value>,
@@ -133,6 +135,9 @@ impl FakeSettings {
                 "slot": { "available": false, "detail": "fake" },
                 "uptime": { "available": true, "seconds": 7 },
             })),
+            device_code: std::sync::Mutex::new(
+                serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid" }),
+            ),
             telemetry: std::sync::Mutex::new(serde_json::json!({
                 "thermal": { "available": false, "detail": "fake" },
                 "watchdog": { "available": false, "detail": "fake" },
@@ -250,6 +255,11 @@ impl FakeSettings {
     /// Replace what `get_system_info` answers.
     pub fn set_system_info(&self, value: Value) {
         *self.system_info.lock().unwrap() = value;
+    }
+
+    /// Replace what `get_device_code` answers.
+    pub fn set_device_code(&self, value: Value) {
+        *self.device_code.lock().unwrap() = value;
     }
 
     /// Replace what `get_telemetry` answers.
@@ -624,7 +634,7 @@ impl SettingsApi for FakeSettings {
 
     /// The first vector of `docs/factory-ap-key.md`.
     async fn get_device_code(&self) -> anyhow::Result<Value> {
-        Ok(serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid" }))
+        Ok(self.device_code.lock().unwrap().clone())
     }
 
     async fn get_telemetry(&self) -> anyhow::Result<Value> {

@@ -156,6 +156,10 @@ impl SettingsApi for InterruptOnce {
     ) -> anyhow::Result<serde_json::Value> {
         self.inner.set_update_config(patch).await
     }
+
+    async fn get_device_code(&self) -> anyhow::Result<serde_json::Value> {
+        self.inner.get_device_code().await
+    }
 }
 
 /// The interrupted path, then the retry: nothing half-lands, and the retry
@@ -325,7 +329,7 @@ pub(super) async fn no_claim_surface_emits_the_password() {
     let short = post_json(
         &router,
         "/api/v1/setup",
-        &json!({ "password": "PW-SEN" }).to_string(),
+        &json!({ "deviceCode": "DFN4-L34C-T8N", "password": "PW-SEN" }).to_string(),
         None,
     )
     .await;

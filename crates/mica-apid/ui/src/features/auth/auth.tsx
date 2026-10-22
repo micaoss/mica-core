@@ -82,6 +82,7 @@ export function SetupView() {
   const { t } = useTranslation()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [deviceCode, setDeviceCode] = useState('')
   const [hostname, setHostname] = useState('')
   const [apPsk, setApPsk] = useState('')
   const [generated, setGenerated] = useState<SetupResult | null>(null)
@@ -97,6 +98,7 @@ export function SetupView() {
   const setup = useMutation({
     mutationFn: () => api<SetupResult>('/api/v1/setup', json('POST', {
       password,
+      ...(deviceCode ? { deviceCode } : {}),
       ...(hostname ? { hostname } : {}),
       ...(apPsk ? { apPsk } : {}),
     })),
@@ -123,8 +125,11 @@ export function SetupView() {
   return (
     <AuthFrame title={t('auth.setup.title')} copy={t('auth.setup.copy')}>
       <form className="grid gap-5" onSubmit={submit}>
+        <FormField label={t('auth.setup.deviceCode')} hint={t('auth.setup.deviceCodeHint')}>
+          {(id) => <Input id={id} autoFocus autoComplete="off" autoCapitalize="characters" spellCheck={false} value={deviceCode} onChange={(event) => setDeviceCode(event.target.value)} />}
+        </FormField>
         <FormField label={t('auth.setup.hostname')} hint={t('auth.setup.hostnameHint')}>
-          {(id) => <Input id={id} autoFocus autoComplete="off" value={hostname} onChange={(event) => setHostname(event.target.value)} placeholder={t('auth.setup.hostnamePlaceholder')} />}
+          {(id) => <Input id={id} autoComplete="off" value={hostname} onChange={(event) => setHostname(event.target.value)} placeholder={t('auth.setup.hostnamePlaceholder')} />}
         </FormField>
         <FormField label={t('auth.setup.password')} hint={t('auth.setup.passwordHint')}>
           {(id) => <Input id={id} autoComplete="new-password" minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />}

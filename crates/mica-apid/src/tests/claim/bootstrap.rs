@@ -283,8 +283,10 @@ pub(super) async fn a_factory_fresh_device_issues_one_administrator_session_to_c
     let (router, fake) = test_app(seeded_tree());
     fake.hold_access_reads(2, std::time::Duration::from_secs(1));
 
-    let first_body = json!({ "password": FIRST_PASSWORD }).to_string();
-    let second_body = json!({ "password": SECOND_PASSWORD }).to_string();
+    let first_body =
+        json!({ "deviceCode": "DFN4-L34C-T8N", "password": FIRST_PASSWORD }).to_string();
+    let second_body =
+        json!({ "deviceCode": "DFN4-L34C-T8N", "password": SECOND_PASSWORD }).to_string();
     let (first, second) = tokio::join!(
         post_json(&router, "/api/v1/setup", &first_body, None),
         post_json(&router, "/api/v1/setup", &second_body, None),

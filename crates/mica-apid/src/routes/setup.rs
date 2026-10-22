@@ -51,6 +51,12 @@ pub(crate) struct SetupRequest {
     /// not used after the claim (`docs/factory-ap-key.md`).
     #[serde(default, rename = "apPsk")]
     pub(super) ap_psk: Option<String>,
+    /// The device code from the device's label, as printed or without its
+    /// dashes, in any case. Required when the device has a code: it is the
+    /// proof that whoever claims the device holds it, which reaching the
+    /// console over a network the device joined by BLE is not.
+    #[serde(default, rename = "deviceCode")]
+    pub(super) device_code: Option<String>,
 }
 
 /// `POST /api/v1/setup` response body.
@@ -80,6 +86,9 @@ pub(crate) struct SetupResult {
 /// **Unauthenticated**, because it creates the device's first credential.
 /// Answers **409** once a password exists, which closes it permanently.
 ///
+/// On a device with a device code the body carries it as `deviceCode`, and a
+/// wrong one counts in the login backoff.
+///
 /// Everything is validated before anything is written; a rejected request
 /// leaves the device untouched and still in setup mode. On success the writes
 /// run in the order hostname, network, then `access` with `wifi.ap.psk` as
@@ -100,8 +109,10 @@ pub(crate) struct SetupResult {
     responses(
         (status = 201, description = "The device is configured and a browser session was created; the body carries that session's CSRF token", body = SetupResult),
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 403, description = "`deviceCode` is not this device's code (`device_code_incorrect`)", body = ApiError),
         (status = 409, description = "The device already has an admin password, so it is not in setup mode (`already_configured`). Change the password with `POST /api/v1/actions/change-password`", body = ApiError),
-        (status = 422, description = "The body is not this shape, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them", body = ApiError),
+        (status = 429, description = "Too many wrong device codes or logins; retry shortly (`login_throttled`)", body = ApiError),
+        (status = 422, description = "The body is not this shape, `deviceCode` is missing on a device with a code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them", body = ApiError),
         (status = 500, description = "Hashing the password failed (`hash_failed`), the stored `access` subtree could not be read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -147,6 +158,10 @@ pub(crate) async fn api_v1_setup(
         // makes the record useful.
         state.audit.record(CLAIM_EVENT, "refused", &source);
         return already_configured();
+    }
+    if let Err(response) = check_device_code(&state, request.device_code.as_deref(), &source).await
+    {
+        return *response;
     }
 
     // Everything below this line validates. Nothing below it writes until the
@@ -349,6 +364,67 @@ pub(crate) async fn api_v1_setup(
         }),
     )
         .into_response()
+}
+
+/// The possession check: `typed` must be the device's code when it has one.
+async fn check_device_code(
+    state: &AppState,
+    typed: Option<&str>,
+    source: &str,
+) -> Result<(), Box<Response>> {
+    let known = match state.api.get_device_code().await {
+        Ok(value) => value["code"].as_str().map(canonical_code),
+        Err(err) => return Err(Box::new(bus_api_error(&err, None))),
+    };
+    let Some(known) = known else {
+        return Ok(());
+    };
+    let Some(typed) = typed else {
+        return Err(Box::new(api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "this device has a device code: send it as `deviceCode`".to_string(),
+            )
+            .at("deviceCode"),
+        )));
+    };
+    if !state.guard.begin_attempt() {
+        state.audit.record(CLAIM_EVENT, "throttled", source);
+        return Err(Box::new(api_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            ApiError::apid(
+                "login_throttled",
+                "too many failed attempts; retry shortly".to_string(),
+            ),
+        )));
+    }
+    let typed = canonical_code(typed);
+    if aws_lc_rs::constant_time::verify_slices_are_equal(typed.as_bytes(), known.as_bytes())
+        .is_err()
+    {
+        state.guard.confirm_failure();
+        state.audit.record(CLAIM_EVENT, "wrong-device-code", source);
+        return Err(Box::new(api_response(
+            StatusCode::FORBIDDEN,
+            ApiError::apid(
+                "device_code_incorrect",
+                "that is not this device's code; it is on the device's label".to_string(),
+            )
+            .at("deviceCode"),
+        )));
+    }
+    state.guard.record_success();
+    Ok(())
+}
+
+/// A device code as typed, compared without dashes and spaces and in upper
+/// case, as the label prints it.
+fn canonical_code(code: &str) -> String {
+    code.chars()
+        .filter(|c| !matches!(c, '-' | ' '))
+        .map(|c| c.to_ascii_uppercase())
+        .collect()
 }
 
 /// 409 `already_configured`: the device has an administrator.

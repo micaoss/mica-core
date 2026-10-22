@@ -109,7 +109,9 @@ export const en = {
     },
     setup: {
       title: 'Make this device yours',
-      copy: 'Set the administrator password and, optionally, a hostname. Network interfaces can be inspected from the console next.',
+      copy: "Enter the device code from the device's label and set the administrator password and, optionally, a hostname. Network interfaces can be inspected from the console next.",
+      deviceCode: 'Device code',
+      deviceCodeHint: "On the device's label, for example DFN4-L34C-T8N. It shows that the device is in your hands.",
       hostname: 'Hostname',
       hostnameHint: 'Optional; letters, numbers and hyphens.',
       hostnamePlaceholder: 'mica',

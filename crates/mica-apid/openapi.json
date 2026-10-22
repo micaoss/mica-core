@@ -5961,7 +5961,7 @@
           "actions"
         ],
         "summary": "First-run setup: set the admin password and, optionally, a hostname and\nnetwork entries.",
-        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, then `access` with `wifi.ap.psk` as\none write.\n\nOn a product with Wi-Fi the claim sets the access point's key: `apPsk`\nwhen the body carries one, otherwise a generated key answered once as\n`apPsk`.\n\nAnswers **201** with the browser session's CSRF token and that generated\nkey. It mints no API token: see [`SetupResult`].",
+        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nOn a device with a device code the body carries it as `deviceCode`, and a\nwrong one counts in the login backoff.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, then `access` with `wifi.ap.psk` as\none write.\n\nOn a product with Wi-Fi the claim sets the access point's key: `apPsk`\nwhen the body carries one, otherwise a generated key answered once as\n`apPsk`.\n\nAnswers **201** with the browser session's CSRF token and that generated\nkey. It mints no API token: see [`SetupResult`].",
         "operationId": "api_v1_setup",
         "requestBody": {
           "content": {
@@ -5994,6 +5994,16 @@
               }
             }
           },
+          "403": {
+            "description": "`deviceCode` is not this device's code (`device_code_incorrect`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "405": {
             "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
             "content": {
@@ -6015,7 +6025,17 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them",
+            "description": "The body is not this shape, `deviceCode` is missing on a device with a code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong device codes or logins; retry shortly (`login_throttled`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12667,6 +12687,13 @@
               "null"
             ],
             "description": "The access point's key from now on (`wifi.ap.psk`), on a product with\nWi-Fi. Absent, the device generates one and answers it once in\n[`SetupResult::ap_psk`]. Either way the key derived for the label is\nnot used after the claim (`docs/factory-ap-key.md`)."
+          },
+          "deviceCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The device code from the device's label, as printed or without its\ndashes, in any case. Required when the device has a code: it is the\nproof that whoever claims the device holds it, which reaching the\nconsole over a network the device joined by BLE is not."
           },
           "hostname": {
             "type": [

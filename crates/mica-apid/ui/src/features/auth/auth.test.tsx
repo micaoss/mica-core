@@ -91,4 +91,20 @@ describe('first-run setup', () => {
     const body = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as Record<string, unknown>
     expect(body.apPsk).toBe('harbour-key-7')
   })
+
+  /// The device code from the label proves the device is in the claimer's
+  /// hands; the device answers whether it is the right one.
+  it('sends the device code from the label', async () => {
+    const fetch = stubFetch({ 'POST /api/v1/setup': { csrfToken: 'csrf-token' } })
+    renderPanel(withTheme(<SetupView />))
+
+    await userEvent.type(screen.getByLabelText('Device code'), 'DFN4-L34C-T8N')
+    await userEvent.type(screen.getByLabelText('Admin password'), 'correct-horse')
+    await userEvent.type(screen.getByLabelText('Confirm password'), 'correct-horse')
+    await userEvent.click(screen.getByRole('button', { name: 'Configure device' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled())
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as Record<string, unknown>
+    expect(body.deviceCode).toBe('DFN4-L34C-T8N')
+  })
 })
