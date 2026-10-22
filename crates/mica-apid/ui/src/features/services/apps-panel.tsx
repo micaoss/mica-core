@@ -15,13 +15,7 @@ import { TaskProgress } from '@/shared/components/task-progress'
 import { failureDetail } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { APPS, appState, appTone, useApps } from './apps'
-
-/// What a bundle asks for beyond the installed version (`app_privileges`).
-interface PrivilegesAsked {
-  root?: boolean
-  capabilities?: string[]
-  devices?: string[]
-}
+import { PrivilegesList, type PrivilegesAsked } from './privileges-asked'
 
 /// The bundle is streamed as its own bytes, as an update archive is.
 function postBundle(file: File, acceptPrivileges: boolean) {
@@ -57,7 +51,6 @@ export function AppsPanel() {
     },
   })
   const rules = upload.error instanceof ApiError ? upload.error.rules ?? [] : []
-  const list = (items?: string[]) => (items ?? []).join(', ')
 
   return (
     <div className="grid gap-3">
@@ -95,11 +88,7 @@ export function AppsPanel() {
                 description={(
                   <span className="grid gap-2">
                     <span>{t('services.apps.privileges.copy')}</span>
-                    <span className="grid gap-1">
-                      {asked.privileges.root ? <span className="font-medium">{t('services.apps.privileges.root')}</span> : null}
-                      {asked.privileges.capabilities?.length ? <span className="font-mono">{t('services.apps.privileges.capabilities', { list: list(asked.privileges.capabilities) })}</span> : null}
-                      {asked.privileges.devices?.length ? <span className="font-mono">{t('services.apps.privileges.devices', { list: list(asked.privileges.devices) })}</span> : null}
-                    </span>
+                    <PrivilegesList asked={asked.privileges} />
                   </span>
                 )}
                 confirmLabel={t('services.apps.privileges.accept')}

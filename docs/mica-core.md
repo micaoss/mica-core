@@ -633,9 +633,10 @@ install or update by hand takes it.
 
 | Member | Does |
 | --- | --- |
-| `GetApps`, `GetApp(name)` | `{available, arch, apps}`, and one of them: each app's `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user`, `account` and `uid` of its own user, `capabilities`, `devices`), `last` (the last flow's `action`, `outcome` `ok` or `failed`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` |
+| `GetApps`, `GetApp(name)` | `{available, arch, apps}`, and one of them: each app's `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user`, `account` and `uid` of its own user, `capabilities`, `devices`), `last` (the last flow's `action`, `outcome` `ok` or `failed`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`, and `privileges`, what the available version asks for beyond the installed one's once an update fetched it) and `seed` |
 | `InstallApp(path, reinstall, upgrade, acceptPrivileges)` | Install the bundle at `path`; `upgrade` refuses an app not installed. Unless `acceptPrivileges`, a bundle that asks for privileges beyond the installed version's is refused with them (`AppPrivileges`) |
-| `RollbackApp(name)`, `RemoveApp(name, purge)`, `CheckAppUpdate(name)`, `UpdateApp(name)` | The flows above |
+| `RollbackApp(name)`, `RemoveApp(name, purge)`, `CheckAppUpdate(name)` | The flows above |
+| `UpdateApp(name, acceptPrivileges)` | The update above. Unless `acceptPrivileges`, a version that asks for privileges beyond the installed one's fails the task and stays offered, with what it asks for in `GetApp`'s `update.privileges`; it is not marked failed |
 | `StartApp`, `StopApp`, `RestartApp(name)` | The verb on its units, at once |
 | `GetAppLog(name)` | Each unit's newest lines, as `GetUnitLog`, and the first-run output |
 
@@ -646,7 +647,7 @@ is `AppPrivileges`, its description JSON `{"message", "privileges": {"root", "ca
 "devices"}}`: what it asks for beyond the installed version (`root` when it runs as root and the
 installed one does not), or on a first install everything it asks for, nothing for an app of its
 own user that keeps no capability and opens no device. An app already running as root asks for
-nothing more. Seeds and updates (`UpdateApp`) are not asked. `GetUnits` names the app a unit is part
+nothing more. Seeds are not asked; an update by hand is asked through its task, as `UpdateApp` says, and an unattended one is refused (above). `GetUnits` names the app a unit is part
 of as `app`, and a `services.units` write naming an app's unit is refused (`unit_taken`).
 
 **On the device: `micad app`.**
@@ -655,7 +656,7 @@ of as `app`, and a `services.units` write naming an app's unit is refused (`unit
 | --- | --- |
 | `install <file> [--reinstall] [--yes]` | Install or upgrade the app in a bundle. A bundle that asks for privileges beyond the installed version's prints them and asks at the terminal; `--yes` accepts them, and without a terminal nothing is installed |
 | `upgrade <file> [--yes]` | The same, refused when the app is not installed |
-| `update <name>` | Fetch the newer version its update URL offers, and upgrade |
+| `update <name> [--yes]` | Fetch the newer version its update URL offers, and upgrade; one asking for more privileges prints them and asks at the terminal, unless `--yes` |
 | `check [name]` | Read its update URL now; every app with one, without a name |
 | `rollback <name>` | Switch to the previous version |
 | `remove <name> [--purge]` | Stop it and delete it; `--purge` its data too |
@@ -675,7 +676,9 @@ asking for privileges beyond the installed version's is 409 `app_privileges`, wi
 `?acceptPrivileges=true` takes it. The console then shows what the bundle asks for and uploads it
 again with `acceptPrivileges` once the user accepts.
 `DELETE /api/v1/apps/{name}` (`?purge=true`) removes; `POST /api/v1/apps/{name}/{action}`
-is `rollback`, `check` or `update` (a task) or `start`, `stop` or `restart`; `GET
+is `rollback`, `check` or `update` (a task; `update?acceptPrivileges=true` takes a version asking
+for more privileges, which the console shows from `update.privileges` and asks about first) or
+`start`, `stop` or `restart`; `GET
 /api/v1/apps/{name}/logs` is the log, each line scrubbed of secrets. The console lists the apps
 on its services page, with the upload, and gives each its own page.
 

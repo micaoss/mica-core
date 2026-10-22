@@ -263,8 +263,15 @@ pub trait SettingsApi: Send + Sync {
         anyhow::bail!("this build installs no apps")
     }
     /// `rollback`, `check` or `update` an app (`RollbackApp`,
-    /// `CheckAppUpdate`, `UpdateApp`), answering the task id.
-    async fn app_flow(&self, _name: &str, _flow: &str) -> anyhow::Result<String> {
+    /// `CheckAppUpdate`, `UpdateApp`), answering the task id. An `update`
+    /// takes a version asking for more privileges only when
+    /// `accept_privileges`.
+    async fn app_flow(
+        &self,
+        _name: &str,
+        _flow: &str,
+        _accept_privileges: bool,
+    ) -> anyhow::Result<String> {
         anyhow::bail!("this build changes no apps")
     }
     /// Remove an app, its data too when `purge` (`RemoveApp`), answering the

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
@@ -17,6 +17,7 @@ import { Spinner } from '@/shared/components/ui/spinner'
 import { failureDetail } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { appRoute, appState, appTone, useApps } from './apps'
+import { PrivilegesList } from './privileges-asked'
 
 type Verb = 'start' | 'stop' | 'restart'
 type Flow = 'rollback' | 'check' | 'update'
@@ -37,7 +38,7 @@ export function AppDetailPage() {
     enabled: app !== undefined,
   })
 
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['apps'] })
+  const invalidate = useCallback(() => void queryClient.invalidateQueries({ queryKey: ['apps'] }), [queryClient])
   const act = useMutationFeedback<void, Verb>({
     mutationFn: (verb) => api<void>(`${appRoute(name)}/${verb}`, { method: 'POST' }),
     success: (_data, verb) => t(`services.units.acted.${verb}`, { name }),
@@ -104,7 +105,7 @@ export function AppDetailPage() {
       {app.last?.outcome === 'failed' ? (
         <Callout tone="warning" title={t('services.apps.lastFailed', { action: app.last.action })}>{app.last.message}</Callout>
       ) : null}
-      <TaskProgress taskId={task} />
+      <TaskProgress taskId={task} onFinished={invalidate} />
 
       <PageSection title={t('services.apps.versionTitle')} description={t('services.apps.versionCopy')}>
         <div className="grid gap-3">
@@ -182,8 +183,35 @@ export function AppDetailPage() {
             {app.update.error ? <Callout tone="warning" title={app.update.error} /> : null}
             <span className="flex flex-wrap justify-end gap-2">
               <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => flow.mutate('check')}>{t('services.apps.check')}</Button>
-              <Button type="button" size="sm" disabled={!app.update.available || busy} onClick={() => flow.mutate('update')}>{t('services.apps.updateTo', { version: app.update.available ?? '' })}</Button>
+              {app.update.available && app.update.privileges ? (
+                <ConfirmDialog
+                  trigger={<Button type="button" size="sm" disabled={busy}>{t('services.apps.updateTo', { version: app.update.available })}</Button>}
+                  tone={app.update.privileges.root ? 'danger' : 'neutral'}
+                  title={t('services.apps.privileges.updateTitle', { version: app.update.available })}
+                  description={(
+                    <span className="grid gap-2">
+                      <span>{t('services.apps.privileges.updateCopy')}</span>
+                      <PrivilegesList asked={app.update.privileges} />
+                    </span>
+                  )}
+                  confirmLabel={t('services.apps.privileges.acceptUpdate')}
+                  success={t('services.apps.flows.update', { name })}
+                  failure={name}
+                  onConfirm={async () => {
+                    const accepted = await api<TaskAccepted>(`${appRoute(name)}/update?acceptPrivileges=true`, { method: 'POST' })
+                    setTask(accepted.taskId)
+                    invalidate()
+                  }}
+                />
+              ) : (
+                <Button type="button" size="sm" disabled={!app.update.available || busy} onClick={() => flow.mutate('update')}>{t('services.apps.updateTo', { version: app.update.available ?? '' })}</Button>
+              )}
             </span>
+            {app.update.available && app.update.privileges ? (
+              <Callout tone="warning" title={t('services.apps.privileges.updateTitle', { version: app.update.available })}>
+                <PrivilegesList asked={app.update.privileges} />
+              </Callout>
+            ) : null}
           </Panel>
         </PageSection>
       ) : null}

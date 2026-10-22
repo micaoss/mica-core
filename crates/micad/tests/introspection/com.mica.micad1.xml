@@ -283,10 +283,13 @@ Read an app's version file now; answers the task's id.
 </method>
 <!--
 Fetch and install the newer version an app's version file offers;
-answers the task's id.
+answers the task's id. Unless `accept_privileges`, a version that asks
+for privileges beyond the installed one's fails the task and is kept
+with what it asks for (`update.privileges` in `GetApp`).
 -->
 <method name="UpdateApp">
 <arg name="name" type="s" direction="in"/>
+<arg name="accept_privileges" type="b" direction="in"/>
 <arg type="s" direction="out"/>
 </method>
 <!--

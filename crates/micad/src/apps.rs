@@ -143,6 +143,18 @@ struct UpdateState {
     /// A version whose install failed: not offered again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     failed: Option<String>,
+    /// What the version offered asked for beyond the installed one when an
+    /// update by hand fetched it: it is offered still, and taken once they
+    /// are accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    asked: Option<AskedPrivileges>,
+}
+
+/// The privileges a version offered asks for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct AskedPrivileges {
+    version: String,
+    privileges: PrivilegeDelta,
 }
 
 /// One app in the record.
@@ -421,6 +433,12 @@ impl Apps {
                 "available": available,
                 "checkedAt": entry.update.checked_at,
                 "error": entry.update.error,
+                "privileges": entry
+                    .update
+                    .asked
+                    .as_ref()
+                    .filter(|asked| available.as_deref() == Some(asked.version.as_str()))
+                    .map(|asked| &asked.privileges),
             })),
             "seed": seed.map(|seed| json!({
                 "version": seed.version,

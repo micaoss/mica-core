@@ -14,7 +14,7 @@ use crate::unit_cli::bus_error;
 const USAGE: &str = "\
 usage: micad app install <file> [--reinstall] [--yes] [--detach]
        micad app upgrade <file> [--yes] [--detach]
-       micad app update <name> [--detach]
+       micad app update <name> [--yes] [--detach]
        micad app check [name]
        micad app rollback <name> [--detach]
        micad app remove <name> [--purge] [--detach]
@@ -28,7 +28,9 @@ usage: micad app install <file> [--reinstall] [--yes] [--detach]
             asks for privileges beyond the installed version's (root,
             capabilities, devices; any on a first install) prints them and
             asks first, unless --yes
-  update    fetch the newer version its update URL offers, and upgrade
+  update    fetch the newer version its update URL offers, and upgrade; one
+            that asks for more privileges prints them and asks first,
+            unless --yes
   check     read its update URL now (every app with one, without a name)
   rollback  switch to the previous version
   remove    stop it and delete it; --purge deletes its data too
@@ -66,7 +68,7 @@ trait MicadApps {
     fn rollback_app(&self, name: &str) -> zbus::Result<String>;
     fn remove_app(&self, name: &str, purge: bool) -> zbus::Result<String>;
     fn check_app_update(&self, name: &str) -> zbus::Result<String>;
-    fn update_app(&self, name: &str) -> zbus::Result<String>;
+    fn update_app(&self, name: &str, accept_privileges: bool) -> zbus::Result<String>;
     fn get_app_log(&self, name: &str) -> zbus::Result<String>;
 }
 
@@ -79,7 +81,11 @@ enum Command {
         /// Accept the privileges the bundle asks for without asking.
         yes: bool,
     },
-    Update(String),
+    Update {
+        name: String,
+        /// Accept the privileges the newer version asks for without asking.
+        yes: bool,
+    },
     Check(Option<String>),
     Rollback(String),
     Remove {
@@ -110,8 +116,8 @@ fn parse(args: &[String]) -> Result<(Command, bool), String> {
     let (words, detached) = take(args, "--detach");
     let (words, yes) = take(&words, "--yes");
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
-    if yes && !matches!(words.first(), Some(&("install" | "upgrade"))) {
-        return Err("--yes is for install and upgrade".into());
+    if yes && !matches!(words.first(), Some(&("install" | "upgrade" | "update"))) {
+        return Err("--yes is for install, upgrade and update".into());
     }
     let command = match words.as_slice() {
         ["install", file] => Command::Install {
@@ -132,7 +138,10 @@ fn parse(args: &[String]) -> Result<(Command, bool), String> {
             upgrade: true,
             yes,
         },
-        ["update", name] => Command::Update((*name).to_string()),
+        ["update", name] => Command::Update {
+            name: (*name).to_string(),
+            yes,
+        },
         ["check"] => Command::Check(None),
         ["check", name] => Command::Check(Some((*name).to_string())),
         ["rollback", name] => Command::Rollback((*name).to_string()),
@@ -268,7 +277,35 @@ async fn run(command: Command, detached: bool) -> Result<()> {
                 answer => answer,
             }
         }
-        Command::Update(name) => micad.update_app(&name).await,
+        Command::Update { name, yes } => {
+            let task = micad.update_app(&name, yes).await.map_err(bus_error)?;
+            if detached {
+                println!("task {task}");
+                return Ok(());
+            }
+            let err = match wait(&micad, &task).await {
+                Ok(message) => {
+                    println!("{message}");
+                    return Ok(());
+                }
+                Err(err) => err,
+            };
+            let app: Value = serde_json::from_str(&micad.get_app(&name).await.map_err(bus_error)?)?;
+            let privileges = &app["update"]["privileges"];
+            if yes || !privileges.is_object() {
+                return Err(err);
+            }
+            eprint!(
+                "{}",
+                render_privileges(
+                    &json!({ "message": format!("{err:#}"), "privileges": privileges })
+                )
+            );
+            if !confirm()? {
+                bail!("not updated; --yes accepts the privileges");
+            }
+            micad.update_app(&name, true).await
+        }
         Command::Rollback(name) => micad.rollback_app(&name).await,
         Command::Remove { name, purge } => micad.remove_app(&name, purge).await,
         Command::Check(Some(name)) => micad.check_app_update(&name).await,
@@ -559,6 +596,16 @@ mod tests {
         assert!(parse(&words("install")).is_err());
         assert!(parse(&words("remove demo --keep")).is_err());
         assert!(parse(&words("remove demo --yes")).is_err());
+        assert_eq!(
+            parse(&words("update demo --yes")),
+            Ok((
+                Command::Update {
+                    name: "demo".into(),
+                    yes: true
+                },
+                false
+            ))
+        );
     }
 
     #[test]

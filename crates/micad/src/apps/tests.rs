@@ -925,7 +925,7 @@ async fn an_update_is_offered_fetched_and_checked() {
     }
     let checked = rig.apps.check_update("demo").await.unwrap();
     assert_eq!(checked["available"], json!(true));
-    let Err(AppError::Failed(err)) = rig.apps.update("demo", &services).await else {
+    let Err(AppError::Failed(err)) = rig.apps.update("demo", &services, false).await else {
         panic!("a bundle of another sha256 is refused")
     };
     assert!(format!("{err:#}").contains("not the one"), "{err:#}");
@@ -941,7 +941,7 @@ async fn an_update_is_offered_fetched_and_checked() {
         "https://apps.example/demo/latest.json".into(),
         version_file(&sha256),
     );
-    rig.apps.update("demo", &services).await.unwrap();
+    rig.apps.update("demo", &services, false).await.unwrap();
     let entry = &rig.record().apps["demo"];
     assert_eq!(
         (
@@ -951,7 +951,7 @@ async fn an_update_is_offered_fetched_and_checked() {
         ("2.0", "url")
     );
     assert!(matches!(
-        rig.apps.update("demo", &services).await,
+        rig.apps.update("demo", &services, false).await,
         Err(AppError::Refused(_))
     ));
     assert!(
@@ -963,7 +963,8 @@ async fn an_update_is_offered_fetched_and_checked() {
 }
 
 /// An update no one started never takes a version that asks for more: root,
-/// a capability or a device. An update by hand does.
+/// a capability or a device. An update by hand asks first, and takes it once
+/// the privileges are accepted.
 #[tokio::test]
 async fn an_unattended_update_asks_for_no_more_privileges() {
     let rig = Rig::new(Init::Systemd);
@@ -1000,7 +1001,8 @@ async fn an_unattended_update_asks_for_no_more_privileges() {
         );
         files.insert("https://apps.example/demo/demo-2.0.tar.gz".into(), body);
     }
-    let Err(AppError::Refused(why)) = rig.apps.fetch_update("demo", &services, true).await else {
+    let Err(AppError::Refused(why)) = rig.apps.fetch_update("demo", &services, true, false).await
+    else {
         panic!("a root version is not taken unattended")
     };
     assert!(why.contains("more privileges"), "{why}");
@@ -1009,8 +1011,19 @@ async fn an_unattended_update_asks_for_no_more_privileges() {
     let mut record = rig.record();
     record.apps.get_mut("demo").unwrap().update.failed = None;
     rig.apps.write_record(&record).unwrap();
-    rig.apps.update("demo", &services).await.unwrap();
+    // By hand, it is kept with what it asks for until that is accepted.
+    let Err(AppError::Privileges(_, delta)) = rig.apps.update("demo", &services, false).await
+    else {
+        panic!("an update by hand asks first")
+    };
+    assert!(delta.root);
+    assert_eq!(rig.record().apps["demo"].current.version, "1.0");
+    let view = rig.apps.view(Some("demo")).await.unwrap();
+    assert_eq!(view["update"]["available"], json!("2.0"));
+    assert_eq!(view["update"]["privileges"]["root"], json!(true));
+    rig.apps.update("demo", &services, true).await.unwrap();
     assert_eq!(rig.record().apps["demo"].current.version, "2.0");
+    assert_eq!(rig.record().apps["demo"].update.asked, None);
 }
 
 #[test]

@@ -128,6 +128,11 @@ async fn the_actions_reach_micad() {
         ("POST", "/demo/rollback", StatusCode::ACCEPTED),
         ("POST", "/demo/check", StatusCode::ACCEPTED),
         ("POST", "/demo/update", StatusCode::ACCEPTED),
+        (
+            "POST",
+            "/demo/update?acceptPrivileges=true",
+            StatusCode::ACCEPTED,
+        ),
         ("POST", "/demo/restart", StatusCode::NO_CONTENT),
         ("DELETE", "/demo?purge=true", StatusCode::ACCEPTED),
         ("POST", "/demo/explode", StatusCode::NOT_FOUND),
@@ -143,6 +148,7 @@ async fn the_actions_reach_micad() {
             "app rollback demo",
             "app check demo",
             "app update demo",
+            "app update demo accepted",
             "app restart demo",
             "app remove demo purge=true",
         ]

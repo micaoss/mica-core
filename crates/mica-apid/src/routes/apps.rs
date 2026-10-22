@@ -35,6 +35,16 @@ pub(crate) struct InstallQuery {
     pub(super) accept_privileges: bool,
 }
 
+/// Whether an update takes a version asking for more privileges.
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+pub(crate) struct ActionQuery {
+    /// `update` only: take the newer version even when it asks for
+    /// privileges beyond the installed one's.
+    #[serde(default, rename = "acceptPrivileges")]
+    #[param(rename = "acceptPrivileges")]
+    pub(super) accept_privileges: bool,
+}
+
 /// Whether a removal deletes the app's data.
 #[derive(serde::Deserialize, utoipa::IntoParams)]
 pub(crate) struct RemoveQuery {
@@ -102,7 +112,7 @@ fn app_bus_error(err: &anyhow::Error) -> Response {
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "`available` (whether this daemon keeps apps), `arch` and `apps`: each with `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user` `app` or `root`, `account` and `uid` of an app's own user, `capabilities`, `devices`), `last` (`action`, `outcome`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`) and `seed` (`version`, `policy`)", body = ResourceValue),
+        (status = 200, description = "`available` (whether this daemon keeps apps), `arch` and `apps`: each with `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user` `app` or `root`, `account` and `uid` of an app's own user, `capabilities`, `devices`), `last` (`action`, `outcome`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`, and `privileges` `{root, capabilities, devices}` the available version asks for beyond the installed one's once an update fetched it) and `seed` (`version`, `policy`)", body = ResourceValue),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 500, description = "micad failed (`micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
@@ -330,9 +340,10 @@ pub(crate) async fn api_v1_app_remove(
     params(
         ("name" = String, Path, description = "The app"),
         ("action" = String, Path, description = "`rollback`, `check`, `update`, `start`, `stop` or `restart`"),
+        ActionQuery,
     ),
     responses(
-        (status = 202, description = "`rollback`, `check` or `update` was queued; the body carries the task id", body = TaskAccepted),
+        (status = 202, description = "`rollback`, `check` or `update` was queued; the body carries the task id. An `update` to a version asking for privileges beyond the installed one's fails its task unless `acceptPrivileges`, and the app's `update.privileges` then says what it asks for", body = TaskAccepted),
         (status = 204, description = "The init carried out `start`, `stop` or `restart`"),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
@@ -349,9 +360,14 @@ pub(crate) async fn api_v1_app_action(
     _credential: ApiCredential,
     State(state): State<AppState>,
     Path((name, action)): Path<(String, String)>,
+    Query(query): Query<ActionQuery>,
 ) -> Response {
     match action.as_str() {
-        "rollback" | "check" | "update" => match state.api.app_flow(&name, &action).await {
+        "rollback" | "check" | "update" => match state
+            .api
+            .app_flow(&name, &action, query.accept_privileges)
+            .await
+        {
             Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),
             Err(err) => app_bus_error(&err),
         },

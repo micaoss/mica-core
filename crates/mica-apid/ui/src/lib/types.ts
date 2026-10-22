@@ -732,7 +732,12 @@ export interface AppEntry {
   /// Root has the whole device; an app's own user only what it declares.
   privileges: { user: 'app' | 'root'; account: string | null; uid: number | null; capabilities: string[]; devices: string[] } | null
   last: { action: string; outcome: string; message?: string; at: string } | null
-  update: { url: string; auto: boolean; available: string | null; checkedAt: string | null; error: string | null } | null
+  /// `privileges`: what the available version asks for beyond the installed
+  /// one's, once an update fetched it; it is taken only when accepted.
+  update: {
+    url: string; auto: boolean; available: string | null; checkedAt: string | null; error: string | null
+    privileges?: { root: boolean; capabilities: string[]; devices: string[] } | null
+  } | null
   seed: { version: string; policy: string | null } | null
 }
 

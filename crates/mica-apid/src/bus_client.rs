@@ -120,7 +120,7 @@ trait Micad {
     fn rollback_app(&self, name: &str) -> zbus::Result<String>;
     fn remove_app(&self, name: &str, purge: bool) -> zbus::Result<String>;
     fn check_app_update(&self, name: &str) -> zbus::Result<String>;
-    fn update_app(&self, name: &str) -> zbus::Result<String>;
+    fn update_app(&self, name: &str, accept_privileges: bool) -> zbus::Result<String>;
     fn start_app(&self, name: &str) -> zbus::Result<()>;
     fn stop_app(&self, name: &str) -> zbus::Result<()>;
     fn restart_app(&self, name: &str) -> zbus::Result<()>;
@@ -711,7 +711,12 @@ impl SettingsApi for BusSettings {
         .await
     }
 
-    async fn app_flow(&self, name: &str, flow: &str) -> anyhow::Result<String> {
+    async fn app_flow(
+        &self,
+        name: &str,
+        flow: &str,
+        accept_privileges: bool,
+    ) -> anyhow::Result<String> {
         let proxy = self.proxy().await?;
         match flow {
             "rollback" => self.call("RollbackApp", proxy.rollback_app(name)).await,
@@ -719,7 +724,10 @@ impl SettingsApi for BusSettings {
                 self.call("CheckAppUpdate", proxy.check_app_update(name))
                     .await
             }
-            _ => self.call("UpdateApp", proxy.update_app(name)).await,
+            _ => {
+                self.call("UpdateApp", proxy.update_app(name, accept_privileges))
+                    .await
+            }
         }
     }
 

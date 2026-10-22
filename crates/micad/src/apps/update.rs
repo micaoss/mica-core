@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use super::bundle::{self, MAX_ARCHIVE_BYTES};
 use super::flow::InstallOptions;
-use super::{AppEntry, AppError, Apps, now};
+use super::{AppEntry, AppError, Apps, AskedPrivileges, now};
 
 /// The largest version file read.
 const VERSION_FILE_BYTES: u64 = 64 * 1024;
@@ -164,22 +164,34 @@ impl Apps {
     }
 
     /// Check `name`, then fetch and install the newer version it offers.
+    /// Unless `accept_privileges`, a version that asks for privileges beyond
+    /// the installed one's is not installed: what it asks for is kept with
+    /// the offer (`update.privileges`) for the next update to accept.
     ///
     /// # Errors
     ///
     /// The check failed, nothing newer is offered, the bundle did not match
-    /// its sha256, or its install failed (and was rolled back).
-    pub async fn update(&self, name: &str, services: &ServicesSettings) -> Result<Value, AppError> {
-        self.fetch_update(name, services, false).await
+    /// its sha256, it asks for privileges not accepted, or its install failed
+    /// (and was rolled back).
+    pub async fn update(
+        &self,
+        name: &str,
+        services: &ServicesSettings,
+        accept_privileges: bool,
+    ) -> Result<Value, AppError> {
+        self.fetch_update(name, services, false, !accept_privileges)
+            .await
     }
 
     /// [`Apps::update`]; when `unattended`, a version that asks for more
-    /// privileges is refused, and left to an update by hand.
+    /// privileges is refused, and left to an update by hand; when
+    /// `ask_privileges`, it is kept with what it asks for.
     pub(super) async fn fetch_update(
         &self,
         name: &str,
         services: &ServicesSettings,
         unattended: bool,
+        ask_privileges: bool,
     ) -> Result<Value, AppError> {
         self.check_update(name).await?;
         let record = self.read_record();
@@ -213,6 +225,7 @@ impl Apps {
                     InstallOptions {
                         upgrade: true,
                         unattended,
+                        ask_privileges,
                         ..Default::default()
                     },
                     services,
@@ -222,10 +235,17 @@ impl Apps {
             Err(err) => Err(AppError::Failed(err)),
         };
         let _ = std::fs::remove_file(&path);
-        if installed.is_err() {
-            let mut record = self.read_record();
-            if let Some(entry) = record.apps.get_mut(name) {
-                entry.update.failed = Some(offer.version.clone());
+        let mut record = self.read_record();
+        if let Some(entry) = record.apps.get_mut(name) {
+            match &installed {
+                Err(AppError::Privileges(_, delta)) => {
+                    entry.update.asked = Some(AskedPrivileges {
+                        version: offer.version.clone(),
+                        privileges: delta.clone(),
+                    });
+                }
+                Err(_) => entry.update.failed = Some(offer.version.clone()),
+                Ok(_) => entry.update.asked = None,
             }
             self.write_record(&record)?;
         }
@@ -248,7 +268,7 @@ impl Apps {
             let done = if spec.auto {
                 match self.check_update(&name).await {
                     Ok(checked) if checked["available"] == json!(true) => {
-                        self.fetch_update(&name, services, true).await
+                        self.fetch_update(&name, services, true, false).await
                     }
                     other => other,
                 }

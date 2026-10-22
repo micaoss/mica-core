@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/shared/lib/http'
@@ -8,7 +9,7 @@ import { Callout } from './callout'
 /// task the daemon handed back until it settles. This is device state, not the
 /// outcome of a click, so it stays inline rather than becoming a toast: the
 /// operator may leave and come back while a change is still applying.
-export function TaskProgress({ taskId }: { taskId?: string }) {
+export function TaskProgress({ taskId, onFinished }: { taskId?: string, onFinished?: () => void }) {
   const { t } = useTranslation()
   const task = useQuery({
     queryKey: ['task', taskId],
@@ -16,6 +17,12 @@ export function TaskProgress({ taskId }: { taskId?: string }) {
     enabled: Boolean(taskId),
     refetchInterval: (query) => query.state.data?.status === 'finished' ? false : 1_000,
   })
+  const finished = task.data?.status === 'finished'
+  // When the task finishes, what it changed is read again; `onFinished` is
+  // the caller's stable callback.
+  useEffect(() => {
+    if (finished) onFinished?.()
+  }, [finished, onFinished])
   if (!taskId) return null
   if (task.error) return <Callout tone="warning" title={t('task.unconfirmed')} />
   const value = task.data

@@ -1011,7 +1011,7 @@ async fn send_to_log(logger: &str, tag: &str, log: &[u8]) {
 }
 
 /// What an app asks for beyond what it has.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PrivilegeDelta {
     /// It runs as root, with full control of the device.
     pub root: bool,

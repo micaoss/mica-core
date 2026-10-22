@@ -520,12 +520,18 @@ impl SettingsApi for FakeSettings {
         Ok(self.completed_task("app.install", "apps.demo"))
     }
 
-    async fn app_flow(&self, name: &str, flow: &str) -> anyhow::Result<String> {
+    async fn app_flow(
+        &self,
+        name: &str,
+        flow: &str,
+        accept_privileges: bool,
+    ) -> anyhow::Result<String> {
         fake_app_named(name)?;
+        let accepted = if accept_privileges { " accepted" } else { "" };
         self.container_calls
             .lock()
             .unwrap()
-            .push(format!("app {flow} {name}"));
+            .push(format!("app {flow} {name}{accepted}"));
         Ok(self.completed_task(&format!("app.{flow}"), &format!("apps.{name}")))
     }
 
