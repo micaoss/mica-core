@@ -198,7 +198,7 @@ export function AppDetailPage() {
                   success={t('services.apps.flows.update', { name })}
                   failure={name}
                   onConfirm={async () => {
-                    const accepted = await api<TaskAccepted>(`${appRoute(name)}/update?acceptPrivileges=true`, { method: 'POST' })
+                    const accepted = await api<TaskAccepted>(`${appRoute(name)}/update?acceptPrivileges=${encodeURIComponent(app.update?.available ?? '')}`, { method: 'POST' })
                     setTask(accepted.taskId)
                     invalidate()
                   }}

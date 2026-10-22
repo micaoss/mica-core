@@ -154,6 +154,9 @@ struct UpdateState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct AskedPrivileges {
     version: String,
+    /// The bundle asked about.
+    #[serde(default)]
+    sha256: String,
     privileges: PrivilegeDelta,
 }
 

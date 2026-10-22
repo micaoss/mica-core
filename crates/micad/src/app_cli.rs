@@ -30,7 +30,7 @@ usage: micad app install <file> [--reinstall] [--yes] [--detach]
             asks first, unless --yes
   update    fetch the newer version its update URL offers, and upgrade; one
             that asks for more privileges prints them and asks first,
-            unless --yes
+            unless --yes; either accepts that version and bundle only
   check     read its update URL now (every app with one, without a name)
   rollback  switch to the previous version
   remove    stop it and delete it; --purge deletes its data too
@@ -68,7 +68,7 @@ trait MicadApps {
     fn rollback_app(&self, name: &str) -> zbus::Result<String>;
     fn remove_app(&self, name: &str, purge: bool) -> zbus::Result<String>;
     fn check_app_update(&self, name: &str) -> zbus::Result<String>;
-    fn update_app(&self, name: &str, accept_privileges: bool) -> zbus::Result<String>;
+    fn update_app(&self, name: &str, accept: &str) -> zbus::Result<String>;
     fn get_app_log(&self, name: &str) -> zbus::Result<String>;
 }
 
@@ -278,7 +278,7 @@ async fn run(command: Command, detached: bool) -> Result<()> {
             }
         }
         Command::Update { name, yes } => {
-            let task = micad.update_app(&name, yes).await.map_err(bus_error)?;
+            let task = micad.update_app(&name, "").await.map_err(bus_error)?;
             if detached {
                 println!("task {task}");
                 return Ok(());
@@ -292,19 +292,24 @@ async fn run(command: Command, detached: bool) -> Result<()> {
             };
             let app: Value = serde_json::from_str(&micad.get_app(&name).await.map_err(bus_error)?)?;
             let privileges = &app["update"]["privileges"];
-            if yes || !privileges.is_object() {
+            let Some(version) = app["update"]["available"]
+                .as_str()
+                .filter(|_| privileges.is_object())
+            else {
                 return Err(err);
+            };
+            if !yes {
+                eprint!(
+                    "{}",
+                    render_privileges(
+                        &json!({ "message": format!("{err:#}"), "privileges": privileges })
+                    )
+                );
+                if !confirm()? {
+                    bail!("not updated; --yes accepts the privileges");
+                }
             }
-            eprint!(
-                "{}",
-                render_privileges(
-                    &json!({ "message": format!("{err:#}"), "privileges": privileges })
-                )
-            );
-            if !confirm()? {
-                bail!("not updated; --yes accepts the privileges");
-            }
-            micad.update_app(&name, true).await
+            micad.update_app(&name, version).await
         }
         Command::Rollback(name) => micad.rollback_app(&name).await,
         Command::Remove { name, purge } => micad.remove_app(&name, purge).await,

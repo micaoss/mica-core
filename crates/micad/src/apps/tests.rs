@@ -925,7 +925,7 @@ async fn an_update_is_offered_fetched_and_checked() {
     }
     let checked = rig.apps.check_update("demo").await.unwrap();
     assert_eq!(checked["available"], json!(true));
-    let Err(AppError::Failed(err)) = rig.apps.update("demo", &services, false).await else {
+    let Err(AppError::Failed(err)) = rig.apps.update("demo", &services, "").await else {
         panic!("a bundle of another sha256 is refused")
     };
     assert!(format!("{err:#}").contains("not the one"), "{err:#}");
@@ -941,7 +941,7 @@ async fn an_update_is_offered_fetched_and_checked() {
         "https://apps.example/demo/latest.json".into(),
         version_file(&sha256),
     );
-    rig.apps.update("demo", &services, false).await.unwrap();
+    rig.apps.update("demo", &services, "").await.unwrap();
     let entry = &rig.record().apps["demo"];
     assert_eq!(
         (
@@ -951,7 +951,7 @@ async fn an_update_is_offered_fetched_and_checked() {
         ("2.0", "url")
     );
     assert!(matches!(
-        rig.apps.update("demo", &services, false).await,
+        rig.apps.update("demo", &services, "").await,
         Err(AppError::Refused(_))
     ));
     assert!(
@@ -1001,7 +1001,7 @@ async fn an_unattended_update_asks_for_no_more_privileges() {
         );
         files.insert("https://apps.example/demo/demo-2.0.tar.gz".into(), body);
     }
-    let Err(AppError::Refused(why)) = rig.apps.fetch_update("demo", &services, true, false).await
+    let Err(AppError::Refused(why)) = rig.apps.fetch_update("demo", &services, true, "").await
     else {
         panic!("a root version is not taken unattended")
     };
@@ -1012,8 +1012,7 @@ async fn an_unattended_update_asks_for_no_more_privileges() {
     record.apps.get_mut("demo").unwrap().update.failed = None;
     rig.apps.write_record(&record).unwrap();
     // By hand, it is kept with what it asks for until that is accepted.
-    let Err(AppError::Privileges(_, delta)) = rig.apps.update("demo", &services, false).await
-    else {
+    let Err(AppError::Privileges(_, delta)) = rig.apps.update("demo", &services, "").await else {
         panic!("an update by hand asks first")
     };
     assert!(delta.root);
@@ -1021,9 +1020,81 @@ async fn an_unattended_update_asks_for_no_more_privileges() {
     let view = rig.apps.view(Some("demo")).await.unwrap();
     assert_eq!(view["update"]["available"], json!("2.0"));
     assert_eq!(view["update"]["privileges"]["root"], json!(true));
-    rig.apps.update("demo", &services, true).await.unwrap();
+    rig.apps.update("demo", &services, "2.0").await.unwrap();
     assert_eq!(rig.record().apps["demo"].current.version, "2.0");
     assert_eq!(rig.record().apps["demo"].update.asked, None);
+}
+
+/// An update accepts the version it asked about, and only with the bundle
+/// it asked about: another one offered meanwhile is asked about again.
+#[tokio::test]
+async fn an_update_accepts_only_what_it_asked_about() {
+    let rig = Rig::new(Init::Systemd);
+    let services = ServicesSettings::default();
+    let url = "https://apps.example/demo/latest.json";
+    let own = |privileges: serde_json::Value| {
+        json!({
+            "update": { "url": url },
+            "services": [{ "name": "demo", "exec": ["files/run"] }],
+            "privileges": privileges,
+        })
+    };
+    rig.install(&rig.bundle("demo", "1.0", own(json!({})), None), false)
+        .await
+        .unwrap();
+    let offer = |version: &str, extra: serde_json::Value| {
+        let next = rig.bundle("demo", version, extra, None);
+        let body = std::fs::read(&next).unwrap();
+        let mut files = rig.fetch.files.lock().unwrap();
+        files.insert(
+            url.into(),
+            json!({
+                "name": "demo",
+                "version": version,
+                "bundles": { "all": {
+                    "url": format!("demo-{version}.tar.gz"),
+                    "sha256": bundle::sha256_file(&next).unwrap(),
+                    "size": body.len(),
+                } },
+            })
+            .to_string()
+            .into_bytes(),
+        );
+        files.insert(
+            format!("https://apps.example/demo/demo-{version}.tar.gz"),
+            body,
+        );
+    };
+    let asked = |accept: &'static str| {
+        let (rig, services) = (&rig, &services);
+        async move {
+            let Err(AppError::Privileges(_, delta)) =
+                rig.apps.update("demo", services, accept).await
+            else {
+                panic!("{accept:?} is asked about again")
+            };
+            assert_eq!(rig.record().apps["demo"].current.version, "1.0");
+            delta
+        }
+    };
+
+    offer("2.0", own(json!({ "capabilities": ["CAP_NET_RAW"] })));
+    assert_eq!(asked("").await.capabilities, ["CAP_NET_RAW"]);
+    // The same version, another bundle.
+    offer(
+        "2.0",
+        own(json!({ "capabilities": ["CAP_NET_RAW"], "devices": ["/dev/ttyUSB0"] })),
+    );
+    assert_eq!(asked("2.0").await.devices, ["/dev/ttyUSB0"]);
+    // Another version.
+    offer("2.1", json!({ "update": { "url": url } }));
+    assert!(asked("2.0").await.root);
+    assert_eq!(
+        rig.apps.view(Some("demo")).await.unwrap()["update"]["available"],
+        json!("2.1")
+    );
+    rig.apps.update("demo", &services, "2.1").await.unwrap();
+    assert_eq!(rig.record().apps["demo"].current.version, "2.1");
 }
 
 #[test]

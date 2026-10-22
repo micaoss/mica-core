@@ -84,12 +84,12 @@ describe('one app', () => {
     expect(await screen.findByText('Change applied.')).toBeTruthy()
   })
 
-  it('updates to a version asking for more privileges only once they are accepted', async () => {
+  it('updates to the version asking for more privileges only once they are accepted, naming it', async () => {
     const asking = { ...demo, update: { ...demo.update, privileges: { root: false, capabilities: ['CAP_NET_BIND_SERVICE'], devices: [] } } }
     const fetch = stubFetch({
       ...routes,
       '/api/v1/apps': { available: true, arch: 'arm64', apps: [asking] },
-      'POST /api/v1/apps/tailscale/update?acceptPrivileges=true': () => jsonResponse({ taskId: 'task-1' }, 202),
+      'POST /api/v1/apps/tailscale/update?acceptPrivileges=1.80.0': () => jsonResponse({ taskId: 'task-1' }, 202),
     })
     renderPage()
 
@@ -99,7 +99,7 @@ describe('one app', () => {
     expect(within(dialog).getByText('Capabilities: CAP_NET_BIND_SERVICE')).toBeTruthy()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Update with these privileges' }))
 
-    await waitFor(() => expect(sent(fetch, 'POST', '/api/v1/apps/tailscale/update?acceptPrivileges=true')).toBeTruthy())
+    await waitFor(() => expect(sent(fetch, 'POST', '/api/v1/apps/tailscale/update?acceptPrivileges=1.80.0')).toBeTruthy())
     expect(sent(fetch, 'POST', '/api/v1/apps/tailscale/update')).toBeUndefined()
   })
 

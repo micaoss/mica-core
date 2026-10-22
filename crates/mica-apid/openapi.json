@@ -1059,16 +1059,16 @@
           {
             "name": "acceptPrivileges",
             "in": "path",
-            "description": "`update` only: take the newer version even when it asks for\nprivileges beyond the installed one's.",
+            "description": "`update` only: the version whose privileges beyond the installed\none's are accepted, as `update.privileges` showed them. A different\nversion or bundle, or one asking more, is asked about again.",
             "required": true,
             "schema": {
-              "type": "boolean"
+              "type": "string"
             }
           }
         ],
         "responses": {
           "202": {
-            "description": "`rollback`, `check` or `update` was queued; the body carries the task id. An `update` to a version asking for privileges beyond the installed one's fails its task unless `acceptPrivileges`, and the app's `update.privileges` then says what it asks for",
+            "description": "`rollback`, `check` or `update` was queued; the body carries the task id. An `update` to a version asking for privileges beyond the installed one's fails its task unless `acceptPrivileges` names it, and the app's `update.privileges` then says what it asks for",
             "content": {
               "application/json": {
                 "schema": {

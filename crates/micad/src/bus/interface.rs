@@ -640,26 +640,27 @@ impl MicadService {
     }
 
     /// Fetch and install the newer version an app's version file offers;
-    /// answers the task's id. Unless `accept_privileges`, a version that asks
-    /// for privileges beyond the installed one's fails the task and is kept
-    /// with what it asks for (`update.privileges` in `GetApp`).
+    /// answers the task's id. A version that asks for privileges beyond the
+    /// installed one's fails the task and is kept with what it asks for
+    /// (`update.privileges` in `GetApp`), unless it is `accept`: the version
+    /// asked about, with the same bundle and nothing more asked. `""`
+    /// accepts nothing.
     pub(super) async fn update_app(
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
         #[zbus(header)] header: Header<'_>,
         name: &str,
-        accept_privileges: bool,
+        accept: &str,
     ) -> Result<String, AppFault> {
         let owned = name.to_string();
+        let accept = accept.to_string();
         Ok(self
             .app_flow_now(
                 &emitter,
                 sender_of(&header),
                 "app.update",
                 name,
-                |apps, services| async move {
-                    apps.update(&owned, &services, accept_privileges).await
-                },
+                |apps, services| async move { apps.update(&owned, &services, &accept).await },
             )
             .await?)
     }

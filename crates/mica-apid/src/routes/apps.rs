@@ -35,14 +35,15 @@ pub(crate) struct InstallQuery {
     pub(super) accept_privileges: bool,
 }
 
-/// Whether an update takes a version asking for more privileges.
+/// Which version an update takes asking for more privileges.
 #[derive(serde::Deserialize, utoipa::IntoParams)]
 pub(crate) struct ActionQuery {
-    /// `update` only: take the newer version even when it asks for
-    /// privileges beyond the installed one's.
+    /// `update` only: the version whose privileges beyond the installed
+    /// one's are accepted, as `update.privileges` showed them. A different
+    /// version or bundle, or one asking more, is asked about again.
     #[serde(default, rename = "acceptPrivileges")]
     #[param(rename = "acceptPrivileges")]
-    pub(super) accept_privileges: bool,
+    pub(super) accept_privileges: String,
 }
 
 /// Whether a removal deletes the app's data.
@@ -343,7 +344,7 @@ pub(crate) async fn api_v1_app_remove(
         ActionQuery,
     ),
     responses(
-        (status = 202, description = "`rollback`, `check` or `update` was queued; the body carries the task id. An `update` to a version asking for privileges beyond the installed one's fails its task unless `acceptPrivileges`, and the app's `update.privileges` then says what it asks for", body = TaskAccepted),
+        (status = 202, description = "`rollback`, `check` or `update` was queued; the body carries the task id. An `update` to a version asking for privileges beyond the installed one's fails its task unless `acceptPrivileges` names it, and the app's `update.privileges` then says what it asks for", body = TaskAccepted),
         (status = 204, description = "The init carried out `start`, `stop` or `restart`"),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
@@ -365,7 +366,7 @@ pub(crate) async fn api_v1_app_action(
     match action.as_str() {
         "rollback" | "check" | "update" => match state
             .api
-            .app_flow(&name, &action, query.accept_privileges)
+            .app_flow(&name, &action, &query.accept_privileges)
             .await
         {
             Ok(task_id) => api_response(StatusCode::ACCEPTED, TaskAccepted { task_id }),

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::bundle::{self, MAX_ARCHIVE_BYTES};
-use super::flow::InstallOptions;
+use super::flow::{InstallOptions, PrivilegeDelta, privilege_delta};
 use super::{AppEntry, AppError, Apps, AskedPrivileges, now};
 
 /// The largest version file read.
@@ -164,9 +164,10 @@ impl Apps {
     }
 
     /// Check `name`, then fetch and install the newer version it offers.
-    /// Unless `accept_privileges`, a version that asks for privileges beyond
-    /// the installed one's is not installed: what it asks for is kept with
-    /// the offer (`update.privileges`) for the next update to accept.
+    /// A version that asks for privileges beyond the installed one's is not
+    /// installed unless it is `accept`, the version asked about, with the
+    /// same bundle and nothing more asked: what it asks for is kept with the
+    /// offer (`update.privileges`) for an update to accept.
     ///
     /// # Errors
     ///
@@ -177,21 +178,19 @@ impl Apps {
         &self,
         name: &str,
         services: &ServicesSettings,
-        accept_privileges: bool,
+        accept: &str,
     ) -> Result<Value, AppError> {
-        self.fetch_update(name, services, false, !accept_privileges)
-            .await
+        self.fetch_update(name, services, false, accept).await
     }
 
     /// [`Apps::update`]; when `unattended`, a version that asks for more
-    /// privileges is refused, and left to an update by hand; when
-    /// `ask_privileges`, it is kept with what it asks for.
+    /// privileges is refused, and left to an update by hand.
     pub(super) async fn fetch_update(
         &self,
         name: &str,
         services: &ServicesSettings,
         unattended: bool,
-        ask_privileges: bool,
+        accept: &str,
     ) -> Result<Value, AppError> {
         self.check_update(name).await?;
         let record = self.read_record();
@@ -205,6 +204,17 @@ impl Apps {
             .clone()
             .filter(|offer| is_available(entry, &offer.version))
             .ok_or_else(|| AppError::Refused(format!("no newer version of {name} is offered")))?;
+        let accepted = entry
+            .update
+            .asked
+            .as_ref()
+            .filter(|asked| {
+                !accept.is_empty()
+                    && asked.version == accept
+                    && asked.version == offer.version
+                    && asked.sha256 == offer.sha256
+            })
+            .map(|asked| asked.privileges.clone());
         let path = self
             .incoming()?
             .join(format!(".{name}-{}.tar.gz", offer.version));
@@ -225,7 +235,9 @@ impl Apps {
                     InstallOptions {
                         upgrade: true,
                         unattended,
-                        ask_privileges,
+                        ask_privileges: !unattended
+                            && !accepted
+                                .is_some_and(|accepted| self.asks_within(entry, &path, &accepted)),
                         ..Default::default()
                     },
                     services,
@@ -241,6 +253,7 @@ impl Apps {
                 Err(AppError::Privileges(_, delta)) => {
                     entry.update.asked = Some(AskedPrivileges {
                         version: offer.version.clone(),
+                        sha256: offer.sha256.clone(),
                         privileges: delta.clone(),
                     });
                 }
@@ -250,6 +263,28 @@ impl Apps {
             self.write_record(&record)?;
         }
         installed
+    }
+
+    /// Whether the bundle at `archive` asks for nothing beyond `accepted`
+    /// over `entry`'s installed version.
+    fn asks_within(&self, entry: &AppEntry, archive: &Path, accepted: &PrivilegeDelta) -> bool {
+        let Ok(next) = bundle::peek_manifest(archive) else {
+            return false;
+        };
+        let Ok(installed) = self.manifest_of(&next.name, &entry.current.version) else {
+            return false;
+        };
+        privilege_delta(Some(&installed.privileges), &next.privileges).is_none_or(|delta| {
+            (!delta.root || accepted.root)
+                && delta
+                    .capabilities
+                    .iter()
+                    .all(|capability| accepted.capabilities.contains(capability))
+                && delta
+                    .devices
+                    .iter()
+                    .all(|device| accepted.devices.contains(device))
+        })
     }
 
     /// Every app with an update URL checked; those that say `auto` updated,
@@ -268,7 +303,7 @@ impl Apps {
             let done = if spec.auto {
                 match self.check_update(&name).await {
                     Ok(checked) if checked["available"] == json!(true) => {
-                        self.fetch_update(&name, services, true, false).await
+                        self.fetch_update(&name, services, true, "").await
                     }
                     other => other,
                 }

@@ -636,7 +636,7 @@ install or update by hand takes it.
 | `GetApps`, `GetApp(name)` | `{available, arch, apps}`, and one of them: each app's `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user`, `account` and `uid` of its own user, `capabilities`, `devices`), `last` (the last flow's `action`, `outcome` `ok` or `failed`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`, and `privileges`, what the available version asks for beyond the installed one's once an update fetched it) and `seed` |
 | `InstallApp(path, reinstall, upgrade, acceptPrivileges)` | Install the bundle at `path`; `upgrade` refuses an app not installed. Unless `acceptPrivileges`, a bundle that asks for privileges beyond the installed version's is refused with them (`AppPrivileges`) |
 | `RollbackApp(name)`, `RemoveApp(name, purge)`, `CheckAppUpdate(name)` | The flows above |
-| `UpdateApp(name, acceptPrivileges)` | The update above. Unless `acceptPrivileges`, a version that asks for privileges beyond the installed one's fails the task and stays offered, with what it asks for in `GetApp`'s `update.privileges`; it is not marked failed |
+| `UpdateApp(name, accept)` | The update above. A version that asks for privileges beyond the installed one's fails the task and stays offered, with what it asks for in `GetApp`'s `update.privileges`; it is not marked failed. It is taken only when `accept` is that version and the bundle fetched is the one asked about, asking nothing more; any other is asked about again. `""` accepts nothing |
 | `StartApp`, `StopApp`, `RestartApp(name)` | The verb on its units, at once |
 | `GetAppLog(name)` | Each unit's newest lines, as `GetUnitLog`, and the first-run output |
 
@@ -656,7 +656,7 @@ of as `app`, and a `services.units` write naming an app's unit is refused (`unit
 | --- | --- |
 | `install <file> [--reinstall] [--yes]` | Install or upgrade the app in a bundle. A bundle that asks for privileges beyond the installed version's prints them and asks at the terminal; `--yes` accepts them, and without a terminal nothing is installed |
 | `upgrade <file> [--yes]` | The same, refused when the app is not installed |
-| `update <name> [--yes]` | Fetch the newer version its update URL offers, and upgrade; one asking for more privileges prints them and asks at the terminal, unless `--yes` |
+| `update <name> [--yes]` | Fetch the newer version its update URL offers, and upgrade; one asking for more privileges prints them and asks at the terminal, unless `--yes`. Either accepts that version and bundle only: another one offered meanwhile is asked about again |
 | `check [name]` | Read its update URL now; every app with one, without a name |
 | `rollback <name>` | Switch to the previous version |
 | `remove <name> [--purge]` | Stop it and delete it; `--purge` its data too |
@@ -676,8 +676,9 @@ asking for privileges beyond the installed version's is 409 `app_privileges`, wi
 `?acceptPrivileges=true` takes it. The console then shows what the bundle asks for and uploads it
 again with `acceptPrivileges` once the user accepts.
 `DELETE /api/v1/apps/{name}` (`?purge=true`) removes; `POST /api/v1/apps/{name}/{action}`
-is `rollback`, `check` or `update` (a task; `update?acceptPrivileges=true` takes a version asking
-for more privileges, which the console shows from `update.privileges` and asks about first) or
+is `rollback`, `check` or `update` (a task; `update?acceptPrivileges=<version>` takes that version
+asking for more privileges, as `UpdateApp` does, which the console shows from `update.privileges`
+and asks about first) or
 `start`, `stop` or `restart`; `GET
 /api/v1/apps/{name}/logs` is the log, each line scrubbed of secrets. The console lists the apps
 on its services page, with the upload, and gives each its own page.
