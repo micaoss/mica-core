@@ -308,9 +308,7 @@ codes, one to one.
 
 `finish`
 - `finish` follows `setWifi`, `setNetwork`, or neither.
-- It takes no member but `op` and `id`: any other member, `hostname` among them, fails with
-  `bad_request`, an exception to the rule that a receiver ignores members it does not know. It
-  sets nothing; the hostname stays the device's.
+- It sets nothing; the hostname stays the device's.
 - It claims nothing: `claimed` is `false` after a `none` session, and the page's last screen sends
   the user to the console to claim the device ("open the console to set the administrator
   password"). In a `password` or `temp-code` session `claimed` is `true`.

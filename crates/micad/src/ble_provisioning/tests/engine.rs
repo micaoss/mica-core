@@ -643,26 +643,28 @@ async fn a_device_claimed_meanwhile_takes_no_network_over_a_none_session() {
 }
 
 #[tokio::test]
-async fn finish_takes_no_members() {
+async fn finish_ignores_members_it_does_not_know_and_sets_nothing() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
-    for (command, reason) in [
-        (
-            json!({ "op": "finish", "hostname": "deck-7" }),
-            "bad_request",
-        ),
-        (json!({ "op": "finish", "hostname": 7 }), "bad_request"),
-        (
-            json!({ "op": "finish", "interface": "eth0" }),
-            "bad_request",
-        ),
-        (json!({ "op": "claim", "password": PASSWORD }), "unknown_op"),
-        (json!({ "op": "reboot" }), "unknown_op"),
+    let finished = bench
+        .command(json!({ "op": "finish", "hostname": "deck-7" }))
+        .await;
+    assert_eq!(finished[0]["event"], "finished", "{finished:?}");
+    assert_eq!(finished[0]["hostname"], "mica-a4e2e69e");
+    assert!(bench.calls().is_empty(), "finish sets nothing");
+}
+
+#[tokio::test]
+async fn ops_beyond_the_network_are_unknown() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    for command in [
+        json!({ "op": "claim", "password": PASSWORD }),
+        json!({ "op": "reboot" }),
     ] {
         let events = bench.command(command).await;
-        assert_eq!(events[0]["reason"], reason, "{events:?}");
+        assert_eq!(events[0]["reason"], "unknown_op", "{events:?}");
     }
-    assert!(bench.calls().is_empty(), "a refused finish sets nothing");
 }
 
 #[tokio::test]

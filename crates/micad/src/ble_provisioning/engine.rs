@@ -819,7 +819,7 @@ impl Engine {
             Some("scanWifi") => self.spawn_scan(id),
             Some("setWifi") => self.set_wifi(id, &command).await,
             Some("setNetwork") => self.set_network(id, &command).await,
-            Some("finish") => self.finish(id, &command).await,
+            Some("finish") => self.finish(id).await,
             Some(_) => self.failed(id, "unknown_op").await,
             None => self.failed(id, "bad_request").await,
         }
@@ -997,14 +997,7 @@ impl Engine {
             .await;
     }
 
-    async fn finish(&mut self, id: Value, command: &Value) {
-        // `finish` sets nothing, so it takes no member but `op` and `id`.
-        if command
-            .as_object()
-            .is_some_and(|members| members.keys().any(|key| key != "op" && key != "id"))
-        {
-            return self.failed(id, "bad_request").await;
-        }
+    async fn finish(&mut self, id: Value) {
         if let Err(reason) = self.still_unclaimed().await {
             return self.failed(id, reason).await;
         }
