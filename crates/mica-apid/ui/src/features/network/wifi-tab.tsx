@@ -228,6 +228,8 @@ function draftErrors(draft: Draft, data: NetworkData, allowed: number[] | undefi
   if (draft.mode === 'ap') {
     if (new TextEncoder().encode(draft.ssid).length > 32) errors.ssid = t('network.wifi.ssidLong')
     if (draft.security !== 'open' && draft.psk && !(draft.psk.length >= 8 && draft.psk.length <= 63)) errors.psk = t('network.wifi.pskLength')
+    // A device claimed over Bluetooth has no access-point key of its own.
+    if (draft.security !== 'open' && !draft.psk && !data.ap.data?.psk) errors.psk = t('network.wifi.pskRequired')
     const subnet = parseCidr(draft.address)
     if (!subnet) errors.address = t('network.problems.cidr')
     else {

@@ -652,6 +652,7 @@ export const en = {
       pskHint: '8 to 63 characters.',
       pskKeep: 'unchanged',
       pskLength: '8 to 63 characters.',
+      pskRequired: 'Required: this device has no access-point password yet.',
       reachCopy: 'After the switch, reach the device on its new address or at {{host}}.',
       remove: 'Remove',
       removeCopy: 'The device stops connecting to it.',

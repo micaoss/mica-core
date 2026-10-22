@@ -576,6 +576,7 @@ export const zhCN: Translation = {
       pskHint: '8–63 个字符；留空 = 保持不变。',
       pskKeep: '不修改',
       pskLength: '8–63 个字符。',
+      pskRequired: '必填：本设备还没有热点密码。',
       reachCopy: '切换后请用新地址或 {{host}} 访问设备。',
       remove: '删除',
       removeCopy: '设备将不再连接此网络。',

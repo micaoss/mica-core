@@ -63,7 +63,7 @@ impl Device for FakeDevice {
             .unwrap()
             .push(format!("restore {snapshot} remove {remove:?}"));
     }
-    async fn claim(&self, staged: &StagedClaim) -> Result<Option<String>, &'static str> {
+    async fn claim(&self, staged: &StagedClaim) -> Result<(), &'static str> {
         let mut facts = self.facts.lock().unwrap();
         if facts.claimed {
             return Err("already_claimed");
@@ -76,7 +76,7 @@ impl Device for FakeDevice {
             .lock()
             .unwrap()
             .push(format!("claim {}", staged.password));
-        Ok(staged.ap_psk.is_none().then(|| "GENERATED".to_string()))
+        Ok(())
     }
 }
 
@@ -456,9 +456,7 @@ async fn an_unclaimed_device_is_claimed_and_joins_wi_fi_in_one_session() {
     let finished = bench.command(json!({ "op": "finish" })).await;
     assert_eq!(
         finished,
-        vec![
-            json!({ "id": 3, "event": "finished", "claimed": true, "hostname": "deck-7", "apPsk": "GENERATED" })
-        ]
+        vec![json!({ "id": 3, "event": "finished", "claimed": true, "hostname": "deck-7" })]
     );
     assert_eq!(bench.calls(), vec!["join Harbour", "claim harbour-pw-1"]);
     assert_eq!(*bench.radio.disconnected.lock().unwrap(), vec![PHONE]);

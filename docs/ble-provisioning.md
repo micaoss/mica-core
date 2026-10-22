@@ -206,7 +206,7 @@ Reasons any operation can fail with: `busy`, `bad_request` (a missing or malform
 | `scanWifi` | — | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}` | `ap_active`, `no_radio`, `scan_failed` |
 | `claim` | `password`, `hostname` (optional), `apPsk` (optional) | `claimStaged` | `not_allowed`, `already_claimed`, `invalid_password`, `invalid_hostname`, `invalid_ap_psk` |
 | `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `not_claimed`, `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
-| `finish` | — | `finished`: `claimed`, `hostname`, `apPsk` (only when the claim generated one) | `already_claimed`, `not_claimed` |
+| `finish` | — | `finished`: `claimed`, `hostname` | `already_claimed`, `not_claimed` |
 
 `scanWifi`
 - `security` is `open`, `owe`, `wep`, `wpa-psk`, `wpa2-psk`, `wpa3-sae`, `wpa2-wpa3` or `wpa2-eap`,
@@ -218,8 +218,8 @@ Reasons any operation can fail with: `busy`, `bad_request` (a missing or malform
 `claim` (only in a `none` session; otherwise `not_allowed`)
 - `password`: 8 to 1024 bytes. `hostname`: 1-63 letters, digits or hyphens, not starting or ending
   with a hyphen. `apPsk`: the access point's key after the claim, as the console's setup takes it
-  (8-63 printable ASCII characters without `"` or `\`, or 64 hex digits); without it the device
-  generates one at `finish`. A device without Wi-Fi refuses `apPsk` with `invalid_ap_psk`.
+  (8-63 printable ASCII characters without `"` or `\`, or 64 hex digits). A device without Wi-Fi
+  refuses `apPsk` with `invalid_ap_psk`.
 - Nothing is written: the claim is staged. A second `claim` replaces it. `already_claimed` when the
   device was claimed meanwhile.
 
@@ -234,10 +234,14 @@ Reasons any operation can fail with: `busy`, `bad_request` (a missing or malform
 - `connect_failed` covers what the device cannot tell apart.
 
 `finish`
-- In a `none` session it commits the staged claim: administrator, hostname, access-point key, and
-  the claim channel `ble`. `apPsk` is in the event only when the device generated it; the page shows
-  it once. `already_claimed` when another channel claimed first; the staged claim is dropped.
-  `not_claimed` when nothing is staged.
+- In a `none` session it commits the staged claim: administrator, hostname, the `apPsk` of the
+  claim if it had one, and the claim channel `ble`. `already_claimed` when another channel claimed
+  first; the staged claim is dropped. `not_claimed` when nothing is staged.
+- The device generates no access-point key at a BLE claim, and `finished` carries none: after
+  `setWifi` the radio is a client and the access point is off. The key derived from the device
+  code is the unclaimed device's only, so an access point still on without a key of its own is
+  switched off at the claim; the console asks for a key when it is switched on again. The
+  access-point setup (`POST /setup`) still sets a key, since its user is on the access point.
 - In a `password` or `temp-code` session it only ends the session (`claimed: true`).
 - After `finished` the device closes the window and disconnects.
 

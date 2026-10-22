@@ -80,8 +80,10 @@ An open access point uses no key, and `pskSource` is `null`. Once an administrat
 derived key is never used. The claim through `POST /api/v1/setup` sets `wifi.ap.psk` in the same
 write as the administrator, on a product with Wi-Fi: the key the body carries as `apPsk`, or 16
 random characters of the alphabet, which the answer carries once as `apPsk` and the console shows
-before it enters. A claim by provisioning document sets no key, so its device falls back to the
-generated one. A configuration reset keeps the administrator and `wifi.ap.psk`. A
+before it enters. A claim over BLE sets the key only when the phone sent one; otherwise it
+switches an access point that is not off to off, and the console's access-point form asks for a
+key before it is switched on again (`docs/ble-provisioning.md`). A claim by provisioning document
+sets no key, so its device falls back to the generated one. A configuration reset keeps the administrator and `wifi.ap.psk`. A
 factory reset clears both, which makes the derived key apply again. The default SSID is the
 code's whenever `wifi.ap.ssid` is unset; without a code, it comes from the device identifier.
 

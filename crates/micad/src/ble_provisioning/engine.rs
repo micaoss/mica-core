@@ -103,9 +103,8 @@ pub trait Device: Send + Sync + 'static {
     async fn await_wifi(&self, ssid: &str) -> Result<String, &'static str>;
     /// Put the radio's role back and remove the networks named.
     async fn restore_wifi(&self, snapshot: Value, remove: Vec<String>);
-    /// Commit a staged claim: the access-point key it generated, if it did,
-    /// or a `failed` reason.
-    async fn claim(&self, staged: &StagedClaim) -> Result<Option<String>, &'static str>;
+    /// Commit a staged claim, or a `failed` reason.
+    async fn claim(&self, staged: &StagedClaim) -> Result<(), &'static str>;
 }
 
 /// The Bluetooth side.
@@ -910,17 +909,12 @@ impl Engine {
         let device = Arc::clone(&self.device);
         self.spawn_op(id, "finish", async move {
             match device.claim(&staged).await {
-                Ok(ap_psk) => {
+                Ok(()) => {
                     let hostname = match staged.hostname {
                         Some(name) => name,
                         None => device.facts().await.hostname,
                     };
-                    let mut event =
-                        json!({ "event": "finished", "claimed": true, "hostname": hostname });
-                    if let Some(psk) = ap_psk {
-                        event["apPsk"] = json!(psk);
-                    }
-                    event
+                    json!({ "event": "finished", "claimed": true, "hostname": hostname })
                 }
                 Err(reason) => json!({ "event": "failed", "reason": reason }),
             }

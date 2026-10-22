@@ -247,11 +247,15 @@ impl MicadService {
         }
     }
 
+    /// Commit a claim made over BLE. It sets no access-point key unless the
+    /// phone sent one: the radio is a client by now, or the access point is
+    /// switched off here, and the console asks for a key when it is switched
+    /// on again.
     async fn provisioning_claim(
         &self,
         emitter: &SignalEmitter<'_>,
         staged: &StagedClaim,
-    ) -> Result<Option<String>, &'static str> {
+    ) -> Result<(), &'static str> {
         let password = staged.password.clone();
         let hash = tokio::task::spawn_blocking(move || micad_settings::hash_password(&password))
             .await
@@ -268,8 +272,7 @@ impl MicadService {
                 .map_or(0, |since| since.as_secs()),
             rotation_required: false,
         });
-        let wifi = self.features.has(Feature::Wifi);
-        let generated = (wifi && staged.ap_psk.is_none()).then(micad_settings::generate_ap_psk);
+        let ap = self.inner.read().await.settings.wifi.ap.clone();
         let mut writes = vec![(
             "access".to_string(),
             serde_json::to_value(&access).map_err(|_| "busy")?,
@@ -277,8 +280,8 @@ impl MicadService {
         if let Some(hostname) = &staged.hostname {
             writes.push(("hostname".to_string(), json!(hostname)));
         }
-        if let Some(psk) = staged.ap_psk.as_ref().or(generated.as_ref()) {
-            writes.push(("wifi.ap.psk".to_string(), json!(psk)));
+        if self.features.has(Feature::Wifi) {
+            writes.extend(access_point_at_claim(&ap, staged.ap_psk.as_deref()));
         }
         match self.provisioning_write(emitter, &writes, true).await {
             Ok(()) => {}
@@ -292,7 +295,7 @@ impl MicadService {
             tracing::warn!(error = %format!("{err:#}"), "the BLE verifier could not be made at the claim");
         }
         self.provisioning.audit("claim", "completed");
-        Ok(generated)
+        Ok(())
     }
 
     /// Refuse a bus write that reaches the Wi-Fi settings while a BLE
@@ -316,6 +319,20 @@ impl MicadService {
     pub(crate) async fn apply_bluetooth(&self) {
         let _apply = self.apply_lock.lock().await;
         self.apply_subtree("bluetooth").await;
+    }
+}
+
+/// What a BLE claim writes to the access point: the key the phone sent, or
+/// the access point switched off when it has no key of its own, since the
+/// key derived from the device code is the unclaimed device's only.
+fn access_point_at_claim(
+    ap: &micad_settings::WifiApSettings,
+    psk: Option<&str>,
+) -> Option<(String, Value)> {
+    match psk {
+        Some(psk) => Some(("wifi.ap.psk".to_string(), json!(psk))),
+        None => (ap.psk.is_none() && ap.mode != ApMode::Off)
+            .then(|| ("wifi.ap.mode".to_string(), json!("off"))),
     }
 }
 
@@ -407,7 +424,7 @@ impl Device for InterfaceRef<MicadService> {
             .await;
     }
 
-    async fn claim(&self, staged: &StagedClaim) -> Result<Option<String>, &'static str> {
+    async fn claim(&self, staged: &StagedClaim) -> Result<(), &'static str> {
         self.get()
             .await
             .provisioning_claim(self.signal_emitter(), staged)
@@ -418,6 +435,28 @@ impl Device for InterfaceRef<MicadService> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ble_claim_leaves_no_access_point_on_the_derived_key() {
+        let ap = |mode: ApMode, psk: Option<&str>| micad_settings::WifiApSettings {
+            mode,
+            psk: psk.map(str::to_string),
+            ..micad_settings::WifiApSettings::default()
+        };
+        assert_eq!(
+            access_point_at_claim(&ap(ApMode::Always, None), None),
+            Some(("wifi.ap.mode".to_string(), json!("off")))
+        );
+        assert_eq!(access_point_at_claim(&ap(ApMode::Off, None), None), None);
+        assert_eq!(
+            access_point_at_claim(&ap(ApMode::Always, Some("kept-key-1")), None),
+            None
+        );
+        assert_eq!(
+            access_point_at_claim(&ap(ApMode::Off, None), Some("typed-key-1")),
+            Some(("wifi.ap.psk".to_string(), json!("typed-key-1")))
+        );
+    }
 
     #[test]
     fn a_failed_connect_is_named_from_what_the_station_went_through() {

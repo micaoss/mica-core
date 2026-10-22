@@ -299,6 +299,23 @@ describe('the Wi-Fi tab', () => {
     expect(screen.getByRole('button', { name: 'Scan' }).hasAttribute('disabled')).toBe(true)
   })
 
+  it('asks for an access-point password when the device has none', async () => {
+    const fetch = stubFetch({ ...networkRoutes(), '/api/v1/wifi/ap': { ...accessPoint(), psk: undefined }, 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'roles' }, 202) })
+    open('wifi')
+    await screen.findByText('marina')
+    await userEvent.click(screen.getAllByRole('button', { name: 'Edit' }).at(-1)!)
+    await userEvent.click(screen.getByRole('switch', { name: 'Wi-Fi' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Access point' }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'The device operates in this country' }))
+    expect(await screen.findByText('Required: this device has no access-point password yet.')).toBeTruthy()
+    const editing = within(screen.getByRole('region', { name: /Editing/ }))
+    expect(editing.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
+
+    await userEvent.type(screen.getByLabelText('Password'), 'harbour-ap-key')
+    await userEvent.click(editing.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect((bodyOf(fetch, 'PUT', '/api/v1/wifi') as { ap: { psk?: string } }).ap.psk).toBe('harbour-ap-key'))
+  })
+
   it('starts the access point with one write of both roles', async () => {
     const fetch = stubFetch({ ...networkRoutes(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'roles' }, 202) })
     open('wifi')
