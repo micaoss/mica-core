@@ -119,7 +119,7 @@ describe('the bluetooth panel', () => {
     }))
     renderPanel(<BluetoothPanel />)
 
-    expect(await screen.findByText('setup-test.micaos.dev')).toBeTruthy()
+    expect(await screen.findByText('init.micaos.dev')).toBeTruthy()
     expect(screen.getByText('Wi-Fi connected')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Open provisioning' }))
 

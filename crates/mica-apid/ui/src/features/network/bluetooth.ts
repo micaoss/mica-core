@@ -3,7 +3,7 @@ import type { BleProvisioning, BluetoothOverview } from '@/lib/types'
 import { api } from '@/shared/lib/http'
 
 /// Where a phone provisions the device from.
-export const PROVISIONING_PAGE = 'setup-test.micaos.dev'
+export const PROVISIONING_PAGE = 'init.micaos.dev'
 
 /// ONE query for BLE provisioning, shared by the Bluetooth tab and the Wi-Fi
 /// tab's lock banner.

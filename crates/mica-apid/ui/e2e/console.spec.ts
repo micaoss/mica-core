@@ -241,7 +241,7 @@ test('captures the device code, the claim key, BLE provisioning and the pairing 
   await page.screenshot({ path: testInfo.outputPath('bluetooth-verifier-missing.png') })
   verifierReady = true
   await page.reload()
-  await expect(page.getByText('setup-test.micaos.dev')).toBeVisible()
+  await expect(page.getByText('init.micaos.dev')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('bluetooth.png') })
   await page.getByRole('button', { name: 'Edit configuration' }).click()
   await page.getByRole('switch', { name: 'Provisioning when offline' }).click()

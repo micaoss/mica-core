@@ -306,7 +306,7 @@ back each entry `setNetwork` replaced. Otherwise the entries stay, as a change i
 
 ## Not covered
 
-- The page itself: the address is `setup-test.micaos.dev` for now, a single constant on the page.
+- The page itself, at `https://init.micaos.dev`.
 - Android Chrome and Edge, desktop Chrome and Edge. iOS browsers have no Web Bluetooth; the page
   sends the user to the access-point setup.
 
