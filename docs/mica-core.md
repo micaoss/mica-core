@@ -812,11 +812,14 @@ another tunnel's or, for a new or changed port, held by a userspace UDP socket o
 peers' allowed IPs, observed routes and held ports, and the held ports themselves.
 
 **Authentication.** Until an admin password exists, `POST /setup` sets it. On a device with a
-device code the body carries the code from the label as `deviceCode` (dashes, spaces and case
-ignored): that is the claimer's proof of holding the device, which reaching its console is not
-once BLE provisioning has put an unclaimed device on a network. A missing one is 422 at
-`deviceCode`, a wrong one 403 `device_code_incorrect` and counts in the login backoff (429
-`login_throttled`). A device without a code is claimed without one. Browsers exchange the
+device code the body carries the code as `deviceCode` (dashes, spaces and case ignored): that is
+the claimer's proof of holding the device, which reaching its console is not once BLE
+provisioning has put an unclaimed device on a network. The code is on the label and on the
+device's own console, the login prompt and micad's start line (section 3.8). A missing one is 422
+at `deviceCode`, a wrong one 403 `device_code_incorrect` and counts in the login backoff (429
+`login_throttled`, at most 300 s). A device without a code is claimed without one. The claim sets
+no access-point key; the key on the label keeps applying until one is set on the console's Wi-Fi
+page (`docs/factory-ap-key.md`), and an `apPsk` member a client still sends is ignored. Browsers exchange the
 password for an HMAC-signed, HttpOnly session cookie and send the session's CSRF token on every
 mutation; automation uses bearer tokens `mica_<id>_<secret>`, stored as digests. Passwords are
 argon2id, failed logins back off persistently, and security-relevant actions go to an audit ring.

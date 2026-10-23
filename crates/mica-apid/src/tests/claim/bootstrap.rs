@@ -341,7 +341,7 @@ pub(super) async fn a_factory_fresh_device_issues_one_administrator_session_to_c
     // twice looks exactly like a tree written once.
     assert_eq!(
         fake.set_paths(),
-        vec!["access".to_string(), "wifi.ap.psk".to_string()],
+        vec!["access".to_string()],
         "a second claim reached the device"
     );
     let access = access_of(&fake).await;

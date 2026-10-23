@@ -185,14 +185,6 @@ pub(super) async fn an_interrupted_claim_writes_nothing_and_the_retry_mints_one_
     );
     assert!(access.get("claim").is_none(), "{access}");
     assert!(access.get("apiTokens").is_none(), "{access}");
-    assert_eq!(
-        api.inner
-            .get_settings("wifi.ap.psk")
-            .await
-            .unwrap_or_default(),
-        serde_json::Value::Null,
-        "an interrupted claim set the access point's key"
-    );
     let device_id = api
         .inner
         .get_settings("provisioning.deviceId")
@@ -250,7 +242,7 @@ pub(super) async fn a_claim_that_committed_but_was_never_answered_is_refused_on_
     );
     assert_eq!(
         fake.set_paths(),
-        vec!["access".to_string(), "wifi.ap.psk".to_string()],
+        vec!["access".to_string()],
         "the refused retry wrote something"
     );
     let probe = get(&router, "/api/v1/meta", Some(&cookie)).await;

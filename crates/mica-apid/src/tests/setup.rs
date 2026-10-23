@@ -175,86 +175,23 @@ pub(super) async fn the_api_setup_route_records_the_claim_and_no_credential() {
     }
 }
 
-// The claim sets the access point's key: the one the body carries, or one
-// generated and answered once. Either way the label's derived key is over.
+// The claim is the administrator and nothing else: it sets no access-point
+// key, so the key on the label keeps applying until one is set on the Wi-Fi
+// page, and an `apPsk` member a client still sends is ignored.
 #[tokio::test]
-pub(super) async fn the_claim_sets_the_access_point_key_typed_or_generated() {
-    let (router, fake) = test_app(unconfigured_tree());
-    let body = json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw", "apPsk": "typed-key-1" }).to_string();
-    let response = post_json(&router, SETUP_PATH, &body, None).await;
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let answer: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
-    assert!(
-        answer.get("apPsk").is_none(),
-        "a typed key is not answered back: {answer}"
-    );
-    assert_eq!(
-        fake.get_settings("wifi.ap.psk").await.unwrap(),
-        json!("typed-key-1")
-    );
-
-    let (router, fake) = test_app(unconfigured_tree());
-    let body = json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw" }).to_string();
-    let response = post_json(&router, SETUP_PATH, &body, None).await;
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let answer: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
-    let generated = answer["apPsk"]
-        .as_str()
-        .expect("a generated key")
-        .to_string();
-    assert_eq!(generated.len(), 16);
-    assert!(
-        generated
-            .bytes()
-            .all(|c| b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ".contains(&c))
-    );
-    assert_eq!(
-        fake.get_settings("wifi.ap.psk").await.unwrap(),
-        json!(generated)
-    );
-}
-
-// A key no WPA2 client could use is refused before anything is written.
-#[tokio::test]
-pub(super) async fn an_unusable_access_point_key_refuses_the_claim_whole() {
-    let (router, fake) = test_app(unconfigured_tree());
-    let body =
-        json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw", "apPsk": "short" })
-            .to_string();
-    let response = post_json(&router, SETUP_PATH, &body, None).await;
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(envelope(response).await["path"], "wifi.ap.psk");
-    assert!(fake.set_paths().is_empty());
-}
-
-// A product without Wi-Fi has no access point to key.
-#[tokio::test]
-pub(super) async fn a_product_without_wifi_claims_without_a_key() {
-    use micad_settings::{Feature, Features};
-    let fake = Arc::new(FakeSettings::new(unconfigured_tree()));
-    let router =
-        app(AppState::new(fake.clone(), SIGNING_KEY)
-            .with_features(Features::only(&[Feature::Mqtt])));
-    let response = post_json(
-        &router,
-        SETUP_PATH,
-        &json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw" }).to_string(),
-        None,
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let answer: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
-    assert!(answer.get("apPsk").is_none(), "{answer}");
-    assert_eq!(fake.set_paths(), vec!["access".to_string()]);
-
-    let body = json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw", "apPsk": "typed-key-1" }).to_string();
-    let fake = Arc::new(FakeSettings::new(unconfigured_tree()));
-    let router =
-        app(AppState::new(fake.clone(), SIGNING_KEY)
-            .with_features(Features::only(&[Feature::Mqtt])));
-    let response = post_json(&router, SETUP_PATH, &body, None).await;
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(fake.set_paths().is_empty());
+pub(super) async fn the_claim_sets_no_access_point_key() {
+    for body in [
+        json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw" }),
+        json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw", "apPsk": "typed-key-1" }),
+        json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw", "apPsk": "short" }),
+    ] {
+        let (router, fake) = test_app(unconfigured_tree());
+        let response = post_json(&router, SETUP_PATH, &body.to_string(), None).await;
+        assert_eq!(response.status(), StatusCode::CREATED, "{body}");
+        let answer: serde_json::Value = serde_json::from_str(&body_string(response).await).unwrap();
+        assert!(answer.get("apPsk").is_none(), "{answer}");
+        assert_eq!(fake.set_paths(), vec!["access".to_string()], "{body}");
+    }
 }
 
 // The claim proves possession with the device code from the label: missing

@@ -14,9 +14,6 @@ use serde_json::Value;
 
 use super::*;
 
-/// The access point's key, which the claim sets.
-const AP_PSK_PATH: &str = "wifi.ap.psk";
-
 /// `POST /api/v1/setup` request body.
 ///
 /// No `confirm` member, unlike the form the wizard posts: that field exists so
@@ -45,12 +42,6 @@ pub(crate) struct SetupRequest {
     #[serde(default)]
     #[schema(value_type = Option<std::collections::BTreeMap<String, NetworkInterface>>)]
     pub(super) network: Option<NetworkEntries>,
-    /// The access point's key from now on (`wifi.ap.psk`), on a product with
-    /// Wi-Fi. Absent, the device generates one and answers it once in
-    /// [`SetupResult::ap_psk`]. Either way the key derived for the label is
-    /// not used after the claim (`docs/factory-ap-key.md`).
-    #[serde(default, rename = "apPsk")]
-    pub(super) ap_psk: Option<String>,
     /// The device code from the device's label, as printed or without its
     /// dashes, in any case. Required when the device has a code: it is the
     /// proof that whoever claims the device holds it, which reaching the
@@ -70,10 +61,6 @@ pub(crate) struct SetupRequest {
 pub(crate) struct SetupResult {
     /// CSRF token for the browser session created by setup.
     pub(super) csrf_token: String,
-    /// The access-point key the device generated, when the request carried
-    /// none: answered here once and readable nowhere else.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) ap_psk: Option<String>,
 }
 
 // The write order fails safe: nothing before `access.webAdmin` takes the
@@ -89,17 +76,16 @@ pub(crate) struct SetupResult {
 /// On a device with a device code the body carries it as `deviceCode`, and a
 /// wrong one counts in the login backoff.
 ///
+/// The claim sets no access-point key: the key on the label keeps applying
+/// until one is set (`docs/factory-ap-key.md`). An `apPsk` member a client
+/// still sends is ignored.
+///
 /// Everything is validated before anything is written; a rejected request
 /// leaves the device untouched and still in setup mode. On success the writes
-/// run in the order hostname, network, then `access` with `wifi.ap.psk` as
-/// one write.
+/// run in the order hostname, network, then `access`.
 ///
-/// On a product with Wi-Fi the claim sets the access point's key: `apPsk`
-/// when the body carries one, otherwise a generated key answered once as
-/// `apPsk`.
-///
-/// Answers **201** with the browser session's CSRF token and that generated
-/// key. It mints no API token: see [`SetupResult`].
+/// Answers **201** with the browser session's CSRF token. It mints no API
+/// token: see [`SetupResult`].
 #[utoipa::path(
     post,
     path = V1_SETUP_PATH,
@@ -189,20 +175,6 @@ pub(crate) async fn api_v1_setup(
             ApiError::apid("validation_failed", HOSTNAME_RULES.to_string()).at("hostname"),
         );
     }
-    let wifi = state.features.has(micad_settings::Feature::Wifi);
-    if let Some(psk) = request.ap_psk.as_deref() {
-        let refusal = if wifi {
-            micad_settings::validate_wifi_psk(psk).err()
-        } else {
-            Some("this product has no Wi-Fi access point".to_string())
-        };
-        if let Some(message) = refusal {
-            return api_response(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                ApiError::apid("validation_failed", message).at(AP_PSK_PATH),
-            );
-        }
-    }
     // The candidate tree and not the submitted entries, for the reason the
     // pane's comment gives and the network routes act on: every relational rule is
     // about two entries at once, so a submitted bridge port may legitimately
@@ -276,8 +248,6 @@ pub(crate) async fn api_v1_setup(
         }
     };
 
-    let generated_ap_psk = (wifi && request.ap_psk.is_none()).then(micad_settings::generate_ap_psk);
-
     // The writes. `hostname` and `network` come first and are their own calls:
     // neither takes the device out of the unclaimed state, so a failure in
     // either leaves an unclaimed, still-claimable device and the caller may
@@ -325,15 +295,10 @@ pub(crate) async fn api_v1_setup(
         Err(response) => return *response,
     };
     subtree.insert("claim".to_string(), claim);
-    // The access point's key lands with the claim and not beside it: either
-    // order of two writes leaves, on a failure between them, a device whose
-    // access point runs a key nobody was shown. One `Claim`, which micad
-    // refuses when the device gained an administrator meanwhile -- by a
-    // provisioning document, which this route's lock does not cover.
-    let mut writes = vec![(ACCESS_PATH.to_string(), Value::Object(subtree))];
-    if let Some(psk) = request.ap_psk.clone().or_else(|| generated_ap_psk.clone()) {
-        writes.push((AP_PSK_PATH.to_string(), Value::String(psk)));
-    }
+    // One `Claim`, which micad refuses when the device gained an administrator
+    // meanwhile -- by a provisioning document, which this route's lock does
+    // not cover.
+    let writes = vec![(ACCESS_PATH.to_string(), Value::Object(subtree))];
     if let Err(err) = state.api.claim(&writes, &request.password).await {
         if is_already_claimed(&err) {
             state.audit.record(CLAIM_EVENT, "refused", &source);
@@ -360,7 +325,6 @@ pub(crate) async fn api_v1_setup(
         ],
         Json(SetupResult {
             csrf_token: session.csrf_token,
-            ap_psk: generated_ap_psk,
         }),
     )
         .into_response()
