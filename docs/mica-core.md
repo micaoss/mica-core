@@ -252,7 +252,8 @@ absence is reported with its reason rather than as a healthy reading:
   outside the `local` table carry `family`, `protocol` (`kernel` for an address's own subnet,
   `dhcp`, `static`, …) and `scope`. An rtnetlink lookup of the route to `1.1.1.1` (what `ip
   route get` answers) marks each IPv4 default route `effective` when it leaves by that link and
-  gateway; without an answer no route carries the field.
+  gateway; without an answer no route carries the field. Each running access point carries the
+  `channel` and `frequencyMhz` hostapd's `STATUS` reports, absent while it is still choosing one.
 - **Resolution check** (`GetDnsProbe`, `ProbeDns`): `0.debian.pool.ntp.org` looked up every
   60 s and on demand, within 3 s, through resolved's `ResolveHostname` with
   `SD_RESOLVED_NO_CACHE`, or on OpenRC through the C library's resolver; the last result is

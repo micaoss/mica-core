@@ -74,8 +74,28 @@ pub struct ApEvidence {
     pub available: bool,
     /// Why it did not, when it did not.
     pub detail: Option<String>,
+    /// The channel it runs on and its frequency, in MHz; absent while it is
+    /// still choosing one.
+    pub channel: Option<u16>,
+    pub frequency_mhz: Option<u32>,
     /// The stations, in the order hostapd walked them.
     pub stations: Vec<ApStation>,
+}
+
+/// The channel and frequency in hostapd's `STATUS` reply. hostapd reports 0
+/// for both while it is still choosing a channel.
+#[must_use]
+pub fn parse_ap_status(text: &str) -> (Option<u16>, Option<u32>) {
+    let field = |name: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|value| *value > 0)
+    };
+    (
+        field("channel").and_then(|channel| u16::try_from(channel).ok()),
+        field("freq"),
+    )
 }
 
 /// Parse one `STA <mac>` reply into a station.
@@ -350,7 +370,8 @@ pub fn scan_networks(root: &Path, interface: &str) -> Result<Vec<ScannedNetwork>
     Ok(parse_scan_results(&results))
 }
 
-/// Walk one access point's stations over hostapd's control socket.
+/// Ask one access point for its channel, then walk its stations, over
+/// hostapd's control socket.
 ///
 /// Blocking, so it is called from a blocking task like the station query
 /// beside it. Bounded by [`MAX_STATIONS`]: the walk is one round trip per
@@ -366,6 +387,9 @@ pub fn observe_access_point(root: &Path, interface: &str) -> ApEvidence {
         evidence.detail =
             Some("hostapd's control socket is absent: no access point is running".to_string());
         return evidence;
+    }
+    if let Ok(status) = wpa_query(&control_dir, interface, "STATUS", WPA_TIMEOUT) {
+        (evidence.channel, evidence.frequency_mhz) = parse_ap_status(&status);
     }
     let mut command = "STA-FIRST".to_string();
     for _ in 0..MAX_STATIONS {
@@ -436,9 +460,16 @@ pub(super) fn access_point_json(evidence: &ApEvidence, leases: Option<&Value>) -
             Value::Object(entry)
         })
         .collect();
-    json!({
+    let mut entry = json!({
         "interface": evidence.interface,
         "stationCount": stations.len(),
         "stations": stations,
-    })
+    });
+    if let Some(channel) = evidence.channel {
+        entry["channel"] = json!(channel);
+    }
+    if let Some(frequency) = evidence.frequency_mhz {
+        entry["frequencyMhz"] = json!(frequency);
+    }
+    entry
 }

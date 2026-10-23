@@ -141,3 +141,44 @@ pub(super) async fn the_unavailable_observer_is_an_error() {
     assert!(UnavailableNetworkState.observe().await.is_err());
     assert!(UnavailableNetworkState.describe().await.is_err());
 }
+
+/// An access point is asked for its status, then walked station by station.
+#[test]
+pub(super) fn the_access_point_is_asked_for_its_channel_and_stations() {
+    use std::os::unix::net::UnixDatagram;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join(HOSTAPD_CONTROL_DIR)).unwrap();
+    let server = UnixDatagram::bind(root.join(HOSTAPD_CONTROL_DIR).join("wlan0")).unwrap();
+    server
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let fake = std::thread::spawn(move || {
+        let mut asked = Vec::new();
+        for _ in 0..3 {
+            let mut buffer = [0u8; 256];
+            let (received, peer) = server.recv_from(&mut buffer).unwrap();
+            let command = String::from_utf8_lossy(&buffer[..received]).to_string();
+            let reply = match command.as_str() {
+                "STATUS" => "state=ENABLED\nfreq=5180\nchannel=36\n",
+                "STA-FIRST" => "02:00:00:00:02:01\nconnected_time=60\nsignal=-48\n",
+                _ => "FAIL\n",
+            };
+            server
+                .send_to(reply.as_bytes(), peer.as_pathname().unwrap())
+                .unwrap();
+            asked.push(command);
+        }
+        asked
+    });
+
+    let evidence = observe_access_point(root, "wlan0");
+    assert_eq!(
+        fake.join().unwrap(),
+        vec!["STATUS", "STA-FIRST", "STA-NEXT 02:00:00:00:02:01"]
+    );
+    assert!(evidence.available);
+    assert_eq!(evidence.channel, Some(36));
+    assert_eq!(evidence.frequency_mhz, Some(5180));
+    assert_eq!(evidence.stations.len(), 1);
+}

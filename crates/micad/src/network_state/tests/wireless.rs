@@ -155,3 +155,36 @@ pub(super) fn a_scan_row_reads_its_channel_and_security() {
         assert_eq!(scan_security(flags), security, "{flags}");
     }
 }
+
+/// hostapd's `STATUS` names the channel the access point runs on, its own
+/// pick when the configuration leaves it automatic; while it is still
+/// choosing, the channel is 0 and is not reported.
+#[test]
+pub(super) fn an_access_points_status_reads_its_channel() {
+    let status = "state=ENABLED\nphy=phy0\nfreq=2437\nnum_sta_non_erp=0\nchannel=6\n\
+        secondary_channel=0\nssid[0]=mica-lab\n";
+    assert_eq!(parse_ap_status(status), (Some(6), Some(2437)));
+    assert_eq!(
+        parse_ap_status("state=ACS\nfreq=0\nchannel=0\n"),
+        (None, None)
+    );
+
+    let evidence = ApEvidence {
+        interface: "wlan0".to_string(),
+        available: true,
+        channel: Some(6),
+        frequency_mhz: Some(2437),
+        ..ApEvidence::default()
+    };
+    let rendered = super::wifi::access_point_json(&evidence, None);
+    assert_eq!(rendered["channel"], 6);
+    assert_eq!(rendered["frequencyMhz"], 2437);
+    let choosing = ApEvidence {
+        interface: "wlan0".to_string(),
+        available: true,
+        ..ApEvidence::default()
+    };
+    let rendered = super::wifi::access_point_json(&choosing, None);
+    assert!(rendered.get("channel").is_none());
+    assert!(rendered.get("frequencyMhz").is_none());
+}

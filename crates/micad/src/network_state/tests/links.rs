@@ -132,6 +132,8 @@ pub(super) fn a_station_reads_the_address_and_hostname_it_was_leased() {
             interface: "wlan0".to_string(),
             available: true,
             detail: None,
+            channel: None,
+            frequency_mhz: None,
             stations: vec![
                 ApStation {
                     mac: "02:5C:00:00:00:01".to_string(),
