@@ -66,6 +66,7 @@ mod validate;
 mod web;
 mod wifi;
 mod wifi_ap;
+mod wireguard_defaults;
 pub(crate) use apps::*;
 pub(crate) use ble_provisioning::*;
 pub(crate) use bluetooth::*;
@@ -101,6 +102,7 @@ use validate::*;
 pub(crate) use web::*;
 pub(crate) use wifi::*;
 pub(crate) use wifi_ap::*;
+pub(crate) use wireguard_defaults::*;
 
 /// Shared handler state.
 #[derive(Clone)]
@@ -148,6 +150,9 @@ pub struct AppState {
     /// test-only builder below can replace it, so no shipped caller can
     /// redirect this configuration input.
     pub(crate) updates_path: Arc<std::path::PathBuf>,
+    /// Where the kernel lists its sockets (`/proc/net`), for the UDP ports
+    /// services on the device hold.
+    pub(crate) proc_net: Arc<std::path::PathBuf>,
     /// The desired fleet document: `/mica/config/fleet.json` on a device, an
     /// isolated path in route tests.
     pub(crate) fleet_path: Arc<std::path::PathBuf>,
@@ -247,6 +252,7 @@ impl AppState {
             updates_path: Arc::new(std::path::PathBuf::from(
                 micad_settings::configuration::DEFAULT_UPDATES_PATH,
             )),
+            proc_net: Arc::new(std::path::PathBuf::from("/proc/net")),
             fleet_path: Arc::new(std::path::PathBuf::from(
                 micad_settings::configuration::DEFAULT_FLEET_PATH,
             )),
@@ -459,6 +465,13 @@ impl AppState {
     #[cfg(test)]
     pub fn with_meta_manifest(mut self, manifest: impl Into<std::path::PathBuf>) -> Self {
         self.meta_manifest = Arc::new(manifest.into());
+        self
+    }
+
+    /// Read the socket tables from another directory, for tests.
+    #[cfg(test)]
+    pub fn with_proc_net(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.proc_net = Arc::new(dir.into());
         self
     }
 

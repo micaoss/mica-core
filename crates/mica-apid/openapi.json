@@ -3327,7 +3327,7 @@
           "resources"
         ],
         "summary": "Read what the device resolves with.",
-        "description": "The global servers and the static records are the settings; `effective`\nis the global list in global mode and otherwise what each observed\ninterface reports, with where its servers come from; `probe` is the last\nresolution check, which runs every 60 seconds.",
+        "description": "The global servers and the static records are the settings; `effective`\nis the global list in global mode and otherwise what each interface taking\npart in resolution reports (with carrier, and servers or DHCP to bring\nthem), with where its servers come from; `probe` is the last\nresolution check, which runs every 60 seconds.",
         "operationId": "api_v1_dns_read",
         "responses": {
           "200": {
@@ -4418,7 +4418,7 @@
             }
           },
           "422": {
-            "description": "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), an undeclared VLAN parent whose image configuration an entry cannot say (`vlan_parent_unsupported`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a tunnel's listen port another tunnel declares or a service on the device holds (`port_in_use`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), an undeclared VLAN parent whose image configuration an entry cannot say (`vlan_parent_unsupported`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4501,6 +4501,78 @@
           },
           "500": {
             "description": "micad failed to observe (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/network/wireguard/defaults": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "The values a new WireGuard tunnel starts from.",
+        "description": "Computed on the device, so the listen port skips the UDP ports its\nservices hold, which no client can see.",
+        "operationId": "api_v1_network_wireguard_defaults",
+        "responses": {
+          "200": {
+            "description": "The first free name, subnet and listen port, and the UDP ports services hold",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WireguardDefaults"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed (`settings_io`, `micad_failed`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12095,7 +12167,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "The rule's code: `name_invalid`, `address_overlap`,\n`gateway_out_of_subnet`, `metric_duplicate`, `vlan_duplicate`,\n`vlan_parent_invalid`, `bridge_port_taken`, `bridge_port_invalid`,\n`bridge_port_addressed`, `in_use`, or `validation_failed` for a\nfield's own syntax."
+            "description": "The rule's code: `name_invalid`, `address_overlap`,\n`gateway_out_of_subnet`, `metric_duplicate`, `vlan_duplicate`,\n`vlan_parent_invalid`, `bridge_port_taken`, `bridge_port_invalid`,\n`bridge_port_addressed`, `in_use`, `port_in_use`, or `validation_failed` for a\nfield's own syntax."
           },
           "field": {
             "type": "string",
@@ -13954,6 +14026,47 @@
           }
         },
         "additionalProperties": false
+      },
+      "WireguardDefaults": {
+        "type": "object",
+        "description": "The values a new tunnel starts from: the first of each that nothing on the\ndevice has. A value with no free candidate is absent.",
+        "required": [
+          "udpPortsInUse"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`10.2.0.1/24` … `10.254.0.1/24`, then `172.16.100.1/24` …\n`172.16.255.1/24`: the first whose subnet overlaps no declared or\nobserved address, no peer's allowed IPs and no observed route other\nthan a default one."
+          },
+          "listenPort": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "51821 … 51899: the first no tunnel declares and no service holds.",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`wg0`, `wg1`, … : the first no declared or observed link has."
+          },
+          "udpPortsInUse": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "The UDP ports services on the device hold, for a client choosing past\nchanges the device has not seen yet."
+          }
+        }
       },
       "WireguardParameters": {
         "type": "object",

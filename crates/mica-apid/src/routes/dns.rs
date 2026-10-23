@@ -145,32 +145,62 @@ async fn stored_network(state: &AppState) -> BTreeMap<String, IfaceSettings> {
     }
 }
 
-/// Where an interface's servers come from.
-fn link_source(entry: Option<&IfaceSettings>) -> &'static str {
-    match entry {
-        Some(entry) if entry.dhcp && !entry.dns.is_empty() => "custom",
-        Some(entry) if !entry.dhcp && entry.static_.is_some() => "static",
-        _ => "dhcp",
+/// Where a declared interface's servers come from.
+fn link_source(entry: &IfaceSettings) -> &'static str {
+    if entry.dhcp && !entry.dns.is_empty() {
+        "custom"
+    } else if !entry.dhcp && entry.static_.is_some() {
+        "static"
+    } else {
+        "dhcp"
     }
 }
 
-/// Each observed interface but loopback, with the servers it reports.
+/// Each observed interface that takes part in resolution, with the servers it
+/// reports: one with carrier that has servers or runs DHCP to bring them. A
+/// bridge port, an access point's radio, a CAN or dummy link is not one.
 fn observed_links(observed: &Value, network: &BTreeMap<String, IfaceSettings>) -> Vec<DnsLink> {
+    let port = |name: &str| {
+        network.values().any(|entry| {
+            entry
+                .bridge
+                .as_ref()
+                .is_some_and(|bridge| bridge.ports.iter().any(|port| port == name))
+        })
+    };
     observed["interfaces"]["entries"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|entry| {
             let name = entry["name"].as_str()?;
-            (name != "lo").then(|| DnsLink {
+            let servers: Vec<String> = entry["dns"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|server| server.as_str().map(str::to_string))
+                .collect();
+            let dhcp = match network.get(name) {
+                Some(declared) => declared.dhcp && !port(name),
+                None => {
+                    entry["lease"]["available"] == true
+                        || entry["addresses"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|address| address["configSource"] == "DHCPv4")
+                }
+            };
+            let resolves =
+                name != "lo" && entry["link"]["carrier"] == true && (dhcp || !servers.is_empty());
+            resolves.then(|| DnsLink {
                 name: name.to_string(),
-                servers: entry["dns"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|server| server.as_str().map(str::to_string))
-                    .collect(),
-                source: link_source(network.get(name)),
+                servers,
+                source: match network.get(name) {
+                    Some(declared) => link_source(declared),
+                    None if dhcp => "dhcp",
+                    None => "static",
+                },
             })
         })
         .collect()
@@ -179,8 +209,9 @@ fn observed_links(observed: &Value, network: &BTreeMap<String, IfaceSettings>) -
 /// Read what the device resolves with.
 ///
 /// The global servers and the static records are the settings; `effective`
-/// is the global list in global mode and otherwise what each observed
-/// interface reports, with where its servers come from; `probe` is the last
+/// is the global list in global mode and otherwise what each interface taking
+/// part in resolution reports (with carrier, and servers or DHCP to bring
+/// them), with where its servers come from; `probe` is the last
 /// resolution check, which runs every 60 seconds.
 #[utoipa::path(
     get,

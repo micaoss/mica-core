@@ -146,13 +146,21 @@ or it is `routable`, `degraded` or `enslaved`; one without carrier, or a device 
 is not waited for, and one the apply creates must appear. When one fails or times out, the
 previous units go back, the devices whose `.netdev` changed are deleted, networkd reloads, the
 task fails naming the interface, and the stored network map goes back to the one last applied.
+Every DHCP link micad renders gets `[DHCPv4] RouteMetric=`: 100 for the first in name order and
+10 more for each next one, so two uplinks never tie. A wired port (`eth*`, not a VLAN) the map
+does not declare gets `60-mica-auto-<iface>.network`, the image's DHCP with its metric, which
+sorts before the image's `80-dhcp.network`; declaring the port removes it. The Wi-Fi client's
+lease has metric 600. A static gateway keeps networkd's metric 0. Once an apply converges, the
+private key of every WireGuard tunnel the map no longer declares is removed; a rolled-back apply
+keeps them, since the units it puts back name them.
 
 **VLAN parent adoption.** A network write whose VLAN names a parent the map does not declare
 declares that parent with the entry that keeps what the image's own `.network` gives it, and a
 dry run lists it in `adopted`. micad observes that entry per link as `adoption`: the file
 networkd chose for the link and its drop-ins (micad's own global-DNS drop-in left out), read for
 `DHCP=` (IPv4), one `Address=` with its `Gateway=` and `DNS=`. `[Match]` is not read: networkd
-already matched the file to the link, so `Name=eth*` adopts like `Name=eth1`. Anything else (another
+already matched the file to the link, so `Name=eth*` adopts like `Name=eth1`, and neither is
+`[DHCPv4] RouteMetric=`, so a `60-mica-auto-` unit adopts as DHCP. Anything else (another
 section or key, DHCP for IPv6, servers or an address beside DHCP) is refused as
 `vlan_parent_unsupported`, naming it.
 
@@ -189,7 +197,7 @@ live-state tree under its name.
 | Reconciler | systemd | OpenRC |
 | --- | --- | --- |
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
-| `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device and named by file; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. VLAN, bridge, WireGuard and routes are refused by name |
+| `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. VLAN, bridge, WireGuard and routes are refused by name |
 | `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf` (resolved restarted when it changes) always empties `FallbackDNS=` and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file. Global servers: `/run/mica/resolv.d/global`, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
 | `sshd` | `/run/mica/dropbear.env`, the authorized keys of `root` and `mica`, `dropbear.service` | the same files, `mica-dropbear` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
@@ -240,7 +248,11 @@ absence is reported with its reason rather than as a healthy reading:
 - **Network**: networkd `Describe`, wpa_supplicant and hostapd sockets (micad's reply sockets are
   bound under `/run/mica`: its unit has a private `/tmp`, which neither daemon can answer into)
   and a resolved probe; on
-  OpenRC the same document from sysfs, busybox `ip` and `/run/mica/resolv.d`.
+  OpenRC the same document from sysfs, busybox `ip` and `/run/mica/resolv.d`. Each link's routes
+  outside the `local` table carry `family`, `protocol` (`kernel` for an address's own subnet,
+  `dhcp`, `static`, …) and `scope`. An rtnetlink lookup of the route to `1.1.1.1` (what `ip
+  route get` answers) marks each IPv4 default route `effective` when it leaves by that link and
+  gateway; without an answer no route carries the field.
 - **Resolution check** (`GetDnsProbe`, `ProbeDns`): `0.debian.pool.ntp.org` looked up every
   60 s and on demand, within 3 s, through resolved's `ResolveHostname` with
   `SD_RESOLVED_NO_CACHE`, or on OpenRC through the C library's resolver; the last result is
@@ -776,7 +788,14 @@ fetch, import of an uploaded `.micaupd`, install, install of the newest release,
 policy); provisioning status and claim; credential recovery and reset; the factory reset;
 diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
 `PUT /api/v1/network/{iface}` takes a CAN entry like any other, and the console's network page
-edits a CAN interface's bit rate, restart delay, CAN FD and data bit rate.
+edits a CAN interface's bit rate, restart delay, CAN FD and data bit rate. A network write that
+removes a WireGuard tunnel records `wireguard-delete` `accepted` in the audit ring, once per
+tunnel and without its name. A write is refused `port_in_use` when a tunnel's listen port is
+another tunnel's or, for a new or changed port, held by a userspace UDP socket on the device
+(`/proc/net/udp`, `udp6`; a WireGuard device's own kernel socket is not one). `GET
+/api/v1/network/wireguard/defaults` answers the first free `wg<N>`, `10.<N>.0.1/24` (then
+`172.16.<N>.1/24`) and listen port from 51821, past declared and observed names and subnets,
+peers' allowed IPs, observed routes and held ports, and the held ports themselves.
 
 **Authentication.** Until an admin password exists, `POST /setup` sets it. On a device with a
 device code the body carries the code from the label as `deviceCode` (dashes, spaces and case

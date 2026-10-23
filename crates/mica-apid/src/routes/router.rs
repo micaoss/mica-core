@@ -128,6 +128,10 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
             get(api_v1_peers_list).post(api_v1_peers_add),
         )
         .route(V1_NETWORK_PEER_ROUTE, delete(api_v1_peers_remove))
+        .route(
+            V1_NETWORK_WIREGUARD_DEFAULTS_PATH,
+            get(api_v1_network_wireguard_defaults),
+        )
         // POST only, for the reason the power and SSH mutations are: no GET
         // handler exists, so nothing that merely follows a link can replace a
         // tunnel's identity.

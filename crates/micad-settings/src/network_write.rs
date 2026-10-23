@@ -256,7 +256,7 @@ fn collisions<T>(
 /// The rules between entries that only a write is held to, for the entries
 /// in `carried`: two subnets overlap (`address_overlap`), two default routes
 /// share a metric (`metric_duplicate`), a parent carries one VLAN id twice
-/// (`vlan_duplicate`).
+/// (`vlan_duplicate`), two tunnels listen on one port (`port_in_use`).
 pub fn write_violations(
     entries: &BTreeMap<String, IfaceSettings>,
     carried: &[&str],
@@ -315,6 +315,20 @@ pub fn write_violations(
             "vlan_duplicate",
             serde_json::json!({ "parent": parent, "id": id, "name": other }),
             format!("{parent} already carries VLAN {id} (network.{other})"),
+        ));
+    }
+    let ports: Vec<(&str, u16)> = entries
+        .iter()
+        .filter_map(|(iface, cfg)| Some((iface.as_str(), cfg.wireguard.as_ref()?.listen_port?)))
+        .collect();
+    for (target, other) in collisions(&ports, carried, |a, b| a == b) {
+        let ((iface, port), other) = (ports[target], ports[other].0);
+        found.push(NetworkViolation::new(
+            iface,
+            "wireguard.listenPort",
+            "port_in_use",
+            serde_json::json!({ "name": other, "port": port }),
+            format!("network.{other} already listens on UDP port {port}"),
         ));
     }
     found

@@ -297,6 +297,7 @@ pub(super) const V1_NETWORK_PATH: &str = "/v1/network";
 pub(super) const V1_NETWORK_IFACE_ROUTE: &str = "/v1/network/{iface}";
 pub(super) const V1_NETWORK_PEERS_ROUTE: &str = "/v1/network/{iface}/peers";
 pub(super) const V1_NETWORK_PEER_ROUTE: &str = "/v1/network/{iface}/peers/{publicKey}";
+pub(super) const V1_NETWORK_WIREGUARD_DEFAULTS_PATH: &str = "/v1/network/wireguard/defaults";
 
 /// The settings dot-path the interface map lives at, which every envelope
 /// raised about the whole map names.

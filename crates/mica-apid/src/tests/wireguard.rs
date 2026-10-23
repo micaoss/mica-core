@@ -443,3 +443,32 @@ pub(super) async fn the_sentinel_for_a_peer_with_no_stored_key_is_refused() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(fake.set_paths().is_empty(), "a refused entry was written");
 }
+
+// The values a new tunnel starts from: the first name, subnet and port that
+// nothing declared, observed, routed or listening on the device has.
+#[tokio::test]
+pub(super) async fn the_defaults_skip_what_the_device_has() {
+    let proc_net = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        proc_net.path().join("udp6"),
+        "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops\n\
+         \x20 0: 00000000000000000000000000000000:CA6D 00000000000000000000000000000000:0000 07 00000000:00000000 00:00000000 00000000   100        0 4242 2 0000000000000000 0\n",
+    )
+    .unwrap();
+    let (tree, token) = with_token(kinds_tree("hunter2secret"));
+    let fake = Arc::new(FakeSettings::new(tree));
+    fake.set_observed_network(json!({
+        "interfaces": { "entries": [
+            { "name": "wg1", "addresses": [{ "address": "10.2.0.7", "prefixLength": 24 }], "routes": [] },
+            { "name": "eth1", "addresses": [], "routes": [{ "dest": "10.3.0.0/16", "via": "192.168.1.2" }, { "dest": "0.0.0.0/0", "via": "192.168.1.1" }] },
+        ] },
+    }));
+    let router = app(AppState::new(fake, SIGNING_KEY).with_proc_net(proc_net.path()));
+
+    let response = bearer(&router, "GET", "/api/v1/network/wireguard/defaults", &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(response).await,
+        json!({ "name": "wg2", "address": "10.4.0.1/24", "listenPort": 51822, "udpPortsInUse": [51821] })
+    );
+}

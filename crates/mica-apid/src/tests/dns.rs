@@ -18,15 +18,20 @@ fn dns_tree(records: serde_json::Value) -> serde_json::Value {
 
 fn observed() -> serde_json::Value {
     json!({
-        "interfaces": { "available": true, "count": 3, "entries": [
-            { "name": "lo", "dns": [], "addresses": [{ "address": "127.0.0.1" }] },
-            { "name": "eth0", "dns": ["192.168.1.1"], "addresses": [{ "address": "192.168.1.24" }] },
-            { "name": "eth1", "dns": ["192.168.10.53"], "addresses": [{ "address": "192.168.10.1" }] },
+        "interfaces": { "available": true, "count": 7, "entries": [
+            { "name": "lo", "link": { "carrier": true }, "dns": [], "addresses": [{ "address": "127.0.0.1" }] },
+            { "name": "eth0", "link": { "carrier": true }, "dns": ["192.168.1.1"], "addresses": [{ "address": "192.168.1.24", "configSource": "DHCPv4" }] },
+            { "name": "eth1", "link": { "carrier": true }, "dns": ["192.168.10.53"], "addresses": [{ "address": "192.168.10.1" }] },
+            { "name": "eth2", "link": { "carrier": false }, "dns": [], "addresses": [], "lease": { "available": false } },
+            { "name": "eth3", "link": { "carrier": true }, "dns": [], "addresses": [], "lease": { "available": true } },
+            { "name": "dummy0", "link": { "carrier": true }, "dns": [], "addresses": [] },
+            { "name": "wlan0", "link": { "carrier": true }, "dns": [], "addresses": [{ "address": "192.168.4.1", "configSource": "static" }] },
         ] },
     })
 }
 
-// Interface mode reports each observed interface with where its servers come
+// Interface mode reports each interface that takes part in resolution (with
+// carrier, and servers or DHCP to bring them) with where its servers come
 // from, the records with their ids, and the last check.
 #[tokio::test]
 pub(super) async fn the_dns_document_reports_what_lookups_go_to() {
@@ -49,6 +54,7 @@ pub(super) async fn the_dns_document_reports_what_lookups_go_to() {
         json!({ "links": [
             { "name": "eth0", "servers": ["192.168.1.1"], "source": "dhcp" },
             { "name": "eth1", "servers": ["192.168.10.53"], "source": "static" },
+            { "name": "eth3", "servers": [], "source": "dhcp" },
         ] })
     );
     assert_eq!(

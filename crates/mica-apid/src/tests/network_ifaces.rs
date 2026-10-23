@@ -718,3 +718,42 @@ pub(super) async fn a_network_write_waits_for_the_running_network_task() {
     assert_eq!(response.status(), StatusCode::CONFLICT);
     assert_eq!(envelope(response).await["code"], "busy");
 }
+
+// A tunnel the write removes is audited, through the whole map and through
+// the one-interface route, and nothing else the write changes is. The line
+// names no interface: the trail carries fixed strings only.
+#[tokio::test]
+pub(super) async fn removing_a_tunnel_is_audited() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let (tree, token) = with_token(kinds_tree("hunter2secret"));
+    let fake = std::sync::Arc::new(FakeSettings::new(tree));
+    let router = app(AppState::new(fake.clone(), SIGNING_KEY).with_persistence(dir.path()));
+    let mut map = stored_network_map(&fake).await;
+    map["eth1"]["dhcp"] = json!(false);
+    map["wg1"] = map["wg0"].clone();
+    map["wg1"]["wireguard"]["listenPort"] = json!(51821);
+    map["wg1"]["static"]["address"] = json!("10.9.0.2/24");
+    map["wg1"]["wireguard"]["peers"][0]["allowedIps"] = json!(["10.9.0.0/24"]);
+    assert_eq!(
+        put_network_map(&router, &token, &map).await.status(),
+        StatusCode::ACCEPTED
+    );
+    assert!(!dir.path().join("audit.log").exists());
+
+    map.as_object_mut().unwrap().remove("wg0");
+    assert_eq!(
+        put_network_map(&router, &token, &map).await.status(),
+        StatusCode::ACCEPTED
+    );
+    let response = bearer(&router, "DELETE", &iface_url("wg1"), &token).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        audit_events(&audit_lines(dir.path())),
+        [
+            ("wireguard-delete".to_string(), "accepted".to_string()),
+            ("wireguard-delete".to_string(), "accepted".to_string()),
+        ]
+    );
+    let raw = std::fs::read_to_string(dir.path().join("audit.log")).unwrap();
+    assert!(!raw.contains("wg0") && !raw.contains("wg1"), "{raw}");
+}

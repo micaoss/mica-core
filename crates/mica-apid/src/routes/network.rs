@@ -5,10 +5,15 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use micad_settings::IfaceSettings;
+use micad_settings::{IfaceKind, IfaceSettings};
 use serde_json::Value;
 
 use super::*;
+use crate::audit::Source;
+
+/// The audit event of a WireGuard tunnel a write removes. It names no
+/// interface: the trail carries fixed strings only.
+const WIREGUARD_DELETE_EVENT: &str = "wireguard-delete";
 
 /// Read declared network configuration together with current link state.
 #[utoipa::path(
@@ -111,7 +116,7 @@ pub(crate) async fn api_v1_network_read(
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 409, description = "`baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)", body = ApiError),
-        (status = 422, description = "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), an undeclared VLAN parent whose image configuration an entry cannot say (`vlan_parent_unsupported`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
+        (status = 422, description = "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a tunnel's listen port another tunnel declares or a service on the device holds (`port_in_use`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), an undeclared VLAN parent whose image configuration an entry cannot say (`vlan_parent_unsupported`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)", body = ApiError),
         (status = 500, description = "micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -121,6 +126,7 @@ pub(crate) async fn api_v1_network_read(
 pub(crate) async fn api_v1_network_write(
     _credential: ApiCredential,
     State(state): State<AppState>,
+    Source(source): Source,
     query: Result<Query<NetworkWriteQuery>, axum::extract::rejection::QueryRejection>,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
@@ -180,13 +186,19 @@ pub(crate) async fn api_v1_network_write(
         Ok(adopted) => adopted,
         Err(response) => return *response,
     };
+    // Entries this build cannot read count as removed: the write drops them.
+    let (current, _unreadable) = parse_network(&stored);
     let carried: Vec<&str> = entries.keys().map(String::as_str).collect();
     if let Err(response) = map_refusal(&entries, &carried, NETWORK_SETTINGS_PATH) {
         return *response;
     }
+    if let Err(response) = violations_refusal(
+        listener_violations(&entries, &current, &held_udp_ports(&state.proc_net)),
+        NETWORK_SETTINGS_PATH,
+    ) {
+        return *response;
+    }
     if dry_run {
-        // Entries this build cannot read count as removed: the write drops them.
-        let (current, _unreadable) = parse_network(&stored);
         return api_response(
             StatusCode::OK,
             NetworkDryRun {
@@ -200,6 +212,14 @@ pub(crate) async fn api_v1_network_write(
         Ok(task_id) => task_id,
         Err(response) => return *response,
     };
+    for _ in current
+        .iter()
+        .filter(|(iface, cfg)| cfg.kind == IfaceKind::Wireguard && !entries.contains_key(*iface))
+    {
+        state
+            .audit
+            .record(WIREGUARD_DELETE_EVENT, "accepted", &source);
+    }
     match state.api.get_settings(NETWORK_SETTINGS_PATH).await {
         Ok(value) => api_response(
             StatusCode::ACCEPTED,
@@ -272,6 +292,11 @@ pub(crate) async fn api_v1_network_iface_write(
     // carries: a stored entry that already holds an unparseable address is
     // not this request's fault and must not make an edit to a different
     // interface fail.
+    let listeners = listener_violations(
+        &NetworkEntries::from([(iface.clone(), cfg.clone())]),
+        &candidate,
+        &held_udp_ports(&state.proc_net),
+    );
     candidate.insert(iface.clone(), cfg.clone());
     let adopted = match adopt_vlan_parents(&state, &mut candidate, &path).await {
         Ok(adopted) => adopted,
@@ -280,6 +305,9 @@ pub(crate) async fn api_v1_network_iface_write(
     let mut carried = vec![iface.as_str()];
     carried.extend(adopted.iter().map(String::as_str));
     if let Err(response) = map_refusal(&candidate, &carried, &path) {
+        return *response;
+    }
+    if let Err(response) = violations_refusal(listeners, &path) {
         return *response;
     }
     // The entries' own dot-paths and not the whole map, so a concurrent edit
@@ -329,6 +357,7 @@ pub(crate) async fn api_v1_network_iface_write(
 pub(crate) async fn api_v1_network_iface_remove(
     _credential: ApiCredential,
     State(state): State<AppState>,
+    Source(source): Source,
     Path(iface): Path<String>,
 ) -> Response {
     let path = iface_settings_path(&iface);
@@ -339,9 +368,9 @@ pub(crate) async fn api_v1_network_iface_remove(
         Ok(entries) => entries,
         Err(response) => return *response,
     };
-    if candidate.remove(&iface).is_none() {
+    let Some(removed) = candidate.remove(&iface) else {
         return item_not_found(NETWORK_SETTINGS_PATH, &iface);
-    }
+    };
     if let Err(response) = check_network_idle(&state).await {
         return *response;
     }
@@ -365,6 +394,11 @@ pub(crate) async fn api_v1_network_iface_remove(
     }
     if let Err(response) = write_network_map(&state, &candidate).await {
         return *response;
+    }
+    if removed.kind == IfaceKind::Wireguard {
+        state
+            .audit
+            .record(WIREGUARD_DELETE_EVENT, "accepted", &source);
     }
     no_content()
 }

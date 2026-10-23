@@ -122,6 +122,7 @@ use utoipa::OpenApi;
         crate::routes::api_v1_network_write,
         crate::routes::api_v1_network_iface_write,
         crate::routes::api_v1_network_iface_remove,
+        crate::routes::api_v1_network_wireguard_defaults,
         crate::routes::api_v1_peers_list,
         crate::routes::api_v1_peers_add,
         crate::routes::api_v1_peers_remove,

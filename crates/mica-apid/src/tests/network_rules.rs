@@ -273,3 +273,63 @@ pub(super) async fn a_parent_whose_file_an_entry_cannot_say_is_refused() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(stored_network_map(&fake).await, before);
 }
+
+// `/proc/net/udp` with one userspace socket on `port` and the kernel socket
+// a WireGuard device holds on 51820 (inode 0).
+fn udp_table(port: u16) -> String {
+    format!(
+        "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops\n\
+         \x20 1: 00000000:{port:04X} 00000000:0000 07 00000000:00000000 00:00000000 00000000   100        0 31337 2 0000000000000000 0\n\
+         \x20 2: 00000000:CA6C 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 0 2 0000000000000000 0\n"
+    )
+}
+
+// A tunnel's listen port is refused when another tunnel has it or a service
+// on the device holds it; the port a tunnel already listens on is its own.
+#[tokio::test]
+pub(super) async fn a_listen_port_in_use_is_refused() {
+    let proc_net = tempfile::TempDir::new().unwrap();
+    std::fs::write(proc_net.path().join("udp"), udp_table(51830)).unwrap();
+    let (tree, token) = with_token(kinds_tree("hunter2secret"));
+    let fake = std::sync::Arc::new(FakeSettings::new(tree));
+    let router = app(AppState::new(fake.clone(), SIGNING_KEY).with_proc_net(proc_net.path()));
+    let tunnel = |port: u16, subnet: &str| {
+        json!({
+            "kind": "wireguard", "dhcp": false, "static": { "address": subnet },
+            "wireguard": { "listenPort": port, "peers": [] },
+        })
+    };
+    let mut map = stored_network_map(&fake).await;
+
+    map["wg1"] = tunnel(51820, "10.9.0.1/24");
+    let error = refused(&router, &token, map.clone()).await;
+    assert_eq!(error["code"], "port_in_use");
+    assert_eq!(error["params"], json!({ "name": "wg0", "port": 51820 }));
+    assert_eq!(
+        codes(&error),
+        [(
+            "wg1".into(),
+            "wireguard.listenPort".into(),
+            "port_in_use".into()
+        )]
+    );
+
+    map["wg1"] = tunnel(51830, "10.9.0.1/24");
+    let error = refused(&router, &token, map.clone()).await;
+    assert_eq!(error["code"], "port_in_use");
+    assert_eq!(error["params"], json!({ "port": 51830 }));
+    assert_eq!(
+        codes(&error),
+        [(
+            "wg1".into(),
+            "wireguard.listenPort".into(),
+            "port_in_use".into()
+        )]
+    );
+
+    map["wg1"] = tunnel(51831, "10.9.0.1/24");
+    assert_eq!(
+        put_network_map(&router, &token, &map).await.status(),
+        StatusCode::ACCEPTED
+    );
+}

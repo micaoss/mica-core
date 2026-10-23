@@ -63,7 +63,7 @@ pub(crate) struct ErrorDetail {
     /// The rule's code: `name_invalid`, `address_overlap`,
     /// `gateway_out_of_subnet`, `metric_duplicate`, `vlan_duplicate`,
     /// `vlan_parent_invalid`, `bridge_port_taken`, `bridge_port_invalid`,
-    /// `bridge_port_addressed`, `in_use`, or `validation_failed` for a
+    /// `bridge_port_addressed`, `in_use`, `port_in_use`, or `validation_failed` for a
     /// field's own syntax.
     pub(super) code: &'static str,
     /// The values the rule's message names.
