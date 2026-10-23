@@ -4,8 +4,9 @@ export type Translate = (key: string, params?: Record<string, unknown>) => strin
 
 /// One line of a configuration as the review lists it: label, value.
 export type SummaryRow = [label: string, value: string]
-/// One changed line: label, before, after.
-export type DiffRow = [label: string, before: string, after: string]
+/// One changed line: label, before, after, and for a list on both sides the
+/// entries added and removed.
+export type DiffRow = [label: string, before: string, after: string, items?: { added: string[]; removed: string[] }]
 
 /// An interface's configuration in the words its page uses. An interface
 /// nobody declared reads as the image's default; fields the page does not
@@ -43,8 +44,22 @@ export function summary(entry: IfaceEntry | undefined, kind: ViewKind, t: Transl
   } else {
     rows.push([field('method'), value('noAddress')])
   }
-  rows.push([field('routes'), shown.routes?.length ? shown.routes.map((route) => `${route.destination} → ${route.gateway || value('onLink')}`).join('; ') : value('none')])
+  rows.push([field('routes'), shown.routes?.length ? routeItems(shown, t).join('; ') : value('none')])
   return rows
+}
+
+function routeItems(entry: IfaceEntry, t: Translate): string[] {
+  return (entry.routes ?? []).map((route) => `${route.destination} → ${route.gateway || t('network.values.onLink')}`)
+}
+
+/// The list fields of a configuration, by label, as their entries.
+function lists(entry: IfaceEntry | undefined, t: Translate): Map<string, string[]> {
+  const found = new Map<string, string[]>()
+  if (!entry) return found
+  const dns = entry.dhcp ? entry.dns : entry.static?.dns
+  if (dns?.length) found.set(t('network.fields.dns'), dns)
+  if (entry.routes?.length) found.set(t('network.fields.routes'), routeItems(entry, t))
+  return found
 }
 
 /// The lines that differ between two configurations of one interface. A line
@@ -54,9 +69,16 @@ export function diffRows(before: IfaceEntry | undefined, after: IfaceEntry | und
   const left = new Map(summary(before, kind, t))
   const right = new Map(summary(after, kind, t))
   const labels = [...new Set([...left.keys(), ...right.keys()])]
+  const leftLists = lists(before, t)
+  const rightLists = lists(after, t)
   const rows: DiffRow[] = labels
     .filter((label) => left.get(label) !== right.get(label))
-    .map((label) => [label, left.get(label) ?? '—', right.get(label) ?? '—'])
+    .map((label) => {
+      const was = leftLists.get(label)
+      const now = rightLists.get(label)
+      const items = was && now ? { added: now.filter((item) => !was.includes(item)), removed: was.filter((item) => !now.includes(item)) } : undefined
+      return items ? [label, left.get(label) ?? '—', right.get(label) ?? '—', items] : [label, left.get(label) ?? '—', right.get(label) ?? '—']
+    })
   const shown = rows.filter(([, , value]) => value !== '—')
   return shown.length ? shown : rows
 }

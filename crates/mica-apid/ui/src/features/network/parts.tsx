@@ -78,3 +78,16 @@ export function roleOf(iface: Pick<IfaceView, 'kind'>): Role {
     default: return 'lan'
   }
 }
+
+const CAN_STATES: Record<string, string> = {
+  'error-active': 'normal', 'error-warning': 'warning', 'error-passive': 'passive', 'bus-off': 'busOff', stopped: 'stopped', sleeping: 'sleeping',
+}
+
+/// A CAN controller's state and its bit rate in words.
+export function useCanText() {
+  const { t } = useTranslation()
+  return {
+    state: (busState: string) => CAN_STATES[busState] ? t(`network.can.states.${CAN_STATES[busState]}`, { state: busState }) : busState,
+    bitrate: (bitrate: number) => t('network.status.notes.bitrate', { kbps: bitrate / 1000 }),
+  }
+}

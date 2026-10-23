@@ -4,7 +4,7 @@ import type { NetworkMap } from './model'
 import { diffRows } from './summary'
 import { wifiView } from './use-network'
 import { addressBook, validateEntry } from './validate'
-import { buildView, computeStatus, exitOf, sessionInterface, type WifiView } from './view'
+import { buildView, computeStatus, exitOf, routeTable, sessionInterface, tunnelDefaults, type WifiView } from './view'
 
 const off: WifiView = { radio: 'wlan0', mode: 'off', apRunning: false, stations: 0 }
 const t = (key: string, params?: Record<string, unknown>) => params ? `${key}${JSON.stringify(params)}` : key
@@ -93,6 +93,16 @@ describe('the review\'s lines', () => {
     const rows = diffRows({ dhcp: true }, { dhcp: false, static: { address: '192.168.20.1/24' } }, 'physical', t)
     expect(rows.map(([label]) => label)).toEqual(['network.fields.method', 'network.fields.address', 'network.fields.gateway', 'network.fields.dns'])
   })
+
+  it('lists a list field by the entries added and removed', () => {
+    const route = (destination: string) => ({ destination, gateway: '192.168.10.2' })
+    const before = { dhcp: false, static: { address: '192.168.10.1/24', dns: ['1.1.1.1', '9.9.9.9'] }, routes: [route('10.1.0.0/16'), route('10.2.0.0/16')] }
+    const after = { dhcp: false, static: { address: '192.168.10.1/24', dns: ['9.9.9.9'] }, routes: [route('10.2.0.0/16'), route('10.3.0.0/16')] }
+    expect(diffRows(before, after, 'physical', t).map(([label, , , items]) => [label, items])).toEqual([
+      ['network.fields.dns', { added: [], removed: ['1.1.1.1'] }],
+      ['network.fields.routes', { added: ['10.3.0.0/16 → 192.168.10.2'], removed: ['10.1.0.0/16 → 192.168.10.2'] }],
+    ])
+  })
 })
 
 describe('what the console refuses to stage', () => {
@@ -113,5 +123,67 @@ describe('what the console refuses to stage', () => {
 
   it('asks nothing of a bridge port\'s addressing', () => {
     expect(validateEntry('eth1', 'physical', { dhcp: false }, map, [], true)).toEqual({})
+  })
+})
+
+describe('the route table', () => {
+  it('lists the main table\'s IPv4 routes of listed interfaces, default first, then by interface and prefix', () => {
+    const view = buildView(configured() as NetworkMap, observed(), off)
+    expect(routeTable(view).map((row) => [row.destination, row.via ?? null, row.interface, row.source, row.role ?? null])).toEqual([
+      ['0.0.0.0/0', '192.168.1.1', 'eth0', 'dhcp', null],
+      ['192.168.1.1/32', null, 'eth0', 'dhcp', null],
+      ['192.168.1.0/24', null, 'eth0', 'link', null],
+      ['192.168.10.0/24', null, 'eth1', 'link', null],
+      ['10.20.0.0/16', '192.168.10.2', 'eth1', 'static', null],
+      ['10.8.0.0/24', null, 'wg0', 'wireguard', null],
+    ])
+  })
+
+  it('marks the default route the kernel uses and the others as standby', () => {
+    const status = observed()
+    const wlan = status.interfaces.entries!.find((entry) => entry.name === 'wlan0')!
+    wlan.routes = [{ dest: '0.0.0.0/0', via: '192.168.1.1', metric: 600, source: 'DHCPv4', protocol: 'dhcp', table: 'main', family: 'ipv4' }]
+    status.defaultRoutes.entries = [
+      { family: 'ipv4', gateway: '192.168.1.1', interface: 'wlan0', metric: 600, effective: false },
+      { family: 'ipv4', gateway: '192.168.1.1', interface: 'eth0', metric: 1024, effective: true },
+    ]
+    const view = buildView(configured() as NetworkMap, status, off)
+    expect(exitOf(view)).toBe('eth0')
+    expect(view.routes.map((route) => route.interface)).toEqual(['eth0', 'wlan0'])
+    const defaults = routeTable(view).filter((row) => row.destination === '0.0.0.0/0')
+    expect(defaults.map((row) => [row.interface, row.role])).toEqual([['eth0', 'effective'], ['wlan0', 'standby']])
+  })
+
+  it('leaves out routes of hidden links and other tables', () => {
+    const status = observed()
+    status.interfaces.entries!.push({ name: 'dummy0', index: 9, kind: 'dummy', link: { carrier: true }, addresses: [], dhcp: { available: true }, dns: [], routes: [{ dest: '10.99.0.0/24', table: 'main', family: 'ipv4' }] })
+    status.interfaces.entries!.find((entry) => entry.name === 'eth1')!.routes!.push({ dest: '10.30.0.0/16', via: '192.168.10.3', table: 'vpn', family: 'ipv4' })
+    const view = buildView(configured() as NetworkMap, status, off)
+    expect(routeTable(view).some((row) => row.destination === '10.99.0.0/24' || row.destination === '10.30.0.0/16')).toBe(false)
+  })
+})
+
+describe('a new tunnel\'s defaults', () => {
+  it('take the first name, subnet and port nothing on the device has', () => {
+    const view = buildView(configured() as NetworkMap, observed(), off)
+    expect(tunnelDefaults(view, [])).toEqual({ name: 'wg1', address: '10.2.0.1/24', listenPort: 51821 })
+    expect(tunnelDefaults(view, [51821, 51822]).listenPort).toBe(51823)
+  })
+
+  it('move past staged tunnels, peers\' subnets and observed routes', () => {
+    const map = configured() as NetworkMap
+    map.wg1 = { kind: 'wireguard', dhcp: false, static: { address: '10.2.0.1/24' }, wireguard: { listenPort: 51821, peers: [{ publicKey: 'k', allowedIps: ['10.3.0.0/24'] }] } }
+    const status = observed()
+    status.interfaces.entries!.find((entry) => entry.name === 'eth1')!.routes!.push({ dest: '10.4.0.0/16', via: '192.168.10.2', table: 'main', family: 'ipv4' })
+    expect(tunnelDefaults(buildView(map, status, off), [])).toEqual({ name: 'wg2', address: '10.5.0.1/24', listenPort: 51822 })
+  })
+
+  it('reuse what a deleted tunnel held, applied or staged', () => {
+    const map = configured() as NetworkMap
+    delete map.wg0
+    expect(tunnelDefaults(buildView(map, observed(), off), [])).toEqual({ name: 'wg0', address: '10.2.0.1/24', listenPort: 51821 })
+    const status = observed()
+    status.interfaces.entries = status.interfaces.entries!.filter((entry) => entry.name !== 'wg0')
+    expect(tunnelDefaults(buildView(map, status, off), [])).toEqual({ name: 'wg0', address: '10.2.0.1/24', listenPort: 51821 })
   })
 })

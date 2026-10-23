@@ -5,12 +5,13 @@ import { ArrowLeftRight, ChevronDown, ChevronRight, Globe } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import type { StatusTone } from '@/shared/components/status-badge'
 import { DataTable } from '@/shared/components/data-table'
+import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { dnsLinks, ProbeText, useDns } from './dns-tab'
 import { bridgeOf, vlansOn } from './model'
 import { Led, TEXT, useKindLabel, useStatusText } from './parts'
 import type { NetworkData } from './use-network'
-import { computeStatus, exitOf, type DefaultRoute, type IfaceStatus } from './view'
+import { computeStatus, exitOf, routeTable, type IfaceStatus, type RouteRow } from './view'
 import type { NetworkTab } from './network-page'
 
 /// What the device runs now: the way out to the internet, the ports, DNS, the
@@ -22,26 +23,32 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
   const kindLabel = useKindLabel()
   const text = useStatusText()
   const [showRoutes, setShowRoutes] = useState(true)
+  const [allRoutes, setAllRoutes] = useState(false)
   const view = data.applied
   const open = (name: string) => void navigate({ to: '/network/$name', params: { name } })
   const status = (name: string) => computeStatus(view, name)
   const exit = view.routes[0]
   const physical = view.order.filter((name) => view.ifaces[name].kind === 'physical')
   const uplink = exitOf(view) ?? physical.find((name) => !bridgeOf(view.map, name) && view.ifaces[name].entry.dhcp)
+  const standby = [...new Set(view.routes.map((route) => route.interface))].filter((name) => name !== uplink && view.ifaces[name])
+  const routes = routeTable(view)
+  const shownRoutes = allRoutes ? routes : routes.slice(0, ROUTES_FOLDED)
   const lan = view.order.filter((name) => view.ifaces[name].kind === 'bridge' || view.ifaces[name].kind === 'vlan')
   const tunnels = view.order.filter((name) => view.ifaces[name].kind === 'wireguard')
   const radio = view.wifi.radio && view.ifaces[view.wifi.radio] ? view.wifi.radio : undefined
   const toneOf = (names: string[]): StatusTone => !names.length ? 'neutral' : names.some((name) => status(name).tone === 'danger') ? 'danger' : names.some((name) => status(name).tone === 'warning') ? 'warning' : 'success'
   const up = uplink ? status(uplink) : undefined
   const wifi = view.wifi
-  const wifiSummary = wifi.mode === 'off' ? t('network.overview.wifiOff') : wifi.mode === 'ap' ? t('network.overview.wifiAp', { count: wifi.stations }) : wifi.association ? t('network.overview.wifiJoined', { ssid: wifi.association.ssid ?? '' }) : t('network.overview.wifiSearching')
+  const wifiSummary = wifi.mode === 'off' ? t('network.overview.wifiOff') : wifi.mode === 'ap' ? t('network.overview.wifiAp', { count: wifi.stations }) : wifi.association ? t('network.overview.wifiJoined', { ssid: wifi.association.ssid ?? '' }) : t('network.overview.wifiClientDown')
+  // A client that holds a default route is an uplink, not a downstream link.
+  const wifiDownstream = !(wifi.mode === 'client' && radio && (radio === uplink || standby.includes(radio)))
   const dns = useDns()
   const globalDns = dns.data?.mode === 'global'
   const dnsGroups = dnsLinks(data, dns.data).filter((link) => link.servers.length > 0)
 
   return (
     <div className="grid gap-4">
-      <div className="grid items-center gap-3 rounded-xl border bg-card p-4 lg:grid-cols-[1fr_auto_1fr_auto_auto_auto_1.3fr]">
+      <div className="grid items-center gap-3 rounded-xl border bg-card p-4 lg:grid-cols-[1fr_auto_1fr_auto_auto_auto_auto_1.3fr]">
         <Node tone={exit ? 'success' : 'danger'} icon={<Globe />} title={t('network.overview.internet')} value={t(exit ? 'network.overview.online' : 'network.overview.offline')} />
         <Wire tone={exit ? 'success' : 'danger'} label={exit ? t('network.overview.via', { gateway: exit.gateway ?? '—' }) : t('network.overview.noDefault')} />
         <Node
@@ -51,16 +58,31 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
           value={uplink && view.ifaces[uplink].obs?.address ? <span className="font-mono">{view.ifaces[uplink].obs?.address}</span> : up ? text.label(up) : t('network.overview.noUplink')}
           onClick={uplink ? () => open(uplink) : undefined}
         />
+        {standby.length ? (
+          <div className="grid gap-2">
+            {standby.map((name) => (
+              <Node
+                key={name}
+                faint
+                tone={status(name).tone}
+                icon={<ArrowLeftRight />}
+                title={t('network.overview.standby', { name })}
+                value={view.ifaces[name].obs?.address ? <span className="font-mono">{view.ifaces[name].obs?.address}</span> : text.label(status(name))}
+                onClick={() => open(name)}
+              />
+            ))}
+          </div>
+        ) : null}
         <Wire tone={up?.tone ?? 'danger'} />
         <div className="grid justify-items-center gap-0.5 rounded-lg border bg-muted/40 px-5 py-3 text-center">
           <strong className="text-sm">mica</strong>
           <span className="font-mono text-xs text-muted-foreground">{data.hostname ?? '—'}</span>
         </div>
-        <Wire tone={toneOf([...lan, ...(radio ? [radio] : []), ...tunnels])} />
+        <Wire tone={toneOf([...lan, ...(radio && wifiDownstream ? [radio] : []), ...tunnels])} />
         <div className="grid gap-1.5 text-sm">
           {([
             [t('network.overview.virtual'), t('network.overview.healthy', { up: lan.filter((name) => status(name).tone === 'success').length, count: lan.length }), toneOf(lan)],
-            ['Wi-Fi', wifiSummary, wifi.mode === 'off' || !radio ? 'neutral' : status(radio).tone],
+            ...(wifiDownstream ? [['Wi-Fi', wifiSummary, wifi.mode === 'off' || !radio ? 'neutral' : status(radio).tone]] : []),
             [t('network.overview.tunnels'), t('network.overview.tunnelCount', { count: tunnels.length }), toneOf(tunnels)],
           ] as [string, string, StatusTone][]).map(([label, value, tone]) => (
             <div key={label} className="flex items-center gap-2"><Led tone={tone} /><span className="text-muted-foreground">{label}</span><strong className="ms-auto font-medium">{value}</strong></div>
@@ -149,23 +171,31 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
       <div className="rounded-xl border bg-card">
         <button type="button" className="flex w-full items-center gap-2 p-4 text-left text-sm font-semibold" aria-expanded={showRoutes} onClick={() => setShowRoutes(!showRoutes)}>
           {showRoutes ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-          {t('network.overview.routes')}
-          <span className="font-normal text-muted-foreground">{t('network.overview.routesAside', { exit: exit?.interface ?? '—' })}</span>
+          {exit ? t('network.overview.routesTitle', { count: routes.length, exit: exit.interface }) : t('network.overview.routesTitleNone', { count: routes.length })}
         </button>
         {showRoutes ? (
           <div className="border-t">
-            <DataTable<DefaultRoute>
-              rows={view.routes}
-              rowKey={(route) => `${route.interface}-${route.gateway ?? ''}`}
-              empty={t('network.overview.noDefault')}
+            <DataTable<RouteRow>
+              rows={shownRoutes}
+              rowKey={(route) => `${route.interface}-${route.destination}-${route.via ?? ''}-${route.metric ?? ''}`}
+              empty={t('network.overview.noRoutes')}
               columns={[
-                { id: 'destination', header: t('network.overview.columns.destination'), cell: () => t('network.overview.default') },
-                { id: 'via', header: t('network.overview.columns.via'), cell: (route) => <span className="font-mono">{route.gateway ?? t('network.values.onLink')}</span> },
-                { id: 'interface', header: t('network.overview.columns.interface'), cell: (route) => <span className="font-mono">{route.interface}</span> },
+                {
+                  id: 'destination',
+                  header: t('network.overview.columns.destination'),
+                  cell: (route) => route.prefix === 0
+                    ? <span className="flex items-center gap-2">{t('network.overview.default')}{route.role ? <Badge variant={route.role === 'effective' ? 'default' : 'outline'}>{t(`network.overview.roles.${route.role}`)}</Badge> : null}</span>
+                    : <span className="font-mono">{route.destination}</span>,
+                },
+                { id: 'via', header: t('network.overview.columns.via'), cell: (route) => <span className="font-mono">{route.via ?? t('network.values.onLink')}</span> },
+                { id: 'interface', header: t('network.overview.columns.interface'), cell: (route) => <button type="button" className="font-mono text-primary hover:underline" onClick={() => open(route.interface)}>{route.interface}</button> },
                 { id: 'metric', header: t('network.overview.columns.metric'), cell: (route) => route.metric ?? '—' },
+                { id: 'source', header: t('network.overview.columns.source'), cell: (route) => t(`network.overview.sources.${route.source}`) },
               ]}
             />
-            <p className="border-t px-4 py-2 text-xs text-muted-foreground">{t('network.overview.routesScope')}</p>
+            {routes.length > ROUTES_FOLDED && !allRoutes ? (
+              <div className="border-t px-4 py-2"><Button size="xs" variant="link" onClick={() => setAllRoutes(true)}>{t('network.overview.showAllRoutes', { count: routes.length })}</Button></div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -173,7 +203,10 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
   )
 }
 
-function Node({ tone, icon, title, value, onClick }: { tone: StatusTone; icon: ReactNode; title: string; value: ReactNode; onClick?: () => void }) {
+/// Routes the table shows before it is unfolded.
+const ROUTES_FOLDED = 20
+
+function Node({ tone, icon, title, value, onClick, faint }: { tone: StatusTone; icon: ReactNode; title: string; value: ReactNode; onClick?: () => void; faint?: boolean }) {
   const body = (
     <>
       <span className={cn('flex items-center gap-1.5 text-xs text-muted-foreground [&_svg]:size-3.5')}>{icon}{title}</span>
@@ -181,8 +214,8 @@ function Node({ tone, icon, title, value, onClick }: { tone: StatusTone; icon: R
     </>
   )
   return onClick
-    ? <button type="button" onClick={onClick} className="grid gap-0.5 rounded-lg border p-3 text-left hover:border-primary/50">{body}</button>
-    : <div className="grid gap-0.5 rounded-lg border p-3">{body}</div>
+    ? <button type="button" onClick={onClick} className={cn('grid gap-0.5 rounded-lg border p-3 text-left hover:border-primary/50', faint && 'opacity-70')}>{body}</button>
+    : <div className={cn('grid gap-0.5 rounded-lg border p-3', faint && 'opacity-70')}>{body}</div>
 }
 
 function Wire({ tone, label }: { tone: StatusTone; label?: string }) {

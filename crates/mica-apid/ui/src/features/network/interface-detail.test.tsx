@@ -121,3 +121,14 @@ describe('one interface', () => {
     expect(await screen.findByRole('button', { name: 'This radio is configured on the Wi-Fi tab.' })).toBeTruthy()
   })
 })
+
+describe('a CAN bus', () => {
+  it('names its controller state and bit rate, and what restoring drops', async () => {
+    stubFetch(networkRoutes())
+    open('can0')
+    expect(await screen.findByText('Normal (error-active)')).toBeTruthy()
+    expect(screen.getAllByText('250 kbit/s').length).toBeGreaterThan(0)
+    expect(screen.queryByText('error-active')).toBeNull()
+    expect(screen.getByText('This drops the CAN settings this console made and returns the bus to the image\'s default.')).toBeTruthy()
+  })
+})

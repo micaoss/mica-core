@@ -20,20 +20,31 @@ function link(name: string, index: number, fields: Partial<ObservedNetworkInterf
 }
 
 const v4 = (address: string, prefixLength: number, configSource = 'static') => ({ family: 'ipv4', address, prefixLength, scope: 'global', configSource })
+/// One route as micad reports it on its link.
+const route = (dest: string, fields: { via?: string; metric?: number; source?: string; protocol?: string; scope?: string; table?: string; family?: string } = {}) =>
+  ({ dest, family: 'ipv4', table: 'main', metric: 0, ...fields })
 
 export function observed(overrides: Partial<ObservedNetworkState> = {}): ObservedNetworkState {
   const entries = [
     link('lo', 1, { type: 'loopback', addresses: [{ family: 'ipv4', address: '127.0.0.1', prefixLength: 8, scope: 'host' }] }),
-    link('eth0', 2, { hardwareAddress: '02:00:00:00:00:01', addresses: [v4('192.168.1.24', 24, 'DHCPv4')], dns: ['192.168.1.1'], lease: { available: true, server: '192.168.1.1', router: '192.168.1.1', remainingSeconds: 3600 } }),
-    link('eth1', 3, { hardwareAddress: '02:00:00:00:00:02', addresses: [v4('192.168.10.1', 24)] }),
+    link('eth0', 2, { hardwareAddress: '02:00:00:00:00:01', addresses: [v4('192.168.1.24', 24, 'DHCPv4')], dns: ['192.168.1.1'], lease: { available: true, server: '192.168.1.1', router: '192.168.1.1', remainingSeconds: 3600 }, routes: [
+      route('0.0.0.0/0', { via: '192.168.1.1', metric: 1024, source: 'DHCPv4', protocol: 'dhcp' }),
+      route('192.168.1.0/24', { metric: 1024, source: 'DHCPv4', protocol: 'kernel', scope: 'link' }),
+      route('192.168.1.1/32', { metric: 1024, source: 'DHCPv4', protocol: 'dhcp', scope: 'link' }),
+      route('fe80::/64', { family: 'ipv6', metric: 256, protocol: 'kernel', scope: 'link' }),
+    ] }),
+    link('eth1', 3, { hardwareAddress: '02:00:00:00:00:02', addresses: [v4('192.168.10.1', 24)], routes: [
+      route('192.168.10.0/24', { source: 'static', protocol: 'kernel', scope: 'link' }),
+      route('10.20.0.0/16', { via: '192.168.10.2', source: 'static', protocol: 'static' }),
+    ] }),
     link('eth2', 4, { hardwareAddress: '02:00:00:00:00:03', link: { carrier: false, operationalState: 'no-carrier' } }),
     link('wlan0', 5, { type: 'wlan', link: { carrier: false, operationalState: 'no-carrier' } }),
-    link('wg0', 6, { kind: 'wireguard', addresses: [v4('10.8.0.1', 24)] }),
-    link('can0', 7, { type: 'can' }),
+    link('wg0', 6, { kind: 'wireguard', addresses: [v4('10.8.0.1', 24)], routes: [route('10.8.0.0/24', { source: 'static', protocol: 'kernel', scope: 'link' })] }),
+    link('can0', 7, { type: 'can', can: { available: true, busState: 'error-active', bitrate: 250000, txErrors: 3, rxErrors: 0 } }),
   ]
   return {
     interfaces: { available: true, count: entries.length, entries },
-    defaultRoutes: { available: true, count: 1, entries: [{ family: 'ipv4', gateway: '192.168.1.1', interface: 'eth0', metric: 1024 }] },
+    defaultRoutes: { available: true, count: 1, entries: [{ family: 'ipv4', gateway: '192.168.1.1', interface: 'eth0', metric: 1024, effective: true }] },
     dns: { available: true, linkServers: ['192.168.1.1'], resolverServers: ['192.168.1.1'], probe: { name: 'example.org', reachable: true, result: 'ok' } },
     wifi: { available: true, associations: [] },
     accessPoint: { available: true, entries: [] },

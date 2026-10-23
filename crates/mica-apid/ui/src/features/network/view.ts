@@ -1,7 +1,7 @@
 import { isHiddenInterface } from '@/lib/network'
 import type { ObservedNetworkInterface, ObservedNetworkState } from '@/lib/types'
 import type { StatusTone } from '@/shared/components/status-badge'
-import { bridgeOf, defaultEntry, vlansOn, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
+import { bridgeOf, defaultEntry, overlaps, vlansOn, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
 
 /// What the device reports about one interface, in the terms the pages use.
 export interface Observed {
@@ -20,7 +20,11 @@ export interface Observed {
   /// Seconds since each tunnel peer's latest handshake, `null` for a peer
   /// that never completed one. Absent when the device did not say.
   handshakeAges?: (number | null)[]
+  /// The IPv4 routes of the main table on the link.
+  routes: ObservedRoute[]
 }
+
+type ObservedRoute = NonNullable<ObservedNetworkInterface['routes']>[number]
 
 export interface IfaceView {
   name: string
@@ -45,7 +49,29 @@ export interface WifiView {
   association?: { ssid?: string; bssid?: string; rssiDbm?: number; linkSpeedMbps?: number }
 }
 
-export interface DefaultRoute { gateway?: string; interface: string; metric?: number }
+export interface DefaultRoute {
+  gateway?: string
+  interface: string
+  metric?: number
+  /// Whether the kernel sends traffic for the internet this way; absent when
+  /// the device did not say.
+  effective?: boolean
+}
+
+/// One row of the overview's route table.
+export interface RouteRow {
+  destination: string
+  prefix: number
+  via?: string
+  interface: string
+  metric?: number
+  /// Who installed it: a DHCP lease, the configuration, a tunnel, or the
+  /// kernel for an address's own subnet.
+  source: 'dhcp' | 'static' | 'wireguard' | 'link'
+  /// Set on default routes when there is more than one: the one in use and
+  /// the ones standing by.
+  role?: 'effective' | 'standby'
+}
 
 export interface NetView {
   map: NetworkMap
@@ -78,6 +104,9 @@ function observedOf(entry: ObservedNetworkInterface, now: number): Observed {
       : entry.dns.map((server) => typeof server === 'string' ? server : server.address ?? '').filter(Boolean),
     can: can ? { busState: can.busState, bitrate: can.bitrate, txErrors: can.txErrors, rxErrors: can.rxErrors, busOffCount: can.busOffCount } : undefined,
     handshakeAges: peers?.map((peer) => peer.latestHandshake ? Math.max(0, Math.floor(now / 1000) - peer.latestHandshake) : null),
+    routes: (entry.routes ?? []).filter((route) =>
+      (route.table === undefined || route.table === 'main' || route.table === 254)
+      && (route.family === undefined ? !route.dest.includes(':') : route.family === 'ipv4' || route.family === 'inet')),
   }
 }
 
@@ -115,14 +144,51 @@ export function buildView(map: NetworkMap, status: ObservedNetworkState | undefi
     || left.localeCompare(right))
   const routes = (status?.defaultRoutes.entries ?? [])
     .filter((route): route is typeof route & { interface: string } => route.interface !== undefined && (route.family === undefined || route.family === 'ipv4' || route.family === 'inet'))
-    .map((route) => ({ gateway: route.gateway, interface: route.interface, metric: route.metric }))
-    .sort((left, right) => (left.metric ?? 0) - (right.metric ?? 0))
+    .map((route) => ({ gateway: route.gateway, interface: route.interface, metric: route.metric, effective: route.effective }))
+    .sort((left, right) => Number(right.effective === true) - Number(left.effective === true) || (left.metric ?? 0) - (right.metric ?? 0))
   return { map, ifaces, order, observed: status !== undefined, routes, wifi }
 }
 
-/// The interface the default route leaves by.
+/// The interface the default route leaves by: the one the kernel uses, or
+/// the lowest metric when the device did not say.
 export function exitOf(view: NetView): string | undefined {
   return view.routes[0]?.interface
+}
+
+function routeSource(iface: IfaceView, route: ObservedRoute): RouteRow['source'] {
+  if (iface.kind === 'wireguard') return 'wireguard'
+  if (route.protocol === 'kernel') return 'link'
+  if (route.protocol === 'dhcp' || route.source === 'DHCPv4') return 'dhcp'
+  if (route.protocol === 'static' || route.protocol === 'boot') return 'static'
+  // A device that does not say who installed the route (OpenRC): a route
+  // without a gateway is the link's own.
+  if (route.via === undefined || route.via === null) return 'link'
+  return route.source === 'static' ? 'static' : 'link'
+}
+
+/// The routes of the interfaces the pages list: default routes first, the one
+/// in use leading, then each interface's in page order, narrowest first.
+export function routeTable(view: NetView): RouteRow[] {
+  const defaults: RouteRow[] = []
+  const others: RouteRow[] = []
+  view.order.forEach((name) => {
+    const iface = view.ifaces[name]
+    for (const route of iface.obs?.routes ?? []) {
+      const [destination, prefix] = route.dest.split('/')
+      const row: RouteRow = { destination: route.dest, prefix: Number(prefix ?? 32), via: route.via ?? undefined, interface: name, metric: route.metric ?? undefined, source: routeSource(iface, route) }
+      if (destination === '0.0.0.0' && row.prefix === 0) defaults.push(row)
+      else others.push(row)
+    }
+  })
+  const rank = (row: RouteRow) => {
+    const at = view.routes.findIndex((route) => route.interface === row.interface && (route.gateway === undefined || route.gateway === row.via))
+    return at < 0 ? view.routes.length : at
+  }
+  defaults.sort((left, right) => rank(left) - rank(right) || (left.metric ?? 0) - (right.metric ?? 0))
+  if (defaults.length > 1) defaults.forEach((row, at) => { row.role = at === 0 ? 'effective' : 'standby' })
+  // Array sort is stable, so rows keep the interface order between equal prefixes.
+  others.sort((left, right) => view.order.indexOf(left.interface) - view.order.indexOf(right.interface) || right.prefix - left.prefix)
+  return [...defaults, ...others]
 }
 
 export interface IfaceStatus {
@@ -216,4 +282,33 @@ export function sessionInterface(status: ObservedNetworkState | undefined, local
   if (!localAddress || !status) return null
   const found = (status.interfaces.entries ?? []).find((entry) => entry.addresses.some((address) => address.address === localAddress))
   return found?.name ?? null
+}
+
+/// The listen ports a new tunnel is offered, in order.
+const TUNNEL_PORTS = Array.from({ length: 79 }, (_, at) => 51821 + at)
+/// The tunnel addresses a new tunnel is offered, in order.
+const TUNNEL_ADDRESSES = [
+  ...Array.from({ length: 253 }, (_, at) => `10.${at + 2}.0.1/24`),
+  ...Array.from({ length: 156 }, (_, at) => `172.16.${at + 100}.1/24`),
+]
+
+/// What a new tunnel starts from: the first name, subnet and listen port that
+/// nothing in `view` has (staged changes included) and, for the port, no
+/// service on the device holds (`held`). A value with no free candidate is
+/// absent.
+export function tunnelDefaults(view: NetView, held: number[]): { name?: string; address?: string; listenPort?: number } {
+  const entries = Object.values(view.map)
+  // A tunnel the device runs and the map no longer declares is one a staged
+  // change deletes: what it holds is free.
+  const live = view.order.filter((name) => view.ifaces[name].declared || view.ifaces[name].kind !== 'wireguard')
+  const subnets = [
+    ...live.flatMap((name) => [view.ifaces[name].obs?.address, ...(view.ifaces[name].obs?.routes ?? []).filter((route) => !route.dest.endsWith('/0')).map((route) => route.dest)]),
+    ...entries.flatMap((entry) => [entry.dhcp ? undefined : entry.static?.address, ...(entry.wireguard?.peers ?? []).flatMap((peer) => peer.allowedIps)]),
+  ].filter((subnet): subnet is string => subnet !== undefined)
+  const ports = new Set([...held, ...entries.flatMap((entry) => entry.wireguard?.listenPort ?? [])])
+  return {
+    name: Array.from({ length: 100 }, (_, at) => `wg${at}`).find((name) => !live.includes(name)),
+    address: TUNNEL_ADDRESSES.find((address) => !subnets.some((subnet) => overlaps(address, subnet))),
+    listenPort: TUNNEL_PORTS.find((port) => !ports.has(port)),
+  }
 }

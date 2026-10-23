@@ -240,7 +240,7 @@ function Effective({ data, dns }: { data: NetworkData; dns: DnsDocument | undefi
             value: global ? (
               <span className="grid justify-items-end gap-0.5">{(dns?.effective.global ?? []).map((server, index) => <span key={server} className="font-mono">{index + 1}. {server}</span>)}</span>
             ) : links.length ? (
-              <span className="grid justify-items-end gap-0.5">
+              <span className="grid justify-items-start gap-0.5 text-left">
                 {links.map((link) => (
                   <span key={link.name}>
                     <Link className="font-mono text-primary" to="/network/$name" params={{ name: link.name }}>{link.name}</Link>

@@ -54,6 +54,14 @@ describe('the network page', () => {
     expect(screen.queryByRole('link', { name: 'lo' })).toBeNull()
   })
 
+  it('shows a CAN bus by its state, bit rate and error counters', async () => {
+    stubFetch(networkRoutes())
+    open()
+    const card = within(await screen.findByRole('region', { name: 'Field buses' })).getByRole('link', { name: 'can0' })
+    expect(within(card).getByText('250 kbit/s')).toBeTruthy()
+    expect(within(card).getByText('TX 3 / RX 0')).toBeTruthy()
+  })
+
   it('stages a tunnel, reviews it, and writes the whole map in one request', async () => {
     const fetch = stubFetch({
       ...networkRoutes(),
@@ -81,6 +89,20 @@ describe('the network page', () => {
     await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/network')).toBeTruthy())
     expect(bodyOf(fetch, 'PUT', '/api/v1/network')).toEqual({ baseVersion: 'v1', configured: { ...configured(), wg1: { kind: 'wireguard', static: { address: '10.2.0.1/24' }, wireguard: { listenPort: 51821, peers: [] } } } })
     expect(await screen.findByText('The device reports the interfaces reconciled.')).toBeTruthy()
+  })
+
+  it('offers a new tunnel a port no service on the device holds', async () => {
+    stubFetch({ ...networkRoutes(), '/api/v1/network/wireguard/defaults': { name: 'wg1', address: '10.2.0.1/24', listenPort: 51822, udpPortsInUse: [51821] } })
+    open('wireguard')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    const wizard = await screen.findByRole('dialog')
+    const port = within(wizard).getByLabelText('Listen port')
+    await waitFor(() => expect((port as HTMLInputElement).value).toBe('51822'))
+    expect((within(wizard).getByLabelText('Tunnel address') as HTMLInputElement).value).toBe('10.2.0.1/24')
+    await userEvent.clear(port)
+    await userEvent.type(port, '51821')
+    expect(within(wizard).getByText('A service on the device listens on that port.')).toBeTruthy()
+    expect(within(wizard).getByRole('button', { name: 'Stage' }).hasAttribute('disabled')).toBe(true)
   })
 
   it('restores the previous map at the version it reads first when the apply fails', async () => {
@@ -180,6 +202,53 @@ describe('the network page', () => {
     expect(await screen.findByText('Online')).toBeTruthy()
     expect(screen.getByText('via 192.168.1.1')).toBeTruthy()
     expect(screen.getByText('Uplink eth0')).toBeTruthy()
+  })
+
+  it('lists every IPv4 route of the main table with its source on the overview', async () => {
+    stubFetch(networkRoutes())
+    open('overview')
+    expect(await screen.findByText('Routes · 6 · default via eth0')).toBeTruthy()
+    const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1)
+    expect(rows.map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))).toEqual([
+      ['default', '192.168.1.1', 'eth0', '1024', 'DHCP'],
+      ['192.168.1.1/32', 'on-link', 'eth0', '1024', 'DHCP'],
+      ['192.168.1.0/24', 'on-link', 'eth0', '1024', 'On link'],
+      ['192.168.10.0/24', 'on-link', 'eth1', '0', 'On link'],
+      ['10.20.0.0/16', '192.168.10.2', 'eth1', '0', 'Static'],
+      ['10.8.0.0/24', 'on-link', 'wg0', '0', 'WireGuard'],
+    ])
+    expect(screen.queryByText('fe80::/64')).toBeNull()
+  })
+
+  it('shows the first 20 routes and the rest on request', async () => {
+    const status = observed()
+    const eth1 = status.interfaces.entries!.find((entry) => entry.name === 'eth1')!
+    for (let at = 0; at < 20; at++) eth1.routes!.push({ dest: `10.${100 + at}.0.0/16`, via: '192.168.10.2', source: 'static', protocol: 'static', table: 'main', family: 'ipv4' })
+    stubFetch(networkRoutes(configured(), status))
+    open('overview')
+    expect(await screen.findByText('Routes · 26 · default via eth0')).toBeTruthy()
+    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(21)
+    await userEvent.click(screen.getByRole('button', { name: 'Show all 26 routes' }))
+    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(27)
+  })
+
+  it('shows each default route as an uplink, the one in use first, and a joined Wi-Fi client among them', async () => {
+    const status = observed()
+    const wlan = status.interfaces.entries!.find((entry) => entry.name === 'wlan0')!
+    wlan.link = { carrier: true, operationalState: 'routable' }
+    wlan.routes = [{ dest: '0.0.0.0/0', via: '192.168.1.1', metric: 600, source: 'DHCPv4', protocol: 'dhcp', table: 'main', family: 'ipv4' }]
+    status.wifi.associations = [{ interface: 'wlan0', associated: true, ssid: 'marina' }]
+    status.defaultRoutes.entries = [
+      { family: 'ipv4', gateway: '192.168.1.1', interface: 'wlan0', metric: 600, effective: false },
+      { family: 'ipv4', gateway: '192.168.1.1', interface: 'eth0', metric: 1024, effective: true },
+    ]
+    stubFetch({ ...networkRoutes(configured(), status), '/api/v1/wifi/client': { enabled: true, interface: 'wlan0' }, '/api/v1/wifi/ap': accessPoint('off') })
+    open('overview')
+    expect(await screen.findByText('Uplink eth0')).toBeTruthy()
+    expect(screen.getByText('Standby wlan0')).toBeTruthy()
+    expect(screen.queryByText('Joined marina')).toBeNull()
+    const defaults = within(screen.getByRole('table')).getAllByRole('row').slice(1, 3)
+    expect(defaults.map((row) => [within(row).getAllByRole('cell')[2].textContent, within(row).getByText(/In use|Standby/).textContent])).toEqual([['eth0', 'In use'], ['wlan0', 'Standby']])
   })
 
   it('shows what the device resolves with on the DNS tab and checks again on request', async () => {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { FormField } from '@/shared/components/form-field'
@@ -7,9 +8,11 @@ import { Button } from '@/shared/components/ui/button'
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
 import { Input } from '@/shared/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select'
+import { api } from '@/shared/lib/http'
 import { updateChangeSet } from './change-set'
 import { bridgeOf, NAME_PATTERN, nextName, overlaps, parseCidr, stageCreate, vlansOn, type CreateSpec } from './model'
 import type { NetworkData } from './use-network'
+import { tunnelDefaults } from './view'
 
 type Kind = CreateSpec['kind']
 
@@ -25,11 +28,23 @@ export function CreateWizard({ data, kinds, onClose }: { data: NetworkData; kind
   const parents = view.order.filter((name) => view.ifaces[name].kind === 'physical' || view.ifaces[name].kind === 'bridge')
   const [parent, setParent] = useState(() => parents.find((name) => !bridgeOf(map, name) && name !== data.session) ?? parents[0] ?? '')
   const [vlanId, setVlanId] = useState('')
-  const [address, setAddress] = useState('10.2.0.1/24')
-  const [port, setPort] = useState('51821')
+  // The device knows the UDP ports its services hold; the rest is known here,
+  // staged changes included. Without the device's answer, no port is held.
+  const device = useQuery({
+    queryKey: ['network', 'wireguard', 'defaults'],
+    queryFn: () => api<{ udpPortsInUse: number[] }>('/api/v1/network/wireguard/defaults'),
+    enabled: kinds.includes('wireguard'),
+    retry: false,
+  })
+  const held = device.data?.udpPortsInUse ?? []
+  const suggested = tunnelDefaults(view, held)
+  const [typedAddress, setAddress] = useState<string>()
+  const [typedPort, setPort] = useState<string>()
+  const address = typedAddress ?? suggested.address ?? ''
+  const port = typedPort ?? (suggested.listenPort === undefined ? '' : String(suggested.listenPort))
   const taken = (name: string) => view.ifaces[name] !== undefined
 
-  const automatic = kind === 'bridge' ? nextName(taken, 'br', 1) : kind === 'vlan' ? (vlanId ? `${parent}-${vlanId}` : '') : nextName(taken, 'wg', 0)
+  const automatic = kind === 'bridge' ? nextName(taken, 'br', 1) : kind === 'vlan' ? (vlanId ? `${parent}-${vlanId}` : '') : suggested.name ?? ''
   const name = names[kind] ?? automatic
   const errors: Partial<Record<'name' | 'vlanId' | 'parent' | 'address' | 'port', string>> = {}
   if (!name) { if (kind !== 'vlan' || vlanId) errors.name = t('network.problems.nameMissing') }
@@ -51,6 +66,7 @@ export function CreateWizard({ data, kinds, onClose }: { data: NetworkData; kind
     const listen = Number(port)
     if (!(listen >= 1 && listen <= 65535)) errors.port = t('network.problems.portRange')
     else if (Object.values(map).some((entry) => entry.kind === 'wireguard' && entry.wireguard?.listenPort === listen)) errors.port = t('network.problems.portTaken')
+    else if (held.includes(listen)) errors.port = t('network.problems.portHeld')
   }
   const valid = Object.keys(errors).length === 0 && name !== ''
 
@@ -97,10 +113,10 @@ export function CreateWizard({ data, kinds, onClose }: { data: NetworkData; kind
           ) : null}
           {kind === 'wireguard' ? (
             <>
-              <FormField label={t('network.fields.tunnelAddress')} hint={errors.address ? <span className="text-destructive">{errors.address}</span> : t('network.wizard.tunnelHint')}>
+              <FormField label={t('network.fields.tunnelAddress')} hint={!address ? t('network.wizard.noFreeAddress') : errors.address ? <span className="text-destructive">{errors.address}</span> : t('network.wizard.tunnelHint')}>
                 {(id) => <Input id={id} className="font-mono" value={address} aria-invalid={Boolean(errors.address)} onChange={(event) => setAddress(event.target.value.trim())} />}
               </FormField>
-              <FormField label={t('network.fields.listenPort')} hint={errors.port ? <span className="text-destructive">{errors.port}</span> : t('network.wizard.portHint')}>
+              <FormField label={t('network.fields.listenPort')} hint={!port ? t('network.wizard.noFreePort') : errors.port ? <span className="text-destructive">{errors.port}</span> : t('network.wizard.portHint')}>
                 {(id) => <Input id={id} className="w-32 font-mono" inputMode="numeric" value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ''))} />}
               </FormField>
             </>

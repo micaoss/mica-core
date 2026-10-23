@@ -16,12 +16,13 @@ import { PageSection } from '@/shared/components/page'
 import { CollectionPanel, Panel } from '@/shared/components/panel'
 import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
+import { Switch } from '@/shared/components/ui/switch'
 import { failureDetail, notifySuccess } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { EditBar } from './change-bar'
 import { updateChangeSet } from './change-set'
 import { CreateWizard } from './create-wizard'
-import { overlaps, parseCidr, stageSet, type WireguardPeerState } from './model'
+import { overlaps, parseCidr, stageRemove, stageRevert, stageSet, type WireguardPeerState } from './model'
 import { Led, StatusLine, Tag, TEXT, useStatusText } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus } from './view'
@@ -61,6 +62,7 @@ export function WireguardTab({ data, tunnel, onEditing }: { data: NetworkData; t
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {all.map((name) => {
             const isApplied = data.applied.ifaces[name] !== undefined
+            const deleting = isApplied && data.staged.map[name] === undefined
             const entry = (isApplied ? data.applied : data.staged).ifaces[name].entry
             const status = computeStatus(data.applied, name)
             const key = state.data?.[name]?.publicKey
@@ -75,6 +77,7 @@ export function WireguardTab({ data, tunnel, onEditing }: { data: NetworkData; t
                   <Led tone={status.tone} /><span className="font-mono font-semibold">{name}</span><span className="text-xs text-muted-foreground">WireGuard</span>
                   <span className="flex-1" />
                   {!isApplied ? <Tag tone="pending">{t('network.tags.pendingCreate')}</Tag> : null}
+                  {deleting ? <Tag tone="pending">{t('network.tags.pendingDelete')}</Tag> : null}
                 </div>
                 <span className="font-mono text-sm">{entry.static?.address || '—'}</span>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -83,6 +86,7 @@ export function WireguardTab({ data, tunnel, onEditing }: { data: NetworkData; t
                   <dt className="text-muted-foreground">{t('network.wireguard.peers')}</dt><dd>{isApplied ? t('network.wireguard.peerCount', { count: entry.wireguard?.peers.length ?? 0 }) : t('network.wireguard.afterApply')}</dd>
                   <dt className="text-muted-foreground">{t('network.wireguard.publicKey')}</dt><dd className="font-mono">{key ? shortKey(key) : <span className="text-muted-foreground">{t('network.wireguard.keyAfterApply')}</span>}</dd>
                 </dl>
+                {!isApplied ? <Button className="justify-self-start" size="sm" variant="outline" onClick={() => updateChangeSet((set) => stageRevert(set, name))}>{t('network.wireguard.undoCreate')}</Button> : null}
               </div>
             )
           })}
@@ -99,8 +103,10 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
   const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const staged = data.staged.ifaces[name]?.entry ?? data.applied.ifaces[name].entry
   const applied = data.applied.ifaces[name].entry
+  const deleting = data.staged.map[name] === undefined
+  const staged = deleting ? applied : data.staged.ifaces[name]?.entry ?? applied
+  const [understood, setUnderstood] = useState(false)
   const status = computeStatus(data.applied, name)
   const [draft, setDraft] = useState<{ address: string; port: string }>()
   useEffect(() => { onEditing(draft !== undefined); return () => onEditing(false) }, [draft, onEditing])
@@ -177,6 +183,11 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
         <div className="flex flex-wrap items-center gap-2.5"><Led tone={status.tone} className="size-2.5" /><h2 className="font-mono text-xl font-semibold">{name}</h2><span className="text-sm text-muted-foreground">WireGuard</span></div>
         <StatusLine status={status} />
       </div>
+      {deleting ? (
+        <Callout tone="warning" title={t('network.wireguard.deletePending')}>
+          <Button size="sm" variant="outline" onClick={() => updateChangeSet((set) => stageRevert(set, name))}>{t('network.review.revert')}</Button>
+        </Callout>
+      ) : null}
 
       <PageSection title={t('network.wireguard.tunnel')} description={t(draft ? 'network.wireguard.tunnelEditing' : 'network.wireguard.tunnelCopy')}>
         <Panel className={draft ? 'ring-2 ring-primary/40' : undefined}>
@@ -262,6 +273,39 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
           />
         </CollectionPanel>
       </PageSection>
+
+      {!deleting ? (
+        <PageSection title={t('network.wireguard.delete')} tone="danger">
+          <Panel>
+            <p className="text-sm text-muted-foreground">{t('network.wireguard.deleteCopy')}</p>
+            <div>
+              <ConfirmDialog
+                trigger={<Button size="sm" variant="destructive">{t('network.wireguard.deleteNamed', { name })}</Button>}
+                title={t('network.wireguard.deleteTitle', { name })}
+                description={t('network.wireguard.deleteConfirm', {
+                  count: peers.data?.length ?? applied.wireguard?.peers.length ?? 0,
+                  subnets: (peers.data ?? applied.wireguard?.peers ?? []).flatMap((each) => each.allowedIps).join(', ') || t('network.values.none'),
+                })}
+                confirmLabel={t('network.wireguard.deleteNamed', { name })}
+                success={t('network.edit.staged')}
+                failure={t('network.wireguard.delete')}
+                confirmDisabled={data.session === name && !understood}
+                onConfirm={() => {
+                  updateChangeSet((set) => stageRemove(set, name, 'wireguard'))
+                  void navigate({ to: '/network', search: { tab: 'wireguard' } })
+                }}
+              >
+                {data.session === name ? (
+                  <label className="flex items-center gap-2 text-sm font-medium text-destructive">
+                    <Switch checked={understood} onCheckedChange={setUnderstood} aria-label={t('network.wireguard.deleteSession', { name })} />
+                    {t('network.wireguard.deleteSession', { name })}
+                  </label>
+                ) : null}
+              </ConfirmDialog>
+            </div>
+          </Panel>
+        </PageSection>
+      ) : null}
 
       <FormDialog
         open={adding}

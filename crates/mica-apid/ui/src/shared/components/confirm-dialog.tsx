@@ -29,6 +29,8 @@ export function ConfirmDialog({
   open,
   onOpenChange,
   disabled,
+  confirmDisabled,
+  children,
 }: {
   /// Omitted when the dialog is driven by `open` from somewhere else, such as a
   /// form that confirms on submit.
@@ -44,6 +46,10 @@ export function ConfirmDialog({
   open?: boolean
   onOpenChange?: (open: boolean) => void
   disabled?: boolean
+  /// Holds the confirmation back, such as until a risk is acknowledged.
+  confirmDisabled?: boolean
+  /// What the operator answers before confirming, below the description.
+  children?: ReactNode
 }) {
   const { t } = useTranslation()
   const [uncontrolled, setUncontrolled] = useState(false)
@@ -79,11 +85,12 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {children}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{cancelLabel ?? t('common.actions.cancel')}</AlertDialogCancel>
           <AlertDialogAction
             variant={tone === 'danger' ? 'destructive' : 'default'}
-            disabled={pending}
+            disabled={pending || confirmDisabled}
             onClick={() => void confirm()}
           >
             {pending ? <Spinner /> : null}

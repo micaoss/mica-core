@@ -539,7 +539,10 @@ export interface ObservedNetworkInterface {
   /// The DHCPv4 lease the interface holds.
   lease?: AvailableFact & { server?: string; router?: string; remainingSeconds?: number }
   linkDns?: { address: string; source?: string; provider?: string }[]
-  routes?: { dest: string; via?: string; metric?: number; source?: string; table?: string | number }[]
+  /// Every route on the link outside the local table. `protocol` is who
+  /// installed it (`kernel` for an address's own subnet), `scope` how far it
+  /// reaches.
+  routes?: { dest: string; via?: string | null; metric?: number | null; source?: string | null; table?: string | number | null; family?: string; protocol?: string | null; scope?: string | null }[]
   can?: AvailableFact & {
     busState?: string
     bitrate?: number
@@ -585,6 +588,9 @@ export interface ObservedNetworkState {
       table?: string
       tableId?: number
       configSource?: string
+      /// Whether the kernel sends traffic for the internet this way, as a
+      /// lookup of a public address answers. Absent when the lookup failed.
+      effective?: boolean
     }[]
   }
   dns: AvailableFact & {

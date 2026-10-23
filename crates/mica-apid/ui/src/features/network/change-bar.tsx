@@ -211,12 +211,19 @@ function ReviewDialog({ data, onClose }: { data: NetworkData; onClose: () => voi
                     <span className="text-muted-foreground">—</span>
                     <span>{t(change.kind === 'bridge' ? 'network.review.deleteBridge' : 'network.review.delete')}</span>
                   </div>
-                ) : rows(change, data).map(([label, before, after]) => (
+                ) : rows(change, data).map(([label, before, after, items]) => (
                   <div key={label} className="grid grid-cols-[minmax(0,10rem)_1fr] gap-3 py-0.5">
                     <span className="text-muted-foreground">{label}</span>
-                    <span className="font-mono text-[0.8125rem] break-words">
-                      {change.op === 'create' ? <ins className="text-success no-underline">{after}</ins> : <><del className="text-muted-foreground">{before}</del>{'  →  '}<ins className="text-success no-underline">{after}</ins></>}
-                    </span>
+                    {items ? (
+                      <span className="grid font-mono text-[0.8125rem] break-words">
+                        {items.added.map((item) => <ins key={`+${item}`} className="text-success no-underline">+ {item}</ins>)}
+                        {items.removed.map((item) => <del key={`-${item}`} className="text-destructive no-underline">− {item}</del>)}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-[0.8125rem] break-words">
+                        {change.op === 'create' ? <ins className="text-success no-underline">{after}</ins> : <><del className="text-muted-foreground">{before}</del>{'  →  '}<ins className="text-success no-underline">{after}</ins></>}
+                      </span>
+                    )}
                   </div>
                 ))}
               </Fragment>

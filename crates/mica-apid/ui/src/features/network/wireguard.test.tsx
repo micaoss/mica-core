@@ -77,6 +77,37 @@ describe('the WireGuard tab', () => {
     expect(screen.getAllByText(NEW_PEER).length).toBeGreaterThan(0)
   })
 
+  it('stages a tunnel delete behind a confirmation naming its peers and subnets, and undoes it', async () => {
+    stubFetch(networkRoutes())
+    open('tab=wireguard&tunnel=wg0')
+    await screen.findByText(`${PEER_KEY.slice(0, 8)}…${PEER_KEY.slice(-6)}`)
+    await userEvent.click(screen.getByRole('button', { name: 'Delete wg0' }))
+    const confirm = await screen.findByRole('alertdialog')
+    expect(within(confirm).getByText(/1 peer will disconnect and the routes to 10\.8\.0\.2\/32 will be removed/)).toBeTruthy()
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Delete wg0' }))
+
+    const card = await screen.findByRole('link', { name: /wg0/ })
+    expect(within(card).getByText('Delete · pending')).toBeTruthy()
+    const bar = await screen.findByRole('region', { name: 'Pending network changes' })
+    expect(within(bar).getByText('wg0')).toBeTruthy()
+
+    await userEvent.click(card)
+    expect(await screen.findByText('Deleted when the changes are applied.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Revert' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Pending network changes' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'Delete wg0' })).toBeTruthy()
+  })
+
+  it('drops a tunnel that was never applied without asking', async () => {
+    stubFetch(networkRoutes())
+    open('tab=wireguard')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stage' }))
+    expect(await screen.findByText('New · pending')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Undo create' }))
+    await waitFor(() => expect(screen.queryByText('New · pending')).toBeNull())
+  })
+
   it('stages a new listen port with the interface changes', async () => {
     stubFetch(networkRoutes())
     open('tab=wireguard&tunnel=wg0')

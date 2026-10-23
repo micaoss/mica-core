@@ -187,6 +187,49 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
   await expect(page.getByRole('textbox', { name: 'IP 地址', exact: true })).toHaveAttribute('aria-invalid', 'false')
   await page.getByText('配置', { exact: true }).click()
   await page.screenshot({ path: testInfo.outputPath('n7-static-lease.png'), fullPage: true })
+
+  // G2 starts from no staged changes.
+  await page.evaluate(() => sessionStorage.clear())
+
+  // G2: the route table, the uplink and the standby.
+  await page.goto('./network?tab=overview')
+  await expect(page.getByText('路由表 · 9 条 · 默认经 eth0')).toBeVisible()
+  await expect(page.getByText('备用 · wlan0')).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 1400 })
+  await page.screenshot({ path: testInfo.outputPath('n7-overview-routes.png') })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+
+  // A new tunnel starts from free values; deleting one is staged behind a confirmation.
+  await page.goto('./network?tab=wireguard')
+  await page.getByRole('button', { name: '新增' }).click()
+  await expect(page.getByRole('textbox', { name: '监听端口' })).toHaveValue('51821')
+  await page.screenshot({ path: testInfo.outputPath('n7-wg-wizard.png'), fullPage: true })
+  await page.getByRole('button', { name: '取消' }).click()
+  await page.goto('./network?tab=wireguard&tunnel=wg0')
+  await page.getByRole('button', { name: '删除 wg0' }).click()
+  await expect(page.getByRole('alertdialog')).toContainText('1 个对端将断开，允许的网段 10.10.0.1/32 的路由将移除')
+  await page.screenshot({ path: testInfo.outputPath('n7-wg-delete-confirm.png'), fullPage: true })
+  await page.getByRole('alertdialog').getByRole('button', { name: '删除 wg0' }).click()
+  await expect(page.getByText('删除 · 待应用')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n7-wg-delete-pending.png'), fullPage: true })
+
+  // A route list changes entry by entry in the review.
+  await page.goto('./network/eth1')
+  await page.getByRole('button', { name: '修改' }).click()
+  await page.getByRole('button', { name: '删除' }).first().click()
+  await page.getByRole('button', { name: '添加路由' }).click()
+  await page.getByRole('textbox', { name: '目标网段' }).last().fill('10.40.0.0/16')
+  await page.getByRole('textbox', { name: '下一跳' }).last().fill('192.168.10.4')
+  await page.getByRole('button', { name: '完成编辑' }).click()
+  await page.getByRole('button', { name: '审阅并应用' }).click()
+  await expect(page.getByRole('dialog', { name: '审阅网络更改' })).toContainText('+ 10.40.0.0/16 → 192.168.10.4')
+  await page.screenshot({ path: testInfo.outputPath('n7-review-routes.png'), fullPage: true })
+  await page.keyboard.press('Escape')
+
+  // CAN reads in words.
+  await page.goto('./network/can0')
+  await expect(page.getByText('总线告警').first()).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n7-can.png'), fullPage: true })
 })
 
 test('captures the device code, the claim key, BLE provisioning and the pairing window', async ({ page }, testInfo) => {
@@ -669,10 +712,11 @@ function benchPayload(path: string): unknown {
   if (path === '/api/v1/network') return {
     configured: {
       eth0: { dhcp: true },
-      eth1: { dhcp: false, static: { address: '192.168.10.1/24' } },
+      eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, routes: [{ destination: '10.1.1.0/24', gateway: '192.168.10.2' }, { destination: '10.30.0.0/16', gateway: '192.168.10.3' }] },
       wg0: { kind: 'wireguard', dhcp: false, static: { address: '10.10.0.2/24', dns: [] }, wireguard: { listenPort: 51820, peers: [PEER] } },
+      can0: { kind: 'can', can: { bitrate: 250000 } },
     },
-    configuredCount: 3,
+    configuredCount: 4,
     version: 'e2e-version',
     observed: { available: true, interfaceCount: 0, interfaces: [] },
   }
@@ -686,6 +730,7 @@ function benchPayload(path: string): unknown {
     ],
     probe: { ok: true, name: '0.debian.pool.ntp.org', latencyMs: 24, checkedAt: '2026-10-21T08:00:00Z' },
   }
+  if (path === '/api/v1/network/wireguard/defaults') return { name: 'wg1', address: '10.2.0.1/24', listenPort: 51821, udpPortsInUse: [5353] }
   if (path === '/api/v1/network/wg0/peers') return [{ ...PEER, presharedKey: true, latestHandshake: null, rxBytes: null, txBytes: null }]
   if (path === '/api/v1/state/network') return { wg0: { publicKey: 'e2eDevicePublicKeye2eDevicePublicKeye2eDev0=' } }
   if (path === '/api/v1/wifi/client') return { enabled: true, interface: 'wlan0' }
@@ -705,13 +750,23 @@ function benchPayload(path: string): unknown {
         lease: { available: true, server: '192.168.1.1', router: '192.168.1.1', remainingSeconds: 3480 },
         dns: ['192.168.1.1'],
         linkDns: [{ address: '192.168.1.1', source: 'DHCPv4' }],
-        routes: [{ dest: '0.0.0.0/0', via: '192.168.1.1', metric: 1024, source: 'DHCPv4', table: 'main' }],
+        routes: [
+          { dest: '0.0.0.0/0', family: 'ipv4', via: '192.168.1.1', metric: 100, source: 'DHCPv4', table: 'main', protocol: 'dhcp', scope: 'global' },
+          { dest: '192.168.1.0/24', family: 'ipv4', via: null, metric: 100, source: 'DHCPv4', table: 'main', protocol: 'kernel', scope: 'link' },
+          { dest: '192.168.1.1/32', family: 'ipv4', via: null, metric: 100, source: 'DHCPv4', table: 'main', protocol: 'dhcp', scope: 'link' },
+          { dest: 'fe80::/64', family: 'ipv6', via: null, metric: 256, source: null, table: 'main', protocol: 'kernel', scope: 'link' },
+        ],
       },
       {
         name: 'eth1', index: 3, hardwareAddress: '02:42:ac:11:00:03',
         link: { operationalState: 'routable', carrierState: 'carrier', carrier: true },
         addresses: [{ family: 'inet', address: '192.168.10.1', prefixLength: 24, scope: 'global', configSource: 'static' }],
         dhcp: { available: false }, dns: [],
+        routes: [
+          { dest: '10.1.1.0/24', family: 'ipv4', via: '192.168.10.2', metric: 0, source: 'static', table: 'main', protocol: 'static', scope: 'global' },
+          { dest: '10.30.0.0/16', family: 'ipv4', via: '192.168.10.3', metric: 0, source: 'static', table: 'main', protocol: 'static', scope: 'global' },
+          { dest: '192.168.10.0/24', family: 'ipv4', via: null, metric: 0, source: 'static', table: 'main', protocol: 'kernel', scope: 'link' },
+        ],
       },
       { name: 'eth2', index: 4, link: { operationalState: 'no-carrier', carrier: false }, addresses: [], dhcp: { available: false }, dns: [] },
       {
@@ -719,9 +774,14 @@ function benchPayload(path: string): unknown {
         link: { operationalState: 'routable', carrier: true },
         addresses: [{ family: 'inet', address: '10.20.0.31', prefixLength: 24, scope: 'global', configSource: 'DHCPv4' }],
         dhcp: { available: true }, dns: [],
+        routes: [
+          { dest: '0.0.0.0/0', family: 'ipv4', via: '10.20.0.1', metric: 600, source: 'DHCPv4', table: 'main', protocol: 'dhcp', scope: 'global' },
+          { dest: '10.20.0.0/24', family: 'ipv4', via: null, metric: 600, source: 'DHCPv4', table: 'main', protocol: 'kernel', scope: 'link' },
+        ],
       },
       {
         name: 'wg0', index: 6, kind: 'wireguard', link: { operationalState: 'routable', carrier: true }, addresses: [{ family: 'inet', address: '10.10.0.2', prefixLength: 24, scope: 'global' }], dhcp: { available: false }, dns: [],
+        routes: [{ dest: '10.10.0.0/24', family: 'ipv4', via: null, metric: 0, source: 'static', table: 'main', protocol: 'kernel', scope: 'link' }],
         wireguard: { available: true, peers: [{ publicKey: PEER.publicKey, latestHandshake: Math.floor(Date.now() / 1000) - 42, rxBytes: 1_284_000, txBytes: 312_000, persistentKeepalive: 25 }] },
       },
       {
@@ -730,7 +790,10 @@ function benchPayload(path: string): unknown {
       },
     ] },
     session: { interface: 'eth0', localAddress: '192.168.1.24' },
-    defaultRoutes: { available: true, count: 1, entries: [{ family: 'inet', gateway: '192.168.1.1', interface: 'eth0', metric: 100 }] },
+    defaultRoutes: { available: true, count: 2, entries: [
+      { family: 'ipv4', gateway: '192.168.1.1', interface: 'eth0', metric: 100, effective: true },
+      { family: 'ipv4', gateway: '10.20.0.1', interface: 'wlan0', metric: 600, effective: false },
+    ] },
     dns: { available: true, linkServers: ['192.168.1.1'], resolverServers: ['127.0.0.53'], probe: { name: 'deb.debian.org', reachable: true, result: 'resolved' } },
     wifi: { available: true, associations: [{ interface: 'wlan0', associated: true, ssid: 'marina-guest', rssiDbm: -58 }] },
     accessPoint: { available: true, entries: [] },

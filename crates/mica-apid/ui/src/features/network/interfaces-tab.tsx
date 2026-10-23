@@ -6,7 +6,7 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/components/ui/button'
 import { CreateWizard } from './create-wizard'
 import { bridgeOf, vlansOn } from './model'
-import { Led, ROLES, roleOf, Tag, TEXT, useKindLabel, useStatusText, type Role } from './parts'
+import { Led, ROLES, roleOf, Tag, TEXT, useCanText, useKindLabel, useStatusText, type Role } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus, exitOf } from './view'
 
@@ -44,6 +44,7 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
   const navigate = useNavigate()
   const kindLabel = useKindLabel()
   const text = useStatusText()
+  const canText = useCanText()
   const iface = data.staged.ifaces[name]
   const applied = data.applied.ifaces[name]
   const status = computeStatus(data.applied, name)
@@ -78,7 +79,8 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
     : iface.kind === 'can'
       ? [
           [t('network.fields.state'), <span className={TEXT[status.tone]}>{text.label(status)}</span>],
-          [t('network.fields.bitrate'), entry.can ? `${entry.can.bitrate}` : t('network.values.notSet')],
+          [t('network.fields.bitrate'), entry.can ? canText.bitrate(entry.can.bitrate) : t('network.values.notSet')],
+          ...(obs?.can ? [[t('network.fields.busErrors'), t('network.values.errorCounts', { tx: obs.can.txErrors ?? 0, rx: obs.can.rxErrors ?? 0 })] as [string, React.ReactNode]] : []),
         ]
       : []
   return (

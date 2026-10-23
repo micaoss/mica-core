@@ -20,7 +20,7 @@ import {
   bridgeOf, stageRemove, stageRevert, stageSet, vlansOn,
   type ChangeSet, type IfaceEntry,
 } from './model'
-import { Led, StatusLine, Tag, useKindLabel } from './parts'
+import { Led, StatusLine, Tag, useCanText, useKindLabel } from './parts'
 import { useNetwork, type NetworkData } from './use-network'
 import { addressBook, validateEntry, type Problem, type Problems } from './validate'
 import { computeStatus, exitOf } from './view'
@@ -157,7 +157,7 @@ function Body({ data, name, editing, onEdit }: { data: NetworkData; name: string
         <PageSection title={t(physical ? 'network.detail.restore' : 'network.detail.delete')} tone="danger">
           <Panel>
             <p className="text-sm text-muted-foreground">
-              {physical ? t('network.detail.restoreCopy') : iface.kind === 'bridge' && iface.entry.bridge?.ports.length ? t('network.detail.deleteBridgeCopy', { ports: iface.entry.bridge.ports.join(', ') }) : t('network.detail.deleteCopy')}
+              {iface.kind === 'can' ? t('network.detail.restoreCanCopy') : physical ? t('network.detail.restoreCopy') : iface.kind === 'bridge' && iface.entry.bridge?.ports.length ? t('network.detail.deleteBridgeCopy', { ports: iface.entry.bridge.ports.join(', ') }) : t('network.detail.deleteCopy')}
             </p>
             {blockers.length ? <p className="text-sm text-destructive">{t('network.detail.blocked', { reasons: blockers.join('; ') })}</p> : null}
             <div className="flex flex-wrap items-center gap-3">
@@ -183,6 +183,7 @@ function Body({ data, name, editing, onEdit }: { data: NetworkData; name: string
 
 function Observation({ data, name }: { data: NetworkData; name: string }) {
   const { t } = useTranslation()
+  const canText = useCanText()
   const iface = data.applied.ifaces[name]
   const obs = iface.obs
   const entry = iface.entry
@@ -197,8 +198,8 @@ function Observation({ data, name }: { data: NetworkData; name: string }) {
   const gateway = obs?.lease?.router ?? (!entry.dhcp && obs?.address ? entry.static?.gateway : undefined)
   const facts = iface.kind === 'can'
     ? [
-        { id: 'state', label: t('network.fields.state'), value: obs?.can?.busState ?? obs?.operationalState ?? '—' },
-        { id: 'bitrate', label: t('network.fields.bitrate'), value: obs?.can?.bitrate ? t('network.status.notes.bitrate', { kbps: obs.can.bitrate / 1000 }) : t('network.status.notes.bitrateUnreported') },
+        { id: 'state', label: t('network.fields.state'), value: obs?.can?.busState ? canText.state(obs.can.busState) : obs?.operationalState ?? '—' },
+        { id: 'bitrate', label: t('network.fields.bitrate'), value: obs?.can?.bitrate ? canText.bitrate(obs.can.bitrate) : t('network.status.notes.bitrateUnreported') },
         obs?.can && { id: 'errors', label: t('network.fields.busErrors'), value: t('network.values.busErrors', { tx: obs.can.txErrors ?? 0, rx: obs.can.rxErrors ?? 0, busOff: obs.can.busOffCount ?? 0 }) },
       ]
     : [
@@ -221,6 +222,7 @@ const mono = (value: ReactNode) => <span className="font-mono">{value}</span>
 
 function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; onEdit: () => void }) {
   const { t } = useTranslation()
+  const canText = useCanText()
   const iface = data.staged.ifaces[name]
   const entry = iface.entry
   const map = data.staged.map
@@ -231,7 +233,7 @@ function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; o
       {iface.kind === 'can' ? (
         <Group title={t('network.can.title')}>
           <FactList facts={[
-            { id: 'bitrate', label: t('network.fields.bitrate'), value: entry.can ? `${entry.can.bitrate}` : t('network.values.notSet'), mono: true },
+            { id: 'bitrate', label: t('network.fields.bitrate'), value: entry.can ? canText.bitrate(entry.can.bitrate) : t('network.values.notSet') },
             { id: 'restart', label: t('network.fields.restart'), value: entry.can?.restartMs ? `${entry.can.restartMs} ms` : t('network.values.never') },
             { id: 'fd', label: t('network.fields.fd'), value: t(entry.can?.fd ? 'network.values.on' : 'network.values.off') },
             entry.can?.fd && { id: 'data', label: t('network.fields.dataBitrate'), value: entry.can.dataBitrate ?? '—', mono: true },
