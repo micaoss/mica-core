@@ -152,7 +152,7 @@ pub(super) async fn a_dhcp_iface_with_its_own_dns_ignores_the_leases() {
     assert_eq!(
         rendered,
         "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nDNS=1.1.1.1\nDNS=2606:4700:4700::1111\n\n\
-[DHCPv4]\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n"
+[DHCPv4]\nRouteMetric=100\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n"
     );
 }
 
@@ -216,4 +216,76 @@ pub(super) async fn a_refused_can_interface_writes_nothing() {
 
     assert!(err.contains("needs can.dataBitrate"), "{err}");
     assert!(!dir.path().join("50-mica-can0.network").exists());
+}
+
+/// Every DHCP link micad renders takes a default-route metric: from 100, 10
+/// apart in name order, so two uplinks never tie. A static link and a bridge
+/// port take none.
+#[tokio::test]
+pub(super) async fn dhcp_links_take_distinct_route_metrics_in_name_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, _calls) = reconciler_in(dir.path());
+    reconciler
+        .apply(&settings_with(&[
+            ("eth0", static_iface()),
+            ("eth1", dhcp_iface()),
+            ("eth2", port_iface()),
+            ("br0", bridge_iface(&["eth2"])),
+        ]))
+        .await
+        .unwrap();
+
+    let unit = |iface: &str| {
+        std::fs::read_to_string(dir.path().join(format!("50-mica-{iface}.network"))).unwrap()
+    };
+    assert!(
+        unit("br0").ends_with("\n[DHCPv4]\nRouteMetric=100\n"),
+        "{}",
+        unit("br0")
+    );
+    assert!(
+        unit("eth1").ends_with("\n[DHCPv4]\nRouteMetric=110\n"),
+        "{}",
+        unit("eth1")
+    );
+    assert!(!unit("eth0").contains("RouteMetric"));
+    assert!(!unit("eth2").contains("RouteMetric"));
+}
+
+/// A wired port nobody declared gets the image's DHCP in a unit of micad's
+/// own, with its metric; declaring it takes that unit away.
+#[tokio::test]
+pub(super) async fn an_undeclared_wired_port_gets_a_dhcp_unit_with_its_metric() {
+    let dir = tempfile::tempdir().unwrap();
+    let ports = tempfile::tempdir().unwrap();
+    for port in ["eth0", "eth1", "eth1.100", "wlan0", "lo"] {
+        std::fs::create_dir(ports.path().join(port)).unwrap();
+    }
+    let (reconciler, _calls) = reconciler_in(dir.path());
+    let reconciler = reconciler.with_ports_dir(ports.path().to_path_buf());
+    reconciler
+        .apply(&settings_with(&[("eth0", dhcp_iface())]))
+        .await
+        .unwrap();
+
+    let mut names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.ends_with(".network"))
+        .collect();
+    names.sort();
+    assert_eq!(names, ["50-mica-eth0.network", "60-mica-auto-eth1.network"]);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("60-mica-auto-eth1.network")).unwrap(),
+        "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric=110\n"
+    );
+
+    reconciler
+        .apply(&settings_with(&[
+            ("eth0", dhcp_iface()),
+            ("eth1", static_iface()),
+        ]))
+        .await
+        .unwrap();
+    assert!(!dir.path().join("60-mica-auto-eth1.network").exists());
 }

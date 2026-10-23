@@ -215,6 +215,9 @@ pub struct NetworkReconciler<R: NetworkReload, D: LinkDelete> {
     keys: Keystore,
     kernel: Arc<dyn KernelFeatures>,
     settle: Arc<dyn LinkSettle>,
+    /// Where the kernel lists its links (`/sys/class/net`), for the wired
+    /// ports nobody declared; `None` renders no unit for them.
+    ports_dir: Option<PathBuf>,
     applied: AtomicBool,
 }
 
@@ -230,8 +233,34 @@ impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
             keys,
             kernel: Arc::new(NoClaim),
             settle: Arc::new(NoSettle),
+            ports_dir: None,
             applied: AtomicBool::new(false),
         }
+    }
+
+    /// Give the wired ports listed in `dir` and not declared a DHCP unit of
+    /// their own, with its route metric.
+    #[must_use]
+    pub fn with_ports_dir(mut self, dir: PathBuf) -> Self {
+        self.ports_dir = Some(dir);
+        self
+    }
+
+    /// The wired ports in [`Self::ports_dir`] no entry declares: the links
+    /// the image's `80-dhcp.network` (`Name=eth*`) would configure, less the
+    /// VLANs on them.
+    fn undeclared_ports(&self, settings: &Settings) -> BTreeSet<String> {
+        let Some(dir) = &self.ports_dir else {
+            return BTreeSet::new();
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return BTreeSet::new();
+        };
+        entries
+            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .filter(|name| name.starts_with("eth") && !name.contains('.'))
+            .filter(|name| !settings.network.contains_key(name))
+            .collect()
     }
 
     /// Wait for changed interfaces through `settle`.
@@ -307,6 +336,7 @@ impl NetworkReconciler<Networkd, NetworkctlDelete> {
         Self::new(dir, Networkd, NetworkctlDelete, production_keystore())
             .with_kernel(Arc::new(DeployedKernel::production()))
             .with_settle(Arc::new(NetworkdSettle))
+            .with_ports_dir(Path::new("/").join(crate::network_state::NET_CLASS_DIR))
     }
 }
 
@@ -385,12 +415,34 @@ impl<R: NetworkReload, D: LinkDelete> Reconciler for NetworkReconciler<R, D> {
     }
 
     async fn apply(&self, settings: &Settings) -> anyhow::Result<serde_json::Value> {
+        let state = self.write_and_settle(settings).await?;
+        // Only now: a rollback puts back netdevs that name these key files.
+        let tunnels: BTreeSet<&str> = settings
+            .network
+            .iter()
+            .filter(|(_, cfg)| matches!(cfg.kind, IfaceKind::Wireguard))
+            .map(|(iface, _)| iface.as_str())
+            .collect();
+        for iface in self.keys.retain_keys(&tunnels)? {
+            tracing::info!(%iface, "removed the private key of a deleted tunnel");
+        }
+        Ok(state)
+    }
+}
+
+impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
+    /// Render and write the units, reload networkd and, past the first pass,
+    /// wait for the changed interfaces, putting the previous files back when
+    /// they do not come up.
+    async fn write_and_settle(&self, settings: &Settings) -> anyhow::Result<serde_json::Value> {
         validate_network(&settings.network)?;
         validate_kernel_features(&settings.network, self.kernel.features().await.as_deref())?;
         // Before the netdevs, so networkd finds every key file a unit names.
         let psks = self.keys.sync_psks(&preshared_keys(&settings.network))?;
         let masters = bridge_ports(&settings.network);
         let children = vlan_children(&settings.network);
+        let ports = self.undeclared_ports(settings);
+        let metrics = route_metrics(&settings.network, &masters, &ports);
         std::fs::create_dir_all(&self.target_dir)?;
         let previous = self.managed_files()?;
         let mut files = BTreeMap::new();
@@ -405,6 +457,7 @@ impl<R: NetworkReload, D: LinkDelete> Reconciler for NetworkReconciler<R, D> {
                 cfg,
                 masters.get(iface.as_str()).copied(),
                 children.get(iface.as_str()).map_or(&[][..], Vec::as_slice),
+                metrics.get(iface.as_str()).copied(),
             );
             files.insert(file_name.clone(), unit);
             let mut entry = json!({
@@ -430,6 +483,16 @@ impl<R: NetworkReload, D: LinkDelete> Reconciler for NetworkReconciler<R, D> {
                 }
                 files.insert(netdev_name, netdev);
             }
+        }
+        for port in &ports {
+            let dhcp = micad_settings::IfaceSettings {
+                dhcp: true,
+                ..micad_settings::IfaceSettings::default()
+            };
+            files.insert(
+                auto_unit_name(port),
+                render_unit(port, &dhcp, None, &[], metrics.get(port.as_str()).copied()),
+            );
         }
         let torn_down: BTreeSet<String> = previous
             .keys()

@@ -171,10 +171,9 @@ pub(super) async fn recreates_a_tunnel_whose_peers_changed_and_tears_down_a_remo
             "reload".to_string(),
         ]
     );
-    // The key outlives the entry: re-declaring wg0 keeps the identity the
-    // far end already trusts, and the file is unreachable to everything
-    // but networkd meanwhile.
-    assert!(dir.path().join("networkd-secrets/wg-wg0.key").exists());
+    // A deleted tunnel takes its key along: declaring wg0 again is a new
+    // identity, as the console's confirmation says.
+    assert!(!dir.path().join("networkd-secrets/wg-wg0.key").exists());
 }
 
 #[tokio::test]

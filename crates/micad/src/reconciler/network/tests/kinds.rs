@@ -38,7 +38,10 @@ pub(super) async fn renders_a_bridge_netdev_and_gives_its_port_only_the_master()
     assert_eq!(netdev, GOLDEN_BRIDGE_NETDEV);
     assert_eq!(port, GOLDEN_BRIDGE_PORT);
     // The bridge itself carries the addressing its ports gave up.
-    assert_eq!(bridge, "[Match]\nName=br0\n\n[Network]\nDHCP=yes\n");
+    assert_eq!(
+        bridge,
+        "[Match]\nName=br0\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric=100\n"
+    );
     // A bridge has no netdev-less port file left behind and no VLAN line.
     assert!(!dir.path().join("50-mica-eth1.netdev").exists());
 }

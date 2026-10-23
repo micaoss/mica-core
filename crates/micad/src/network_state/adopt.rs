@@ -12,7 +12,8 @@ const MAX_UNIT_BYTES: u64 = 64 * 1024;
 
 /// The entry that keeps what `units` configure, in order: the `.network`
 /// then its drop-ins. `[Match]` is not read, since networkd already chose
-/// the file for this link. Anything an entry cannot say is named in the
+/// the file for this link, nor `[DHCPv4] RouteMetric=`, which micad renders
+/// for every DHCP link it configures. Anything an entry cannot say is named in the
 /// error: another section, another key, more than one address, DHCP for
 /// IPv6, or servers beside DHCP, which an entry would use instead of the
 /// lease's rather than with them.
@@ -30,7 +31,7 @@ pub fn adopted_entry(units: &[&str]) -> Result<Value, String> {
             }
             if line.starts_with('[') && line.ends_with(']') {
                 section = line.to_string();
-                if !matches!(section.as_str(), "[Match]" | "[Network]") {
+                if !matches!(section.as_str(), "[Match]" | "[Network]" | "[DHCPv4]") {
                     return Err(format!("its {section} section"));
                 }
                 continue;
@@ -42,6 +43,12 @@ pub fn adopted_entry(units: &[&str]) -> Result<Value, String> {
                 return Err(format!("the line `{line}`"));
             };
             let (key, value) = (key.trim(), value.trim());
+            if section == "[DHCPv4]" {
+                if key == "RouteMetric" {
+                    continue;
+                }
+                return Err(format!("{section} {key}="));
+            }
             match key {
                 "DHCP" => match value {
                     "yes" | "true" | "on" | "1" | "ipv4" => dhcp = Some(true),

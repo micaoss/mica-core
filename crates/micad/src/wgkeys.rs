@@ -150,6 +150,37 @@ impl Keystore {
         Ok(changed)
     }
 
+    /// Remove the private key of every interface not in `keep`, and answer
+    /// the interfaces whose keys went.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the directory cannot be read or a key removed.
+    pub fn retain_keys(&self, keep: &BTreeSet<&str>) -> Result<Vec<String>> {
+        let mut removed = Vec::new();
+        let entries = match fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(removed),
+            Err(err) => return Err(err).with_context(|| format!("read {}", self.dir.display())),
+        };
+        for entry in entries {
+            let path = entry?.path();
+            let Some(iface) = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_prefix("wg-"))
+                .and_then(|rest| rest.strip_suffix(".key"))
+            else {
+                continue;
+            };
+            if !keep.contains(iface) {
+                removed.push(iface.to_string());
+                fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
+            }
+        }
+        Ok(removed)
+    }
+
     /// The public half of `iface`'s private key, drawing and storing a private
     /// key first if it has none.
     ///
@@ -328,6 +359,24 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(stored_key(&store, "wg0"), stored_key(&store, "wg0"));
         assert!(store.key_path("wg0").exists());
+    }
+
+    #[test]
+    fn retaining_keys_removes_only_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = keystore_in(dir.path());
+        assert!(store.retain_keys(&BTreeSet::new()).unwrap().is_empty());
+        store.ensure("wg0").unwrap();
+        store.ensure("wg1").unwrap();
+        fs::write(dir.path().join(NETWORKD_SECRETS_DIR).join("notes"), "").unwrap();
+
+        assert_eq!(
+            store.retain_keys(&BTreeSet::from(["wg0"])).unwrap(),
+            ["wg1"]
+        );
+        assert!(store.key_path("wg0").exists());
+        assert!(!store.key_path("wg1").exists());
+        assert!(dir.path().join(NETWORKD_SECRETS_DIR).join("notes").exists());
     }
 
     #[test]

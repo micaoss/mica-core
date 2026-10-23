@@ -9,6 +9,18 @@ fn the_image_dhcp_file_is_adopted_as_a_dhcp_entry() {
     assert_eq!(adopted_entry(&[IMAGE_DHCP]), Ok(json!({ "dhcp": true })));
 }
 
+/// The unit micad renders for an undeclared wired port: the image's DHCP
+/// with a route metric, which is micad's to render again once declared.
+#[test]
+fn the_auto_dhcp_unit_is_adopted_as_a_dhcp_entry() {
+    let unit = "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric=110\n";
+    assert_eq!(adopted_entry(&[unit]), Ok(json!({ "dhcp": true })));
+    assert_eq!(
+        adopted_entry(&["[Network]\nDHCP=yes\n[DHCPv4]\nUseDNS=no\n"]),
+        Err("[DHCPv4] UseDNS=".to_string())
+    );
+}
+
 #[test]
 fn a_static_file_is_adopted_with_its_address_gateway_and_servers() {
     let unit = "# a comment\n[Match]\nName=eth1\nMACAddress=02:00:00:00:00:01\n\n\

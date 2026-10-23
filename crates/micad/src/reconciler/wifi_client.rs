@@ -256,9 +256,15 @@ fn render_config(client: &WifiClientSettings) -> Result<String> {
     Ok(out)
 }
 
+/// The default-route metric of the station's lease: above every wired
+/// uplink's, so the radio carries traffic only when no cable does.
+const ROUTE_METRIC: u32 = 600;
+
 /// Render the networkd unit that addresses an associated station link.
 fn render_networkd(interface: &str) -> String {
-    format!("[Match]\nName={interface}\n\n[Network]\nDHCP=yes\n")
+    format!(
+        "[Match]\nName={interface}\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric={ROUTE_METRIC}\n"
+    )
 }
 
 impl<C: UnitControl, R: NetworkReload> WifiClientReconciler<C, R> {

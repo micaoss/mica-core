@@ -164,3 +164,36 @@ fn a_link_networkd_gave_up_on_fails_and_one_coming_up_is_pending() {
         Verdict::Pending("it is carrier".to_string())
     );
 }
+
+/// A rollback puts back a netdev that names the deleted tunnel's key file, so
+/// the key goes only once the apply converged.
+#[tokio::test]
+pub(super) async fn a_deleted_tunnel_keeps_its_key_until_the_apply_converged() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = dir.path().join("networkd-secrets/wg-wg0.key");
+    let tunnel = || ("wg0", wireguard_iface(Some(51820), vec![peer(1)]));
+    let (reconciler, _calls, _asked) =
+        settling_in(dir.path(), Err("eth0.100: it is off".to_string()));
+    reconciler
+        .apply(&settings_with(&[("eth0", dhcp_iface()), tunnel()]))
+        .await
+        .unwrap();
+    let private_key = std::fs::read_to_string(&key).unwrap();
+
+    reconciler
+        .apply(&settings_with(&[
+            ("eth0", dhcp_iface()),
+            ("eth0.100", vlan_iface("eth0", 100)),
+        ]))
+        .await
+        .unwrap_err();
+    assert_eq!(std::fs::read_to_string(&key).unwrap(), private_key);
+    assert!(read(dir.path(), "50-mica-wg0.netdev").is_some());
+
+    let (reconciler, _calls, _asked) = settling_in(dir.path(), Ok(()));
+    reconciler
+        .apply(&settings_with(&[("eth0", dhcp_iface())]))
+        .await
+        .unwrap();
+    assert!(!key.exists());
+}

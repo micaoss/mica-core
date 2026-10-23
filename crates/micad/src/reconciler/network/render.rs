@@ -1,5 +1,7 @@
 //! The networkd units a network declaration renders to.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::wgkeys::Keystore;
 use micad_settings::{CanConfig, IfaceKind, IfaceSettings, WireguardConfig};
 
@@ -89,6 +91,7 @@ pub(super) fn render_unit(
     cfg: &IfaceSettings,
     master: Option<&str>,
     vlans: &[&str],
+    metric: Option<u32>,
 ) -> String {
     if let Some(can) = &cfg.can {
         return render_can_unit(iface, can);
@@ -131,19 +134,60 @@ pub(super) fn render_unit(
             }
         }
     }
-    // The entry's own servers replace the lease's, in every way a lease or a
-    // router advertisement can name one.
-    if master.is_none() && cfg.dhcp && !cfg.dns.is_empty() {
-        out.push_str("\n[DHCPv4]\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n");
+    if master.is_none() && cfg.dhcp && (metric.is_some() || !cfg.dns.is_empty()) {
+        out.push_str("\n[DHCPv4]\n");
+        if let Some(metric) = metric {
+            out.push_str(&format!("RouteMetric={metric}\n"));
+        }
+        // The entry's own servers replace the lease's, in every way a lease
+        // or a router advertisement can name one.
+        if !cfg.dns.is_empty() {
+            out.push_str("UseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n");
+        }
     }
     out
 }
 
+/// The default-route metric of the first DHCP link; each next one, in name
+/// order, takes [`ROUTE_METRIC_STEP`] more, so two uplinks never tie and the
+/// one the kernel prefers stays the same from boot to boot.
+const ROUTE_METRIC_BASE: u32 = 100;
+const ROUTE_METRIC_STEP: u32 = 10;
+
+/// The default-route metric of each DHCP link this reconciler renders: the
+/// declared ones that address themselves and the undeclared `ports`.
+pub(super) fn route_metrics<'a>(
+    network: &'a BTreeMap<String, IfaceSettings>,
+    masters: &BTreeMap<&str, &str>,
+    ports: &'a BTreeSet<String>,
+) -> BTreeMap<&'a str, u32> {
+    let declared = network
+        .iter()
+        .filter(|(iface, cfg)| {
+            cfg.dhcp && cfg.can.is_none() && !masters.contains_key(iface.as_str())
+        })
+        .map(|(iface, _)| iface.as_str());
+    let links: BTreeSet<&str> = declared.chain(ports.iter().map(String::as_str)).collect();
+    links
+        .into_iter()
+        .zip((ROUTE_METRIC_BASE..).step_by(ROUTE_METRIC_STEP as usize))
+        .collect()
+}
+
+/// The unit of a wired port nobody declared: the image's DHCP, with its
+/// metric.
+pub(super) fn auto_unit_name(iface: &str) -> String {
+    format!("{AUTO_UNIT_PREFIX}{iface}.network")
+}
+
+const AUTO_UNIT_PREFIX: &str = "60-mica-auto-";
+
 /// Whether `file_name` is one this reconciler wrote: `50-mica-<iface>.network`
 /// or, for a virtual link, `50-mica-<iface>.netdev`.
 pub(super) fn is_mica_managed(file_name: &str) -> bool {
-    file_name.starts_with("50-mica-")
-        && (file_name.ends_with(".network") || file_name.ends_with(".netdev"))
+    (file_name.starts_with("50-mica-")
+        && (file_name.ends_with(".network") || file_name.ends_with(".netdev")))
+        || (file_name.starts_with(AUTO_UNIT_PREFIX) && file_name.ends_with(".network"))
 }
 
 /// The interface a swept `50-mica-<iface>.netdev` created, and nothing for any
