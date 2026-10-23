@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { formatAge } from '@/i18n/format'
 import { cn } from '@/shared/lib/utils'
 import { StatusBadge, type StatusTone } from '@/shared/components/status-badge'
+import { Card } from '@/shared/components/ui/card'
 import type { IfaceStatus, IfaceView } from './view'
 
 const LED: Record<StatusTone, string> = {
@@ -28,7 +30,11 @@ export function useStatusText() {
   const { t } = useTranslation()
   return {
     label: (status: IfaceStatus) => t(`network.status.${status.label}`),
-    note: (status: IfaceStatus) => status.note ? t(status.note.key, status.note.params) : undefined,
+    note: (status: IfaceStatus) => {
+      if (!status.note) return undefined
+      const age = status.note.params?.handshakeAge
+      return t(status.note.key, { ...status.note.params, ...(typeof age === 'number' ? { handshake: formatAge(age * 1000, t) } : {}) })
+    },
   }
 }
 
@@ -40,6 +46,35 @@ export function StatusLine({ status, compact }: { status: IfaceStatus; compact?:
       <StatusBadge tone={status.tone}>{text.label(status)}</StatusBadge>
       {note && !compact ? <span className="text-sm text-muted-foreground">{note}</span> : null}
     </span>
+  )
+}
+
+/// A block of a network page, as wide as the page: its title, explanation
+/// and actions head the card above a rule. A table's rows meet the card's
+/// edges (`flush`); a block being edited is outlined; a danger block's title
+/// is red.
+export function Section({ title, description, action, tone = 'default', editing, flush, footer, children }: {
+  title: string
+  description?: string
+  action?: ReactNode
+  tone?: 'default' | 'danger'
+  editing?: boolean
+  flush?: boolean
+  footer?: ReactNode
+  children?: ReactNode
+}) {
+  return (
+    <Card className={cn('gap-0 py-0', editing && 'ring-2 ring-primary/40')}>
+      <header className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="grid min-w-0 gap-1">
+          <h2 className={cn('text-base font-semibold', tone === 'danger' && 'text-destructive')}>{title}</h2>
+          {description ? <p className="text-[0.8125rem] text-muted-foreground">{description}</p> : null}
+        </div>
+        {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
+      </header>
+      {flush ? children : <div className="flex flex-col gap-4 p-4">{children}</div>}
+      {footer ? <div className="border-t border-border p-3">{footer}</div> : null}
+    </Card>
   )
 }
 

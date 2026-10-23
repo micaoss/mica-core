@@ -6,8 +6,7 @@ import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
 import { FactList } from '@/shared/components/fact-list'
 import { FormField } from '@/shared/components/form-field'
-import { Page, PageSection } from '@/shared/components/page'
-import { Panel } from '@/shared/components/panel'
+import { Page } from '@/shared/components/page'
 import { SegmentedControl } from '@/shared/components/segmented-control'
 import { Button, buttonVariants } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
@@ -20,7 +19,7 @@ import {
   bridgeOf, stageRemove, stageRevert, stageSet, vlansOn,
   type ChangeSet, type IfaceEntry,
 } from './model'
-import { Led, StatusLine, Tag, useCanText, useKindLabel } from './parts'
+import { Led, Section, StatusLine, Tag, useCanText, useKindLabel } from './parts'
 import { useNetwork, type NetworkData } from './use-network'
 import { addressBook, validateEntry, type Problem, type Problems } from './validate'
 import { computeStatus, exitOf } from './view'
@@ -51,7 +50,7 @@ export function InterfaceDetailPage() {
   const done = () => { setSnapshot(undefined); if (dirty) notifySuccess(t('network.edit.staged')) }
 
   return (
-    <Page>
+    <Page className="gap-4">
       <Header data={data} name={name} editing={editing} />
       <Body key={name} data={data} name={name} editing={editing} onEdit={start} />
       {editing ? <EditFooter data={data} name={name} dirty={dirty} onCancel={cancel} onDone={done} /> : <ChangeBar data={data} />}
@@ -139,43 +138,42 @@ function Body({ data, name, editing, onEdit }: { data: NetworkData; name: string
       {data.session === name ? <Callout tone="neutral" title={t('network.detail.sessionTitle', { name })}>{t('network.detail.sessionCopy')}</Callout> : null}
       {applied ? <Observation data={data} name={name} /> : null}
       {!editable ? (
-        <PageSection title={t('network.detail.config')}>
-          <Panel>
-            <Button className="justify-self-start" variant="outline" onClick={() => void navigate({ to: '/network', search: iface.kind === 'wifi' ? { tab: 'wifi' } : { tab: 'wireguard', tunnel: name } })}>
-              {t(iface.kind === 'wifi' ? 'network.detail.onWifi' : 'network.detail.onWireguard')}
-            </Button>
-          </Panel>
-        </PageSection>
+        <Section title={t('network.detail.config')}>
+          <Button className="justify-self-start" variant="outline" onClick={() => void navigate({ to: '/network', search: iface.kind === 'wifi' ? { tab: 'wifi' } : { tab: 'wireguard', tunnel: name } })}>
+            {t(iface.kind === 'wifi' ? 'network.detail.onWifi' : 'network.detail.onWireguard')}
+          </Button>
+        </Section>
       ) : (
-        <PageSection title={t('network.detail.config')} description={editing ? t('network.detail.editHint') : undefined}>
-          <Panel className={editing ? 'ring-2 ring-primary/40' : undefined}>
-            {editing ? <ConfigForm data={data} name={name} /> : <ConfigView data={data} name={name} onEdit={onEdit} />}
-          </Panel>
-        </PageSection>
+        <Section
+          title={t('network.detail.config')}
+          description={editing ? t('network.detail.editHint') : undefined}
+          editing={editing}
+          action={editing ? undefined : <Button size="sm" onClick={onEdit}>{t('network.detail.edit')}</Button>}
+        >
+          {editing ? <ConfigForm data={data} name={name} /> : <ConfigView data={data} name={name} />}
+        </Section>
       )}
       {editable && !editing && (!physical || iface.declared) ? (
-        <PageSection title={t(physical ? 'network.detail.restore' : 'network.detail.delete')} tone="danger">
-          <Panel>
-            <p className="text-sm text-muted-foreground">
-              {iface.kind === 'can' ? t('network.detail.restoreCanCopy') : physical ? t('network.detail.restoreCopy') : iface.kind === 'bridge' && iface.entry.bridge?.ports.length ? t('network.detail.deleteBridgeCopy', { ports: iface.entry.bridge.ports.join(', ') }) : t('network.detail.deleteCopy')}
-            </p>
-            {blockers.length ? <p className="text-sm text-destructive">{t('network.detail.blocked', { reasons: blockers.join('; ') })}</p> : null}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={blockers.length > 0}
-                onClick={() => {
-                  updateChangeSet((set) => stageRemove(set, name, iface.kind))
-                  if (!physical) void navigate({ to: '/network' })
-                }}
-              >
-                {physical ? t('network.detail.restore') : t('network.detail.deleteNamed', { name })}
-              </Button>
-              <span className="text-sm text-muted-foreground">{t('network.detail.stagedHint')}</span>
-            </div>
-          </Panel>
-        </PageSection>
+        <Section title={t(physical ? 'network.detail.restore' : 'network.detail.delete')} tone="danger">
+          <p className="text-sm text-muted-foreground">
+            {iface.kind === 'can' ? t('network.detail.restoreCanCopy') : physical ? t('network.detail.restoreCopy') : iface.kind === 'bridge' && iface.entry.bridge?.ports.length ? t('network.detail.deleteBridgeCopy', { ports: iface.entry.bridge.ports.join(', ') }) : t('network.detail.deleteCopy')}
+          </p>
+          {blockers.length ? <p className="text-sm text-destructive">{t('network.detail.blocked', { reasons: blockers.join('; ') })}</p> : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={blockers.length > 0}
+              onClick={() => {
+                updateChangeSet((set) => stageRemove(set, name, iface.kind))
+                if (!physical) void navigate({ to: '/network' })
+              }}
+            >
+              {physical ? t('network.detail.restore') : t('network.detail.deleteNamed', { name })}
+            </Button>
+            <span className="text-sm text-muted-foreground">{t('network.detail.stagedHint')}</span>
+          </div>
+        </Section>
       ) : null}
     </>
   )
@@ -212,15 +210,15 @@ function Observation({ data, name }: { data: NetworkData; name: string }) {
         bridgeOf(map, name) && { id: 'bridge', label: t('network.list.memberOf'), value: bridgeOf(map, name), mono: true },
       ]
   return (
-    <PageSection title={t('network.detail.observed')}>
-      <Panel><FactList facts={facts} /></Panel>
-    </PageSection>
+    <Section title={t('network.detail.observed')}>
+      <FactList layout="grid" facts={facts} />
+    </Section>
   )
 }
 
 const mono = (value: ReactNode) => <span className="font-mono">{value}</span>
 
-function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; onEdit: () => void }) {
+function ConfigView({ data, name }: { data: NetworkData; name: string }) {
   const { t } = useTranslation()
   const canText = useCanText()
   const iface = data.staged.ifaces[name]
@@ -229,10 +227,9 @@ function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; o
   const bridge = bridgeOf(map, name)
   return (
     <div className="grid gap-5">
-      <Button className="justify-self-start" size="sm" onClick={onEdit}>{t('network.detail.edit')}</Button>
       {iface.kind === 'can' ? (
         <Group title={t('network.can.title')}>
-          <FactList facts={[
+          <FactList layout="pairs" facts={[
             { id: 'bitrate', label: t('network.fields.bitrate'), value: entry.can ? canText.bitrate(entry.can.bitrate) : t('network.values.notSet') },
             { id: 'restart', label: t('network.fields.restart'), value: entry.can?.restartMs ? `${entry.can.restartMs} ms` : t('network.values.never') },
             { id: 'fd', label: t('network.fields.fd'), value: t(entry.can?.fd ? 'network.values.on' : 'network.values.off') },
@@ -249,7 +246,7 @@ function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; o
             <strong className="text-sm">{t(entry.dhcp ? 'network.presets.dhcp' : entry.static ? 'network.presets.static' : 'network.values.noAddress')}</strong>
           </Group>
           <Group title={t(entry.dhcp ? 'network.fields.dns' : 'network.detail.addressAndDns')}>
-            <FactList facts={entry.dhcp
+            <FactList layout="pairs" facts={entry.dhcp
               ? [{ id: 'dns', label: t('network.fields.dns'), value: entry.dns?.length ? mono(entry.dns.join(', ')) : t('network.detail.leaseDns') }]
               : [
                   { id: 'address', label: t('network.fields.address'), value: mono(entry.static?.address || t('network.values.notSet')) },
@@ -273,7 +270,7 @@ function ConfigView({ data, name, onEdit }: { data: NetworkData; name: string; o
       ) : null}
       {iface.kind === 'vlan' && entry.vlan ? (
         <Group title="VLAN">
-          <FactList facts={[
+          <FactList layout="pairs" facts={[
             { id: 'parent', label: t('network.fields.parent'), value: <Link className="font-mono text-primary" to="/network/$name" params={{ name: entry.vlan.parent }}>{entry.vlan.parent}</Link> },
             { id: 'id', label: t('network.fields.vlanId'), value: entry.vlan.id, mono: true },
           ]} />
@@ -304,7 +301,7 @@ const splitList = (text: string) => text.split(/[,，\s]+/).map((item) => item.t
 function ListInput({ id, values, onChange, placeholder, invalid }: { id: string; values: string[] | undefined; onChange: (values: string[]) => void; placeholder?: string; invalid?: boolean }) {
   const [text, setText] = useState((values ?? []).join(', '))
   const shown = splitList(text).join(',') === (values ?? []).join(',') ? text : (values ?? []).join(', ')
-  return <Input id={id} className="font-mono" value={shown} placeholder={placeholder} aria-invalid={invalid} onChange={(event) => { setText(event.target.value); onChange(splitList(event.target.value)) }} />
+  return <Input id={id} className="font-mono sm:w-80" value={shown} placeholder={placeholder} aria-invalid={invalid} onChange={(event) => { setText(event.target.value); onChange(splitList(event.target.value)) }} />
 }
 
 function ProblemText({ problem }: { problem?: Problem }) {
@@ -376,7 +373,7 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
       ) : (
         <Group title={t('network.detail.addressAndDns')}>
           <FormField label={t('network.fields.address')} hint={problems.address ? <ProblemText problem={problems.address} /> : t('network.detail.cidrHint')}>
-            {(id) => <Input id={id} className="font-mono" value={entry.static?.address ?? ''} aria-invalid={Boolean(problems.address)} onChange={(event) => set((current) => ({ ...current, static: { ...current.static, address: event.target.value.trim() } }))} />}
+            {(id) => <Input id={id} className="font-mono sm:w-80" value={entry.static?.address ?? ''} aria-invalid={Boolean(problems.address)} onChange={(event) => set((current) => ({ ...current, static: { ...current.static, address: event.target.value.trim() } }))} />}
           </FormField>
           {lease?.address && /dhcp/i.test(lease.source ?? '') && !entry.static?.address ? (
             <Button className="justify-self-start" size="sm" variant="link" onClick={() => set((current) => ({ ...current, static: { address: lease.address ?? '', ...(lease.lease?.router ? { gateway: lease.lease.router } : {}), dns: lease.dns } }))}>
@@ -384,7 +381,7 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
             </Button>
           ) : null}
           <FormField label={t('network.fields.gateway')} hint={problems.gateway ? <ProblemText problem={problems.gateway} /> : t('network.detail.gatewayHint')}>
-            {(id) => <Input id={id} className="font-mono" value={entry.static?.gateway ?? ''} placeholder={t('network.values.none')} aria-invalid={Boolean(problems.gateway)} onChange={(event) => set((current) => { const value = event.target.value.trim(); const next = { ...current, static: { address: current.static?.address ?? '', ...current.static } }; if (value) next.static.gateway = value; else delete next.static.gateway; return next })} />}
+            {(id) => <Input id={id} className="font-mono sm:w-80" value={entry.static?.gateway ?? ''} placeholder={t('network.values.none')} aria-invalid={Boolean(problems.gateway)} onChange={(event) => set((current) => { const value = event.target.value.trim(); const next = { ...current, static: { address: current.static?.address ?? '', ...current.static } }; if (value) next.static.gateway = value; else delete next.static.gateway; return next })} />}
           </FormField>
           <FormField label={t('network.fields.dns')} hint={problems.dns ? <ProblemText problem={problems.dns} /> : t('network.detail.listHint')}>
             {(id) => <ListInput id={id} values={entry.static?.dns} placeholder={t('network.detail.optional')} invalid={Boolean(problems.dns)} onChange={(dns) => set((current) => ({ ...current, static: { address: current.static?.address ?? '', ...current.static, dns } }))} />}
@@ -454,7 +451,7 @@ function RoutesForm({ data, name, problems }: { data: NetworkData; name: string;
   return (
     <Group title={t('network.fields.routes')}>
       {routes.map((route, index) => (
-        <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+        <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-center gap-2 sm:grid-cols-[200px_200px_auto] sm:justify-start">
           <Input className="font-mono" aria-label={t('network.detail.routeDestination')} value={route.destination} placeholder="10.20.0.0/16" onChange={(event) => set(routes.map((row, at) => at === index ? { ...row, destination: event.target.value.trim() } : row))} />
           <Input className="font-mono" aria-label={t('network.detail.routeVia')} value={route.gateway ?? ''} placeholder={t('network.detail.routeOnLink')} onChange={(event) => set(routes.map((row, at) => { if (at !== index) return row; const next = { ...row }; const value = event.target.value.trim(); if (value) next.gateway = value; else delete next.gateway; return next }))} />
           <Button size="icon-sm" variant="ghost" aria-label={t('common.actions.delete')} onClick={() => set(routes.filter((_, at) => at !== index))}><X /></Button>
@@ -477,10 +474,10 @@ function CanForm({ data, name, problems }: { data: NetworkData; name: string; pr
       <p className="text-sm text-muted-foreground">{t('network.can.copy')}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField label={t('network.fields.bitrate')} hint={problems.bitrate ? <ProblemText problem={problems.bitrate} /> : t('network.can.bitrateHint')}>
-          {(id) => <Input id={id} className="font-mono" inputMode="numeric" value={can.bitrate || ''} aria-invalid={Boolean(problems.bitrate)} onChange={(event) => set((current) => ({ ...current, bitrate: Number(digits(event.target.value)) }))} />}
+          {(id) => <Input id={id} className="font-mono sm:w-50" inputMode="numeric" value={can.bitrate || ''} aria-invalid={Boolean(problems.bitrate)} onChange={(event) => set((current) => ({ ...current, bitrate: Number(digits(event.target.value)) }))} />}
         </FormField>
         <FormField label={t('network.fields.restart')} hint={t('network.can.restartHint')}>
-          {(id) => <Input id={id} className="font-mono" inputMode="numeric" value={can.restartMs ?? ''} onChange={(event) => set((current) => { const next = { ...current }; if (digits(event.target.value)) next.restartMs = Number(digits(event.target.value)); else delete next.restartMs; return next })} />}
+          {(id) => <Input id={id} className="font-mono sm:w-50" inputMode="numeric" value={can.restartMs ?? ''} onChange={(event) => set((current) => { const next = { ...current }; if (digits(event.target.value)) next.restartMs = Number(digits(event.target.value)); else delete next.restartMs; return next })} />}
         </FormField>
       </div>
       <FormField label={t('network.fields.fd')}>
@@ -488,7 +485,7 @@ function CanForm({ data, name, problems }: { data: NetworkData; name: string; pr
       </FormField>
       {can.fd ? (
         <FormField label={t('network.fields.dataBitrate')} hint={t('network.can.dataBitrateHint')}>
-          {(id) => <Input id={id} className="font-mono" inputMode="numeric" value={can.dataBitrate ?? ''} onChange={(event) => set((current) => ({ ...current, dataBitrate: Number(digits(event.target.value)) || undefined }))} />}
+          {(id) => <Input id={id} className="font-mono sm:w-80" inputMode="numeric" value={can.dataBitrate ?? ''} onChange={(event) => set((current) => ({ ...current, dataBitrate: Number(digits(event.target.value)) || undefined }))} />}
         </FormField>
       ) : null}
       {data.session === name ? <p className="text-sm text-destructive">{t('network.detail.sessionCopy')}</p> : null}

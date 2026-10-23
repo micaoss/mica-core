@@ -2,7 +2,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderParamRoute, stubFetch } from '@/shared/testing/panel'
-import { networkRoutes, PEER_KEY } from '@/shared/testing/network'
+import { configured, networkRoutes, observed, PEER_KEY } from '@/shared/testing/network'
 import { resetChangeSet } from './change-set'
 import { NetworkPage } from './network-page'
 import { hostRoute } from './wireguard-tab'
@@ -25,6 +25,35 @@ describe('the WireGuard tab', () => {
     const card = await screen.findByRole('link', { name: /wg0/ })
     expect(within(card).getByText('51820')).toBeTruthy()
     expect(within(card).getByText('1 peer')).toBeTruthy()
+  })
+
+  it('reads the latest handshake on the card and each peer\'s handshake and traffic in the table', async () => {
+    const status = observed()
+    const handshake = Math.floor(Date.now() / 1000) - 300
+    for (const entry of status.interfaces.entries!) {
+      if (entry.name === 'wg0') entry.wireguard = { available: true, peers: [{ publicKey: PEER_KEY, latestHandshake: handshake, rxBytes: 1_310_720, txBytes: 2048, persistentKeepalive: 25 }] }
+    }
+    stubFetch({
+      ...networkRoutes(configured(), status),
+      '/api/v1/network/wg0/peers': [{ name: 'Harbour office', publicKey: PEER_KEY, presharedKey: true, allowedIps: ['10.8.0.2/32'], persistentKeepalive: 25, latestHandshake: handshake, rxBytes: 1_310_720, txBytes: 2048 }],
+    })
+    open('tab=wireguard')
+    const card = await screen.findByRole('link', { name: /wg0/ })
+    expect(within(card).getByText('Peers offline')).toBeTruthy()
+    expect(within(card).getByText('5 min ago')).toBeTruthy()
+
+    await userEvent.click(card)
+    const table = await screen.findByRole('table')
+    expect(within(table).getByRole('columnheader', { name: 'Latest handshake' })).toBeTruthy()
+    expect(within(table).getByText('5 min ago')).toBeTruthy()
+    expect(within(table).getByText('1.3 MiB / 2.0 KiB')).toBeTruthy()
+  })
+
+  it('says a peer has not handshaken yet', async () => {
+    stubFetch(networkRoutes())
+    open('tab=wireguard&tunnel=wg0')
+    const table = await screen.findByRole('table')
+    expect(await within(table).findByText('No handshake yet')).toBeTruthy()
   })
 
   it('gives the remote side this device as a host route on its own key', async () => {
@@ -111,7 +140,7 @@ describe('the WireGuard tab', () => {
   it('stages a new listen port with the interface changes', async () => {
     stubFetch(networkRoutes())
     open('tab=wireguard&tunnel=wg0')
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
     const port = screen.getByLabelText('Listen port')
     await userEvent.clear(port)
     await userEvent.type(port, '51900')

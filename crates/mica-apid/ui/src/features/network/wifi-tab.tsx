@@ -13,8 +13,6 @@ import { DataTable } from '@/shared/components/data-table'
 import { FactList } from '@/shared/components/fact-list'
 import { FormDialog } from '@/shared/components/form-dialog'
 import { FormField, ToggleField } from '@/shared/components/form-field'
-import { PageSection } from '@/shared/components/page'
-import { CollectionPanel, Panel } from '@/shared/components/panel'
 import { SegmentedControl } from '@/shared/components/segmented-control'
 import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
@@ -25,6 +23,7 @@ import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { provisioningQuery } from './bluetooth'
 import { EditBar } from './change-bar'
 import { inSubnet, intToIp, ipToInt, isIPv4, overlaps, parseCidr, sameEntry, type IfaceEntry } from './model'
+import { Section } from './parts'
 import { countryName, ELSEWHERE, EUROPE } from './regulatory'
 import type { NetworkData } from './use-network'
 
@@ -140,23 +139,21 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
   return (
     <>
       {locked ? <Callout tone="warning" title={t('network.wifi.locked')} /> : null}
-      <PageSection title={t('network.wifi.state')}>
-        <Panel><StateFacts data={data} /></Panel>
-      </PageSection>
+      <Section title={t('network.wifi.state')}>
+        <StateFacts data={data} />
+      </Section>
 
       {listMode === 'client' ? <ClientLists data={data} locked={locked} /> : null}
       {listMode === 'ap' && wifi.mode === 'ap' ? <Stations data={data} /> : null}
 
-      <PageSection title={t('network.wifi.config')} description={draft ? t('network.wifi.editHint') : t('network.wifi.configCopy', { radio: radio || '—' })}>
-        <Panel className={draft ? 'ring-2 ring-primary/40' : undefined}>
-          {draft ? <ConfigForm draft={draft} setDraft={setDraft} errors={errors} current={wifi.mode} allowed={allowed} /> : (
-            <>
-              <div><Button size="sm" disabled={!radio || locked} onClick={start}>{t('network.detail.edit')}</Button></div>
-              <ConfigView data={data} />
-            </>
-          )}
-        </Panel>
-      </PageSection>
+      <Section
+        title={t('network.wifi.config')}
+        description={draft ? t('network.wifi.editHint') : t('network.wifi.configCopy', { radio: radio || '—' })}
+        editing={draft !== undefined}
+        action={draft ? undefined : <Button size="sm" disabled={!radio || locked} onClick={start}>{t('network.detail.edit')}</Button>}
+      >
+        {draft ? <ConfigForm draft={draft} setDraft={setDraft} errors={errors} current={wifi.mode} allowed={allowed} /> : <ConfigView data={data} />}
+      </Section>
 
       {draft ? (
         <EditBar what={t('network.wifi.config')} dirty={dirty} errors={errorCount} onCancel={() => setDraft(undefined)} onDone={askOrSave} doneLabel={t('common.actions.save')} />
@@ -261,9 +258,9 @@ function StateFacts({ data }: { data: NetworkData }) {
   const wifi = data.wifi
   const radio = wifi.radio
   const address = radio ? data.applied.ifaces[radio]?.obs?.address : undefined
-  if (wifi.mode === 'off') return <FactList facts={[{ id: 'mode', label: t('network.wifi.mode'), value: <strong>{t('network.wifi.off')}</strong> }]} />
+  if (wifi.mode === 'off') return <FactList layout="grid" facts={[{ id: 'mode', label: t('network.wifi.mode'), value: <strong>{t('network.wifi.off')}</strong> }]} />
   if (wifi.mode === 'client') {
-    return <FactList facts={[
+    return <FactList layout="grid" facts={[
       { id: 'mode', label: t('network.wifi.mode'), value: <strong>{t('network.wifi.modes.client')}</strong> },
       { id: 'state', label: t('network.fields.state'), value: wifi.association ? <span className="text-success">{t('network.status.connected')}</span> : <span className="text-warning">{t('network.wifi.searching')}</span> },
       { id: 'ssid', label: 'SSID', value: wifi.association?.ssid ?? '—' },
@@ -271,7 +268,7 @@ function StateFacts({ data }: { data: NetworkData }) {
       { id: 'address', label: t('network.fields.address'), value: address ?? '—', mono: true },
     ]} />
   }
-  return <FactList facts={[
+  return <FactList layout="grid" facts={[
     { id: 'mode', label: t('network.wifi.mode'), value: <strong>{t('network.wifi.modes.ap')}</strong> },
     { id: 'state', label: t('network.fields.state'), value: wifi.apRunning ? <span className="text-success">{t('network.status.apRunning')}</span> : <span className="text-destructive">{t('network.status.apDown')}</span> },
     { id: 'ssid', label: 'SSID', value: <strong>{wifi.apSsid || t('network.wifi.ssidAuto')}</strong> },
@@ -315,7 +312,7 @@ function ConfigView({ data }: { data: NetworkData }) {
           ]),
     )
   }
-  return <FactList facts={facts} />
+  return <FactList layout="pairs" facts={facts} />
 }
 
 function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draft; setDraft: (draft: Draft) => void; errors: Record<string, string>; current: 'off' | 'client' | 'ap'; allowed: number[] | undefined }) {
@@ -345,12 +342,12 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
           </FormField>
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label="SSID" hint={hint('ssid', t('network.wifi.ssidHint'))}>
-              {(id) => <Input id={id} value={draft.ssid} aria-invalid={Boolean(errors.ssid)} onChange={(event) => setDraft({ ...draft, ssid: event.target.value })} />}
+              {(id) => <Input id={id} className="sm:w-50" value={draft.ssid} aria-invalid={Boolean(errors.ssid)} onChange={(event) => setDraft({ ...draft, ssid: event.target.value })} />}
             </FormField>
             <FormField label={t('network.wifi.security')}>
               {(id) => (
                 <Select value={draft.security} onValueChange={(value) => setDraft({ ...draft, security: value as ApSecurity })}>
-                  <SelectTrigger id={id} className="w-56"><SelectValue>{t(`network.wifi.apSecurities.${draft.security}`)}</SelectValue></SelectTrigger>
+                  <SelectTrigger id={id} className="w-50"><SelectValue>{t(`network.wifi.apSecurities.${draft.security}`)}</SelectValue></SelectTrigger>
                   <SelectContent>{AP_SECURITIES.map((each) => <SelectItem key={each} value={each}>{t(`network.wifi.apSecurities.${each}`)}</SelectItem>)}</SelectContent>
                 </Select>
               )}
@@ -358,14 +355,14 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
           </div>
           {draft.security === 'open' ? <Callout tone="warning" title={t('network.wifi.openWarning')} /> : (
             <FormField label={t('network.wifi.password')} hint={hint('psk', t('network.wifi.pskHint'))}>
-              {(id) => <Input id={id} className="sm:w-1/2" type="password" value={draft.psk} placeholder={t('network.wifi.pskKeep')} aria-invalid={Boolean(errors.psk)} onChange={(event) => setDraft({ ...draft, psk: event.target.value })} />}
+              {(id) => <Input id={id} className="sm:w-80" type="password" value={draft.psk} placeholder={t('network.wifi.pskKeep')} aria-invalid={Boolean(errors.psk)} onChange={(event) => setDraft({ ...draft, psk: event.target.value })} />}
             </FormField>
           )}
           <FormField label={t('network.wifi.country')} hint={hint('country', t('network.wifi.countryHint'))}>
             {(id) => (
               <div className="grid gap-2">
                 <Select value={draft.country} onValueChange={(value) => { const country = String(value); setDraft({ ...draft, country }) }}>
-                  <SelectTrigger id={id} className="w-72"><SelectValue>{`${countryName(draft.country, locale)} (${draft.country})`}</SelectValue></SelectTrigger>
+                  <SelectTrigger id={id} className="w-80 max-w-full"><SelectValue>{`${countryName(draft.country, locale)} (${draft.country})`}</SelectValue></SelectTrigger>
                   <SelectContent>{countries.map((code) => <SelectItem key={code} value={code}>{countryName(code, locale)} ({code})</SelectItem>)}</SelectContent>
                 </Select>
                 <label className="flex items-center gap-2 text-sm">
@@ -379,20 +376,20 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
             <FormField label={t('network.wifi.channel')} hint={hint('channel', t('network.wifi.channelHint'))}>
               {(id) => (
                 <Select value={String(draft.channel)} onValueChange={(value) => setDraft({ ...draft, channel: Number(value) })}>
-                  <SelectTrigger id={id} className="w-48 font-mono"><SelectValue>{channelLabel(draft.channel, t)}</SelectValue></SelectTrigger>
+                  <SelectTrigger id={id} className="w-50 font-mono"><SelectValue>{channelLabel(draft.channel, t)}</SelectValue></SelectTrigger>
                   <SelectContent>{(allowed ?? [draft.channel]).map((channel) => <SelectItem key={channel} value={String(channel)}>{channelLabel(channel, t)}</SelectItem>)}</SelectContent>
                 </Select>
               )}
             </FormField>
             <FormField label={t('network.wifi.apAddress')} hint={hint('address', t('network.wifi.apAddressHint'))}>
-              {(id) => <Input id={id} className="font-mono" value={draft.address} aria-invalid={Boolean(errors.address)} onChange={(event) => { const address = event.target.value.trim(); const derived = derivedPool(draft.address); const following = draft.poolStart === derived.poolStart && draft.poolEnd === derived.poolEnd; setDraft({ ...draft, address, ...(following ? derivedPool(address) : {}) }) }} />}
+              {(id) => <Input id={id} className="font-mono sm:w-50" value={draft.address} aria-invalid={Boolean(errors.address)} onChange={(event) => { const address = event.target.value.trim(); const derived = derivedPool(draft.address); const following = draft.poolStart === derived.poolStart && draft.poolEnd === derived.poolEnd; setDraft({ ...draft, address, ...(following ? derivedPool(address) : {}) }) }} />}
             </FormField>
             <FormField label={t('network.wifi.pool')} hint={hint('pool', t('network.wifi.poolHint'))}>
               {(id) => (
                 <div className="flex items-center gap-2">
-                  <Input id={id} className="font-mono" aria-label={t('network.wifi.poolStart')} value={draft.poolStart} aria-invalid={Boolean(errors.pool)} onChange={(event) => setDraft({ ...draft, poolStart: event.target.value.trim() })} />
+                  <Input id={id} className="font-mono sm:w-50" aria-label={t('network.wifi.poolStart')} value={draft.poolStart} aria-invalid={Boolean(errors.pool)} onChange={(event) => setDraft({ ...draft, poolStart: event.target.value.trim() })} />
                   <span>–</span>
-                  <Input className="font-mono" aria-label={t('network.wifi.poolEnd')} value={draft.poolEnd} aria-invalid={Boolean(errors.pool)} onChange={(event) => setDraft({ ...draft, poolEnd: event.target.value.trim() })} />
+                  <Input className="font-mono sm:w-50" aria-label={t('network.wifi.poolEnd')} value={draft.poolEnd} aria-invalid={Boolean(errors.pool)} onChange={(event) => setDraft({ ...draft, poolEnd: event.target.value.trim() })} />
                 </div>
               )}
             </FormField>
@@ -416,20 +413,20 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
               />
               {draft.customDns ? (
                 <FormField label={t('network.fields.dns')} hint={hint('dns', t('network.detail.listHint'))}>
-                  {(id) => <Input id={id} className="font-mono" defaultValue={(entry.dns ?? []).join(', ')} onChange={(event) => setEntry({ ...entry, dns: split(event.target.value) })} />}
+                  {(id) => <Input id={id} className="font-mono sm:w-80" defaultValue={(entry.dns ?? []).join(', ')} onChange={(event) => setEntry({ ...entry, dns: split(event.target.value) })} />}
                 </FormField>
               ) : null}
             </>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label={t('network.fields.address')} hint={hint('address', t('network.detail.cidrHint'))}>
-                {(id) => <Input id={id} className="font-mono" value={entry.static?.address ?? ''} placeholder="192.168.31.20/24" onChange={(event) => setEntry({ ...entry, static: { ...entry.static, address: event.target.value.trim() } })} />}
+                {(id) => <Input id={id} className="font-mono sm:w-50" value={entry.static?.address ?? ''} placeholder="192.168.31.20/24" onChange={(event) => setEntry({ ...entry, static: { ...entry.static, address: event.target.value.trim() } })} />}
               </FormField>
               <FormField label={t('network.fields.gateway')} hint={hint('gateway')}>
-                {(id) => <Input id={id} className="font-mono" value={entry.static?.gateway ?? ''} placeholder={t('network.values.none')} onChange={(event) => { const gateway = event.target.value.trim(); const next = { ...entry, static: { address: entry.static?.address ?? '', ...entry.static } }; if (gateway) next.static.gateway = gateway; else delete next.static.gateway; setEntry(next) }} />}
+                {(id) => <Input id={id} className="font-mono sm:w-50" value={entry.static?.gateway ?? ''} placeholder={t('network.values.none')} onChange={(event) => { const gateway = event.target.value.trim(); const next = { ...entry, static: { address: entry.static?.address ?? '', ...entry.static } }; if (gateway) next.static.gateway = gateway; else delete next.static.gateway; setEntry(next) }} />}
               </FormField>
               <FormField className="sm:col-span-2" label={t('network.fields.dns')} hint={hint('dns', t('network.detail.listHint'))}>
-                {(id) => <Input id={id} className="font-mono" defaultValue={(entry.static?.dns ?? []).join(', ')} onChange={(event) => setEntry({ ...entry, static: { address: entry.static?.address ?? '', ...entry.static, dns: split(event.target.value) } })} />}
+                {(id) => <Input id={id} className="font-mono sm:w-80" defaultValue={(entry.static?.dns ?? []).join(', ')} onChange={(event) => setEntry({ ...entry, static: { address: entry.static?.address ?? '', ...entry.static, dns: split(event.target.value) } })} />}
               </FormField>
             </div>
           )}
@@ -490,67 +487,70 @@ function ClientLists({ data, locked }: { data: NetworkData; locked: boolean }) {
 
   return (
     <>
-      <PageSection title={t('network.wifi.savedNetworks')} description={t('network.wifi.savedCopy')}>
-        {networks.error ? <Callout tone="danger" title={failureDetail(networks.error, t('common.requestFailed'))} /> : null}
-        <CollectionPanel action={<Button size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: '', existing: false, secured: true })}><Plus />{t('network.wifi.add')}</Button>} title={t('network.wifi.savedNetworks')}>
-          <DataTable<WifiNetwork>
-            rows={networks.data ? [...networks.data].sort((left, right) => right.priority - left.priority) : undefined}
-            rowKey={(entry) => entry.ssid}
-            isPending={networks.isPending}
-            empty={t('network.wifi.empty')}
-            columns={[
-              { id: 'ssid', header: t('network.wifi.network'), cell: (entry) => <span className="flex flex-wrap items-center gap-1.5"><strong>{entry.ssid}</strong>{entry.hidden ? <span className="text-xs text-muted-foreground">{t('network.wifi.hidden')}</span> : null}{wifi.association?.ssid === entry.ssid ? <span className="text-xs text-primary">{t('network.status.connected')}</span> : null}</span> },
-              { id: 'security', header: t('network.wifi.security'), cell: (entry) => t(entry.psk ? 'network.wifi.wpa' : 'network.wifi.open') },
-              { id: 'priority', header: t('network.wifi.priority'), cell: (entry) => entry.priority },
-              { id: 'auto', header: t('network.wifi.autoConnect'), cell: (entry) => t(entry.autoConnect === false ? 'network.values.off' : 'network.values.on') },
-              { id: 'actions', header: '', align: 'end', cell: (entry) => (
-                <span className="flex justify-end gap-2">
-                  <Button type="button" size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: entry.ssid, existing: true, secured: Boolean(entry.psk) }, entry)}>{t('common.actions.edit')}</Button>
-                  <ConfirmDialog
-                    trigger={<Button type="button" size="sm" variant="destructive" disabled={locked} aria-label={t('network.wifi.removeNamed', { name: entry.ssid })}><Trash2 /></Button>}
-                    title={t('network.wifi.removeNamed', { name: entry.ssid })}
-                    description={t('network.wifi.removeCopy')}
-                    confirmLabel={t('network.wifi.remove')}
-                    success={t('network.wifi.removed', { name: entry.ssid })}
-                    failure={t('network.wifi.remove')}
-                    onConfirm={() => remove.mutateAsync(entry.ssid)}
-                  />
-                </span>
-              ) },
-            ]}
-          />
-        </CollectionPanel>
-      </PageSection>
+      <Section
+        title={t('network.wifi.savedNetworks')}
+        description={t('network.wifi.savedCopy')}
+        action={<Button size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: '', existing: false, secured: true })}><Plus />{t('network.wifi.add')}</Button>}
+        flush
+      >
+        {networks.error ? <div className="p-4"><Callout tone="danger" title={failureDetail(networks.error, t('common.requestFailed'))} /></div> : null}
+        <DataTable<WifiNetwork>
+          rows={networks.data ? [...networks.data].sort((left, right) => right.priority - left.priority) : undefined}
+          rowKey={(entry) => entry.ssid}
+          isPending={networks.isPending}
+          empty={t('network.wifi.empty')}
+          columns={[
+            { id: 'ssid', header: t('network.wifi.network'), cell: (entry) => <span className="flex flex-wrap items-center gap-1.5"><strong>{entry.ssid}</strong>{entry.hidden ? <span className="text-xs text-muted-foreground">{t('network.wifi.hidden')}</span> : null}{wifi.association?.ssid === entry.ssid ? <span className="text-xs text-primary">{t('network.status.connected')}</span> : null}</span> },
+            { id: 'security', header: t('network.wifi.security'), cell: (entry) => t(entry.psk ? 'network.wifi.wpa' : 'network.wifi.open') },
+            { id: 'priority', header: t('network.wifi.priority'), cell: (entry) => entry.priority },
+            { id: 'auto', header: t('network.wifi.autoConnect'), cell: (entry) => t(entry.autoConnect === false ? 'network.values.off' : 'network.values.on') },
+            { id: 'actions', header: '', align: 'end', cell: (entry) => (
+              <span className="flex justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: entry.ssid, existing: true, secured: Boolean(entry.psk) }, entry)}>{t('common.actions.edit')}</Button>
+                <ConfirmDialog
+                  trigger={<Button type="button" size="sm" variant="destructive" disabled={locked} aria-label={t('network.wifi.removeNamed', { name: entry.ssid })}><Trash2 /></Button>}
+                  title={t('network.wifi.removeNamed', { name: entry.ssid })}
+                  description={t('network.wifi.removeCopy')}
+                  confirmLabel={t('network.wifi.remove')}
+                  success={t('network.wifi.removed', { name: entry.ssid })}
+                  failure={t('network.wifi.remove')}
+                  onConfirm={() => remove.mutateAsync(entry.ssid)}
+                />
+              </span>
+            ) },
+          ]}
+        />
+      </Section>
 
-      <PageSection title={t('network.wifi.nearby')} description={t('network.wifi.nearbyCopy')}>
-        <CollectionPanel
-          title={t('network.wifi.nearby')}
-          action={<Button size="sm" variant="outline" disabled={Boolean(scanBlocked) || scan.isPending} onClick={() => scan.mutate()}><Radar />{scan.isPending ? t('network.wifi.scanning') : t('network.wifi.scan')}</Button>}
-        >
-          {scanBlocked ? <p className="p-4 text-sm text-muted-foreground">{scanBlocked}</p> : (
-            <>
-              {scan.data && scan.data.available === false ? <p className="p-4 text-sm text-warning">{scan.data.reason === 'access-point' ? t('network.wifi.scanApHolds', { iface: scan.data.interface ?? wifi.radio ?? '' }) : scan.data.reason === 'client-off' ? t('network.wifi.scanClientOff') : scan.data.detail ?? t('network.wifi.scanUnavailable')}</p> : null}
-              <DataTable<ScannedNetwork>
-                rows={scan.data?.networks === undefined ? [] : groupScan(scan.data.networks)}
-                rowKey={(network) => network.best.bssid}
-                isPending={scan.isPending}
-                empty={t('network.wifi.scanEmpty')}
-                columns={[
-                  { id: 'ssid', header: t('network.wifi.network'), cell: (network) => <span className="flex flex-wrap items-center gap-1.5">{network.ssid ? <strong>{network.ssid}</strong> : <span className="text-muted-foreground">{t('network.wifi.hiddenNetwork')}</span>}{networks.data?.some((each) => each.ssid === network.ssid) ? <span className="text-xs text-muted-foreground">{t('network.wifi.alreadySaved')}</span> : null}</span> },
-                  { id: 'signal', header: t('network.wifi.signal'), cell: signal },
-                  { id: 'security', header: t('network.wifi.security'), cell: (network) => t(`network.wifi.securities.${scanSecurity(network.best.flags)}`) },
-                  { id: 'band', header: t('network.wifi.band'), cell: (network) => [...new Set(network.accessPoints.map((bss) => band(bss.frequencyMhz)).filter(Boolean))].map((each) => `${each} GHz`).join(' / ') || '—' },
-                  { id: 'actions', header: '', align: 'end', cell: (network) => {
-                    const security = scanSecurity(network.best.flags)
-                    const saved = networks.data?.some((each) => each.ssid === network.ssid)
-                    return saved || security === 'eap' || security === 'wep' ? null : <Button type="button" size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: network.ssid, existing: false, secured: security !== 'open' })}>{t('network.wifi.connect')}</Button>
-                  } },
-                ]}
-              />
-            </>
-          )}
-        </CollectionPanel>
-      </PageSection>
+      <Section
+        title={t('network.wifi.nearby')}
+        description={t('network.wifi.nearbyCopy')}
+        action={<Button size="sm" variant="outline" disabled={Boolean(scanBlocked) || scan.isPending} onClick={() => scan.mutate()}><Radar />{scan.isPending ? t('network.wifi.scanning') : t('network.wifi.scan')}</Button>}
+        flush
+      >
+        {scanBlocked ? <p className="p-4 text-sm text-muted-foreground">{scanBlocked}</p> : (
+          <>
+            {scan.data && scan.data.available === false ? <p className="p-4 text-sm text-warning">{scan.data.reason === 'access-point' ? t('network.wifi.scanApHolds', { iface: scan.data.interface ?? wifi.radio ?? '' }) : scan.data.reason === 'client-off' ? t('network.wifi.scanClientOff') : scan.data.detail ?? t('network.wifi.scanUnavailable')}</p> : null}
+            <DataTable<ScannedNetwork>
+              rows={scan.data?.networks === undefined ? [] : groupScan(scan.data.networks)}
+              rowKey={(network) => network.best.bssid}
+              isPending={scan.isPending}
+              empty={t('network.wifi.scanEmpty')}
+              columns={[
+                { id: 'ssid', header: t('network.wifi.network'), cell: (network) => <span className="flex flex-wrap items-center gap-1.5">{network.ssid ? <strong>{network.ssid}</strong> : <span className="text-muted-foreground">{t('network.wifi.hiddenNetwork')}</span>}{networks.data?.some((each) => each.ssid === network.ssid) ? <span className="text-xs text-muted-foreground">{t('network.wifi.alreadySaved')}</span> : null}</span> },
+                { id: 'signal', header: t('network.wifi.signal'), cell: signal },
+                { id: 'security', header: t('network.wifi.security'), cell: (network) => t(`network.wifi.securities.${scanSecurity(network.best.flags)}`) },
+                { id: 'band', header: t('network.wifi.band'), cell: (network) => [...new Set(network.accessPoints.map((bss) => band(bss.frequencyMhz)).filter(Boolean))].map((each) => `${each} GHz`).join(' / ') || '—' },
+                { id: 'actions', header: '', align: 'end', cell: (network) => {
+                  const security = scanSecurity(network.best.flags)
+                  const saved = networks.data?.some((each) => each.ssid === network.ssid)
+                  return saved || security === 'eap' || security === 'wep' ? null : <Button type="button" size="sm" variant="outline" disabled={locked} onClick={() => open({ ssid: network.ssid, existing: false, secured: security !== 'open' })}>{t('network.wifi.connect')}</Button>
+                } },
+              ]}
+            />
+          </>
+        )}
+      </Section>
 
       <FormDialog
         open={dialog !== undefined}
@@ -590,21 +590,19 @@ function Stations({ data }: { data: NetworkData }) {
   const stations = (data.status.data?.accessPoint?.entries ?? []).find((entry) => entry.interface === data.wifi.radio)?.stations ?? []
   const bytes = (value?: number) => value === undefined ? '—' : value >= 1e9 ? `${(value / 1e9).toFixed(1)} GB` : value >= 1e6 ? `${(value / 1e6).toFixed(1)} MB` : `${Math.round(value / 1e3)} KB`
   return (
-    <PageSection title={t('network.wifi.stations')} description={t('network.wifi.stationsCopy')}>
-      <CollectionPanel>
-        <DataTable
-          rows={stations}
-          rowKey={(station) => station.mac}
-          empty={t('network.wifi.noStations')}
-          columns={[
-            { id: 'host', header: t('network.wifi.host'), cell: (station) => station.hostname || station.address ? <span>{station.hostname ?? '—'} <span className="font-mono text-[0.8125rem] text-muted-foreground">{station.address ?? ''}</span></span> : '—' },
-            { id: 'mac', header: 'MAC', cell: (station) => <span className="font-mono text-[0.8125rem]">{station.mac}</span> },
-            { id: 'signal', header: t('network.wifi.signal'), cell: (station) => station.signalDbm !== undefined ? `${station.signalDbm} dBm` : '—' },
-            { id: 'connected', header: t('network.wifi.connectedFor'), cell: (station) => station.connectedSeconds !== undefined ? t('network.wifi.minutes', { count: Math.floor(station.connectedSeconds / 60) }) : '—' },
-            { id: 'traffic', header: t('network.wifi.traffic'), cell: (station) => <span className={cn('text-muted-foreground')}>{bytes(station.rxBytes)} / {bytes(station.txBytes)}</span> },
-          ]}
-        />
-      </CollectionPanel>
-    </PageSection>
+    <Section title={t('network.wifi.stations')} description={t('network.wifi.stationsCopy')} flush>
+      <DataTable
+        rows={stations}
+        rowKey={(station) => station.mac}
+        empty={t('network.wifi.noStations')}
+        columns={[
+          { id: 'host', header: t('network.wifi.host'), cell: (station) => station.hostname || station.address ? <span>{station.hostname ?? '—'} <span className="font-mono text-[0.8125rem] text-muted-foreground">{station.address ?? ''}</span></span> : '—' },
+          { id: 'mac', header: 'MAC', cell: (station) => <span className="font-mono text-[0.8125rem]">{station.mac}</span> },
+          { id: 'signal', header: t('network.wifi.signal'), cell: (station) => station.signalDbm !== undefined ? `${station.signalDbm} dBm` : '—' },
+          { id: 'connected', header: t('network.wifi.connectedFor'), cell: (station) => station.connectedSeconds !== undefined ? t('network.wifi.minutes', { count: Math.floor(station.connectedSeconds / 60) }) : '—' },
+          { id: 'traffic', header: t('network.wifi.traffic'), cell: (station) => <span className={cn('text-muted-foreground')}>{bytes(station.rxBytes)} / {bytes(station.txBytes)}</span> },
+        ]}
+      />
+    </Section>
   )
 }

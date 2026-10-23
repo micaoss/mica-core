@@ -45,12 +45,12 @@ export function NetworkPage() {
         <TabsList aria-label={t('network.title')}>
           {shown.map((each) => <TabsTrigger key={each} value={each}>{t(`network.tabs.${each}`)}</TabsTrigger>)}
         </TabsList>
-        <TabsContent value="overview" className="grid gap-6 pt-4"><OverviewTab data={data} onTab={select} /></TabsContent>
-        <TabsContent value="interfaces" className="grid gap-6 pt-4"><InterfacesTab data={data} /></TabsContent>
-        {data.serves('wifi') ? <TabsContent value="wifi" className="grid gap-6 pt-4"><WifiTab data={data} onEditing={setCardEditing} /></TabsContent> : null}
-        <TabsContent value="dns" className="grid gap-6 pt-4"><DnsTab data={data} onEditing={setCardEditing} /></TabsContent>
-        {!data.openrc ? <TabsContent value="wireguard" className="grid gap-6 pt-4"><WireguardTab data={data} tunnel={search.tunnel} onEditing={setCardEditing} /></TabsContent> : null}
-        {data.serves('bluetooth') ? <TabsContent value="bluetooth" className="grid gap-6 pt-4"><BluetoothPanel onEditing={setCardEditing} /></TabsContent> : null}
+        <TabsContent value="overview" className="grid gap-4 pt-4"><OverviewTab data={data} onTab={select} /></TabsContent>
+        <TabsContent value="interfaces" className="grid gap-4 pt-4"><InterfacesTab data={data} /></TabsContent>
+        {data.serves('wifi') ? <TabsContent value="wifi" className="grid gap-4 pt-4"><WifiTab data={data} onEditing={setCardEditing} /></TabsContent> : null}
+        <TabsContent value="dns" className="grid gap-4 pt-4"><DnsTab data={data} onEditing={setCardEditing} /></TabsContent>
+        {!data.openrc ? <TabsContent value="wireguard" className="grid gap-4 pt-4"><WireguardTab data={data} tunnel={search.tunnel} onEditing={setCardEditing} /></TabsContent> : null}
+        {data.serves('bluetooth') ? <TabsContent value="bluetooth" className="grid gap-4 pt-4"><BluetoothPanel onEditing={setCardEditing} /></TabsContent> : null}
       </Tabs>
       {cardEditing ? null : <ChangeBar data={data} />}
     </Page>

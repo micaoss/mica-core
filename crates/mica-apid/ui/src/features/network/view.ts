@@ -245,9 +245,15 @@ export function computeStatus(view: NetView, name: string): IfaceStatus {
       if (!peers) return status('neutral', 'noPeers')
       const ages = obs.handshakeAges
       if (!ages) return status('warning', 'started', { key: 'network.status.notes.peersUnknown', params: { count: peers } })
-      const up = ages.filter((age) => age !== null && age <= HANDSHAKE_FRESH_SECONDS).length
-      if (up === 0) return status('warning', 'started', { key: 'network.status.notes.noHandshake' })
-      return status('success', 'connected', { key: 'network.status.notes.peersUp', params: { up, count: ages.length } })
+      const seen = ages.filter((age) => age !== null)
+      const handshakeAge = seen.length ? Math.min(...seen) : undefined
+      const up = seen.filter((age) => age <= HANDSHAKE_FRESH_SECONDS).length
+      if (up > 0) return status('success', 'tunnelUp', { key: 'network.status.notes.peersOnline', params: { up, count: ages.length, handshakeAge: handshakeAge ?? 0 } })
+      // A peer with keepalive handshakes every two minutes even when idle, so
+      // its silence means it is gone; without keepalive, silence is no traffic.
+      const keepalive = (entry.wireguard?.peers ?? []).some((peer) => peer.persistentKeepalive)
+      if (keepalive) return status('danger', 'peersOffline', handshakeAge === undefined ? { key: 'network.status.notes.neverHandshake' } : { key: 'network.status.notes.lastHandshake', params: { handshakeAge } })
+      return status('warning', 'idle', handshakeAge === undefined ? { key: 'network.status.notes.idleNever' } : { key: 'network.status.notes.idleHandshake', params: { handshakeAge } })
     }
     case 'wifi': {
       const wifi = view.wifi

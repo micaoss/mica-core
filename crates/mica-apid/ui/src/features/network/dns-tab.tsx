@@ -11,8 +11,6 @@ import { DataTable } from '@/shared/components/data-table'
 import { FactList } from '@/shared/components/fact-list'
 import { FormDialog } from '@/shared/components/form-dialog'
 import { FormField, ToggleField } from '@/shared/components/form-field'
-import { PageSection } from '@/shared/components/page'
-import { CollectionPanel, Panel } from '@/shared/components/panel'
 import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
 import { Spinner } from '@/shared/components/ui/spinner'
@@ -20,6 +18,7 @@ import { Switch } from '@/shared/components/ui/switch'
 import { failureDetail, notifyFailure, notifySuccess } from '@/shared/feedback/toast'
 import { EditBar } from './change-bar'
 import { isIPv4 } from './model'
+import { Section } from './parts'
 import type { NetworkData } from './use-network'
 
 const MAX_SERVERS = 3
@@ -115,55 +114,55 @@ export function DnsTab({ data, onEditing }: { data: NetworkData; onEditing: (edi
       {dns.error ? <Callout tone="danger" title={failureDetail(dns.error, t('common.requestFailed'))} /> : null}
       <Effective data={data} dns={dns.data} />
 
-      <PageSection title={t('network.dns.global')} description={draft ? t('network.wifi.editHint') : t('network.dns.globalCopy')}>
-        <Panel className={draft ? 'ring-2 ring-primary/40' : undefined}>
-          {draft ? (
-            <div className="grid gap-5">
-              <ToggleField
-                title={t('network.dns.global')}
-                description={t(draft.enabled ? 'network.dns.onHint' : 'network.dns.offHint')}
-                control={<Switch checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} aria-label={t('network.dns.global')} />}
-              />
-              {draft.enabled ? (
-                <>
-                  {[0, 1, 2].slice(0, MAX_SERVERS).map((index) => {
-                    const result = tests?.[draft.servers[index]]
-                    return (
-                      <FormField key={index} label={t(`network.dns.slots.${index}`)} hint={errors[index] ? <span className="text-destructive">{errors[index]}</span> : index === 0 && !draft.servers.some(Boolean) ? t('network.dns.suggested') : undefined}>
-                        {(id) => (
-                          <div className="flex flex-wrap items-center gap-3">
-                            <Input id={id} className="w-56 font-mono" value={draft.servers[index]} placeholder={t(index === 0 ? 'network.dns.required' : 'network.dns.optional')} aria-invalid={Boolean(errors[index])} onChange={(event) => { const next = [...draft.servers]; next[index] = event.target.value.trim(); setDraft({ ...draft, servers: next }); setTests(undefined) }} />
-                            {result ? (result.reachable
-                              ? <span className="text-sm text-success">{t('network.dns.reachable', { ms: result.latencyMs })}</span>
-                              : <span className="text-sm text-destructive">{t('network.dns.timedOut')}</span>) : null}
-                          </div>
-                        )}
-                      </FormField>
-                    )
-                  })}
-                  <FormField label={t('network.dns.test')} hint={t('network.dns.testHint', { name: dns.data?.probe?.name ?? '' })}>
-                    {() => (
-                      <div>
-                        <Button size="sm" variant="outline" disabled={testing || !draft.servers.some((server) => isIPv4(server))} onClick={() => void runTest()}>
-                          {testing ? <Spinner /> : null}{t(testing ? 'network.dns.testing' : 'network.dns.testServers')}
-                        </Button>
-                      </div>
-                    )}
-                  </FormField>
-                </>
-              ) : null}
-            </div>
-          ) : (
-            <>
-              <div><Button size="sm" onClick={start}>{t('network.detail.edit')}</Button></div>
-              <FactList facts={[
-                { id: 'state', label: t('network.fields.state'), value: global.enabled ? <span className="text-success">{t('network.values.on')}</span> : t('network.values.off') },
-                global.enabled && { id: 'servers', label: t('network.dns.global'), value: <span className="grid justify-items-end gap-0.5">{global.servers.map((server, index) => <span key={server} className="font-mono">{t(`network.dns.slots.${index}`)}: {server}</span>)}</span> },
-              ]} />
-            </>
-          )}
-        </Panel>
-      </PageSection>
+      <Section
+        title={t('network.dns.global')}
+        description={draft ? t('network.wifi.editHint') : t('network.dns.globalCopy')}
+        editing={draft !== undefined}
+        action={draft ? undefined : <Button size="sm" onClick={start}>{t('network.detail.edit')}</Button>}
+      >
+        {draft ? (
+          <div className="grid gap-5">
+            <ToggleField
+              title={t('network.dns.global')}
+              description={t(draft.enabled ? 'network.dns.onHint' : 'network.dns.offHint')}
+              control={<Switch checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} aria-label={t('network.dns.global')} />}
+            />
+            {draft.enabled ? (
+              <>
+                {[0, 1, 2].slice(0, MAX_SERVERS).map((index) => {
+                  const result = tests?.[draft.servers[index]]
+                  return (
+                    <FormField key={index} label={t(`network.dns.slots.${index}`)} hint={errors[index] ? <span className="text-destructive">{errors[index]}</span> : index === 0 && !draft.servers.some(Boolean) ? t('network.dns.suggested') : undefined}>
+                      {(id) => (
+                        <div className="flex flex-wrap items-center gap-3">
+                          <Input id={id} className="font-mono sm:w-80" value={draft.servers[index]} placeholder={t(index === 0 ? 'network.dns.required' : 'network.dns.optional')} aria-invalid={Boolean(errors[index])} onChange={(event) => { const next = [...draft.servers]; next[index] = event.target.value.trim(); setDraft({ ...draft, servers: next }); setTests(undefined) }} />
+                          {result ? (result.reachable
+                            ? <span className="text-sm text-success">{t('network.dns.reachable', { ms: result.latencyMs })}</span>
+                            : <span className="text-sm text-destructive">{t('network.dns.timedOut')}</span>) : null}
+                        </div>
+                      )}
+                    </FormField>
+                  )
+                })}
+                <FormField label={t('network.dns.test')} hint={t('network.dns.testHint', { name: dns.data?.probe?.name ?? '' })}>
+                  {() => (
+                    <div>
+                      <Button size="sm" variant="outline" disabled={testing || !draft.servers.some((server) => isIPv4(server))} onClick={() => void runTest()}>
+                        {testing ? <Spinner /> : null}{t(testing ? 'network.dns.testing' : 'network.dns.testServers')}
+                      </Button>
+                    </div>
+                  )}
+                </FormField>
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <FactList layout="pairs" facts={[
+            { id: 'state', label: t('network.fields.state'), value: global.enabled ? <span className="text-success">{t('network.values.on')}</span> : t('network.values.off') },
+            global.enabled && { id: 'servers', label: t('network.dns.global'), value: <span className="grid gap-0.5">{global.servers.map((server, index) => <span key={server} className="font-mono">{t(`network.dns.slots.${index}`)}: {server}</span>)}</span> },
+          ]} />
+        )}
+      </Section>
 
       <StaticRecords records={records} hostname={data.hostname ?? ''} isPending={dns.isPending} write={writeRecord} remove={removeRecord} />
 
@@ -224,49 +223,52 @@ function Effective({ data, dns }: { data: NetworkData; dns: DnsDocument | undefi
     }
   }
   return (
-    <PageSection title={t('network.dns.effective')} description={t('network.dns.effectiveCopy')}>
-      <Panel>
-        <FactList facts={[
-          {
-            id: 'mode',
-            label: t('network.dns.mode'),
-            value: global
-              ? <span><strong>{t('network.dns.globalMode')}</strong> <span className="text-muted-foreground">· {t('network.dns.globalModeCopy')}</span></span>
-              : <span><strong>{t('network.dns.perInterface')}</strong> <span className="text-muted-foreground">· {t('network.dns.perInterfaceCopy')}</span></span>,
-          },
-          {
-            id: 'servers',
-            label: t('network.dns.servers'),
-            value: global ? (
-              <span className="grid justify-items-end gap-0.5">{(dns?.effective.global ?? []).map((server, index) => <span key={server} className="font-mono">{index + 1}. {server}</span>)}</span>
-            ) : links.length ? (
-              <span className="grid justify-items-start gap-0.5 text-left">
-                {links.map((link) => (
-                  <span key={link.name}>
-                    <Link className="font-mono text-primary" to="/network/$name" params={{ name: link.name }}>{link.name}</Link>
-                    : <span className="font-mono">{link.servers.length ? link.servers.join(', ') : t('network.values.none')}</span> <span className="text-muted-foreground">({t(`network.dns.sources.${link.source}`)})</span>
-                  </span>
-                ))}
-              </span>
-            ) : <span className="text-muted-foreground">{t('network.values.none')}</span>,
-          },
-          { id: 'records', label: t('network.dns.records'), value: t('network.dns.recordCount', { count: dns?.staticRecords.length ?? 0 }) },
-          {
-            id: 'probe',
-            label: t('network.dns.probe'),
-            value: (
-              <span className="flex flex-wrap items-center justify-end gap-2">
-                <ProbeText probe={probe} />
-                {probe ? <span className="font-mono text-muted-foreground">{probe.name}</span> : null}
-                <Button size="sm" variant="outline" disabled={checking} onClick={() => void recheck()}>
-                  {checking ? <Spinner /> : null}{t('network.dns.recheck')}
-                </Button>
-              </span>
-            ),
-          },
-        ]} />
-      </Panel>
-    </PageSection>
+    <Section
+      title={t('network.dns.effective')}
+      description={t('network.dns.effectiveCopy')}
+      action={(
+        <Button size="sm" variant="outline" disabled={checking} onClick={() => void recheck()}>
+          {checking ? <Spinner /> : null}{t('network.dns.recheck')}
+        </Button>
+      )}
+    >
+      <FactList layout="grid" facts={[
+        {
+          id: 'mode',
+          label: t('network.dns.mode'),
+          value: global
+            ? <span><strong>{t('network.dns.globalMode')}</strong> <span className="text-muted-foreground">· {t('network.dns.globalModeCopy')}</span></span>
+            : <span><strong>{t('network.dns.perInterface')}</strong> <span className="text-muted-foreground">· {t('network.dns.perInterfaceCopy')}</span></span>,
+        },
+        {
+          id: 'servers',
+          label: t('network.dns.servers'),
+          value: global ? (
+            <span className="grid gap-0.5">{(dns?.effective.global ?? []).map((server, index) => <span key={server} className="font-mono">{index + 1}. {server}</span>)}</span>
+          ) : links.length ? (
+            <span className="grid gap-0.5">
+              {links.map((link) => (
+                <span key={link.name}>
+                  <Link className="font-mono text-primary" to="/network/$name" params={{ name: link.name }}>{link.name}</Link>
+                  : <span className="font-mono">{link.servers.length ? link.servers.join(', ') : t('network.values.none')}</span> <span className="text-muted-foreground">({t(`network.dns.sources.${link.source}`)})</span>
+                </span>
+              ))}
+            </span>
+          ) : <span className="text-muted-foreground">{t('network.values.none')}</span>,
+        },
+        { id: 'records', label: t('network.dns.records'), value: t('network.dns.recordCount', { count: dns?.staticRecords.length ?? 0 }) },
+        {
+          id: 'probe',
+          label: t('network.dns.probe'),
+          value: (
+            <span className="flex flex-wrap items-center gap-2">
+              <ProbeText probe={probe} />
+              {probe ? <span className="font-mono text-muted-foreground">{probe.name}</span> : null}
+            </span>
+          ),
+        },
+      ]} />
+    </Section>
   )
 }
 
@@ -297,9 +299,11 @@ function StaticRecords({ records, hostname, isPending, write, remove }: { record
   const hint = (key: string, fallback?: string) => errors[key] && (key !== 'hostname' || record?.hostname) ? <span className="text-destructive">{errors[key]}</span> : fallback
 
   return (
-    <PageSection title={t('network.dns.records')} description={t('network.dns.recordsCopy')}>
-      <CollectionPanel
+    <>
+      <Section
         title={t('network.dns.records')}
+        description={t('network.dns.recordsCopy')}
+        flush
         action={(
           <span className="flex flex-wrap items-center gap-2">
             <Input className="h-8 w-44" value={query} placeholder={t('network.dns.search')} aria-label={t('network.dns.search')} onChange={(event) => setQuery(event.target.value)} />
@@ -334,7 +338,7 @@ function StaticRecords({ records, hostname, isPending, write, remove }: { record
             ) },
           ]}
         />
-      </CollectionPanel>
+      </Section>
       <FormDialog
         open={editing !== undefined}
         onOpenChange={(next) => { if (!next) setEditing(undefined) }}
@@ -356,6 +360,6 @@ function StaticRecords({ records, hostname, isPending, write, remove }: { record
           {(id) => <Input id={id} value={record?.comment ?? ''} aria-invalid={Boolean(errors.comment)} onChange={(event) => record && setEditing({ ...editing, record: { ...record, comment: event.target.value } })} />}
         </FormField>
       </FormDialog>
-    </PageSection>
+    </>
   )
 }

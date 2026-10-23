@@ -32,6 +32,16 @@ describe('one interface', () => {
     expect(screen.getAllByText('Exit').length).toBeGreaterThan(0)
   })
 
+  it('heads each block with its title and keeps the edit entry in that header', async () => {
+    stubFetch(networkRoutes())
+    open('eth1')
+    const config = (await screen.findByRole('heading', { name: 'Configuration' })).closest('header')!
+    expect(within(config).getByRole('button', { name: 'Edit configuration' })).toBeTruthy()
+    const live = screen.getByRole('heading', { name: 'Live state' }).closest('header')!
+    expect(within(live).queryByRole('button')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Restore image default' }).className).toContain('text-destructive')
+  })
+
   it('says so when the device has no such interface', async () => {
     stubFetch(networkRoutes())
     open('nope0')
@@ -48,7 +58,7 @@ describe('one interface', () => {
   it('refuses a gateway outside the subnet before anything is staged', async () => {
     stubFetch(networkRoutes())
     open('eth1')
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
     await userEvent.type(screen.getByLabelText('Gateway'), '10.0.0.1')
     expect(await screen.findByText('The gateway is outside this subnet.')).toBeTruthy()
     const bar = screen.getByRole('region', { name: 'Editing eth1' })
@@ -59,7 +69,7 @@ describe('one interface', () => {
   it('puts everything back when an edit is cancelled', async () => {
     stubFetch(networkRoutes())
     open('eth0')
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
     await userEvent.click(screen.getByRole('button', { name: 'Static' }))
     expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe('')
     await userEvent.click(within(screen.getByRole('region', { name: 'Editing eth0' })).getByRole('button', { name: 'Cancel' }))
@@ -70,7 +80,7 @@ describe('one interface', () => {
   it('prefills nothing when a port goes static, and offers the lease it holds', async () => {
     stubFetch(networkRoutes())
     open('eth0')
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
     await userEvent.click(screen.getByRole('button', { name: 'Static' }))
     expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe('')
     expect((screen.getByLabelText('Gateway') as HTMLInputElement).value).toBe('')
@@ -84,7 +94,7 @@ describe('one interface', () => {
   it('offers no lease on a port that holds none', async () => {
     stubFetch(networkRoutes({ ...configured(), eth1: { dhcp: true } }))
     open('eth1')
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
     await userEvent.click(screen.getByRole('button', { name: 'Static' }))
     expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe('')
     expect(screen.queryByRole('button', { name: /Use the current lease/ })).toBeNull()
@@ -108,7 +118,7 @@ describe('one interface', () => {
     cleanup()
 
     open('eth2')
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
     await userEvent.click(screen.getByRole('button', { name: 'Remove from br0' }))
     await userEvent.click(within(screen.getByRole('region', { name: 'Editing eth2' })).getByRole('button', { name: 'Done' }))
     const dialog = await review()

@@ -46,7 +46,7 @@ test('summarises the network on its overview', async ({ page, isMobile }) => {
   test.skip(isMobile, 'desktop network workflow')
   await page.goto('./network?tab=overview')
 
-  await expect(page.getByText('Online')).toBeVisible()
+  await expect(page.getByText('Online', { exact: true })).toBeVisible()
   await expect(page.getByText('Uplink eth0')).toBeVisible()
   await expect(page.getByText('via 192.168.1.1')).toBeVisible()
 })
@@ -71,7 +71,7 @@ test('stages an interface edit and applies it through the review dialog', async 
   await page.getByRole('link', { name: 'eth0' }).click()
 
   await expect(page.getByRole('heading', { name: 'eth0' })).toBeVisible()
-  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.getByRole('button', { name: 'Edit configuration' }).click()
   await page.getByRole('button', { name: 'Static' }).click()
   await page.getByRole('textbox', { name: 'Address' }).fill('192.168.1.24/24')
   await page.getByRole('button', { name: 'Done' }).click()
@@ -120,7 +120,7 @@ test('captures each network page for review', async ({ page }, testInfo) => {
     await page.screenshot({ path: testInfo.outputPath(`network-${name}.png`), fullPage: true })
   }
   await page.goto('./network/eth1')
-  await page.getByRole('button', { name: 'Edit' }).click()
+  await page.getByRole('button', { name: 'Edit configuration' }).click()
   await page.getByRole('textbox', { name: 'Address', exact: true }).fill('192.168.10.2/24')
   await page.getByRole('button', { name: 'Done' }).click()
   await page.getByRole('button', { name: 'Review and apply' }).click()
@@ -132,13 +132,13 @@ test('captures each network page for review', async ({ page }, testInfo) => {
 
   await page.route('**/api/v1/dns/test', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ server: '9.9.9.9', reachable: true, latencyMs: 18 }, { server: '149.112.112.112', reachable: false, latencyMs: null }]) }))
   await page.goto('./network?tab=dns')
-  await page.getByRole('button', { name: 'Edit' }).first().click()
+  await page.getByRole('button', { name: 'Edit configuration' }).click()
   await page.getByRole('button', { name: 'Test servers' }).click()
   await expect(page.getByText('Reachable · 18 ms')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('network-dns-edit.png'), fullPage: true })
 
   await page.goto('./network?tab=wifi')
-  await page.getByRole('button', { name: 'Edit' }).last().click()
+  await page.getByRole('button', { name: 'Edit configuration' }).click()
   await page.getByRole('button', { name: 'Access point' }).click()
   await page.mouse.wheel(0, 4000)
   await page.screenshot({ path: testInfo.outputPath('network-wifi-ap-edit.png') })
@@ -178,7 +178,7 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
   // G1: a port switched to static gets no address of its own choosing, and
   // the lease it holds is one click away.
   await page.goto('./network/eth0')
-  await page.getByRole('button', { name: '修改' }).click()
+  await page.getByRole('button', { name: '编辑配置' }).click()
   await page.getByRole('button', { name: '静态' }).click()
   await expect(page.getByRole('textbox', { name: 'IP 地址', exact: true })).toHaveValue('')
   await page.screenshot({ path: testInfo.outputPath('n7-static-empty.png'), fullPage: true })
@@ -215,7 +215,7 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
 
   // A route list changes entry by entry in the review.
   await page.goto('./network/eth1')
-  await page.getByRole('button', { name: '修改' }).click()
+  await page.getByRole('button', { name: '编辑配置' }).click()
   await page.getByRole('button', { name: '删除' }).first().click()
   await page.getByRole('button', { name: '添加路由' }).click()
   await page.getByRole('textbox', { name: '目标网段' }).last().fill('10.40.0.0/16')
@@ -230,6 +230,34 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
   await page.goto('./network/can0')
   await expect(page.getByText('总线告警').first()).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('n7-can.png'), fullPage: true })
+
+  // G3: each block's title, explanation and actions head its card.
+  await page.evaluate(() => sessionStorage.clear())
+  for (const [name, path, heading] of [
+    ['interface', './network/eth1', '配置'],
+    ['wifi', './network?tab=wifi', 'Wi-Fi 配置'],
+    ['dns', './network?tab=dns', '静态解析记录'],
+  ] as const) {
+    await page.goto(path)
+    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible()
+    await page.waitForLoadState('networkidle')
+    await page.screenshot({ path: testInfo.outputPath(`n7-card-${name}.png`), fullPage: true })
+  }
+  await page.goto('./network/eth1')
+  await page.getByRole('button', { name: '编辑配置' }).click()
+  await page.screenshot({ path: testInfo.outputPath('n7-card-editing.png'), fullPage: true })
+  await page.getByRole('button', { name: '取消' }).click()
+  await page.setViewportSize({ width: 560, height: 1000 })
+  await page.screenshot({ path: testInfo.outputPath('n7-card-narrow.png'), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+
+  // A tunnel reads its state from its peers' handshakes.
+  await page.goto('./network?tab=wireguard')
+  await expect(page.getByText('隧道已连通')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n7-wg-list.png'), fullPage: true })
+  await page.goto('./network?tab=wireguard&tunnel=wg0')
+  await expect(page.getByRole('columnheader', { name: '最近握手' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n7-wg-detail.png'), fullPage: true })
 })
 
 test('captures the device code, the claim key, BLE provisioning and the pairing window', async ({ page }, testInfo) => {
@@ -731,7 +759,7 @@ function benchPayload(path: string): unknown {
     probe: { ok: true, name: '0.debian.pool.ntp.org', latencyMs: 24, checkedAt: '2026-10-21T08:00:00Z' },
   }
   if (path === '/api/v1/network/wireguard/defaults') return { name: 'wg1', address: '10.2.0.1/24', listenPort: 51821, udpPortsInUse: [5353] }
-  if (path === '/api/v1/network/wg0/peers') return [{ ...PEER, presharedKey: true, latestHandshake: null, rxBytes: null, txBytes: null }]
+  if (path === '/api/v1/network/wg0/peers') return [{ ...PEER, presharedKey: true, latestHandshake: Math.floor(Date.now() / 1000) - 42, rxBytes: 1_284_000, txBytes: 312_000 }]
   if (path === '/api/v1/state/network') return { wg0: { publicKey: 'e2eDevicePublicKeye2eDevicePublicKeye2eDev0=' } }
   if (path === '/api/v1/wifi/client') return { enabled: true, interface: 'wlan0' }
   if (path === '/api/v1/wifi/ap') return { mode: 'off', interface: 'wlan0', ssid: 'mica-cm4', psk: '<redacted>', channel: 6, countryCode: 'DE', address: '192.168.4.1/24', holdDownSeconds: 120, graceSeconds: 60, dhcpServer: { poolStart: '192.168.4.2', poolEnd: '192.168.4.254' } }

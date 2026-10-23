@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { formatAge } from '@/i18n/format'
 import { ChevronLeft, KeyRound, Plus, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import { cn } from '@/shared/lib/utils'
@@ -9,11 +10,11 @@ import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { CopyField } from '@/shared/components/copy-field'
 import { DataTable } from '@/shared/components/data-table'
+import { formatBytes } from '@/shared/components/fact'
 import { FactList } from '@/shared/components/fact-list'
 import { FormDialog } from '@/shared/components/form-dialog'
 import { FormField } from '@/shared/components/form-field'
-import { PageSection } from '@/shared/components/page'
-import { CollectionPanel, Panel } from '@/shared/components/panel'
+import { Panel } from '@/shared/components/panel'
 import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
 import { Switch } from '@/shared/components/ui/switch'
@@ -23,7 +24,7 @@ import { EditBar } from './change-bar'
 import { updateChangeSet } from './change-set'
 import { CreateWizard } from './create-wizard'
 import { overlaps, parseCidr, stageRemove, stageRevert, stageSet, type WireguardPeerState } from './model'
-import { Led, StatusLine, Tag, TEXT, useStatusText } from './parts'
+import { Led, Section, StatusLine, Tag, TEXT, useStatusText } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus } from './view'
 
@@ -52,6 +53,11 @@ export function WireguardTab({ data, tunnel, onEditing }: { data: NetworkData; t
   if (tunnel && applied.includes(tunnel)) return <TunnelDetail data={data} name={tunnel} publicKey={state.data?.[tunnel]?.publicKey} onEditing={onEditing} />
 
   const all = [...applied, ...pendingOnly]
+  const latestHandshake = (ages?: (number | null)[]) => {
+    if (!ages) return '—'
+    const seen = ages.filter((age) => age !== null)
+    return seen.length ? formatAge(Math.min(...seen) * 1000, t) : t('network.wireguard.neverHandshake')
+  }
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -84,6 +90,7 @@ export function WireguardTab({ data, tunnel, onEditing }: { data: NetworkData; t
                   <dt className="text-muted-foreground">{t('network.fields.state')}</dt><dd className={TEXT[status.tone]}>{text.label(status)}</dd>
                   <dt className="text-muted-foreground">{t('network.fields.listenPort')}</dt><dd className="font-mono">{entry.wireguard?.listenPort ?? t('network.values.automatic')}</dd>
                   <dt className="text-muted-foreground">{t('network.wireguard.peers')}</dt><dd>{isApplied ? t('network.wireguard.peerCount', { count: entry.wireguard?.peers.length ?? 0 }) : t('network.wireguard.afterApply')}</dd>
+                  <dt className="text-muted-foreground">{t('network.wireguard.handshake')}</dt><dd>{latestHandshake(data.applied.ifaces[name]?.obs?.handshakeAges)}</dd>
                   <dt className="text-muted-foreground">{t('network.wireguard.publicKey')}</dt><dd className="font-mono">{key ? shortKey(key) : <span className="text-muted-foreground">{t('network.wireguard.keyAfterApply')}</span>}</dd>
                 </dl>
                 {!isApplied ? <Button className="justify-self-start" size="sm" variant="outline" onClick={() => updateChangeSet((set) => stageRevert(set, name))}>{t('network.wireguard.undoCreate')}</Button> : null}
@@ -189,122 +196,126 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
         </Callout>
       ) : null}
 
-      <PageSection title={t('network.wireguard.tunnel')} description={t(draft ? 'network.wireguard.tunnelEditing' : 'network.wireguard.tunnelCopy')}>
-        <Panel className={draft ? 'ring-2 ring-primary/40' : undefined}>
-          {draft ? (
-            <>
-              <FormField label={t('network.fields.tunnelAddress')} hint={errors.address ? <span className="text-destructive">{errors.address}</span> : t('network.wizard.tunnelHint')}>
-                {(id) => <Input id={id} className="font-mono" value={draft.address} aria-invalid={Boolean(errors.address)} onChange={(event) => setDraft({ ...draft, address: event.target.value.trim() })} />}
-              </FormField>
-              <FormField label={t('network.fields.listenPort')} hint={errors.port ? <span className="text-destructive">{errors.port}</span> : t('network.wireguard.portChange')}>
-                {(id) => <Input id={id} className="w-32 font-mono" inputMode="numeric" value={draft.port} onChange={(event) => setDraft({ ...draft, port: event.target.value.replace(/\D/g, '') })} />}
-              </FormField>
-            </>
-          ) : (
-            <>
-              <div><Button size="sm" onClick={() => setDraft({ address: staged.static?.address ?? '', port: String(port ?? '') })}>{t('network.detail.edit')}</Button></div>
-              {tunnelPending ? <Callout tone="warning" title={t('network.wireguard.tunnelPending')} /> : null}
-              <FactList facts={[
-                { id: 'address', label: t('network.fields.tunnelAddress'), value: staged.static?.address || '—', mono: true },
-                { id: 'port', label: t('network.fields.listenPort'), value: <span><span className="font-mono">{port ?? t('network.values.automatic')}</span> <span className="text-muted-foreground">{t('network.wireguard.listenCopy')}</span></span> },
-              ]} />
-            </>
-          )}
-        </Panel>
-      </PageSection>
+      <Section
+        title={t('network.wireguard.tunnel')}
+        description={t(draft ? 'network.wireguard.tunnelEditing' : 'network.wireguard.tunnelCopy')}
+        editing={draft !== undefined}
+        action={draft ? undefined : <Button size="sm" onClick={() => setDraft({ address: staged.static?.address ?? '', port: String(port ?? '') })}>{t('network.detail.edit')}</Button>}
+      >
+        {draft ? (
+          <>
+            <FormField label={t('network.fields.tunnelAddress')} hint={errors.address ? <span className="text-destructive">{errors.address}</span> : t('network.wizard.tunnelHint')}>
+              {(id) => <Input id={id} className="font-mono sm:w-80" value={draft.address} aria-invalid={Boolean(errors.address)} onChange={(event) => setDraft({ ...draft, address: event.target.value.trim() })} />}
+            </FormField>
+            <FormField label={t('network.fields.listenPort')} hint={errors.port ? <span className="text-destructive">{errors.port}</span> : t('network.wireguard.portChange')}>
+              {(id) => <Input id={id} className="w-32 font-mono" inputMode="numeric" value={draft.port} onChange={(event) => setDraft({ ...draft, port: event.target.value.replace(/\D/g, '') })} />}
+            </FormField>
+          </>
+        ) : (
+          <>
+            {tunnelPending ? <Callout tone="warning" title={t('network.wireguard.tunnelPending')} /> : null}
+            <FactList layout="pairs" facts={[
+              { id: 'address', label: t('network.fields.tunnelAddress'), value: staged.static?.address || '—', mono: true },
+              { id: 'port', label: t('network.fields.listenPort'), value: <span><span className="font-mono">{port ?? t('network.values.automatic')}</span> <span className="text-muted-foreground">{t('network.wireguard.listenCopy')}</span></span> },
+            ]} />
+          </>
+        )}
+      </Section>
 
-      <PageSection title={t('network.wireguard.localKey')} description={t('network.wireguard.keyCopy')}>
-        <Panel>
-          {rotate.data ? <Callout tone="warning" title={t('network.wireguard.rotatedTitle')}>{t('network.wireguard.rotatedCopy')}</Callout> : null}
-          {key ? <CopyField value={key} label={t('common.actions.copy')} /> : <p className="text-sm text-muted-foreground">{t('network.wireguard.keyHidden')}</p>}
-          <div>
-            <ConfirmDialog
-              trigger={<Button size="sm" variant="destructive">{t('network.wireguard.rotate')}</Button>}
-              title={t('network.wireguard.rotate')}
-              description={t('network.wireguard.rotateConfirm', { name })}
-              confirmLabel={t('network.wireguard.rotate')}
-              success={t('network.wireguard.rotatedKey')}
-              failure={t('network.wireguard.rotate')}
-              onConfirm={() => rotate.mutateAsync()}
-            />
-          </div>
-        </Panel>
-      </PageSection>
+      <Section
+        title={t('network.wireguard.localKey')}
+        description={t('network.wireguard.keyCopy')}
+        action={(
+          <ConfirmDialog
+            trigger={<Button size="sm" variant="outline">{t('network.wireguard.rotate')}</Button>}
+            title={t('network.wireguard.rotate')}
+            description={t('network.wireguard.rotateConfirm', { name })}
+            confirmLabel={t('network.wireguard.rotate')}
+            success={t('network.wireguard.rotatedKey')}
+            failure={t('network.wireguard.rotate')}
+            onConfirm={() => rotate.mutateAsync()}
+          />
+        )}
+      >
+        {rotate.data ? <Callout tone="warning" title={t('network.wireguard.rotatedTitle')}>{t('network.wireguard.rotatedCopy')}</Callout> : null}
+        {key ? <CopyField value={key} label={t('common.actions.copy')} /> : <p className="text-sm text-muted-foreground">{t('network.wireguard.keyHidden')}</p>}
+      </Section>
 
       {key ? (
-        <PageSection title={t('network.wireguard.localTitle')} description={t('network.wireguard.localCopy')}>
-          <Panel>
-            <CopyField value={snippet} label={t('common.actions.copy')} />
-            <p className="text-sm text-muted-foreground">{t('network.wireguard.endpointNote')}</p>
-          </Panel>
-        </PageSection>
+        <Section title={t('network.wireguard.localTitle')} description={t('network.wireguard.localCopy')}>
+          <CopyField value={snippet} label={t('common.actions.copy')} />
+          <p className="text-sm text-muted-foreground">{t('network.wireguard.endpointNote')}</p>
+        </Section>
       ) : null}
 
-      <PageSection title={t('network.wireguard.peersCount', { count: peers.data?.length ?? 0 })} description={t('network.wireguard.peersCopy')}>
-        {peers.error ? <Callout tone="danger" title={failureDetail(peers.error, t('common.requestFailed'))} /> : null}
-        <CollectionPanel title={t('network.wireguard.peers')} action={<Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus />{t('network.wireguard.add')}</Button>}>
-          <DataTable<WireguardPeerState>
-            rows={peers.data}
-            rowKey={(each) => each.publicKey}
-            isPending={peers.isPending}
-            empty={t('network.wireguard.noPeers')}
-            columns={[
-              { id: 'key', header: t('network.wireguard.peer'), cell: (each) => (
-                <span className="grid">
-                  <strong className={each.name ? undefined : 'font-normal text-muted-foreground'}>{each.name || t('network.wireguard.unnamed')}</strong>
-                  <span className="text-[0.8125rem] text-muted-foreground"><span className="font-mono" title={each.publicKey}>{shortKey(each.publicKey)}</span>{each.presharedKey ? <span> · {t('network.wireguard.withPsk')}</span> : null}</span>
-                </span>
-              ) },
-              { id: 'endpoint', header: t('network.wireguard.endpoint'), cell: (each) => each.endpoint ? <span className="font-mono text-[0.8125rem]">{each.endpoint}</span> : <span className="text-muted-foreground">{t('network.wireguard.waiting')}</span> },
-              { id: 'allowed', header: t('network.wireguard.allowed'), cell: (each) => <span className="font-mono text-[0.8125rem]">{each.allowedIps.join(', ')}</span> },
-              { id: 'keepalive', header: t('network.wireguard.keepalive'), cell: (each) => each.persistentKeepalive ? t('network.values.seconds', { count: each.persistentKeepalive }) : '—' },
-              { id: 'actions', header: '', align: 'end', cell: (each) => (
-                <ConfirmDialog
-                  trigger={<Button type="button" size="sm" variant="destructive" aria-label={t('network.wireguard.remove')}><Trash2 />{t('network.wireguard.remove')}</Button>}
-                  title={t('network.wireguard.remove')}
-                  description={t('network.wireguard.removeCopy')}
-                  confirmLabel={t('network.wireguard.remove')}
-                  success={t('network.wireguard.removed')}
-                  failure={t('network.wireguard.remove')}
-                  onConfirm={() => remove.mutateAsync(each.publicKey)}
-                />
-              ) },
-            ]}
-          />
-        </CollectionPanel>
-      </PageSection>
+      <Section
+        title={t('network.wireguard.peersCount', { count: peers.data?.length ?? 0 })}
+        description={t('network.wireguard.peersCopy')}
+        action={<Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus />{t('network.wireguard.add')}</Button>}
+        flush
+      >
+        {peers.error ? <div className="p-4"><Callout tone="danger" title={failureDetail(peers.error, t('common.requestFailed'))} /></div> : null}
+        <DataTable<WireguardPeerState>
+          rows={peers.data}
+          rowKey={(each) => each.publicKey}
+          isPending={peers.isPending}
+          empty={t('network.wireguard.noPeers')}
+          columns={[
+            { id: 'key', header: t('network.wireguard.peer'), cell: (each) => (
+              <span className="grid">
+                <strong className={each.name ? undefined : 'font-normal text-muted-foreground'}>{each.name || t('network.wireguard.unnamed')}</strong>
+                <span className="text-[0.8125rem] text-muted-foreground"><span className="font-mono" title={each.publicKey}>{shortKey(each.publicKey)}</span>{each.presharedKey ? <span> · {t('network.wireguard.withPsk')}</span> : null}</span>
+              </span>
+            ) },
+            { id: 'endpoint', header: t('network.wireguard.endpoint'), cell: (each) => each.endpoint ? <span className="font-mono text-[0.8125rem]">{each.endpoint}</span> : <span className="text-muted-foreground">{t('network.wireguard.waiting')}</span> },
+            { id: 'allowed', header: t('network.wireguard.allowed'), cell: (each) => <span className="font-mono text-[0.8125rem]">{each.allowedIps.join(', ')}</span> },
+            { id: 'keepalive', header: t('network.wireguard.keepalive'), cell: (each) => each.persistentKeepalive ? t('network.values.seconds', { count: each.persistentKeepalive }) : '—' },
+            { id: 'handshake', header: t('network.wireguard.handshake'), cell: (each) => each.latestHandshake ? formatAge(Date.now() - each.latestHandshake * 1000, t) : <span className="text-muted-foreground">{t('network.wireguard.neverHandshake')}</span> },
+            { id: 'traffic', header: t('network.wireguard.traffic'), cell: (each) => each.latestHandshake ? <span className="text-muted-foreground">{formatBytes(each.rxBytes ?? 0)} / {formatBytes(each.txBytes ?? 0)}</span> : '—' },
+            { id: 'actions', header: '', align: 'end', cell: (each) => (
+              <ConfirmDialog
+                trigger={<Button type="button" size="sm" variant="destructive" aria-label={t('network.wireguard.remove')}><Trash2 />{t('network.wireguard.remove')}</Button>}
+                title={t('network.wireguard.remove')}
+                description={t('network.wireguard.removeCopy')}
+                confirmLabel={t('network.wireguard.remove')}
+                success={t('network.wireguard.removed')}
+                failure={t('network.wireguard.remove')}
+                onConfirm={() => remove.mutateAsync(each.publicKey)}
+              />
+            ) },
+          ]}
+        />
+      </Section>
 
       {!deleting ? (
-        <PageSection title={t('network.wireguard.delete')} tone="danger">
-          <Panel>
-            <p className="text-sm text-muted-foreground">{t('network.wireguard.deleteCopy')}</p>
-            <div>
-              <ConfirmDialog
-                trigger={<Button size="sm" variant="destructive">{t('network.wireguard.deleteNamed', { name })}</Button>}
-                title={t('network.wireguard.deleteTitle', { name })}
-                description={t('network.wireguard.deleteConfirm', {
-                  count: peers.data?.length ?? applied.wireguard?.peers.length ?? 0,
-                  subnets: (peers.data ?? applied.wireguard?.peers ?? []).flatMap((each) => each.allowedIps).join(', ') || t('network.values.none'),
-                })}
-                confirmLabel={t('network.wireguard.deleteNamed', { name })}
-                success={t('network.edit.staged')}
-                failure={t('network.wireguard.delete')}
-                confirmDisabled={data.session === name && !understood}
-                onConfirm={() => {
-                  updateChangeSet((set) => stageRemove(set, name, 'wireguard'))
-                  void navigate({ to: '/network', search: { tab: 'wireguard' } })
-                }}
-              >
-                {data.session === name ? (
-                  <label className="flex items-center gap-2 text-sm font-medium text-destructive">
-                    <Switch checked={understood} onCheckedChange={setUnderstood} aria-label={t('network.wireguard.deleteSession', { name })} />
-                    {t('network.wireguard.deleteSession', { name })}
-                  </label>
-                ) : null}
-              </ConfirmDialog>
-            </div>
-          </Panel>
-        </PageSection>
+        <Section title={t('network.wireguard.delete')} tone="danger">
+          <p className="text-sm text-muted-foreground">{t('network.wireguard.deleteCopy')}</p>
+          <div>
+            <ConfirmDialog
+              trigger={<Button size="sm" variant="destructive">{t('network.wireguard.deleteNamed', { name })}</Button>}
+              title={t('network.wireguard.deleteTitle', { name })}
+              description={t('network.wireguard.deleteConfirm', {
+                count: peers.data?.length ?? applied.wireguard?.peers.length ?? 0,
+                subnets: (peers.data ?? applied.wireguard?.peers ?? []).flatMap((each) => each.allowedIps).join(', ') || t('network.values.none'),
+              })}
+              confirmLabel={t('network.wireguard.deleteNamed', { name })}
+              success={t('network.edit.staged')}
+              failure={t('network.wireguard.delete')}
+              confirmDisabled={data.session === name && !understood}
+              onConfirm={() => {
+                updateChangeSet((set) => stageRemove(set, name, 'wireguard'))
+                void navigate({ to: '/network', search: { tab: 'wireguard' } })
+              }}
+            >
+              {data.session === name ? (
+                <label className="flex items-center gap-2 text-sm font-medium text-destructive">
+                  <Switch checked={understood} onCheckedChange={setUnderstood} aria-label={t('network.wireguard.deleteSession', { name })} />
+                  {t('network.wireguard.deleteSession', { name })}
+                </label>
+              ) : null}
+            </ConfirmDialog>
+          </div>
+        </Section>
       ) : null}
 
       <FormDialog

@@ -50,7 +50,23 @@ describe('the joined view', () => {
     const map: NetworkMap = { ...configured() as NetworkMap, wg0: { kind: 'wireguard', static: { address: '10.8.0.1/24' }, wireguard: { peers: [{ publicKey: 'a' }, { publicKey: 'b' }] } } as NetworkMap[string] }
     const joined = buildView(map, status, off, now)
     expect(computeStatus(joined, 'can0')).toEqual({ tone: 'warning', label: 'busErrors', note: { key: 'network.status.notes.bitrate', params: { kbps: 500 } } })
-    expect(computeStatus(joined, 'wg0')).toEqual({ tone: 'success', label: 'connected', note: { key: 'network.status.notes.peersUp', params: { up: 1, count: 2 } } })
+    expect(computeStatus(joined, 'wg0')).toEqual({ tone: 'success', label: 'tunnelUp', note: { key: 'network.status.notes.peersOnline', params: { up: 1, count: 2, handshakeAge: 30 } } })
+  })
+
+  it('tells a tunnel whose peers stopped answering from one that is only quiet', () => {
+    const now = 1_800_000_000_000
+    const tunnel = (keepalive: number | undefined, handshake: number | null) => {
+      const status = observed()
+      for (const entry of status.interfaces.entries!) {
+        if (entry.name === 'wg0') entry.wireguard = { available: true, peers: [{ publicKey: 'a', latestHandshake: handshake }] }
+      }
+      const map: NetworkMap = { ...configured() as NetworkMap, wg0: { kind: 'wireguard', static: { address: '10.8.0.1/24' }, wireguard: { peers: [{ publicKey: 'a', allowedIps: ['10.8.0.2/32'], ...(keepalive ? { persistentKeepalive: keepalive } : {}) }] } } }
+      return computeStatus(buildView(map, status, off, now), 'wg0')
+    }
+    expect(tunnel(25, now / 1000 - 600)).toEqual({ tone: 'danger', label: 'peersOffline', note: { key: 'network.status.notes.lastHandshake', params: { handshakeAge: 600 } } })
+    expect(tunnel(undefined, now / 1000 - 600)).toEqual({ tone: 'warning', label: 'idle', note: { key: 'network.status.notes.idleHandshake', params: { handshakeAge: 600 } } })
+    expect(tunnel(25, null)).toEqual({ tone: 'danger', label: 'peersOffline', note: { key: 'network.status.notes.neverHandshake' } })
+    expect(tunnel(undefined, null)).toEqual({ tone: 'warning', label: 'idle', note: { key: 'network.status.notes.idleNever' } })
   })
 
   it('says why the access point is down and leaves a missing interface unobserved', () => {
