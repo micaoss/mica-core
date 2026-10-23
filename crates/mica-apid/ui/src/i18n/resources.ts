@@ -443,6 +443,7 @@ export const en = {
       switch: 'Switch interface',
       unknown: 'There is no interface {{name}} on this device.',
       useLease: 'Use the current lease ({{address}})',
+      useLeaseGateway: 'Use the current lease ({{address}}, gateway {{gateway}})',
       vlanRebuild: 'Changing the parent rebuilds the VLAN.',
     },
     wizard: {

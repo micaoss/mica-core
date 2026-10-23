@@ -17,7 +17,7 @@ import { notifySuccess } from '@/shared/feedback/toast'
 import { ChangeBar, EditBar } from './change-bar'
 import { updateChangeSet } from './change-set'
 import {
-  bridgeOf, overlaps, stageRemove, stageRevert, stageSet, vlansOn,
+  bridgeOf, stageRemove, stageRevert, stageSet, vlansOn,
   type ChangeSet, type IfaceEntry,
 } from './model'
 import { Led, StatusLine, Tag, useKindLabel } from './parts'
@@ -340,7 +340,7 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
     return next
   })
   const toStatic = () => set((current) => {
-    const next: IfaceEntry = { ...current, dhcp: false, static: { address: current.static?.address || suggestSubnet(data), ...(current.static?.gateway ? { gateway: current.static.gateway } : {}), dns: current.dns ?? current.static?.dns ?? [] } }
+    const next: IfaceEntry = { ...current, dhcp: false, static: { address: current.static?.address ?? '', ...(current.static?.gateway ? { gateway: current.static.gateway } : {}), dns: current.dns ?? current.static?.dns ?? [] } }
     delete next.dns
     return next
   })
@@ -374,11 +374,11 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
       ) : (
         <Group title={t('network.detail.addressAndDns')}>
           <FormField label={t('network.fields.address')} hint={problems.address ? <ProblemText problem={problems.address} /> : t('network.detail.cidrHint')}>
-            {(id) => <Input id={id} className="font-mono" value={entry.static?.address ?? ''} placeholder="192.168.10.1/24" aria-invalid={Boolean(problems.address)} onChange={(event) => set((current) => ({ ...current, static: { ...current.static, address: event.target.value.trim() } }))} />}
+            {(id) => <Input id={id} className="font-mono" value={entry.static?.address ?? ''} aria-invalid={Boolean(problems.address)} onChange={(event) => set((current) => ({ ...current, static: { ...current.static, address: event.target.value.trim() } }))} />}
           </FormField>
           {lease?.address && /dhcp/i.test(lease.source ?? '') && !entry.static?.address ? (
             <Button className="justify-self-start" size="sm" variant="link" onClick={() => set((current) => ({ ...current, static: { address: lease.address ?? '', ...(lease.lease?.router ? { gateway: lease.lease.router } : {}), dns: lease.dns } }))}>
-              {t('network.detail.useLease', { address: lease.address })}
+              {lease.lease?.router ? t('network.detail.useLeaseGateway', { address: lease.address, gateway: lease.lease.router }) : t('network.detail.useLease', { address: lease.address })}
             </Button>
           ) : null}
           <FormField label={t('network.fields.gateway')} hint={problems.gateway ? <ProblemText problem={problems.gateway} /> : t('network.detail.gatewayHint')}>
@@ -442,19 +442,6 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
       {!data.openrc ? <RoutesForm data={data} name={name} problems={problems} /> : null}
     </div>
   )
-}
-
-/// A subnet for an interface switched to static: the first 192.168.<n>.1/24
-/// that no interface uses.
-function suggestSubnet(data: NetworkData): string {
-  const used = data.staged.order
-    .map((name) => data.staged.ifaces[name].obs?.address ?? (!data.staged.map[name]?.dhcp ? data.staged.map[name]?.static?.address : undefined))
-    .filter((address): address is string => Boolean(address))
-  for (let third = 10; third < 250; third += 10) {
-    const candidate = `192.168.${third}.1/24`
-    if (!used.some((address) => overlaps(candidate, address))) return candidate
-  }
-  return '192.168.200.1/24'
 }
 
 function RoutesForm({ data, name, problems }: { data: NetworkData; name: string; problems: Problems }) {

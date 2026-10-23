@@ -366,6 +366,7 @@ export const zhCN: Translation = {
       switch: '切换接口',
       unknown: '设备上没有接口 {{name}}。',
       useLease: '填入当前租约（{{address}}）',
+      useLeaseGateway: '填入当前租约（{{address}}，网关 {{gateway}}）',
       vlanRebuild: '修改父接口会重建 VLAN。',
     },
     wizard: {

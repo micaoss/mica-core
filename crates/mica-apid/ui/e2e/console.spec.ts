@@ -169,6 +169,26 @@ test('captures the review of a VLAN that takes its parent over', async ({ page }
   await page.screenshot({ path: testInfo.outputPath('network-review-adopt.png') })
 })
 
+test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.addInitScript(() => localStorage.setItem('mica.ui.locale', 'zh-CN'))
+
+  // G1: a port switched to static gets no address of its own choosing, and
+  // the lease it holds is one click away.
+  await page.goto('./network/eth0')
+  await page.getByRole('button', { name: '修改' }).click()
+  await page.getByRole('button', { name: '静态' }).click()
+  await expect(page.getByRole('textbox', { name: 'IP 地址', exact: true })).toHaveValue('')
+  await page.screenshot({ path: testInfo.outputPath('n7-static-empty.png'), fullPage: true })
+  await page.getByRole('button', { name: '填入当前租约（192.168.1.24/24，网关 192.168.1.1）' }).click()
+  await expect(page.getByRole('textbox', { name: 'IP 地址', exact: true })).toHaveValue('192.168.1.24/24')
+  await expect(page.getByRole('textbox', { name: 'IP 地址', exact: true })).toHaveAttribute('aria-invalid', 'false')
+  await page.getByText('配置', { exact: true }).click()
+  await page.screenshot({ path: testInfo.outputPath('n7-static-lease.png'), fullPage: true })
+})
+
 test('captures the device code, the claim key, BLE provisioning and the pairing window', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
   await page.setViewportSize({ width: 1440, height: 1000 })

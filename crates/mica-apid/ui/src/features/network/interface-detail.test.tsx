@@ -61,10 +61,33 @@ describe('one interface', () => {
     open('eth0')
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     await userEvent.click(screen.getByRole('button', { name: 'Static' }))
-    expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe('192.168.20.1/24')
+    expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe('')
     await userEvent.click(within(screen.getByRole('region', { name: 'Editing eth0' })).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Editing eth0' })).toBeNull())
     expect(screen.queryByRole('region', { name: 'Pending network changes' })).toBeNull()
+  })
+
+  it('prefills nothing when a port goes static, and offers the lease it holds', async () => {
+    stubFetch(networkRoutes())
+    open('eth0')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Static' }))
+    expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText('Gateway') as HTMLInputElement).value).toBe('')
+    await userEvent.click(screen.getByRole('button', { name: 'Use the current lease (192.168.1.24/24, gateway 192.168.1.1)' }))
+    expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe('192.168.1.24/24')
+    expect((screen.getByLabelText('Gateway') as HTMLInputElement).value).toBe('192.168.1.1')
+    expect((screen.getByLabelText('DNS servers') as HTMLInputElement).value).toBe('192.168.1.1')
+    expect(screen.queryByRole('button', { name: /Use the current lease/ })).toBeNull()
+  })
+
+  it('offers no lease on a port that holds none', async () => {
+    stubFetch(networkRoutes({ ...configured(), eth1: { dhcp: true } }))
+    open('eth1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Static' }))
+    expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe('')
+    expect(screen.queryByRole('button', { name: /Use the current lease/ })).toBeNull()
   })
 
   it('stages an Ethernet port back to the image default', async () => {
