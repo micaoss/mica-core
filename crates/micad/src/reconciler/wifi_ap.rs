@@ -160,8 +160,8 @@ struct AcsWatch {
 enum PskSource {
     /// `wifi.ap.psk`.
     Settings,
-    /// The device code under the product secret, while the device is
-    /// unclaimed (`docs/factory-ap-key.md`).
+    /// The device code under the product secret, the key on the label
+    /// (`docs/factory-ap-key.md`).
     Derived,
     /// The per-device key generated on STATE.
     Generated,
@@ -430,10 +430,10 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
 
     /// The pre-shared key the access point should use, and where it came from.
     ///
-    /// `wifi.ap.psk` when the operator set one. Otherwise, while the device is
-    /// unclaimed (no web administrator), the key derived from the device code
-    /// under the product secret, which the device's label prints. Otherwise
-    /// the per-device key generated on STATE at first boot. There is
+    /// `wifi.ap.psk` when the operator set one. Otherwise the key derived from
+    /// the device code under the product secret, which the device's label
+    /// prints, claimed or not. Otherwise the per-device key generated on STATE
+    /// at first boot. There is
     /// deliberately no constant fallback: the signed rootfs is byte-identical
     /// on every device, so a baked default would be one WiFi key for the
     /// entire fleet.
@@ -441,9 +441,7 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
         if let Some(psk) = &settings.wifi.ap.psk {
             return Ok((psk.clone(), PskSource::Settings));
         }
-        if let (Some(code), Some(root), None) =
-            (code, &self.device_root, &settings.access.web_admin)
-        {
+        if let (Some(code), Some(root)) = (code, &self.device_root) {
             match device_code::product_secret(root) {
                 Ok(secret) => return Ok((device_code::key_of(&secret, code), PskSource::Derived)),
                 Err(reason) => tracing::warn!(%reason, "no derived access-point key"),
@@ -589,10 +587,8 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiApReconciler<C, R> {
     }
 
     fn reads(&self) -> &'static [&'static str] {
-        // The clients are handed the global DNS servers while they are on;
-        // the derived key holds only while no administrator has claimed the
-        // device.
-        &["dns", "access.webAdmin"]
+        // The clients are handed the global DNS servers while they are on.
+        &["dns"]
     }
 
     async fn apply(&self, settings: &Settings) -> Result<serde_json::Value> {

@@ -373,6 +373,10 @@ async fn serve() -> anyhow::Result<()> {
         service = service.with_system_info(Arc::new(system_info::HostSystemInfo::production()));
         service = service.with_telemetry(Arc::new(telemetry::SysfsTelemetry::production()));
         service = service.with_device_root(std::path::PathBuf::from("/"));
+        device_code::announce(
+            std::path::Path::new("/"),
+            std::path::Path::new(device_code::ISSUE_PATH),
+        );
         // The first boot after a factory reset records it once and discards
         // the space the erase freed, in the background: the boot does not
         // wait for it.

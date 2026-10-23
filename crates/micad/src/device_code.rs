@@ -366,6 +366,44 @@ pub fn device_code(root: &Path) -> Result<DeviceCode, String> {
     })
 }
 
+/// Where micad puts the device code for the login prompt. Base links
+/// `/etc/issue.d/50-mica-device-code.issue` here; agetty shows the files of
+/// `/etc/issue.d` after `/etc/issue`.
+pub const ISSUE_PATH: &str = "/run/mica/device-code.issue";
+
+/// Put this device's code where whoever has the device in hand reads it: the
+/// login prompt, through `issue`, and the log micad starts with. A device
+/// without a code gets no line.
+pub fn announce(root: &Path, issue: &Path) {
+    match device_code(root) {
+        Ok(code) => {
+            let printed = printed(&code.code);
+            tracing::info!(code = %printed, source = code.source.name(), "device code");
+            if let Err(err) = write_issue(issue, &format!("Device code: {printed}\n\n")) {
+                tracing::warn!(path = %issue.display(), error = %err, "the device code could not be put on the login prompt");
+            }
+        }
+        Err(reason) => {
+            tracing::info!(%reason, "this device has no code");
+            if let Err(err) = std::fs::remove_file(issue)
+                && err.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(path = %issue.display(), error = %err, "a stale device code could not be removed");
+            }
+        }
+    }
+}
+
+/// `text` at `path`, replaced whole: a getty never reads half a file.
+fn write_issue(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let staged = path.with_extension("issue.tmp");
+    std::fs::write(&staged, text)?;
+    std::fs::rename(&staged, path)
+}
+
 /// `micad device-code`: print this device's code and its source.
 pub fn device_code_main() -> anyhow::Result<()> {
     match device_code(Path::new("/")) {

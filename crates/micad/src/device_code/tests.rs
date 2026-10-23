@@ -234,3 +234,27 @@ fn the_product_secret_is_the_owners_alone() {
             .contains("fewer than 32")
     );
 }
+
+/// Whoever has the device in hand reads its code on the login prompt: the
+/// issue text names it, and a device without a code has none.
+#[test]
+fn the_code_is_put_on_the_login_prompt() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let issue = root.path().join("run/mica/device-code.issue");
+    write(root.path(), CONFIG_PATH, "source=emmc-cid\n");
+    write(root.path(), "sys/block/mmcblk2/device/type", "MMC\n");
+    write(
+        root.path(),
+        "sys/block/mmcblk2/device/cid",
+        "150100444a54443452a1b2c3d4e5f600\n",
+    );
+    announce(root.path(), &issue);
+    assert_eq!(
+        std::fs::read_to_string(&issue).expect("issue"),
+        "Device code: DFN4-L34C-T8N\n\n"
+    );
+
+    write(root.path(), CONFIG_PATH, "source=serial\n");
+    announce(root.path(), &issue);
+    assert!(!issue.exists(), "a device without a code shows none");
+}

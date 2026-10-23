@@ -1,7 +1,8 @@
 # Device code and factory access-point key
 
-A device's code names it by its hardware. It is printed on the device's label and survives
-reflashing. Under a product's secret, the code also derives the device's default access-point key.
+A device's code names it by its hardware. It is printed on the device's label, shown on the
+device's own console (the login prompt and micad's start line, `docs/mica-core.md` section 3.8)
+and survives reflashing. Under a product's secret, the code also derives the device's default access-point key.
 A label tool can compute that key offline from the printed code. micad implements both derivations
 in `crates/micad/src/device_code.rs`.
 
@@ -10,7 +11,8 @@ in `crates/micad/src/device_code.rs`.
 The product secret ships in every image of the product, and images are public. Whoever holds a
 product image's `ap-secret` can derive the default access-point key of every device of that
 product from its printed device code. The default key is therefore a first-contact credential,
-not a secret: it only lets the first user reach a new device.
+not a secret: it lets whoever can derive it onto the device's access point until the user sets a
+key of their own, which the console's Wi-Fi page recommends while the default applies.
 
 ## Where the code comes from
 
@@ -72,21 +74,18 @@ bytes. micad uses the file only if it is readable by its owner alone (no group o
 The access point's key is, in order:
 
 1. `wifi.ap.psk`, when it is set (`pskSource: "settings"`);
-2. the derived key, while the device is unclaimed, that is while it has no web administrator, and
-   it has a code and a usable secret (`"derived"`);
+2. the derived key, the one on the label, when the device has a code and a usable secret
+   (`"derived"`), claimed or not;
 3. the per-device key generated on STATE at first boot (`"generated"`).
 
-An open access point uses no key, and `pskSource` is `null`. Once an administrator exists, the
-derived key is never used. The claim through `POST /api/v1/setup` sets `wifi.ap.psk` in the same
-write as the administrator, on a product with Wi-Fi: the key the body carries as `apPsk`, or 16
-random characters of the alphabet, which the answer carries once as `apPsk` and the console shows
-before it enters. BLE provisioning claims nothing and sets no key (`docs/ble-provisioning.md`): a
-device it set up stays unclaimed, on the derived key, until it is claimed in the console, whose
-setup also asks for the device code. The console's access-point form asks for a key before an
-access point without one is switched on. A claim by provisioning document
-sets no key, so its device falls back to the generated one. A configuration reset keeps the administrator and `wifi.ap.psk`. A
-factory reset clears both, which makes the derived key apply again. The default SSID is the
-code's whenever `wifi.ap.ssid` is unset; without a code, it comes from the device identifier.
+An open access point uses no key, and `pskSource` is `null`. Claiming the device changes nothing
+about the key: `POST /api/v1/setup` sets the administrator password and, optionally, the hostname,
+and no key, so whoever claims over the access point stays connected. BLE provisioning sets no key
+either (`docs/ble-provisioning.md`). The derived key applies until the user sets one on the
+console's Wi-Fi page, which says so while it applies; the access-point form asks for a key only
+when the user edits it. A configuration reset keeps the administrator and `wifi.ap.psk`. A factory
+reset clears both, which makes the derived key apply again. The default SSID is the code's
+whenever `wifi.ap.ssid` is unset; without a code, it comes from the device identifier.
 
 A board that declares a source whose value is unusable, or a product secret that is missing,
 short or readable by others, is logged by micad. The access point then uses the next key in the

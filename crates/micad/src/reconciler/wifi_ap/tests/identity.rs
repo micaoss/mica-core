@@ -181,7 +181,7 @@ pub(super) async fn an_unclaimed_device_with_a_code_uses_the_labelled_ssid_and_k
 }
 
 #[tokio::test]
-pub(super) async fn a_claimed_device_never_uses_the_derived_key() {
+pub(super) async fn a_claimed_device_keeps_the_derived_key_until_a_key_is_set() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
     let reconciler = reconciler.with_device_root(device_root(dir.path()));
@@ -198,10 +198,14 @@ pub(super) async fn a_claimed_device_never_uses_the_derived_key() {
         json!("mica-789Z"),
         "the SSID stays the label's"
     );
-    assert_eq!(state["pskSource"], json!("generated"));
+    assert_eq!(
+        state["pskSource"],
+        json!("derived"),
+        "claiming changes nothing about the key"
+    );
     let rendered = std::fs::read_to_string(&paths.config).unwrap();
     assert!(
-        rendered.contains(&format!("wpa_passphrase={SECRET_PSK}\n")),
+        rendered.contains("wpa_passphrase=U8A5TU7RT6A6E8TV\n"),
         "{rendered}"
     );
 }

@@ -352,6 +352,11 @@ the udhcpc it starts, and `mica-wifi-client` passes the `metric` of its environm
 same way. The script puts the default route at that metric (`ip -4 route replace default via
 <router> dev <iface> metric <n>`), and at none when `IF_METRIC` is unset or empty.
 
+At start micad logs the device code (`device code`, with its source) and writes it to
+`/run/mica/device-code.issue` as `Device code: XXXX-XXXX-XXX` and a blank line, replaced whole; a
+device without a code gets no file. Base links `/etc/issue.d/50-mica-device-code.issue` to that
+file, so agetty shows it under `/etc/issue` on the serial console and every local login prompt.
+
 Failed services are read with mica-openrc's `/usr/lib/mica/mica-init failed`, the log with
 `logread`, and power goes through `openrc-shutdown`.
 
