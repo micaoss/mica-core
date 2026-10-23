@@ -190,3 +190,41 @@ fn an_ipv4_address_is_its_interface_and_the_address_with_its_prefix() {
     );
     assert_eq!(ipv4_address(&[2, 24]), None);
 }
+
+#[test]
+fn a_route_reply_reads_its_output_link_and_gateway() {
+    let mut body = vec![AF_INET, 32, 0, 0, 254, 16, 0, 1, 0, 0, 0, 0];
+    body.extend(attribute(RTA_DST, &[1, 1, 1, 1]));
+    body.extend(attribute(RTA_OIF, &words(&[3])));
+    body.extend(attribute(RTA_GATEWAY, &[192, 0, 2, 1]));
+    assert_eq!(
+        route_choice(&body),
+        Some(RouteChoice {
+            interface_index: 3,
+            gateway: Some(Ipv4Addr::new(192, 0, 2, 1)),
+        })
+    );
+    let mut on_link = vec![AF_INET, 32, 0, 0, 254, 2, 253, 1, 0, 0, 0, 0];
+    on_link.extend(attribute(RTA_OIF, &words(&[4])));
+    assert_eq!(
+        route_choice(&on_link),
+        Some(RouteChoice {
+            interface_index: 4,
+            gateway: None,
+        })
+    );
+    assert_eq!(route_choice(&body[..RTMSG]), None);
+}
+
+#[test]
+fn a_route_request_asks_for_one_ipv4_destination() {
+    let request = route_request(Ipv4Addr::new(1, 1, 1, 1));
+    let (kind, flags, body) = messages(&request)[0];
+    assert_eq!(kind, RTM_GETROUTE);
+    assert_eq!(flags & NLM_F_DUMP, 0);
+    assert_eq!(&body[..2], &[AF_INET, 32]);
+    assert_eq!(
+        attributes(&body[RTMSG..]),
+        vec![(RTA_DST, &[1u8, 1, 1, 1][..])]
+    );
+}

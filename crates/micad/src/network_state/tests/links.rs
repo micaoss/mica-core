@@ -55,11 +55,37 @@ pub(super) fn routes_list_the_link_s_table_with_addresses_written_out() {
     assert_eq!(
         observed["interfaces"]["entries"][1]["routes"],
         json!([
-            {"dest": "0.0.0.0/0", "via": "192.0.2.1", "metric": 1024, "source": "DHCPv4", "table": "main"},
-            {"dest": "192.0.2.0/24", "via": null, "metric": null, "source": null, "table": "main"}
+            {"dest": "0.0.0.0/0", "family": "ipv4", "via": "192.0.2.1", "metric": 1024, "source": "DHCPv4", "table": "main", "protocol": "dhcp", "scope": "global"},
+            {"dest": "192.0.2.0/24", "family": "ipv4", "via": null, "metric": null, "source": null, "table": "main", "protocol": "kernel", "scope": "link"}
         ])
     );
     assert_eq!(observed["interfaces"]["entries"][0]["routes"], json!([]));
+}
+
+/// A default route is effective when the kernel's route to the internet
+/// leaves by its link and gateway; without that answer nothing is claimed.
+#[test]
+pub(super) fn the_default_route_the_kernel_picks_is_effective() {
+    let effective = |internet: Option<crate::netlink::RouteChoice>| {
+        let links = LinkEvidence {
+            internet,
+            ..LinkEvidence::default()
+        };
+        observe(&describe_fixture(), &WifiEvidence::default(), &links)["defaultRoutes"]["entries"]
+            [0]
+        .get("effective")
+        .cloned()
+    };
+    let via = |interface_index, gateway: [u8; 4]| {
+        Some(crate::netlink::RouteChoice {
+            interface_index,
+            gateway: Some(gateway.into()),
+        })
+    };
+    assert_eq!(effective(via(2, [192, 0, 2, 1])), Some(json!(true)));
+    assert_eq!(effective(via(3, [192, 0, 2, 1])), Some(json!(false)));
+    assert_eq!(effective(via(2, [192, 0, 2, 9])), Some(json!(false)));
+    assert_eq!(effective(None), None);
 }
 
 /// What the kernel said about a CAN or WireGuard link lands on that link.

@@ -161,10 +161,13 @@ pub(super) fn is_default_route(route: &Value) -> bool {
     }
 }
 
+/// One default route. An IPv4 one is `effective` when `internet`, the
+/// kernel's route to the internet, leaves by its link and gateway.
 pub(super) fn default_route_json(
     route: &Value,
     interface: Option<&str>,
     index: Option<u64>,
+    internet: Option<&crate::netlink::RouteChoice>,
 ) -> Value {
     let family = route.get("Family").and_then(Value::as_i64);
     let gateway = route
@@ -199,6 +202,11 @@ pub(super) fn default_route_json(
     insert_named_id(&mut root, "table", table, route_table_name(route));
     if let Some(source) = route.get("ConfigSource").and_then(Value::as_str) {
         root.insert("configSource".to_string(), json!(source));
+    }
+    if let Some(internet) = internet.filter(|_| root["family"] == "ipv4") {
+        let effective = index == Some(u64::from(internet.interface_index))
+            && gateway == internet.gateway.map(|gateway| gateway.to_string());
+        root.insert("effective".to_string(), json!(effective));
     }
     Value::Object(root)
 }
@@ -374,8 +382,8 @@ pub(super) fn routes_json(link: &Value) -> Value {
         .filter(|route| route.get("Table").and_then(Value::as_u64) != Some(LOCAL_TABLE))
         .filter_map(|route| {
             let family = route.get("Family").and_then(Value::as_i64);
-            let destination =
-                format_address(family, &route.get("Destination").and_then(bytes_of)?)?;
+            let destination_bytes = route.get("Destination").and_then(bytes_of)?;
+            let destination = format_address(family, &destination_bytes)?;
             let prefix = route
                 .get("DestinationPrefixLength")
                 .and_then(Value::as_u64)
@@ -392,10 +400,13 @@ pub(super) fn routes_json(link: &Value) -> Value {
             });
             Some(json!({
                 "dest": format!("{destination}/{prefix}"),
+                "family": family_name(family, destination_bytes.len()),
                 "via": via,
                 "metric": route.get("Priority").and_then(Value::as_u64),
                 "source": route.get("ConfigSource").and_then(Value::as_str),
                 "table": table,
+                "protocol": route.get("Protocol").and_then(Value::as_u64).and_then(route_protocol_name),
+                "scope": route.get("Scope").and_then(Value::as_u64).and_then(route_scope_name),
             }))
         })
         .collect();
@@ -649,7 +660,9 @@ pub fn observed_json(
                     .into_iter()
                     .flatten()
                     .filter(|route| is_default_route(route))
-                    .map(move |route| default_route_json(route, name, index))
+                    .map(move |route| {
+                        default_route_json(route, name, index, links_evidence.internet.as_ref())
+                    })
             })
             .collect();
         json!({ "available": true, "count": entries.len(), "entries": entries })

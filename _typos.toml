@@ -29,3 +29,5 @@ inh = "inh"
 WRONLY = "WRONLY"
 # The DesignWare watchdog's vendor.
 Synopsys = "Synopsys"
+# rtnetlink's output interface attribute.
+RTA_OIF = "RTA_OIF"

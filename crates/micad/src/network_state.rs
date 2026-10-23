@@ -239,7 +239,13 @@ pub struct LinkEvidence {
     /// Each link configured by a file that is not micad's: the entry that
     /// keeps that configuration ([`adopt::adoption`]).
     pub adoptions: BTreeMap<String, Value>,
+    /// The route the kernel picks for the internet, a lookup of
+    /// [`INTERNET_PROBE`]; `None` when it could not be asked or has none.
+    pub internet: Option<crate::netlink::RouteChoice>,
 }
+
+/// The public address whose route stands for "the way to the internet".
+pub const INTERNET_PROBE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(1, 1, 1, 1);
 
 /// Ask the kernel about the CAN and WireGuard links `describe` lists.
 pub(crate) async fn observe_links(describe: Result<&Value, &str>) -> LinkEvidence {
@@ -296,6 +302,11 @@ pub(crate) async fn observe_links(describe: Result<&Value, &str>) -> LinkEvidenc
             evidence.wireguard.insert(name, value);
         }
     }
+    evidence.internet = tokio::task::spawn_blocking(|| crate::netlink::route_to(INTERNET_PROBE))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten();
     evidence
 }
 

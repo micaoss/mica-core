@@ -4,13 +4,15 @@
 //! out of the floor), a WireGuard device's peers (generic netlink; `wg
 //! show` needs wireguard-tools, which no image ships), and the kernel's
 //! IPv4 addresses (rtnetlink), which BLE provisioning reads whatever
-//! configures them.
+//! configures them, and the route the kernel picks for one destination
+//! (rtnetlink; `ip route get` needs iproute2).
 //!
 //! Both are one request and the replies to it, on a socket that lives for
 //! that exchange. The parsers take the reply bytes, so they are tested
 //! without a kernel.
 
 use std::io;
+use std::net::Ipv4Addr;
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -36,6 +38,12 @@ const RTM_GETLINK: u16 = 18;
 const RTM_NEWADDR: u16 = 20;
 const RTM_GETADDR: u16 = 22;
 const IFADDRMSG: usize = 8;
+const RTM_NEWROUTE: u16 = 24;
+const RTM_GETROUTE: u16 = 26;
+const RTMSG: usize = 12;
+const RTA_DST: u16 = 1;
+const RTA_OIF: u16 = 4;
+const RTA_GATEWAY: u16 = 5;
 const AF_INET: u8 = 2;
 const RT_SCOPE_HOST: u8 = 254;
 const IFA_LOCAL: u16 = 2;
@@ -317,7 +325,7 @@ pub fn ipv4_address(body: &[u8]) -> Option<(String, String)> {
     let name = label.split(':').next().unwrap_or(label);
     Some((
         name.to_string(),
-        format!("{}/{}", std::net::Ipv4Addr::from(local), header[1]),
+        format!("{}/{}", Ipv4Addr::from(local), header[1]),
     ))
 }
 
@@ -335,6 +343,58 @@ pub fn ipv4_addresses() -> io::Result<std::collections::BTreeMap<String, String>
         }
     }
     Ok(found)
+}
+
+// ---- Route lookup ----------------------------------------------------------
+
+/// The route the kernel picks for a destination: the link it leaves by and
+/// the gateway, `None` when the destination is on that link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RouteChoice {
+    pub interface_index: u32,
+    pub gateway: Option<Ipv4Addr>,
+}
+
+fn route_request(destination: Ipv4Addr) -> Vec<u8> {
+    let mut body = vec![0u8; RTMSG];
+    body[0] = AF_INET;
+    body[1] = 32;
+    body.extend(attribute(RTA_DST, &destination.octets()));
+    message(RTM_GETROUTE, 0, &body)
+}
+
+/// An `RTM_NEWROUTE` body's output link and gateway. `None` for a body
+/// without an output link.
+pub fn route_choice(body: &[u8]) -> Option<RouteChoice> {
+    let attributes = attributes(body.get(RTMSG..)?);
+    let interface_index = attributes
+        .iter()
+        .find(|(kind, _)| *kind == RTA_OIF)
+        .and_then(|(_, payload)| u32_at(payload, 0))?;
+    let gateway = attributes
+        .iter()
+        .find(|(kind, _)| *kind == RTA_GATEWAY)
+        .and_then(|(_, payload)| <[u8; 4]>::try_from(*payload).ok())
+        .map(Ipv4Addr::from);
+    Some(RouteChoice {
+        interface_index,
+        gateway,
+    })
+}
+
+/// The route the kernel picks for `destination`, as `ip route get` answers.
+/// `None` when the kernel has no route there.
+pub fn route_to(destination: Ipv4Addr) -> io::Result<Option<RouteChoice>> {
+    match exchange(None, &route_request(destination)) {
+        Ok(replies) => Ok(replies
+            .iter()
+            .filter(|(kind, _)| *kind == RTM_NEWROUTE)
+            .find_map(|(_, body)| route_choice(body))),
+        Err(err) if err.raw_os_error() == Some(rustix::io::Errno::NETUNREACH.raw_os_error()) => {
+            Ok(None)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 // ---- WireGuard -------------------------------------------------------------
