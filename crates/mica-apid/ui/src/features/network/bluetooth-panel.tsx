@@ -149,7 +149,7 @@ export function BluetoothPanel({ onEditing }: { onEditing?: (editing: boolean) =
       {overview?.adapter.available ? (
         <Panel title={t('network.bluetooth.adapter')} description={t('network.bluetooth.adapterCopy')}>
           <FactList facts={[
-            { id: 'name', label: t('network.bluetooth.name'), value: <span className="font-mono">{overview.adapter.name || '—'}</span> },
+            { id: 'name', label: t('network.bluetooth.name'), value: <span className="grid justify-items-end"><span className="font-mono">{overview.adapter.name || '—'}</span><span className="text-xs text-muted-foreground">{t('network.bluetooth.nameHint')}</span></span> },
             { id: 'address', label: t('network.bluetooth.address'), value: <span className="font-mono">{overview.adapter.address ?? '—'}</span> },
             { id: 'powered', label: t('network.bluetooth.state'), value: overview.adapter.powered ? t('network.bluetooth.on') : t('network.bluetooth.off') },
             { id: 'discoverable', label: t('network.bluetooth.discoverable'), value: window ? <span className="text-warning">{t('network.bluetooth.discoverableFor', { left })}</span> : t('network.bluetooth.notDiscoverable') },

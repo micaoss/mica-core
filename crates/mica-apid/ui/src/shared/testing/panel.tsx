@@ -75,7 +75,7 @@ export function renderParamRoute(node: ReactNode, routePath: string, path: strin
     routeTree: rootRoute.addChildren([paramRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
-  return render(<RouterProvider router={router as never} />)
+  return Object.assign(render(<RouterProvider router={router as never} />), { router })
 }
 
 export function jsonResponse(value: unknown, status = 200) {

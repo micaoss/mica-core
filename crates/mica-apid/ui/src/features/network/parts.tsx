@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatAge } from '@/i18n/format'
+import { band, channelOf } from '@/lib/wifi-scan'
 import { cn } from '@/shared/lib/utils'
 import { StatusBadge, type StatusTone } from '@/shared/components/status-badge'
 import { Card } from '@/shared/components/ui/card'
-import type { IfaceStatus, IfaceView } from './view'
+import type { IfaceStatus, IfaceView, WifiView } from './view'
 
 const LED: Record<StatusTone, string> = {
   neutral: 'bg-muted-foreground/50',
@@ -49,6 +50,26 @@ export function StatusLine({ status, compact }: { status: IfaceStatus; compact?:
   )
 }
 
+/// Wi-Fi readings in words: a signal with its strength, a frequency as its
+/// band and channel, the supplicant's key management as a security type.
+export function useWifiText() {
+  const { t } = useTranslation()
+  return {
+    signal: (dbm: number) => t('network.wifi.signalValue', { dbm, quality: t(`network.wifi.signalQuality.${dbm >= -60 ? 'strong' : dbm >= -75 ? 'medium' : 'weak'}`) }),
+    bandChannel: (frequencyMhz?: number) => {
+      const which = band(frequencyMhz)
+      const channel = channelOf(frequencyMhz)
+      return which && channel ? t('network.wifi.bandChannel', { band: which, channel }) : undefined
+    },
+    /// The channel the access point runs on, with its band when hostapd said.
+    apChannel: (wifi: WifiView) => {
+      const which = band(wifi.apFrequencyMhz)
+      return which ? t('network.wifi.channelOn', { channel: wifi.apChannel, band: which }) : t('network.wifi.channelValue', { channel: wifi.apChannel })
+    },
+    security: (keyManagement: string) => keyManagement === 'NONE' ? t('network.wifi.securities.open') : keyManagement === 'SAE' ? t('network.wifi.securities.sae') : keyManagement,
+  }
+}
+
 /// A block of a network page, as wide as the page: its title, explanation
 /// and actions head the card above a rule. A table's rows meet the card's
 /// edges (`flush`); a block being edited is outlined; a danger block's title
@@ -75,6 +96,16 @@ export function Section({ title, description, action, tone = 'default', editing,
       {flush ? children : <div className="flex flex-col gap-4 p-4">{children}</div>}
       {footer ? <div className="border-t border-border p-3">{footer}</div> : null}
     </Card>
+  )
+}
+
+/// A titled group of fields inside a block.
+export function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="grid gap-2">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {children}
+    </section>
   )
 }
 

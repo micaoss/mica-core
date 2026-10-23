@@ -21,6 +21,16 @@ export function band(frequencyMhz?: number): '2.4' | '5' | '6' | undefined {
   return undefined
 }
 
+/// The channel a frequency is, in its band's numbering.
+export function channelOf(frequencyMhz?: number): number | undefined {
+  if (frequencyMhz === undefined) return undefined
+  if (frequencyMhz === 2484) return 14
+  if (frequencyMhz >= 2412 && frequencyMhz <= 2472) return (frequencyMhz - 2407) / 5
+  if (frequencyMhz >= 5925 && frequencyMhz <= 7125) return (frequencyMhz - 5950) / 5
+  if (frequencyMhz >= 4900 && frequencyMhz < 5925) return (frequencyMhz - 5000) / 5
+  return undefined
+}
+
 const strength = (bss: ScannedBss) => bss.signalDbm ?? Number.NEGATIVE_INFINITY
 
 /// The scan's access points grouped by SSID, each group's strongest first and

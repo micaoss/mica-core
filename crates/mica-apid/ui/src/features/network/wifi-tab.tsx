@@ -5,7 +5,7 @@ import type { TFunction } from 'i18next'
 import { Plus, Radar, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import type { TaskAccepted, WifiAccessPoint, WifiChannels, WifiScan } from '@/lib/types'
-import { band, groupScan, scanSecurity, type ScannedNetwork } from '@/lib/wifi-scan'
+import { groupScan, scanSecurity, type ScannedNetwork } from '@/lib/wifi-scan'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
@@ -23,7 +23,7 @@ import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { provisioningQuery } from './bluetooth'
 import { EditBar } from './change-bar'
 import { inSubnet, intToIp, ipToInt, isIPv4, overlaps, parseCidr, sameEntry, type IfaceEntry } from './model'
-import { Section } from './parts'
+import { Group, Section, useWifiText } from './parts'
 import { countryName, ELSEWHERE, EUROPE } from './regulatory'
 import type { NetworkData } from './use-network'
 
@@ -256,23 +256,33 @@ function draftErrors(draft: Draft, data: NetworkData, allowed: number[] | undefi
 function StateFacts({ data }: { data: NetworkData }) {
   const { t } = useTranslation()
   const wifi = data.wifi
+  const wifiText = useWifiText()
   const radio = wifi.radio
-  const address = radio ? data.applied.ifaces[radio]?.obs?.address : undefined
+  const obs = radio ? data.applied.ifaces[radio]?.obs : undefined
+  const address = obs?.address
+  const association = wifi.association
+  const ap = data.ap.data
   if (wifi.mode === 'off') return <FactList layout="grid" facts={[{ id: 'mode', label: t('network.wifi.mode'), value: <strong>{t('network.wifi.off')}</strong> }]} />
   if (wifi.mode === 'client') {
     return <FactList layout="grid" facts={[
       { id: 'mode', label: t('network.wifi.mode'), value: <strong>{t('network.wifi.modes.client')}</strong> },
-      { id: 'state', label: t('network.fields.state'), value: wifi.association ? <span className="text-success">{t('network.status.connected')}</span> : <span className="text-warning">{t('network.wifi.searching')}</span> },
-      { id: 'ssid', label: 'SSID', value: wifi.association?.ssid ?? '—' },
-      { id: 'signal', label: t('network.wifi.signal'), value: wifi.association?.rssiDbm !== undefined ? `${wifi.association.rssiDbm} dBm` : '—' },
+      { id: 'state', label: t('network.fields.state'), value: association ? <span className="text-success">{t('network.status.connected')}</span> : <span className="text-warning">{t('network.wifi.searching')}</span> },
+      { id: 'ssid', label: 'SSID', value: association?.ssid ?? '—' },
+      { id: 'security', label: t('network.wifi.security'), value: association?.keyManagement ? wifiText.security(association.keyManagement) : '—' },
+      { id: 'signal', label: t('network.wifi.signal'), value: association?.rssiDbm !== undefined ? wifiText.signal(association.rssiDbm) : '—' },
+      { id: 'bssid', label: t('network.wifi.bssid'), value: association?.bssid ?? '—', mono: true },
+      { id: 'band', label: t('network.wifi.band'), value: wifiText.bandChannel(association?.frequencyMhz) ?? '—' },
+      { id: 'rate', label: t('network.wifi.linkRate'), value: association?.linkSpeedMbps ? t('network.wifi.linkRateValue', { mbps: association.linkSpeedMbps }) : '—' },
       { id: 'address', label: t('network.fields.address'), value: address ?? '—', mono: true },
+      { id: 'gateway', label: t('network.fields.gateway'), value: obs?.lease?.router ?? '—', mono: true },
     ]} />
   }
   return <FactList layout="grid" facts={[
     { id: 'mode', label: t('network.wifi.mode'), value: <strong>{t('network.wifi.modes.ap')}</strong> },
     { id: 'state', label: t('network.fields.state'), value: wifi.apRunning ? <span className="text-success">{t('network.status.apRunning')}</span> : <span className="text-destructive">{t('network.status.apDown')}</span> },
     { id: 'ssid', label: 'SSID', value: <strong>{wifi.apSsid || t('network.wifi.ssidAuto')}</strong> },
-    { id: 'channel', label: t('network.wifi.channel'), value: data.ap.data ? channelLabel(data.ap.data.channel, t) : '—' },
+    { id: 'security', label: t('network.wifi.security'), value: ap ? t(`network.wifi.apSecurities.${ap.security ?? 'wpa2-psk'}`) : '—' },
+    { id: 'channel', label: t('network.wifi.channel'), value: wifi.apChannel ? wifiText.apChannel(wifi) : ap ? channelLabel(ap.channel, t) : '—' },
     { id: 'clients', label: t('network.wifi.clients'), value: t('network.wifi.clientCount', { count: wifi.stations }) },
   ]} />
 }
@@ -282,37 +292,67 @@ function ConfigView({ data }: { data: NetworkData }) {
   const wifi = data.wifi
   const ap = data.ap.data
   const entry = (wifi.radio ? data.applied.ifaces[wifi.radio]?.entry : undefined) ?? { dhcp: true }
-  const facts: Parameters<typeof FactList>[0]['facts'] = [
-    { id: 'enabled', label: t('network.wifi.enabled'), value: wifi.mode === 'off' ? t('network.wifi.offRadio', { radio: wifi.radio ?? '' }) : <span className="text-success">{t('network.values.on')}</span> },
-    wifi.mode !== 'off' && { id: 'mode', label: t('network.wifi.mode'), value: t(`network.wifi.modes.${wifi.mode}`) },
-  ]
+  const radio = (
+    <Group title={t('network.wifi.groups.wifi')}>
+      <FactList layout="pairs" facts={[
+        { id: 'enabled', label: t('network.wifi.enabled'), value: wifi.mode === 'off' ? t('network.wifi.offRadio', { radio: wifi.radio ?? '' }) : <span className="text-success">{t('network.values.on')}</span> },
+        wifi.mode !== 'off' && { id: 'mode', label: t('network.wifi.mode'), value: t(`network.wifi.modes.${wifi.mode}`) },
+      ]} />
+    </Group>
+  )
   if (wifi.mode === 'ap' && ap) {
-    facts.push(
-      { id: 'start', label: t('network.wifi.start'), value: t(`network.wifi.starts.${ap.mode === 'provisioning' ? 'provisioning' : 'always'}`) },
-      { id: 'ssid', label: 'SSID', value: ap.ssid || t('network.wifi.ssidAuto') },
-      { id: 'security', label: t('network.wifi.security'), value: t(`network.wifi.apSecurities.${ap.security ?? 'wpa2-psk'}`) },
-      ap.security !== 'open' && { id: 'psk', label: t('network.wifi.password'), value: t('network.wifi.pskHidden') },
-      { id: 'country', label: t('network.wifi.country'), value: `${countryName(ap.countryCode, i18n.resolvedLanguage ?? 'en')} (${ap.countryCode})` },
-      { id: 'channel', label: t('network.wifi.channel'), value: channelLabel(ap.channel, t) },
-      { id: 'address', label: t('network.wifi.apAddress'), value: ap.address, mono: true },
-      { id: 'pool', label: t('network.wifi.pool'), value: ap.dhcpServer ? `${ap.dhcpServer.poolStart} – ${ap.dhcpServer.poolEnd}` : '—', mono: true },
-      { id: 'lease', label: t('network.wifi.lease'), value: ap.dhcpServer?.leaseSeconds ? t('network.values.seconds', { count: ap.dhcpServer.leaseSeconds }) : t('network.wifi.leaseDefault') },
-      { id: 'dhcp', label: t('network.wifi.apDhcp'), value: t('network.wifi.apDhcpCopy') },
+    return (
+      <div className="grid gap-5">
+        {radio}
+        <Group title={t('network.wifi.groups.start')}>
+          <FactList layout="pairs" facts={[
+            { id: 'start', label: t('network.wifi.start'), value: t(`network.wifi.starts.${ap.mode === 'provisioning' ? 'provisioning' : 'always'}`) },
+          ]} />
+        </Group>
+        <Group title={t('network.wifi.groups.network')}>
+          <FactList layout="pairs" facts={[
+            { id: 'ssid', label: 'SSID', value: ap.ssid || t('network.wifi.ssidAuto') },
+            { id: 'security', label: t('network.wifi.security'), value: t(`network.wifi.apSecurities.${ap.security ?? 'wpa2-psk'}`) },
+            ap.security !== 'open' && { id: 'psk', label: t('network.wifi.password'), value: t('network.wifi.pskHidden') },
+          ]} />
+        </Group>
+        <Group title={t('network.wifi.groups.radio')}>
+          <FactList layout="pairs" facts={[
+            { id: 'country', label: t('network.wifi.country'), value: `${countryName(ap.countryCode, i18n.resolvedLanguage ?? 'en')} (${ap.countryCode})` },
+            { id: 'channel', label: t('network.wifi.channel'), value: channelLabel(ap.channel, t) },
+          ]} />
+        </Group>
+        <Group title={t('network.wifi.groups.addressing')}>
+          <FactList layout="pairs" facts={[
+            { id: 'address', label: t('network.wifi.apAddress'), value: ap.address, mono: true },
+            { id: 'pool', label: t('network.wifi.pool'), value: ap.dhcpServer ? `${ap.dhcpServer.poolStart} – ${ap.dhcpServer.poolEnd}` : '—', mono: true },
+            { id: 'lease', label: t('network.wifi.lease'), value: ap.dhcpServer?.leaseSeconds ? t('network.values.seconds', { count: ap.dhcpServer.leaseSeconds }) : t('network.wifi.leaseDefault') },
+            { id: 'dhcp', label: t('network.wifi.apDhcp'), value: t('network.wifi.apDhcpCopy') },
+          ]} />
+        </Group>
+      </div>
     )
   }
   if (wifi.mode === 'client') {
-    facts.push(
-      { id: 'preset', label: t('network.detail.preset'), value: t(entry.dhcp ? 'network.presets.dhcp' : 'network.presets.static') },
-      ...(entry.dhcp
-        ? [{ id: 'dns', label: t('network.fields.dns'), value: entry.dns?.length ? entry.dns.join(', ') : t('network.detail.leaseDns') }]
-        : [
-            { id: 'address', label: t('network.fields.address'), value: entry.static?.address || '—', mono: true },
-            { id: 'gateway', label: t('network.fields.gateway'), value: entry.static?.gateway || t('network.values.none'), mono: true },
-            { id: 'dns', label: t('network.fields.dns'), value: entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none'), mono: true },
-          ]),
+    return (
+      <div className="grid gap-5">
+        {radio}
+        <Group title={t('network.detail.addressAndDns')}>
+          <FactList layout="pairs" facts={[
+            { id: 'preset', label: t('network.detail.preset'), value: t(entry.dhcp ? 'network.presets.dhcp' : 'network.presets.static') },
+            ...(entry.dhcp
+              ? [{ id: 'dns', label: t('network.fields.dns'), value: entry.dns?.length ? entry.dns.join(', ') : t('network.detail.leaseDns') }]
+              : [
+                  { id: 'address', label: t('network.fields.address'), value: entry.static?.address || '—', mono: true },
+                  { id: 'gateway', label: t('network.fields.gateway'), value: entry.static?.gateway || t('network.values.none'), mono: true },
+                  { id: 'dns', label: t('network.fields.dns'), value: entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none'), mono: true },
+                ]),
+          ]} />
+        </Group>
+      </div>
     )
   }
-  return <FactList layout="pairs" facts={facts} />
+  return radio
 }
 
 function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draft; setDraft: (draft: Draft) => void; errors: Record<string, string>; current: 'off' | 'client' | 'ap'; allowed: number[] | undefined }) {
@@ -402,7 +442,7 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
       ) : (
         <>
           <FormField label={t('network.detail.preset')}>
-            {() => <SegmentedControl<'dhcp' | 'static'> label={t('network.detail.preset')} value={entry.dhcp ? 'dhcp' : 'static'} onValueChange={(preset) => setEntry(preset === 'dhcp' ? { ...withoutAddressing(entry), dhcp: true } : { ...withoutAddressing(entry), dhcp: false, static: { address: entry.static?.address ?? '', ...(entry.static?.gateway ? { gateway: entry.static.gateway } : {}), dns: entry.dns ?? entry.static?.dns ?? [] } })} segments={[{ value: 'dhcp', label: t('network.presets.dhcp') }, { value: 'static', label: t('network.presets.static') }]} />}
+            {() => <SegmentedControl<'dhcp' | 'static'> label={t('network.detail.preset')} cards value={entry.dhcp ? 'dhcp' : 'static'} onValueChange={(preset) => setEntry(preset === 'dhcp' ? { ...withoutAddressing(entry), dhcp: true } : { ...withoutAddressing(entry), dhcp: false, static: { address: entry.static?.address ?? '', ...(entry.static?.gateway ? { gateway: entry.static.gateway } : {}), dns: entry.dns ?? entry.static?.dns ?? [] } })} segments={[{ value: 'dhcp', label: t('network.presets.dhcp') }, { value: 'static', label: t('network.presets.static') }]} />}
           </FormField>
           {entry.dhcp ? (
             <>
@@ -483,7 +523,8 @@ function ClientLists({ data, locked }: { data: NetworkData; locked: boolean }) {
       : api<WifiNetwork>('/api/v1/wifi/client/networks', json('POST', body))
     return request.then(() => queryClient.invalidateQueries({ queryKey: ['wifi-networks'] }))
   }
-  const signal = (network: ScannedNetwork) => network.best.signalDbm === undefined ? '—' : `${network.best.signalDbm} dBm`
+  const wifiText = useWifiText()
+  const signal = (network: ScannedNetwork) => network.best.signalDbm === undefined ? '—' : wifiText.signal(network.best.signalDbm)
 
   return (
     <>
@@ -540,7 +581,7 @@ function ClientLists({ data, locked }: { data: NetworkData; locked: boolean }) {
                 { id: 'ssid', header: t('network.wifi.network'), cell: (network) => <span className="flex flex-wrap items-center gap-1.5">{network.ssid ? <strong>{network.ssid}</strong> : <span className="text-muted-foreground">{t('network.wifi.hiddenNetwork')}</span>}{networks.data?.some((each) => each.ssid === network.ssid) ? <span className="text-xs text-muted-foreground">{t('network.wifi.alreadySaved')}</span> : null}</span> },
                 { id: 'signal', header: t('network.wifi.signal'), cell: signal },
                 { id: 'security', header: t('network.wifi.security'), cell: (network) => t(`network.wifi.securities.${scanSecurity(network.best.flags)}`) },
-                { id: 'band', header: t('network.wifi.band'), cell: (network) => [...new Set(network.accessPoints.map((bss) => band(bss.frequencyMhz)).filter(Boolean))].map((each) => `${each} GHz`).join(' / ') || '—' },
+                { id: 'band', header: t('network.wifi.band'), cell: (network) => [...new Set(network.accessPoints.map((bss) => wifiText.bandChannel(bss.frequencyMhz)).filter(Boolean))].join(' / ') || '—' },
                 { id: 'actions', header: '', align: 'end', cell: (network) => {
                   const security = scanSecurity(network.best.flags)
                   const saved = networks.data?.some((each) => each.ssid === network.ssid)

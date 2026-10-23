@@ -68,7 +68,9 @@ export function wifiView(client: WifiClientRole | undefined, ap: WifiAccessPoint
     // failed channel selection.
     apReason: running === false || status?.accessPoint?.reason === 'acs_failed' ? status?.accessPoint?.reason ?? undefined : undefined,
     apSsid: ap?.ssid,
+    apChannel: point?.channel,
+    apFrequencyMhz: point?.frequencyMhz,
     stations: point?.stationCount ?? 0,
-    association: association ? { ssid: association.ssid, bssid: association.bssid, rssiDbm: association.rssiDbm, linkSpeedMbps: association.linkSpeedMbps } : undefined,
+    association: association ? { ssid: association.ssid, bssid: association.bssid, frequencyMhz: association.frequencyMhz, keyManagement: association.keyManagement, rssiDbm: association.rssiDbm, linkSpeedMbps: association.linkSpeedMbps } : undefined,
   }
 }

@@ -48,6 +48,7 @@ describe('the network page', () => {
     expect(within(ports).getAllByRole('link').map((card) => card.getAttribute('aria-label'))).toEqual(['eth0', 'eth1', 'eth2'])
     expect(within(within(ports).getByRole('link', { name: 'eth0' })).getByText('Exit')).toBeTruthy()
     expect(within(within(ports).getByRole('link', { name: 'eth2' })).getAllByText('No cable').length).toBeGreaterThan(0)
+    expect(within(within(ports).getByRole('link', { name: 'eth2' })).queryByText('Waiting for DHCP')).toBeNull()
     expect(screen.getByRole('region', { name: 'Wireless' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Tunnels' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Field buses' })).toBeTruthy()
@@ -464,7 +465,9 @@ describe('the Wi-Fi tab', () => {
 
 describe('the Wi-Fi tab as a client', () => {
   const joined = () => {
-    const status = observed({ wifi: { available: true, associations: [{ interface: 'wlan0', associated: true, ssid: 'marina', rssiDbm: -52 }] } })
+    const status = observed({ wifi: { available: true, associations: [{ interface: 'wlan0', associated: true, ssid: 'marina', bssid: '02:00:00:00:03:01', frequencyMhz: 5180, keyManagement: 'SAE', rssiDbm: -52, linkSpeedMbps: 72 }] } })
+    const wlan = status.interfaces.entries!.find((entry) => entry.name === 'wlan0')!
+    wlan.lease = { available: true, server: '192.168.30.1', router: '192.168.30.1', remainingSeconds: 42358 }
     return { ...networkRoutes(configured(), status), '/api/v1/wifi/client': { enabled: true, interface: 'wlan0' } }
   }
 
@@ -479,10 +482,17 @@ describe('the Wi-Fi tab as a client', () => {
       'POST /api/v1/wifi/client/networks': () => jsonResponse({ ssid: 'harbour', psk: '<redacted>', hidden: false, priority: 0 }),
     })
     open('wifi')
-    expect(await screen.findByText('-52 dBm')).toBeTruthy()
+    const state = (await screen.findByRole('heading', { name: 'Status' })).closest('[data-slot=card]') as HTMLElement
+    expect(await within(state).findByText('-52 dBm · Strong')).toBeTruthy()
+    expect(within(state).getByText('WPA3-SAE')).toBeTruthy()
+    expect(within(state).getByText('02:00:00:00:03:01')).toBeTruthy()
+    expect(within(state).getByText('72 Mbit/s')).toBeTruthy()
+    expect(within(state).getByText('192.168.30.1')).toBeTruthy()
+    expect(within(state).getByText('5 GHz · 36')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Scan' }))
     expect(await screen.findByText('harbour')).toBeTruthy()
-    expect(screen.getByText('2.4 GHz / 5 GHz')).toBeTruthy()
+    expect(screen.getByText('2.4 GHz · 6 / 5 GHz · 36')).toBeTruthy()
+    expect(screen.getByText('-80 dBm · Weak')).toBeTruthy()
     expect(screen.getAllByRole('button', { name: 'Connect' })).toHaveLength(1)
     await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add network' })
@@ -496,7 +506,7 @@ describe('the Wi-Fi tab as a client', () => {
   it('stages nothing and asks before turning the radio off', async () => {
     const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'off' }, 202) })
     open('wifi')
-    await screen.findByText('-52 dBm')
+    await screen.findByText('-52 dBm · Strong')
     await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
     await userEvent.click(screen.getByRole('switch', { name: 'Wi-Fi' }))
     await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
@@ -508,7 +518,7 @@ describe('the Wi-Fi tab as a client', () => {
   it('writes the radio\'s own addressing as an interface', async () => {
     const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'w' }) })
     open('wifi')
-    await screen.findByText('-52 dBm')
+    await screen.findByText('-52 dBm · Strong')
     await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
     await userEvent.click(screen.getByRole('button', { name: 'Static' }))
     await userEvent.type(screen.getByLabelText('Address'), '192.168.30.5/24')
@@ -526,9 +536,15 @@ describe('the Wi-Fi tab as a client', () => {
 describe('the Wi-Fi tab as an access point', () => {
   it('lists the connected stations and refuses an unconfirmed country or a long SSID', async () => {
     const status = observed({ accessPoint: { available: true, entries: [{ interface: 'wlan0', stationCount: 1, stations: [{ mac: '02:00:00:00:02:01', signalDbm: -48, connectedSeconds: 600, rxBytes: 2_500_000, txBytes: 1_200 }] }] } })
+    status.accessPoint.entries![0] = { ...status.accessPoint.entries![0], channel: 11, frequencyMhz: 2462 }
     stubFetch({ ...networkRoutes(configured(), status), '/api/v1/wifi/ap': accessPoint('always') })
     open('wifi')
     expect(await screen.findByText('02:00:00:00:02:01')).toBeTruthy()
+    const state = screen.getByRole('heading', { name: 'Status' }).closest('[data-slot=card]') as HTMLElement
+    expect(within(state).getByText('Channel 11 · 2.4 GHz')).toBeTruthy()
+    expect(within(state).getByText('WPA2-PSK')).toBeTruthy()
+    const config = screen.getByRole('heading', { name: 'Wi-Fi configuration' }).closest('[data-slot=card]') as HTMLElement
+    expect(within(config).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual(['Wi-Fi', 'Start', 'Network', 'Radio', 'Address and DHCP'])
     expect(screen.getByText('10 min')).toBeTruthy()
     expect(screen.getByText('2.5 MB / 1 KB')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))

@@ -67,7 +67,9 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
       ? <span><span className="font-mono">{obs.address}</span> <span className="text-muted-foreground">{obs.source}</span></span>
       : wanted
         ? <span className="text-muted-foreground"><span className="font-mono">{wanted}</span> · {t('network.list.notInEffect')}</span>
-        : <span className="text-muted-foreground">{t(entry.dhcp ? 'network.list.waitingDhcp' : 'network.list.noAddress')}</span>
+        : entry.dhcp && !obs?.carrier
+          ? '—'
+          : <span className="text-muted-foreground">{t(entry.dhcp ? 'network.list.waitingDhcp' : 'network.list.noAddress')}</span>
   const note = text.note(status)
   const facts: [string, React.ReactNode][] = iface.kind === 'physical'
     ? [

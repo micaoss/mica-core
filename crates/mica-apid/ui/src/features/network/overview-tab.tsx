@@ -9,7 +9,7 @@ import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { dnsLinks, ProbeText, useDns } from './dns-tab'
 import { bridgeOf, vlansOn } from './model'
-import { Led, TEXT, useKindLabel, useStatusText } from './parts'
+import { Led, TEXT, useKindLabel, useStatusText, useWifiText } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus, exitOf, routeTable, type IfaceStatus, type RouteRow } from './view'
 import type { NetworkTab } from './network-page'
@@ -22,6 +22,7 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
   const navigate = useNavigate()
   const kindLabel = useKindLabel()
   const text = useStatusText()
+  const wifiText = useWifiText()
   const [showRoutes, setShowRoutes] = useState(true)
   const [allRoutes, setAllRoutes] = useState(false)
   const view = data.applied
@@ -143,14 +144,18 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
               <>
                 <dt className="text-muted-foreground">{t('network.fields.state')}</dt><dd className={wifi.apRunning ? 'text-success' : 'text-destructive'}>{t(wifi.apRunning ? 'network.status.apRunning' : 'network.status.apDown')}</dd>
                 <dt className="text-muted-foreground">SSID</dt><dd>{wifi.apSsid || '—'}</dd>
+                <dt className="text-muted-foreground">{t('network.wifi.channel')}</dt><dd>{wifi.apChannel ? wifiText.apChannel(wifi) : '—'}</dd>
                 <dt className="text-muted-foreground">{t('network.wifi.clients')}</dt><dd>{wifi.stations}</dd>
               </>
             ) : wifi.mode === 'client' ? (
               <>
                 <dt className="text-muted-foreground">{t('network.fields.state')}</dt><dd className={wifi.association ? 'text-success' : 'text-warning'}>{t(wifi.association ? 'network.status.connected' : 'network.status.notConnected')}</dd>
                 <dt className="text-muted-foreground">SSID</dt><dd>{wifi.association?.ssid ?? '—'}</dd>
-                <dt className="text-muted-foreground">{t('network.wifi.signal')}</dt><dd>{wifi.association?.rssiDbm !== undefined ? `${wifi.association.rssiDbm} dBm` : '—'}</dd>
+                <dt className="text-muted-foreground">{t('network.wifi.signal')}</dt><dd>{wifi.association?.rssiDbm !== undefined ? wifiText.signal(wifi.association.rssiDbm) : '—'}</dd>
+                <dt className="text-muted-foreground">{t('network.wifi.bssid')}</dt><dd className="font-mono">{wifi.association?.bssid ?? '—'}</dd>
+                <dt className="text-muted-foreground">{t('network.wifi.linkRate')}</dt><dd>{wifi.association?.linkSpeedMbps ? t('network.wifi.linkRateValue', { mbps: wifi.association.linkSpeedMbps }) : '—'}</dd>
                 <dt className="text-muted-foreground">{t('network.fields.address')}</dt><dd className="font-mono">{radio ? view.ifaces[radio].obs?.address ?? '—' : '—'}</dd>
+                <dt className="text-muted-foreground">{t('network.fields.gateway')}</dt><dd className="font-mono">{radio ? view.ifaces[radio].obs?.lease?.router ?? '—' : '—'}</dd>
               </>
             ) : null}
           </dl>

@@ -179,7 +179,7 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
   // the lease it holds is one click away.
   await page.goto('./network/eth0')
   await page.getByRole('button', { name: '编辑配置' }).click()
-  await page.getByRole('button', { name: '静态' }).click()
+  await page.getByRole('button', { name: '静态 IP 地址' }).click()
   await expect(page.getByRole('textbox', { name: 'IP 地址', exact: true })).toHaveValue('')
   await page.screenshot({ path: testInfo.outputPath('n7-static-empty.png'), fullPage: true })
   await page.getByRole('button', { name: '填入当前租约（192.168.1.24/24，网关 192.168.1.1）' }).click()
@@ -201,7 +201,7 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
 
   // A new tunnel starts from free values; deleting one is staged behind a confirmation.
   await page.goto('./network?tab=wireguard')
-  await page.getByRole('button', { name: '新增' }).click()
+  await page.getByRole('button', { name: '新增接口' }).click()
   await expect(page.getByRole('textbox', { name: '监听端口' })).toHaveValue('51821')
   await page.screenshot({ path: testInfo.outputPath('n7-wg-wizard.png'), fullPage: true })
   await page.getByRole('button', { name: '取消' }).click()
@@ -258,6 +258,29 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
   await page.goto('./network?tab=wireguard&tunnel=wg0')
   await expect(page.getByRole('columnheader', { name: '最近握手' })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('n7-wg-detail.png'), fullPage: true })
+
+  // G4: the radio's readings, the wording, the lease, the presets and the redirects.
+  await page.goto('./network?tab=wifi')
+  await expect(page.getByText('-58 dBm · 强')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n7-wifi-client.png'), fullPage: true })
+  await page.goto('./network?tab=interfaces')
+  await expect(page.getByText('共 6 个接口')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n7-interfaces.png'), fullPage: true })
+  await page.goto('./network/eth0')
+  await expect(page.getByText(/\d+ 分/).first()).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n7-eth0-lease.png'), fullPage: true })
+  await page.goto('./network/eth1')
+  await page.getByRole('button', { name: '编辑配置' }).click()
+  await expect(page.getByText('正在编辑 eth1')).toBeVisible()
+  await expect(page.getByRole('button', { name: '推荐 DNS：8.8.8.8, 1.1.1.1' })).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 1500 })
+  await page.screenshot({ path: testInfo.outputPath('n7-preset-cards.png') })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.getByRole('button', { name: '取消' }).click()
+  await page.goto('./network/wlan0')
+  await expect(page).toHaveURL(/tab=wifi/)
+  await page.goto('./network/wg0')
+  await expect(page).toHaveURL(/tab=wireguard&tunnel=wg0/)
 })
 
 test('captures the device code, the claim key, BLE provisioning and the pairing window', async ({ page }, testInfo) => {
@@ -802,6 +825,7 @@ function benchPayload(path: string): unknown {
         link: { operationalState: 'routable', carrier: true },
         addresses: [{ family: 'inet', address: '10.20.0.31', prefixLength: 24, scope: 'global', configSource: 'DHCPv4' }],
         dhcp: { available: true }, dns: [],
+        lease: { available: true, server: '10.20.0.1', router: '10.20.0.1', remainingSeconds: 42358 },
         routes: [
           { dest: '0.0.0.0/0', family: 'ipv4', via: '10.20.0.1', metric: 600, source: 'DHCPv4', table: 'main', protocol: 'dhcp', scope: 'global' },
           { dest: '10.20.0.0/24', family: 'ipv4', via: null, metric: 600, source: 'DHCPv4', table: 'main', protocol: 'kernel', scope: 'link' },
@@ -823,7 +847,7 @@ function benchPayload(path: string): unknown {
       { family: 'ipv4', gateway: '10.20.0.1', interface: 'wlan0', metric: 600, effective: false },
     ] },
     dns: { available: true, linkServers: ['192.168.1.1'], resolverServers: ['127.0.0.53'], probe: { name: 'deb.debian.org', reachable: true, result: 'resolved' } },
-    wifi: { available: true, associations: [{ interface: 'wlan0', associated: true, ssid: 'marina-guest', rssiDbm: -58 }] },
+    wifi: { available: true, associations: [{ interface: 'wlan0', associated: true, ssid: 'marina-guest', bssid: '02:00:00:00:03:01', frequencyMhz: 2437, keyManagement: 'WPA2-PSK', rssiDbm: -58, linkSpeedMbps: 72 }] },
     accessPoint: { available: true, entries: [] },
     capabilities: { wifi: { supported: true, interfaces: ['wlan0'] }, bluetooth: { supported: false, adapters: [] }, cellular: { supported: false, interfaces: [] } },
   }

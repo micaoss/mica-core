@@ -45,8 +45,11 @@ export interface WifiView {
   /// the fallback channel, as the device says.
   apReason?: string
   apSsid?: string
+  /// The channel the access point runs on, as hostapd reports it.
+  apChannel?: number
+  apFrequencyMhz?: number
   stations: number
-  association?: { ssid?: string; bssid?: string; rssiDbm?: number; linkSpeedMbps?: number }
+  association?: { ssid?: string; bssid?: string; frequencyMhz?: number; keyManagement?: string; rssiDbm?: number; linkSpeedMbps?: number }
 }
 
 export interface DefaultRoute {

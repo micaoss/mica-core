@@ -29,6 +29,7 @@ describe('one interface', () => {
     expect(screen.getByText('192.168.1.24/24')).toBeTruthy()
     expect(screen.getByText('DHCPv4')).toBeTruthy()
     expect(screen.getByText('02:00:00:00:00:01')).toBeTruthy()
+    expect(screen.getByText('1 h 0 min')).toBeTruthy()
     expect(screen.getAllByText('Exit').length).toBeGreaterThan(0)
   })
 
@@ -40,6 +41,15 @@ describe('one interface', () => {
     const live = screen.getByRole('heading', { name: 'Live state' }).closest('header')!
     expect(within(live).queryByRole('button')).toBeNull()
     expect(screen.getByRole('heading', { name: 'Restore image default' }).className).toContain('text-destructive')
+  })
+
+  it('sends the radio to the Wi-Fi tab and a tunnel to its WireGuard page', async () => {
+    stubFetch(networkRoutes())
+    const radio = open('wlan0')
+    await waitFor(() => expect(radio.router.state.location.href).toBe('/network?tab=wifi'))
+    cleanup()
+    const tunnel = open('wg0')
+    await waitFor(() => expect(tunnel.router.state.location.href).toBe('/network?tab=wireguard&tunnel=wg0'))
   })
 
   it('says so when the device has no such interface', async () => {
@@ -91,6 +101,15 @@ describe('one interface', () => {
     expect(screen.queryByRole('button', { name: /Use the current lease/ })).toBeNull()
   })
 
+  it('offers recommended DNS servers to a static port that has none', async () => {
+    stubFetch(networkRoutes())
+    open('eth1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Recommended DNS: 8.8.8.8, 1.1.1.1' }))
+    expect((screen.getByLabelText('DNS servers') as HTMLInputElement).value).toBe('8.8.8.8, 1.1.1.1')
+    expect(screen.queryByRole('button', { name: /Recommended DNS/ })).toBeNull()
+  })
+
   it('offers no lease on a port that holds none', async () => {
     stubFetch(networkRoutes({ ...configured(), eth1: { dhcp: true } }))
     open('eth1')
@@ -123,12 +142,6 @@ describe('one interface', () => {
     await userEvent.click(within(screen.getByRole('region', { name: 'Editing eth2' })).getByRole('button', { name: 'Done' }))
     const dialog = await review()
     expect(within(dialog).getByText('br0')).toBeTruthy()
-  })
-
-  it('sends a radio and a tunnel to their own tabs', async () => {
-    stubFetch(networkRoutes())
-    open('wlan0')
-    expect(await screen.findByRole('button', { name: 'This radio is configured on the Wi-Fi tab.' })).toBeTruthy()
   })
 })
 

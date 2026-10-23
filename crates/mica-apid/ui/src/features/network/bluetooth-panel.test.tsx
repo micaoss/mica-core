@@ -63,6 +63,8 @@ describe('the bluetooth panel', () => {
     expect(screen.queryByRole('switch', { name: 'Discoverable' })).toBeNull()
     expect(screen.queryByDisplayValue('421137')).toBeNull()
     expect(screen.getByText('edge-42')).toBeTruthy()
+    expect(screen.getByText('Broadcast name')).toBeTruthy()
+    expect(screen.getByText('Phones pick the device by this name when provisioning; it is the hostname.')).toBeTruthy()
     expect(screen.getByText(/cannot normally be discovered/)).toBeTruthy()
     expect(screen.getByText('No pairing requests waiting.')).toBeTruthy()
   })

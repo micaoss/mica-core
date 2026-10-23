@@ -623,6 +623,9 @@ export interface ObservedNetworkState {
     reasonDetail?: string
     entries?: {
       interface: string
+      /// The channel it runs on and its frequency, absent while it chooses.
+      channel?: number
+      frequencyMhz?: number
       stationCount: number
       stations: { mac: string; connectedSeconds?: number; signalDbm?: number; rxBytes?: number; txBytes?: number; address?: string; hostname?: string }[]
     }[]

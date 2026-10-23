@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from '@tanstack/react-router'
+import { Link, Navigate, useNavigate, useParams } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { ChevronLeft, Plus, X } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
@@ -19,7 +19,7 @@ import {
   bridgeOf, stageRemove, stageRevert, stageSet, vlansOn,
   type ChangeSet, type IfaceEntry,
 } from './model'
-import { Led, Section, StatusLine, Tag, useCanText, useKindLabel } from './parts'
+import { Group, Led, Section, StatusLine, Tag, useCanText, useKindLabel } from './parts'
 import { useNetwork, type NetworkData } from './use-network'
 import { addressBook, validateEntry, type Problem, type Problems } from './validate'
 import { computeStatus, exitOf } from './view'
@@ -43,6 +43,10 @@ export function InterfaceDetailPage() {
       </Page>
     )
   }
+
+  // The radio and the tunnels are configured on their own tabs.
+  if (iface.kind === 'wifi') return <Navigate to="/network" search={{ tab: 'wifi' }} replace />
+  if (iface.kind === 'wireguard') return <Navigate to="/network" search={data.applied.ifaces[name] ? { tab: 'wireguard', tunnel: name } : { tab: 'wireguard' }} replace />
 
   const start = () => setSnapshot(data.set)
   const cancel = () => { if (snapshot) updateChangeSet(() => snapshot); setSnapshot(undefined) }
@@ -85,7 +89,6 @@ function Header({ data, name, editing }: { data: NetworkData; name: string; edit
   const bridge = bridgeOf(map, name)
   const vlans = vlansOn(map, name)
   const pending = data.pending.find((change) => change.name === name)
-  const editable = iface.kind !== 'wifi' && iface.kind !== 'wireguard'
   return (
     <header className="grid gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -101,7 +104,7 @@ function Header({ data, name, editing }: { data: NetworkData; name: string; edit
         <span className="text-sm text-muted-foreground">{kindLabel(iface)}</span>
         {exitOf(data.applied) === name ? <Tag tone="exit">{t('network.tags.exit')}</Tag> : null}
         {data.session === name ? <Tag tone="info">{t('network.tags.session')}</Tag> : null}
-        {editable && !(data.applied.ifaces[name]?.declared ?? true) ? <Tag>{t('network.tags.imageDefault')}</Tag> : null}
+        {!(data.applied.ifaces[name]?.declared ?? true) ? <Tag>{t('network.tags.imageDefault')}</Tag> : null}
         {bridge ? <Tag>{t('network.detail.portOf')} <Link className="font-mono text-primary" to="/network/$name" params={{ name: bridge }}>{bridge}</Link></Tag> : null}
         {iface.kind === 'vlan' && iface.entry.vlan ? <Tag>{t('network.detail.on')} <Link className="font-mono text-primary" to="/network/$name" params={{ name: iface.entry.vlan.parent }}>{iface.entry.vlan.parent}</Link></Tag> : null}
         {vlans.map((vlan) => <Tag key={vlan}>VLAN <Link className="font-mono text-primary" to="/network/$name" params={{ name: vlan }}>{vlan}</Link></Tag>)}
@@ -129,7 +132,6 @@ function Body({ data, name, editing, onEdit }: { data: NetworkData; name: string
   const map = data.staged.map
   const bridge = bridgeOf(map, name)
   const vlans = vlansOn(map, name)
-  const editable = iface.kind !== 'wifi' && iface.kind !== 'wireguard'
   const blockers = [...(vlans.length ? [t('network.detail.blockVlans', { vlans: vlans.join(', ') })] : []), ...(bridge ? [t('network.detail.blockBridge', { bridge })] : [])]
   const physical = iface.kind === 'physical' || iface.kind === 'can'
 
@@ -137,23 +139,15 @@ function Body({ data, name, editing, onEdit }: { data: NetworkData; name: string
     <>
       {data.session === name ? <Callout tone="neutral" title={t('network.detail.sessionTitle', { name })}>{t('network.detail.sessionCopy')}</Callout> : null}
       {applied ? <Observation data={data} name={name} /> : null}
-      {!editable ? (
-        <Section title={t('network.detail.config')}>
-          <Button className="justify-self-start" variant="outline" onClick={() => void navigate({ to: '/network', search: iface.kind === 'wifi' ? { tab: 'wifi' } : { tab: 'wireguard', tunnel: name } })}>
-            {t(iface.kind === 'wifi' ? 'network.detail.onWifi' : 'network.detail.onWireguard')}
-          </Button>
-        </Section>
-      ) : (
-        <Section
-          title={t('network.detail.config')}
-          description={editing ? t('network.detail.editHint') : undefined}
-          editing={editing}
-          action={editing ? undefined : <Button size="sm" onClick={onEdit}>{t('network.detail.edit')}</Button>}
-        >
-          {editing ? <ConfigForm data={data} name={name} /> : <ConfigView data={data} name={name} />}
-        </Section>
-      )}
-      {editable && !editing && (!physical || iface.declared) ? (
+      <Section
+        title={t('network.detail.config')}
+        description={editing ? t('network.detail.editHint') : undefined}
+        editing={editing}
+        action={editing ? undefined : <Button size="sm" onClick={onEdit}>{t('network.detail.edit')}</Button>}
+      >
+        {editing ? <ConfigForm data={data} name={name} /> : <ConfigView data={data} name={name} />}
+      </Section>
+      {!editing && (!physical || iface.declared) ? (
         <Section title={t(physical ? 'network.detail.restore' : 'network.detail.delete')} tone="danger">
           <p className="text-sm text-muted-foreground">
             {iface.kind === 'can' ? t('network.detail.restoreCanCopy') : physical ? t('network.detail.restoreCopy') : iface.kind === 'bridge' && iface.entry.bridge?.ports.length ? t('network.detail.deleteBridgeCopy', { ports: iface.entry.bridge.ports.join(', ') }) : t('network.detail.deleteCopy')}
@@ -194,6 +188,11 @@ function Observation({ data, name }: { data: NetworkData; name: string }) {
         ? t(data.applied.ifaces[entry.vlan?.parent ?? '']?.obs?.carrier ? 'network.detail.parentUp' : 'network.detail.parentDown')
         : t(obs.carrier ? 'network.list.linkUp' : 'network.list.noCable')
   const gateway = obs?.lease?.router ?? (!entry.dhcp && obs?.address ? entry.static?.gateway : undefined)
+  const leaseLeft = (seconds: number) => seconds < 60
+    ? t('network.values.seconds', { count: seconds })
+    : seconds < 3600
+      ? t('network.values.minutes', { count: Math.floor(seconds / 60) })
+      : t('network.values.hoursMinutes', { hours: Math.floor(seconds / 3600), minutes: Math.floor(seconds % 3600 / 60) })
   const facts = iface.kind === 'can'
     ? [
         { id: 'state', label: t('network.fields.state'), value: obs?.can?.busState ? canText.state(obs.can.busState) : obs?.operationalState ?? '—' },
@@ -205,7 +204,7 @@ function Observation({ data, name }: { data: NetworkData; name: string }) {
         { id: 'address', label: t('network.fields.address'), value: obs?.address ? <span><span className="font-mono">{obs.address}</span> <span className="text-muted-foreground">{obs.source}</span></span> : '—' },
         { id: 'gateway', label: t('network.fields.gateway'), value: gateway ?? '—', mono: true },
         { id: 'dns', label: t('network.fields.dns'), value: obs?.dns.length ? obs.dns.join(', ') : '—', mono: true },
-        obs?.lease?.remainingSeconds !== undefined && { id: 'lease', label: t('network.fields.leaseLeft'), value: t('network.values.seconds', { count: obs.lease.remainingSeconds }) },
+        obs?.lease?.remainingSeconds !== undefined && { id: 'lease', label: t('network.fields.leaseLeft'), value: leaseLeft(obs.lease.remainingSeconds) },
         { id: 'mac', label: t('network.fields.mac'), value: obs?.mac ?? '—', mono: true },
         bridgeOf(map, name) && { id: 'bridge', label: t('network.list.memberOf'), value: bridgeOf(map, name), mono: true },
       ]
@@ -285,14 +284,8 @@ function ConfigView({ data, name }: { data: NetworkData; name: string }) {
   )
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="grid gap-2">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      {children}
-    </section>
-  )
-}
+/// What a static port is offered when it names no DNS server.
+const RECOMMENDED_DNS = ['8.8.8.8', '1.1.1.1']
 
 const splitList = (text: string) => text.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean)
 
@@ -351,6 +344,7 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
       <Group title={t('network.detail.preset')}>
         <SegmentedControl<'dhcp' | 'static'>
           label={t('network.detail.preset')}
+          cards
           value={entry.dhcp ? 'dhcp' : 'static'}
           onValueChange={(preset) => (preset === 'dhcp' ? toDhcp : toStatic)()}
           segments={(['dhcp', 'static'] as const).map((preset) => ({ value: preset, label: t(`network.presets.${preset}`) }))}
@@ -386,6 +380,11 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
           <FormField label={t('network.fields.dns')} hint={problems.dns ? <ProblemText problem={problems.dns} /> : t('network.detail.listHint')}>
             {(id) => <ListInput id={id} values={entry.static?.dns} placeholder={t('network.detail.optional')} invalid={Boolean(problems.dns)} onChange={(dns) => set((current) => ({ ...current, static: { address: current.static?.address ?? '', ...current.static, dns } }))} />}
           </FormField>
+          {!entry.static?.dns?.length ? (
+            <Button className="justify-self-start" size="sm" variant="link" onClick={() => set((current) => ({ ...current, static: { address: current.static?.address ?? '', ...current.static, dns: RECOMMENDED_DNS } }))}>
+              {t('network.detail.recommendedDns', { servers: RECOMMENDED_DNS.join(', ') })}
+            </Button>
+          ) : null}
         </Group>
       )}
 

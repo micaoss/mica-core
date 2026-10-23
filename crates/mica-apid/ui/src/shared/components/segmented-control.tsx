@@ -11,16 +11,20 @@ export interface Segment<Value extends string> {
 
 /// An exclusive choice between two or three options, shown in full rather than
 /// behind a select. Replaces the two hand-rolled `role="radiogroup"` widgets,
-/// which had no arrow-key navigation between their buttons.
-export function SegmentedControl<Value extends string>({ value, onValueChange, segments, label }: {
+/// which had no arrow-key navigation between their buttons. `cards` lays the
+/// options out as outlined cards of equal width.
+export function SegmentedControl<Value extends string>({ value, onValueChange, segments, label, cards }: {
   value: Value
   onValueChange: (value: Value) => void
   segments: Segment<Value>[]
   label: string
+  cards?: boolean
 }) {
   return (
     <ToggleGroup
       aria-label={label}
+      variant={cards ? 'outline' : undefined}
+      className={cards ? 'grid w-full max-w-md auto-cols-fr grid-flow-col' : undefined}
       value={[value]}
       onValueChange={(next) => {
         // Single-select: pressing the pressed item yields an empty array, which
@@ -37,6 +41,7 @@ export function SegmentedControl<Value extends string>({ value, onValueChange, s
           value={segment.value}
           aria-label={segment.label}
           title={segment.label}
+          className={cards ? 'w-full' : undefined}
         >
           {segment.icon}
           {segment.labelHidden ? null : segment.label}
