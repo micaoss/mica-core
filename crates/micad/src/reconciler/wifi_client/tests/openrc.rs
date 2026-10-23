@@ -19,7 +19,7 @@ pub(super) async fn on_openrc_the_station_service_is_told_its_interface_and_conf
     assert_eq!(
         std::fs::read_to_string(&env).unwrap(),
         format!(
-            "# Managed by micad from wifi.client. Do not edit.\ninterface=wlan0\nconfig={}\n",
+            "# Managed by micad from wifi.client. Do not edit.\ninterface=wlan0\nconfig={}\nmetric=600\n",
             config.display()
         )
     );

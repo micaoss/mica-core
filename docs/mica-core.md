@@ -150,7 +150,9 @@ Every DHCP link micad renders gets `[DHCPv4] RouteMetric=`: 100 for the first in
 10 more for each next one, so two uplinks never tie. A wired port (`eth*`, not a VLAN) the map
 does not declare gets `60-mica-auto-<iface>.network`, the image's DHCP with its metric, which
 sorts before the image's `80-dhcp.network`; declaring the port removes it. The Wi-Fi client's
-lease has metric 600. A static gateway keeps networkd's metric 0. Once an apply converges, the
+lease has metric 600. A static gateway keeps networkd's metric 0. On OpenRC the same numbers go
+into each DHCP stanza as `metric <n>` and into `/run/mica/wifi-client.env` as `metric=600`, for
+Base's `mica-udhcpc` to give the lease's default route (section 3.8). Once an apply converges, the
 private key of every WireGuard tunnel the map no longer declares is removed; a rolled-back apply
 keeps them, since the units it puts back name them.
 
@@ -197,7 +199,7 @@ live-state tree under its name.
 | Reconciler | systemd | OpenRC |
 | --- | --- | --- |
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
-| `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. VLAN, bridge, WireGuard and routes are refused by name |
+| `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. Each DHCP stanza carries `metric <n>`, the networkd numbers. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. VLAN, bridge, WireGuard and routes are refused by name |
 | `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf` (resolved restarted when it changes) always empties `FallbackDNS=` and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file. Global servers: `/run/mica/resolv.d/global`, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
 | `sshd` | `/run/mica/dropbear.env`, the authorized keys of `root` and `mica`, `dropbear.service` | the same files, `mica-dropbear` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
@@ -337,12 +339,18 @@ The contract between micad and the packages whose services it drives on an OpenR
 | Service | Shipped by | micad writes |
 | --- | --- | --- |
 | `mica-dropbear` | mica-ssh | `/run/mica/dropbear.env` (`DROPBEAR_ARGS`) |
-| `mica-wifi-client` | mica-wifi | `/run/mica/wifi-client.env` (`interface`, `config`) |
+| `mica-wifi-client` | mica-wifi | `/run/mica/wifi-client.env` (`interface`, `config`, `metric`) |
 | `mica-wifi-ap` | mica-wifi-ap | `/run/mica/wifi-ap.env` (`interface`, `config`, `address`, `udhcpd`), `/run/mica/wifi-ap-udhcpd.conf` (pidfile `/run/mica-wifi-ap.udhcpd.pid`) |
 | `mica-bluetoothd` | mica-bluetooth | -- |
 | `mica-ntpd` | mica-openrc | `/run/mica/ntpd.conf` (`ntp_servers`) |
 | `mica-network` | mica-openrc | `/var/lib/mica/network/interfaces` |
 | `docker` | mica-docker | -- |
+
+A DHCP lease's default-route metric reaches Base's udhcpc script, `/usr/lib/mica/mica-udhcpc`,
+as `IF_METRIC` in its environment: busybox ifupdown exports a stanza's `metric <n>` that way to
+the udhcpc it starts, and `mica-wifi-client` passes the `metric` of its environment file the
+same way. The script puts the default route at that metric (`ip -4 route replace default via
+<router> dev <iface> metric <n>`), and at none when `IF_METRIC` is unset or empty.
 
 Failed services are read with mica-openrc's `/usr/lib/mica/mica-init failed`, the log with
 `logread`, and power goes through `openrc-shutdown`.

@@ -14,7 +14,7 @@
 //! networkd's, and an OpenRC device refuses them by name rather than
 //! half-configuring them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -24,7 +24,9 @@ use anyhow::{Result, bail};
 use micad_settings::{CanConfig, IfaceKind, IfaceSettings, Settings, StaticConfig};
 use serde_json::json;
 
-use super::{kind_name, validate_dns_override, validate_iface_name, validate_static};
+use super::{
+    kind_name, route_metrics, validate_dns_override, validate_iface_name, validate_static,
+};
 use crate::openrc::{Commands, Host};
 use crate::reconciler::Reconciler;
 
@@ -167,11 +169,18 @@ fn netmask_v4(prefix: u8) -> String {
 /// asked for no DNS option and the servers go into a resolver file that sorts
 /// before the lease's, so they are the ones a resolver reads first even from a
 /// server that names its own unasked.
-fn dhcp_stanza(out: &mut String, iface: &str, dns: &[String]) {
+///
+/// `metric` is the lease's default-route metric. ifupdown hands every stanza
+/// option to the commands it runs as `IF_<OPTION>`, so udhcpc and Base's
+/// script see it as `IF_METRIC`.
+fn dhcp_stanza(out: &mut String, iface: &str, dns: &[String], metric: Option<u32>) {
     let _ = write!(
         out,
         "\nauto {iface}\niface {iface} inet dhcp\n    script {UDHCPC_SCRIPT}\n"
     );
+    if let Some(metric) = metric {
+        let _ = writeln!(out, "    metric {metric}");
+    }
     if dns.is_empty() {
         let _ = writeln!(out, "    udhcpc_opts -b -S");
         return;
@@ -242,8 +251,9 @@ fn can_stanza(out: &mut String, iface: &str, can: &CanConfig, ip: &Path) {
 }
 
 /// The file for `network`, with DHCP on every wired interface it does not
-/// declare, as mica-systemd's `80-dhcp.network` gives it. `ip` is the one a
-/// CAN stanza runs.
+/// declare, as mica-systemd's `80-dhcp.network` gives it, and each DHCP link's
+/// route metric as networkd's units carry it. `ip` is the one a CAN stanza
+/// runs.
 pub(super) fn render(
     network: &BTreeMap<String, IfaceSettings>,
     wired: &[String],
@@ -253,6 +263,12 @@ pub(super) fn render(
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
          auto lo\niface lo inet loopback\n",
     );
+    let ports: BTreeSet<String> = wired
+        .iter()
+        .filter(|iface| !network.contains_key(*iface))
+        .cloned()
+        .collect();
+    let metrics = route_metrics(network, &BTreeMap::new(), &ports);
     for (iface, cfg) in network {
         if let (Some(can), Some(ip)) = (&cfg.can, ip) {
             can_stanza(&mut out, iface, can, ip);
@@ -260,14 +276,19 @@ pub(super) fn render(
         }
         match &cfg.static_ {
             Some(static_) => static_stanza(&mut out, iface, static_)?,
-            None if cfg.dhcp => dhcp_stanza(&mut out, iface, &cfg.dns),
+            None if cfg.dhcp => dhcp_stanza(
+                &mut out,
+                iface,
+                &cfg.dns,
+                metrics.get(iface.as_str()).copied(),
+            ),
             None => {
                 let _ = write!(out, "\nauto {iface}\niface {iface} inet manual\n");
             }
         }
     }
-    for iface in wired.iter().filter(|iface| !network.contains_key(*iface)) {
-        dhcp_stanza(&mut out, iface, &[]);
+    for iface in &ports {
+        dhcp_stanza(&mut out, iface, &[], metrics.get(iface.as_str()).copied());
     }
     Ok(out)
 }

@@ -98,7 +98,7 @@ impl<C: UnitControl, R: NetworkReload> WifiClientReconciler<C, R> {
 /// told its interface by [`OPENRC_ENV`], because an instance per interface
 /// would be a link in the read-only `/etc/init.d`.
 const OPENRC_UNIT: &str = "mica-wifi-client.service";
-/// What micad tells that service: `interface=` and `config=`.
+/// What micad tells that service: `interface=`, `config=` and `metric=`.
 const OPENRC_ENV: &str = "/run/mica/wifi-client.env";
 /// The configuration on STATE, writable on an OpenRC root, where no mount
 /// binds `/etc/wpa_supplicant`.
@@ -369,10 +369,11 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiClientReconciler<C, R>
             write_config_if_changed(&config_path, &render_config(client)?, CONFIG_MODE)?;
         let (networkd_unit, networkd_changed) = match &self.openrc_env {
             // The service's parameters: a change is a restart, as a changed
-            // configuration is.
+            // configuration is. Base's service hands `metric` to udhcpc and
+            // its script as `IF_METRIC`, as ifupdown does for a wired link.
             Some(env) => {
                 let rendered = format!(
-                    "# Managed by micad from wifi.client. Do not edit.\ninterface={}\nconfig={}\n",
+                    "# Managed by micad from wifi.client. Do not edit.\ninterface={}\nconfig={}\nmetric={ROUTE_METRIC}\n",
                     client.interface,
                     config_path.display()
                 );

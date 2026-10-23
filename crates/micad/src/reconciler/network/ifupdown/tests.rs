@@ -68,11 +68,11 @@ fn dhcp_static_and_unaddressed_interfaces_render_as_ifupdown_stanzas() {
         text,
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
 auto lo\niface lo inet loopback\n\
-\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    udhcpc_opts -b -S\n\
+\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    udhcpc_opts -b -S\n\
 \nauto eth1\niface eth1 inet static\n    address 192.168.1.10\n    netmask 255.255.255.0\n    gateway 192.168.1.1\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/eth1 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n    down rm -f /run/mica/resolv.d/eth1 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n\
 \nauto eth2\niface eth2 inet manual\n\
 \nauto eth3\niface eth3 inet6 static\n    address fd00::2\n    netmask 64\n    gateway fd00::1\n\
-\nauto eth4\niface eth4 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    udhcpc_opts -b -S\n"
+\nauto eth4\niface eth4 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 110\n    udhcpc_opts -b -S\n"
     );
 }
 
@@ -167,7 +167,7 @@ fn a_dhcp_interface_with_its_own_dns_asks_the_lease_for_none() {
         text,
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
 auto lo\niface lo inet loopback\n\
-\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    udhcpc_opts -b -S -o -O subnet -O router -O broadcast\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/00-eth0 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n    down rm -f /run/mica/resolv.d/00-eth0 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n"
+\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    udhcpc_opts -b -S -o -O subnet -O router -O broadcast\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/00-eth0 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n    down rm -f /run/mica/resolv.d/00-eth0 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n"
     );
 }
 
@@ -269,4 +269,38 @@ fn iproute2_is_the_first_ip_present_and_not_busybox() {
     assert_eq!(iproute2_ip(&[&absent, &real]), Some(real.clone()));
     assert_eq!(iproute2_ip(&[&linked, &real]), None);
     assert_eq!(iproute2_ip(&[&absent]), None);
+}
+
+/// Each DHCP link's default route gets its own metric, in name order across
+/// declared and undeclared ports, as networkd's units give them; a static or
+/// CAN link gets none.
+#[test]
+fn dhcp_links_get_distinct_route_metrics_in_name_order() {
+    let network = settings(&[
+        ("eth1", dhcp()),
+        ("eth2", fixed("192.168.1.10/24", Some("192.168.1.1"), &[])),
+    ])
+    .network;
+    let text = render(&network, &["eth0".into(), "eth3".into()], None).unwrap();
+    let metrics: Vec<(&str, &str)> = text
+        .split("\nauto ")
+        .skip(2)
+        .map(|stanza| {
+            let iface = stanza.split('\n').next().unwrap();
+            let metric = stanza
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("metric "))
+                .unwrap_or("-");
+            (iface, metric)
+        })
+        .collect();
+    assert_eq!(
+        metrics,
+        [
+            ("eth1", "110"),
+            ("eth2", "-"),
+            ("eth0", "100"),
+            ("eth3", "120")
+        ]
+    );
 }
