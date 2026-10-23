@@ -66,6 +66,9 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
   const stored = data.applied.ifaces[radio]?.entry ?? { dhcp: true }
   const [draft, setDraft] = useState<Draft>()
   const [confirming, setConfirming] = useState(false)
+  // Where the running access point's key comes from: `derived` is the key on
+  // the label, which applies until the user sets one here.
+  const apState = useQuery({ queryKey: ['state', 'wifiAp'], queryFn: () => api<{ pskSource?: string | null }>('/api/v1/state/wifiAp'), enabled: wifi.mode === 'ap', retry: false })
   useEffect(() => { onEditing(draft !== undefined); return () => onEditing(false) }, [draft, onEditing])
   // A BLE provisioning session holds the radio: the device refuses Wi-Fi
   // writes (423) until it ends.
@@ -139,6 +142,7 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
   return (
     <>
       {locked ? <Callout tone="warning" title={t('network.wifi.locked')} /> : null}
+      {wifi.mode === 'ap' && apState.data?.pskSource === 'derived' ? <Callout tone="warning" title={t('network.wifi.labelKey')} /> : null}
       <Section title={t('network.wifi.state')}>
         <StateFacts data={data} />
       </Section>
@@ -225,8 +229,6 @@ function draftErrors(draft: Draft, data: NetworkData, allowed: number[] | undefi
   if (draft.mode === 'ap') {
     if (new TextEncoder().encode(draft.ssid).length > 32) errors.ssid = t('network.wifi.ssidLong')
     if (draft.security !== 'open' && draft.psk && !(draft.psk.length >= 8 && draft.psk.length <= 63)) errors.psk = t('network.wifi.pskLength')
-    // Without a key in the settings the access point would run on one nobody was shown.
-    if (draft.security !== 'open' && !draft.psk && !data.ap.data?.psk) errors.psk = t('network.wifi.pskRequired')
     const subnet = parseCidr(draft.address)
     if (!subnet) errors.address = t('network.problems.cidr')
     else {

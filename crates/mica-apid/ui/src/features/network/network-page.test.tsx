@@ -369,7 +369,7 @@ describe('the Wi-Fi tab', () => {
     expect(screen.getByRole('button', { name: 'Scan' }).hasAttribute('disabled')).toBe(true)
   })
 
-  it('asks for an access-point password when the device has none', async () => {
+  it('starts an access point without a password of its own, on the key on the label', async () => {
     const fetch = stubFetch({ ...networkRoutes(), '/api/v1/wifi/ap': { ...accessPoint(), psk: undefined }, 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'roles' }, 202) })
     open('wifi')
     await screen.findByText('marina')
@@ -377,13 +377,23 @@ describe('the Wi-Fi tab', () => {
     await userEvent.click(screen.getByRole('switch', { name: 'Wi-Fi' }))
     await userEvent.click(screen.getByRole('button', { name: 'Access point' }))
     await userEvent.click(screen.getByRole('checkbox', { name: 'The device operates in this country' }))
-    expect(await screen.findByText('Required: this device has no access-point password yet.')).toBeTruthy()
     const editing = within(screen.getByRole('region', { name: /Editing/ }))
-    expect(editing.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
-
-    await userEvent.type(screen.getByLabelText('Password'), 'harbour-ap-key')
     await userEvent.click(editing.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect((bodyOf(fetch, 'PUT', '/api/v1/wifi') as { ap: { psk?: string } }).ap.psk).toBe('harbour-ap-key'))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toBeTruthy())
+    expect((bodyOf(fetch, 'PUT', '/api/v1/wifi') as { ap: { psk?: string } }).ap.psk).toBeUndefined()
+  })
+
+  it('recommends a password of its own while the access point runs on the key on the label', async () => {
+    stubFetch({ ...networkRoutes(), '/api/v1/wifi/ap': accessPoint('always'), '/api/v1/state/wifiAp': { pskSource: 'derived' } })
+    open('wifi')
+    expect(await screen.findByText('The access point still uses the password on the label. Set a password of your own.')).toBeTruthy()
+  })
+
+  it('says nothing about the label once the access point has a password of its own', async () => {
+    stubFetch({ ...networkRoutes(), '/api/v1/wifi/ap': accessPoint('always'), '/api/v1/state/wifiAp': { pskSource: 'settings' } })
+    open('wifi')
+    expect(await screen.findByText('No clients are connected.')).toBeTruthy()
+    expect(screen.queryByText(/password on the label/)).toBeNull()
   })
 
   it('starts the access point with one write of both roles', async () => {

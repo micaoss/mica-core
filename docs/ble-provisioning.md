@@ -13,8 +13,9 @@ claims the device, resets it, or touches its services or apps, and none will. Th
 with the claim (`POST /api/v1/setup`) or later in the console.
 
 A device stays unclaimed after BLE provisioning. It is claimed afterwards in the console, on the
-network BLE set up, as on its access point: the console's setup asks for the device code from the
-label and the administrator password (`POST /api/v1/setup`, `docs/mica-core.md` section 4). The
+network BLE set up, as on its access point: the console's setup asks for the device code, which
+is on the label and on the device's own console, and the administrator password, and sets no
+access-point key (`POST /api/v1/setup`, `docs/mica-core.md` section 4). The
 `manual` window on a claimed device exists so that a device that went offline can be put back on a
 network on site.
 
@@ -326,10 +327,10 @@ codes, one to one.
   `["https://192.168.1.40", "https://deck-7.local"]`. An IPv6 address is bracketed. When
   `access.web.mode` is `local` or `off` the console is not on the network and the list is empty;
   the page then says so instead of offering a link.
-- The access point: after `setWifi` the radio is a client and the access point is off (`ap:
-  off`). After a wired-only session on an unclaimed device the access point stays on, with the key
-  derived from the device code, until the device is claimed in the console (`ap: on`); the claim
-  sets its own key.
+- The access point: after a Wi-Fi session (`setWifi`) the radio is a client and the access point
+  is off (`ap: off`). After a wired-only session the access point stays on with the key on the
+  label (`ap: on`), and it keeps that key after the device is claimed, until the user sets one on
+  the console's Wi-Fi page (`docs/factory-ap-key.md`).
 - After `finished` the device closes the window and disconnects.
 
 ## Sessions

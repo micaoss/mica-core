@@ -283,7 +283,7 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
   await expect(page).toHaveURL(/tab=wireguard&tunnel=wg0/)
 })
 
-test('captures the device code, the claim key, BLE provisioning and the pairing window', async ({ page }, testInfo) => {
+test('captures the device code, BLE provisioning and the pairing window', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
   await page.setViewportSize({ width: 1440, height: 1000 })
   // The information tab reads more than the shared mocks answer.
@@ -387,16 +387,64 @@ test('captures the device code, the claim key, BLE provisioning and the pairing 
   await expect(page.getByText('Bluetooth provisioning')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('access-claim-ble.png') })
 
-  // The claim: an optional key, and a generated one shown once.
-  await page.route('**/api/v1/session', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'setup' }) }))
-  await page.route('**/api/v1/setup', (route) => route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ csrfToken: 'e2e-csrf', apPsk: 'K7QM2XWD9HC4TR8N' }) }))
+})
+
+// N8: the claim is the device code, the administrator password and an
+// optional hostname, the same page however the device was reached; the
+// access point keeps the key on the label until one is set on the Wi-Fi
+// page, which says so.
+test('captures the N8 setup page and the label key notice in Chinese', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.addInitScript(() => localStorage.setItem('mica.ui.locale', 'zh-CN'))
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/api/v1/session', (route) => route.fulfill(json({ state: 'setup' })))
+  let posted: unknown
+  await page.route('**/api/v1/setup', (route) => {
+    posted = route.request().postDataJSON()
+    return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ csrfToken: 'e2e-csrf' }) })
+  })
+
+  // From a device BLE put on a network: a desktop browser at its address.
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('./')
-  await page.getByLabel('Admin password').fill('harbour-pw-1')
-  await page.getByLabel('Confirm password').fill('harbour-pw-1')
-  await page.screenshot({ path: testInfo.outputPath('setup.png') })
-  await page.getByRole('button', { name: 'Configure device' }).click()
-  await expect(page.getByTestId('generated-ap-psk')).toHaveText('K7QM2XWD9HC4TR8N')
-  await page.screenshot({ path: testInfo.outputPath('setup-ap-key.png') })
+  await expect(page.getByRole('heading', { name: '设置你的设备' })).toBeVisible()
+  await expect(page.getByText('标签上或设备控制台（串口/显示器登录提示）可见。输错只会让下次尝试稍作等待。')).toBeVisible()
+  await expect(page.getByLabel(/热点密钥/)).toHaveCount(0)
+  await page.getByLabel('设备码').fill('DFN4-L34C-T8N')
+  await page.getByLabel('主机名').fill('deck-7')
+  await page.getByLabel('管理员密码').fill('harbour-pw-1')
+  await page.getByLabel('确认密码').fill('harbour-pw-1')
+  await page.screenshot({ path: testInfo.outputPath('n8-setup-network.png') })
+
+  // From the hotspot: a phone on the access point, the same page.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('./')
+  await page.getByLabel('设备码').fill('DFN4-L34C-T8N')
+  await page.getByLabel('管理员密码').fill('harbour-pw-1')
+  await page.getByLabel('确认密码').fill('harbour-pw-1')
+  await page.screenshot({ path: testInfo.outputPath('n8-setup-hotspot.png'), fullPage: true })
+  await page.getByRole('button', { name: '配置设备' }).click()
+  await expect.poll(() => posted).toEqual({ deviceCode: 'DFN4-L34C-T8N', password: 'harbour-pw-1' })
+
+  // Claimed, on the key on the label: the Wi-Fi page recommends its own.
+  await page.unroute('**/api/v1/session')
+  await page.unroute('**/api/v1/setup')
+  await mockNetworkBench(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.route('**/api/v1/wifi/ap', (route) => route.fulfill(json({ ...(benchPayload('/api/v1/wifi/ap') as object), mode: 'always', ssid: null, psk: undefined })))
+  await page.route('**/api/v1/wifi/client', (route) => route.fulfill(json({ enabled: false, interface: 'wlan0' })))
+  await page.route('**/api/v1/state/wifiAp', (route) => route.fulfill(json({ accessPoint: 'unchanged', ssid: 'mica-789Z', pskSource: 'derived' })))
+  await page.route('**/api/v1/network/status', (route) => {
+    const status = benchPayload('/api/v1/network/status') as Record<string, unknown>
+    return route.fulfill(json({
+      ...status,
+      wifi: { available: true, associations: [] },
+      accessPoint: { available: true, running: true, entries: [{ interface: 'wlan0', channel: 6, frequencyMhz: 2437, stationCount: 1, stations: [{ mac: 'aa:bb:cc:dd:ee:01', signalDbm: -48 }] }] },
+    }))
+  })
+  await page.goto('./network?tab=wifi')
+  await expect(page.getByText('热点仍使用标签上的密码，建议设置自己的密码。')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n8-wifi-label-key.png'), fullPage: true })
 })
 
 test('captures an access point on the fallback channel', async ({ page }, testInfo) => {

@@ -74,8 +74,6 @@ export function LoginView() {
 
 interface SetupResult {
   csrfToken: string
-  /// The access-point key the device generated; answered this once.
-  apPsk?: string
 }
 
 export function SetupView() {
@@ -84,39 +82,21 @@ export function SetupView() {
   const [confirm, setConfirm] = useState('')
   const [deviceCode, setDeviceCode] = useState('')
   const [hostname, setHostname] = useState('')
-  const [apPsk, setApPsk] = useState('')
-  const [generated, setGenerated] = useState<SetupResult | null>(null)
   const queryClient = useQueryClient()
   const enter = (result: SetupResult) => {
     const session: SessionStatus = { state: 'authenticated', csrfToken: result.csrfToken }
     rememberSession(session)
     queryClient.setQueryData(sessionKey, session)
   }
-  // Setup answers with the session it created and, when the device generated
-  // the access point's key, that key, readable nowhere else: the console
-  // stops to show it. Otherwise it enters as soon as the device answers.
+  // Setup answers with the session it created; the console enters on it.
   const setup = useMutation({
     mutationFn: () => api<SetupResult>('/api/v1/setup', json('POST', {
       password,
       ...(deviceCode ? { deviceCode } : {}),
       ...(hostname ? { hostname } : {}),
-      ...(apPsk ? { apPsk } : {}),
     })),
-    onSuccess: (result) => {
-      if (result.apPsk) setGenerated(result)
-      else enter(result)
-    },
+    onSuccess: enter,
   })
-  if (generated?.apPsk) {
-    return (
-      <AuthFrame title={t('auth.setup.generatedTitle')} copy={t('auth.setup.generatedCopy')}>
-        <div className="grid gap-5">
-          <p className="rounded-md border bg-muted px-4 py-3 text-center font-mono text-lg tracking-widest select-all" data-testid="generated-ap-psk">{generated.apPsk}</p>
-          <Button size="lg" onClick={() => enter(generated)}>{t('auth.setup.continue')}</Button>
-        </div>
-      </AuthFrame>
-    )
-  }
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (password !== confirm) return
@@ -138,9 +118,6 @@ export function SetupView() {
           {(id) => <Input id={id} autoComplete="new-password" minLength={8} type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} required />}
         </FormField>
         {password && confirm && password !== confirm ? <Callout tone="danger" title={t('auth.setup.mismatch')} /> : null}
-        <FormField label={t('auth.setup.apPsk')} hint={t('auth.setup.apPskHint')}>
-          {(id) => <Input id={id} autoComplete="off" minLength={8} maxLength={63} value={apPsk} onChange={(event) => setApPsk(event.target.value)} />}
-        </FormField>
         {setup.error ? <Callout tone="danger" title={failureDetail(setup.error, t('common.requestFailed'))} /> : null}
         <Button size="lg" type="submit" disabled={setup.isPending || password !== confirm}>
           {setup.isPending ? t('auth.setup.pending') : t('auth.setup.submit')}
