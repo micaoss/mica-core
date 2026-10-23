@@ -130,7 +130,7 @@ describe('the WireGuard tab', () => {
   it('drops a tunnel that was never applied without asking', async () => {
     stubFetch(networkRoutes())
     open('tab=wireguard')
-    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stage' }))
     expect(await screen.findByText('New · pending')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Undo create' }))

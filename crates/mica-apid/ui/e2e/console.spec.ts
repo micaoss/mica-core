@@ -72,7 +72,7 @@ test('stages an interface edit and applies it through the review dialog', async 
 
   await expect(page.getByRole('heading', { name: 'eth0' })).toBeVisible()
   await page.getByRole('button', { name: 'Edit configuration' }).click()
-  await page.getByRole('button', { name: 'Static' }).click()
+  await page.getByRole('button', { name: 'Static IP address' }).click()
   await page.getByRole('textbox', { name: 'Address' }).fill('192.168.1.24/24')
   await page.getByRole('button', { name: 'Done' }).click()
   await page.getByRole('button', { name: 'Review and apply' }).click()
@@ -155,7 +155,7 @@ test('captures the review of a VLAN that takes its parent over', async ({ page }
   test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('./network')
-  await page.getByRole('button', { name: 'Add' }).click()
+  await page.getByRole('button', { name: 'Add interface' }).click()
   const wizard = page.getByRole('dialog')
   await wizard.getByRole('button', { name: 'VLAN' }).click()
   await wizard.getByRole('combobox').click()
@@ -560,7 +560,7 @@ test('keeps a tall dialog inside a short appliance screen', async ({ page }, tes
   // stay on screen.
   await page.setViewportSize({ width: 1024, height: 520 })
   await page.goto('./network')
-  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await page.getByRole('button', { name: 'Add interface', exact: true }).click()
 
   const dialog = page.locator('[data-slot=dialog-content]')
   const box = (await dialog.boundingBox())!

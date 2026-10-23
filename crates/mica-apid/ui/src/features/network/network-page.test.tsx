@@ -30,7 +30,7 @@ describe('the network page', () => {
     expect(screen.queryByRole('tab', { name: 'Bluetooth' })).toBeNull()
     expect(screen.getByRole('tab', { name: 'WireGuard' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Overview' })).toBeTruthy()
-    expect(screen.getByRole('tab', { name: 'DNS' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Global DNS' })).toBeTruthy()
   })
 
   it('offers no tunnels and no new interfaces on OpenRC', async () => {
@@ -38,7 +38,7 @@ describe('the network page', () => {
     open()
     await screen.findByRole('link', { name: 'eth0' })
     await waitFor(() => expect(screen.queryByRole('tab', { name: 'WireGuard' })).toBeNull())
-    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add interface' })).toBeNull()
   })
 
   it('groups the interfaces by role and leaves the loopback out', async () => {
@@ -71,7 +71,7 @@ describe('the network page', () => {
       '/api/v1/health': { apid: 'ok', micad: 'ok' },
     })
     open('wireguard')
-    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
     const wizard = await screen.findByRole('dialog')
     await userEvent.click(within(wizard).getByRole('button', { name: 'Stage' }))
 
@@ -95,7 +95,7 @@ describe('the network page', () => {
   it('offers a new tunnel a port no service on the device holds', async () => {
     stubFetch({ ...networkRoutes(), '/api/v1/network/wireguard/defaults': { name: 'wg1', address: '10.2.0.1/24', listenPort: 51822, udpPortsInUse: [51821] } })
     open('wireguard')
-    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
     const wizard = await screen.findByRole('dialog')
     const port = within(wizard).getByLabelText('Listen port')
     await waitFor(() => expect((port as HTMLInputElement).value).toBe('51822'))
@@ -116,7 +116,7 @@ describe('the network page', () => {
       '/api/v1/health': { apid: 'ok', micad: 'ok' },
     })
     open('wireguard')
-    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stage' }))
     const bar = await screen.findByRole('region', { name: 'Pending network changes' })
     await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
@@ -137,7 +137,7 @@ describe('the network page', () => {
       'PUT /api/v1/network': () => jsonResponse({ error: { code: 'version_conflict', message: 'the network map changed since it was read', path: 'network' } }, 409),
     })
     open('wireguard')
-    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stage' }))
     const bar = await screen.findByRole('region', { name: 'Pending network changes' })
     await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
@@ -185,7 +185,7 @@ describe('the network page', () => {
       } }, 422),
     })
     open('wireguard')
-    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stage' }))
     const bar = await screen.findByRole('region', { name: 'Pending network changes' })
     await userEvent.click(within(bar).getByRole('button', { name: 'Review and apply' }))
@@ -520,7 +520,7 @@ describe('the Wi-Fi tab as a client', () => {
     open('wifi')
     await screen.findByText('-52 dBm · Strong')
     await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Static' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Static IP address' }))
     await userEvent.type(screen.getByLabelText('Address'), '192.168.30.5/24')
     await userEvent.type(screen.getByLabelText('Gateway'), '10.0.0.1')
     const bar = screen.getByRole('region', { name: /Editing/ })
@@ -562,7 +562,7 @@ describe('the add-interface wizard', () => {
   it('names a VLAN after its parent and refuses an ID out of range', async () => {
     stubFetch(networkRoutes())
     open()
-    await userEvent.click(await screen.findByRole('button', { name: 'Add' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add interface' }))
     const wizard = await screen.findByRole('dialog')
     await userEvent.click(within(wizard).getByRole('button', { name: 'VLAN' }))
     const id = within(wizard).getByLabelText('VLAN ID')

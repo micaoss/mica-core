@@ -186,9 +186,9 @@ export const en = {
   network: {
     title: 'Network',
     statusUnavailable: 'The device\'s observed network state could not be read; status shown here may be stale.',
-    tabs: { overview: 'Overview', interfaces: 'Interfaces', wifi: 'Wi-Fi', dns: 'DNS', wireguard: 'WireGuard', bluetooth: 'Bluetooth' },
-    roles: { phys: 'Ethernet ports', lan: 'Bridges & VLANs', wlan: 'Wireless', vpn: 'Tunnels', field: 'Field buses' },
-    kinds: { physical: 'Ethernet', bridge: 'Bridge', vlan: 'VLAN', vlanId: 'VLAN {{id}}', wireguard: 'WireGuard', can: 'CAN', wifi: 'Wi-Fi' },
+    tabs: { overview: 'Overview', interfaces: 'Interfaces', wifi: 'Wi-Fi', dns: 'Global DNS', wireguard: 'WireGuard', bluetooth: 'Bluetooth' },
+    roles: { phys: 'Ethernet ports', lan: 'Virtual ports', wlan: 'Wireless', vpn: 'Tunnels', field: 'Field buses' },
+    kinds: { physical: 'Ethernet port', bridge: 'Bridge', vlan: 'VLAN', vlanId: 'VLAN {{id}}', wireguard: 'WireGuard', can: 'CAN', wifi: 'Wi-Fi' },
     status: {
       acquiring: 'Acquiring address',
       apDown: 'Access point down',
@@ -300,9 +300,9 @@ export const en = {
       static: 'Static',
     },
     presets: {
-      dhcp: 'DHCP',
+      dhcp: 'DHCP (automatic)',
       dhcpCopy: 'Address, gateway and DNS come from the network.',
-      static: 'Static',
+      static: 'Static IP address',
       staticCopy: 'A fixed address you set.',
     },
     tags: {
@@ -315,10 +315,10 @@ export const en = {
       session: 'This session',
     },
     list: {
-      add: 'Add',
+      add: 'Add interface',
       byBridge: 'via {{bridge}}',
-      count: '{{count}} interfaces',
-      count_one: '1 interface',
+      count: '{{count}} interfaces in total',
+      count_one: '1 interface in total',
       linkUp: 'Link up',
       memberOf: 'Member of',
       missing: 'Not present on the device',
