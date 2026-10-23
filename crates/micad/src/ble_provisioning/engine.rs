@@ -15,6 +15,7 @@ use std::time::Instant;
 use aws_lc_rs::agreement;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use micad_settings::{WebMode, WebSettings};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
@@ -65,6 +66,8 @@ pub struct Facts {
     pub model: String,
     pub auto_when_offline: bool,
     pub has_wifi: bool,
+    /// `access.web`: where the console is served, for `finished`'s URLs.
+    pub web: WebSettings,
 }
 
 /// The device side of the operations.
@@ -1010,7 +1013,7 @@ impl Engine {
             let facts = device.facts().await;
             let hostname = facts.hostname;
             let status = device.status().await;
-            let (interface, urls) = console(&status, reached.as_ref(), &hostname);
+            let (interface, urls) = console(&status, reached.as_ref(), &hostname, &facts.web);
             json!({
                 "event": "finished",
                 "claimed": facts.claimed,
@@ -1226,7 +1229,12 @@ impl Engine {
 /// The interface `finished` names, from `getStatus`'s `status`: the one the
 /// session brought up, else the first with an address, Ethernet first; and
 /// the console's addresses on it.
-fn console(status: &Value, reached: Option<&Reached>, hostname: &str) -> (Value, Vec<String>) {
+fn console(
+    status: &Value,
+    reached: Option<&Reached>,
+    hostname: &str,
+    web: &WebSettings,
+) -> (Value, Vec<String>) {
     let interfaces = status["interfaces"].as_array().cloned().unwrap_or_default();
     let found = match reached {
         Some(Reached::Wired(name)) => interfaces.iter().find(|link| link["name"] == name.as_str()),
@@ -1236,17 +1244,47 @@ fn console(status: &Value, reached: Option<&Reached>, hostname: &str) -> (Value,
             .filter(|link| link["address"].is_string())
             .min_by_key(|link| link["kind"] != "ethernet"),
     };
-    let mut urls = Vec::new();
-    if let Some(address) = found.and_then(|link| link["address"].as_str()) {
-        let host = address.split('/').next().unwrap_or(address);
-        urls.push(format!("http://{host}"));
-    }
-    urls.push(format!("http://{hostname}.local"));
+    let host = found
+        .and_then(|link| link["address"].as_str())
+        .map(|address| address.split('/').next().unwrap_or(address));
+    let urls = console_urls(web, host, hostname);
     let interface = found.map_or(
         Value::Null,
         |link| json!({ "name": link["name"], "kind": link["kind"], "address": link["address"] }),
     );
     (interface, urls)
+}
+
+/// The console at `host`, when there is one, and at `<hostname>.local`, as
+/// `web` serves it: HTTPS on its port when enabled, else HTTP on its port, the
+/// port left out where it is the scheme's own. None when apid serves no
+/// network (`local` or `off`).
+pub(super) fn console_urls(web: &WebSettings, host: Option<&str>, hostname: &str) -> Vec<String> {
+    if web.mode != WebMode::Network {
+        return Vec::new();
+    }
+    let (scheme, port, default) = if web.https_enabled {
+        ("https", web.https_port, 443)
+    } else {
+        ("http", web.http_port, 80)
+    };
+    let port = if port == default {
+        String::new()
+    } else {
+        format!(":{port}")
+    };
+    let local = format!("{hostname}.local");
+    host.map(|host| {
+        if host.contains(':') {
+            format!("[{host}]")
+        } else {
+            host.to_string()
+        }
+    })
+    .into_iter()
+    .chain([local])
+    .map(|host| format!("{scheme}://{host}{port}"))
+    .collect()
 }
 
 /// Milliseconds since `since`.

@@ -167,7 +167,7 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
           <span className="grid gap-2">
             {turningOff ? <span>{t(wifi.mode === 'ap' ? 'network.wifi.offApCopy' : 'network.wifi.offClientCopy', { radio })}</span> : null}
             {modeChanged ? <span>{t('network.wifi.switchCopy', { from: t(`network.wifi.modes.${wifi.mode}`) })}</span> : null}
-            {modeChanged && draft?.mode === 'client' ? <span>{t('network.wifi.reachCopy', { host: `${data.hostname ?? 'mica'}.local` })}</span> : null}
+            {modeChanged && draft?.mode === 'client' ? <span>{t('network.wifi.reachCopy', { host: `${window.location.protocol}//${data.hostname ?? 'mica'}.local${window.location.port ? `:${window.location.port}` : ''}` })}</span> : null}
             {openNow ? <span className="text-destructive">{t('network.wifi.openCopy')}</span> : null}
             {onSession ? <span className="text-destructive">{t('network.wifi.sessionCopy')}</span> : null}
           </span>

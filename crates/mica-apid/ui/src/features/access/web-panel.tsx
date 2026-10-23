@@ -19,9 +19,11 @@ import { leaveConsole, type WebMode } from './api-gone'
 /// How long the page waits for apid to come back on its new listener.
 const MOVE_DELAY_MS = 4000
 
-/// Where the console answers after `web` takes effect, on this host.
+/// Where the console answers after `web` takes effect, on this host; the port
+/// is left out where it is the scheme's own.
 export function consoleUrl(web: WebConfiguration, hostname: string) {
-  return web.httpsEnabled ? `https://${hostname}:${web.httpsPort}/` : `http://${hostname}:${web.httpPort}/`
+  const [scheme, port, standard] = web.httpsEnabled ? ['https', web.httpsPort, 443] : ['http', web.httpPort, 80]
+  return `${scheme}://${hostname}${port === standard ? '' : `:${port}`}/`
 }
 
 /// Who reaches the API, and where the console listens. A save restarts apid

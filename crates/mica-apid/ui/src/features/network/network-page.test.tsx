@@ -456,6 +456,8 @@ describe('the Wi-Fi tab', () => {
 
     const confirm = await screen.findByRole('alertdialog')
     expect(within(confirm).getByText('Switch to client?')).toBeTruthy()
+    const port = window.location.port ? `:${window.location.port}` : ''
+    expect(within(confirm).getByText(new RegExp(`at ${window.location.protocol}//[\\w-]+\\.local${port}\\.$`))).toBeTruthy()
     await userEvent.click(within(confirm).getByRole('button', { name: 'Switch and save' }))
 
     await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client' }))

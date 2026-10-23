@@ -317,9 +317,15 @@ codes, one to one.
   hostname, for the `.local` address;
   `interface`, `{name, kind, address}` of the port the session brought up (the
   `ethernet` port of `up`, or the `wifi` port after `connected`), else of the first port with an
-  address, Ethernet first, or null; and `consoleUrls`, `http://<address>` when there is an
-  address and `http://<hostname>.local`; and `ap`, `on` or `off`, whether the device's access
-  point is on, so the page can tell the user.
+  address, Ethernet first, or null; `consoleUrls`, the console at that address when there is
+  one and at `<hostname>.local`; and `ap`, `on` or `off`, whether the device's access point is
+  on, so the page can tell the user.
+- `consoleUrls` follow `access.web`: `https` and `httpsPort` when HTTPS is enabled, else `http`
+  and `httpPort`, the port left out only where it is the scheme's own (80, 443). With the
+  defaults, `["http://192.168.1.40:8080", "http://deck-7.local:8080"]`; with HTTPS on 443,
+  `["https://192.168.1.40", "https://deck-7.local"]`. An IPv6 address is bracketed. When
+  `access.web.mode` is `local` or `off` the console is not on the network and the list is empty;
+  the page then says so instead of offering a link.
 - The access point: after `setWifi` the radio is a client and the access point is off (`ap:
   off`). After a wired-only session on an unclaimed device the access point stays on, with the key
   derived from the device code, until the device is claimed in the console (`ap: on`); the claim

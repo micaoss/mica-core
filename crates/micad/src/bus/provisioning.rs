@@ -63,6 +63,7 @@ impl MicadService {
             model: model.unwrap_or_else(|| "mica".to_string()),
             auto_when_offline: settings.bluetooth.provisioning.auto_when_offline,
             has_wifi: self.features.has(Feature::Wifi),
+            web: settings.access.web,
         }
     }
 

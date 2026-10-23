@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use aws_lc_rs::{agreement, digest};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use micad_settings::{WebMode, WebSettings};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
@@ -186,6 +187,7 @@ impl Bench {
             model: "mica cx3576".into(),
             auto_when_offline: true,
             has_wifi: true,
+            web: WebSettings::default(),
         };
         let device = Arc::new(FakeDevice::default());
         *device.facts.lock().unwrap() = facts.clone();
@@ -493,7 +495,7 @@ async fn an_unclaimed_device_joins_wi_fi_and_stays_unclaimed() {
             "claimed": false,
             "hostname": "mica-a4e2e69e",
             "interface": { "name": "wlan0", "kind": "wifi", "address": "192.168.1.40/24" },
-            "consoleUrls": ["http://192.168.1.40", "http://mica-a4e2e69e.local"],
+            "consoleUrls": ["http://192.168.1.40:8080", "http://mica-a4e2e69e.local:8080"],
             "ap": "off",
         })]
     );
@@ -593,7 +595,7 @@ async fn an_unclaimed_device_is_set_up_over_its_wired_port() {
     );
     assert_eq!(
         finished[0]["consoleUrls"],
-        json!(["http://10.0.0.5", "http://mica-a4e2e69e.local"])
+        json!(["http://10.0.0.5:8080", "http://mica-a4e2e69e.local:8080"])
     );
     bench.pump().await;
     assert_eq!(
@@ -967,4 +969,49 @@ async fn auto_when_offline_switched_off_keeps_the_offline_window_shut() {
     bench.device.facts.lock().unwrap().auto_when_offline = true;
     bench.tick(1).await;
     assert_eq!(bench.last_advert().as_deref(), Some("mica-a4e2e69e"));
+}
+
+/// The console's addresses follow `access.web`: its scheme and port, the port
+/// left out only where it is the scheme's own, and none when apid serves no
+/// network.
+#[test]
+fn console_urls_follow_the_web_listeners() {
+    let urls = |web: WebSettings, host: Option<&str>| console_urls(&web, host, "deck-7");
+    let defaults = WebSettings::default();
+    assert_eq!(
+        urls(defaults, Some("192.168.1.40")),
+        ["http://192.168.1.40:8080", "http://deck-7.local:8080"]
+    );
+    assert_eq!(urls(defaults, None), ["http://deck-7.local:8080"]);
+    let https = WebSettings {
+        https_enabled: true,
+        ..defaults
+    };
+    assert_eq!(
+        urls(https, Some("192.168.1.40")),
+        ["https://192.168.1.40:8443", "https://deck-7.local:8443"]
+    );
+    assert_eq!(
+        urls(
+            WebSettings {
+                https_port: 443,
+                ..https
+            },
+            Some("192.168.1.40")
+        ),
+        ["https://192.168.1.40", "https://deck-7.local"]
+    );
+    assert_eq!(
+        urls(
+            WebSettings {
+                http_port: 80,
+                ..defaults
+            },
+            Some("fd00::5")
+        ),
+        ["http://[fd00::5]", "http://deck-7.local"]
+    );
+    for mode in [WebMode::Local, WebMode::Off] {
+        assert!(urls(WebSettings { mode, ..defaults }, Some("192.168.1.40")).is_empty());
+    }
 }

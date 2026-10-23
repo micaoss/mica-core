@@ -78,5 +78,7 @@ describe('the web console panel', () => {
   it('addresses the console by the listener that serves it', () => {
     expect(consoleUrl(defaults, 'mica.local')).toBe('http://mica.local:8080/')
     expect(consoleUrl({ ...defaults, httpsEnabled: true }, 'mica.local')).toBe('https://mica.local:8443/')
+    expect(consoleUrl({ ...defaults, httpPort: 80 }, 'mica.local')).toBe('http://mica.local/')
+    expect(consoleUrl({ ...defaults, httpsEnabled: true, httpsPort: 443 }, 'mica.local')).toBe('https://mica.local/')
   })
 })
