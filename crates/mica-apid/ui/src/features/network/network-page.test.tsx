@@ -214,10 +214,26 @@ describe('the network page', () => {
     expect(within(screen.getAllByRole('button', { name: 'eth0' })[0].parentElement!).queryByText('LAN only')).toBeNull()
   })
 
-  it('lists every IPv4 route of the main table with its source on the overview', async () => {
+  it('leads from the overview to the route table', async () => {
     stubFetch(networkRoutes())
-    open('overview')
-    expect(await screen.findByText('Routes · 6 · default via eth0')).toBeTruthy()
+    const { router } = open('overview')
+    const link = await screen.findByRole('button', { name: 'View route table' })
+    expect(screen.queryByRole('table')).toBeNull()
+    await userEvent.click(link)
+    await waitFor(() => expect(router.state.location.href).toBe('/network?tab=routes'))
+  })
+
+  it('places the routes tab between the interfaces and Wi-Fi, on OpenRC too', async () => {
+    stubFetch({ ...networkRoutes(), '/api/v1/meta': { api: 'v1', features: ['wifi'], init: 'openrc' } })
+    open()
+    await screen.findByRole('link', { name: 'eth0' })
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Overview', 'Interfaces', 'Routes', 'Wi-Fi', 'Global DNS'])
+  })
+
+  it('lists every IPv4 route of the main table with its source on the routes tab', async () => {
+    stubFetch(networkRoutes())
+    open('routes')
+    expect(await screen.findByText('6 · default via eth0')).toBeTruthy()
     const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1)
     expect(rows.map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))).toEqual([
       ['default', '192.168.1.1', 'eth0', '1024', 'DHCP'],
@@ -235,8 +251,8 @@ describe('the network page', () => {
     const eth1 = status.interfaces.entries!.find((entry) => entry.name === 'eth1')!
     for (let at = 0; at < 20; at++) eth1.routes!.push({ dest: `10.${100 + at}.0.0/16`, via: '192.168.10.2', source: 'static', protocol: 'static', table: 'main', family: 'ipv4' })
     stubFetch(networkRoutes(configured(), status))
-    open('overview')
-    expect(await screen.findByText('Routes · 26 · default via eth0')).toBeTruthy()
+    open('routes')
+    expect(await screen.findByText('26 · default via eth0')).toBeTruthy()
     expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(21)
     await userEvent.click(screen.getByRole('button', { name: 'Show all 26 routes' }))
     expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(27)
@@ -258,6 +274,7 @@ describe('the network page', () => {
     expect(screen.getByText('Standby wlan0')).toBeTruthy()
     expect(screen.getByText('Uplink eth0').closest('button')!.className).toContain('bg-primary')
     expect(screen.getByText('Standby wlan0').closest('button')!.className).toContain('bg-muted')
+    await userEvent.click(screen.getByRole('button', { name: 'View route table' }))
     const defaults = within(screen.getByRole('table')).getAllByRole('row').slice(1, 3)
     expect(defaults.map((row) => [within(row).getAllByRole('cell')[2].textContent, within(row).getByText(/In use|Standby/).textContent])).toEqual([['eth0', 'In use'], ['wlan0', 'Standby']])
   })
@@ -617,5 +634,54 @@ describe('the add-interface wizard', () => {
     await userEvent.clear(id)
     await userEvent.type(id, '20')
     expect((within(wizard).getByLabelText('Name') as HTMLInputElement).value).toBe('eth0-20')
+  })
+})
+
+describe('the static routes on the routes tab', () => {
+  const routed = () => ({ ...configured(), eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, routes: [{ destination: '10.20.0.0/16', gateway: '192.168.10.2' }] } })
+  const rows = (table: HTMLElement) => within(table).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell').slice(0, 4).map((cell) => cell.textContent))
+
+  it('lists them across interfaces and stages a new one', async () => {
+    stubFetch(networkRoutes(routed()))
+    open('routes')
+    const card = await screen.findByRole('region', { name: 'Static routes' })
+    expect(rows(await within(card).findByRole('table'))).toEqual([['10.20.0.0/16', '192.168.10.2', 'eth1', '0']])
+    await userEvent.click(within(card).getByRole('button', { name: 'Add static route' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add static route' })
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Destination' }), '10.30.0.0/16')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Gateway' }), '192.168.1.2')
+    await userEvent.clear(within(dialog).getByRole('textbox', { name: 'Metric' }))
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Metric' }), '5')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Stage' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(rows(within(card).getByRole('table'))).toEqual([['10.30.0.0/16', '192.168.1.2', 'eth0', '5'], ['10.20.0.0/16', '192.168.10.2', 'eth1', '0']])
+    expect(within(card).getByText('Pending')).toBeTruthy()
+    expect(await screen.findByRole('region', { name: 'Pending network changes' })).toBeTruthy()
+  })
+
+  it('refuses the default route in the form', async () => {
+    stubFetch(networkRoutes(routed()))
+    open('routes')
+    const card = await screen.findByRole('region', { name: 'Static routes' })
+    await userEvent.click(await within(card).findByRole('button', { name: 'Add static route' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add static route' })
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Destination' }), '0.0.0.0/0')
+    expect(within(dialog).getByText('The default route follows each interface\'s gateway; set the gateway on the interface instead.')).toBeTruthy()
+    expect((within(dialog).getByRole('button', { name: 'Stage' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('edits and deletes a route in the change set', async () => {
+    stubFetch(networkRoutes(routed()))
+    open('routes')
+    const card = await screen.findByRole('region', { name: 'Static routes' })
+    await userEvent.click(await within(card).findByRole('button', { name: 'Edit 10.20.0.0/16' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit static route' })
+    expect((within(dialog).getByRole('textbox', { name: 'Gateway' }) as HTMLInputElement).value).toBe('192.168.10.2')
+    await userEvent.clear(within(dialog).getByRole('textbox', { name: 'Gateway' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Stage' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(rows(within(card).getByRole('table'))).toEqual([['10.20.0.0/16', 'on-link', 'eth1', '0']])
+    await userEvent.click(within(card).getByRole('button', { name: 'Delete 10.20.0.0/16' }))
+    expect(within(card).getByText('No static routes.')).toBeTruthy()
   })
 })

@@ -858,7 +858,11 @@ fetch, import of an uploaded `.micaupd`, install, install of the newest release,
 policy); provisioning status and claim; credential recovery and reset; the factory reset;
 diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
 `PUT /api/v1/network/{iface}` takes a CAN entry like any other, and the console's network page
-edits a CAN interface's bit rate, restart delay, CAN FD and data bit rate. A network write that
+edits a CAN interface's bit rate, restart delay, CAN FD and data bit rate. Its routes tab shows
+the main table's IPv4 routes and edits every interface's `routes` in one list (destination,
+optional gateway, interface, metric), staged with the other network changes; it refuses a
+`0.0.0.0/0` route, as the default route follows each interface's gateway, and an interface's own
+page lists its routes read-only. A network write that
 removes a WireGuard tunnel records `wireguard-delete` `accepted` in the audit ring, once per
 tunnel and without its name. A write is refused `port_in_use` when a tunnel's listen port is
 another tunnel's or, for a new or changed port, held by a userspace UDP socket on the device

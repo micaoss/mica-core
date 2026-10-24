@@ -209,4 +209,15 @@ describe('a CAN bus', () => {
     expect(screen.queryByText('error-active')).toBeNull()
     expect(screen.getByText('This drops the CAN settings this console made and returns the bus to the image\'s default.')).toBeTruthy()
   })
+
+  it('shows the routes read-only and leads to the routes tab to manage them', async () => {
+    stubFetch(networkRoutes({ ...configured(), eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, routes: [{ destination: '10.20.0.0/16', gateway: '192.168.10.2', metric: 5 }] } }))
+    const { router } = open('eth1')
+    expect(await screen.findByText('10.20.0.0/16 → 192.168.10.2 · metric 5')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    expect(screen.queryByRole('button', { name: 'Add route' })).toBeNull()
+    expect(screen.getByText('10.20.0.0/16 → 192.168.10.2 · metric 5')).toBeTruthy()
+    await userEvent.click(screen.getByRole('link', { name: 'Manage on the routes page' }))
+    await waitFor(() => expect(router.state.location.href).toBe('/network?tab=routes'))
+  })
 })

@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { NetworkPage } from '@/features/network/network-page'
 
-const TABS = ['overview', 'interfaces', 'wifi', 'dns', 'wireguard', 'bluetooth'] as const
+const TABS = ['overview', 'interfaces', 'routes', 'wifi', 'dns', 'wireguard', 'bluetooth'] as const
 
 // The tab and the open tunnel live in the URL, so a link or a reload lands on
 // the same view.

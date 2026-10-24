@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate, useParams } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { Plus, X } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
 import { FactList } from '@/shared/components/fact-list'
@@ -268,11 +267,7 @@ function ConfigView({ data, name }: { data: NetworkData; name: string }) {
           ]} />
         </Group>
       ) : null}
-      {!bridge && iface.kind !== 'can' && !data.openrc ? (
-        <Group title={t('network.fields.routes')}>
-          {entry.routes?.length ? <div className="grid gap-1 font-mono text-sm">{entry.routes.map((route) => <span key={`${route.destination}-${route.gateway ?? ''}`}>{route.destination} → {route.gateway || t('network.values.onLink')}</span>)}</div> : <p className="text-sm text-muted-foreground">{t('network.values.none')}</p>}
-        </Group>
-      ) : null}
+      {!bridge && iface.kind !== 'can' ? <RoutesView data={data} name={name} /> : null}
     </div>
   )
 }
@@ -432,7 +427,7 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
         </Group>
       ) : null}
 
-      {!data.openrc ? <RoutesForm data={data} name={name} problems={problems} /> : null}
+      {!bridgeOf(map, name) ? <RoutesView data={data} name={name} problem={problems.routes} /> : null}
     </div>
   )
 }
@@ -447,22 +442,19 @@ function InternetRow({ entry, internal, onChange }: { entry: IfaceEntry; interna
   )
 }
 
-function RoutesForm({ data, name, problems }: { data: NetworkData; name: string; problems: Problems }) {
+/// An interface's static routes, which the routes tab edits.
+function RoutesView({ data, name, problem }: { data: NetworkData; name: string; problem?: Problem }) {
   const { t } = useTranslation()
-  const iface = data.staged.ifaces[name]
-  const routes = iface.entry.routes ?? []
-  const set = (next: NonNullable<IfaceEntry['routes']>) => updateChangeSet((current) => stageSet(current, name, iface.kind, (entry) => ({ ...entry, routes: next })))
+  const routes = data.staged.ifaces[name].entry.routes ?? []
   return (
     <Group title={t('network.fields.routes')}>
-      {routes.map((route, index) => (
-        <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-center gap-2 sm:grid-cols-[200px_200px_auto] sm:justify-start">
-          <Input className="font-mono" aria-label={t('network.detail.routeDestination')} value={route.destination} placeholder="10.20.0.0/16" onChange={(event) => set(routes.map((row, at) => at === index ? { ...row, destination: event.target.value.trim() } : row))} />
-          <Input className="font-mono" aria-label={t('network.detail.routeVia')} value={route.gateway ?? ''} placeholder={t('network.detail.routeOnLink')} onChange={(event) => set(routes.map((row, at) => { if (at !== index) return row; const next = { ...row }; const value = event.target.value.trim(); if (value) next.gateway = value; else delete next.gateway; return next }))} />
-          <Button size="icon-sm" variant="ghost" aria-label={t('common.actions.delete')} onClick={() => set(routes.filter((_, at) => at !== index))}><X /></Button>
+      {routes.length ? (
+        <div className="grid gap-1 font-mono text-sm">
+          {routes.map((route) => <span key={`${route.destination}-${route.gateway ?? ''}`}>{route.destination} → {route.gateway || t('network.values.onLink')}{route.metric ? ` · ${t('network.routes.metricValue', { metric: route.metric })}` : ''}</span>)}
         </div>
-      ))}
-      {problems.routes ? <ProblemText problem={problems.routes} /> : routes.length ? <p className="text-sm text-muted-foreground">{t('network.detail.routesHint')}</p> : null}
-      <Button className="justify-self-start" size="sm" variant="outline" onClick={() => set([...routes, { destination: '' }])}><Plus />{t('network.detail.addRoute')}</Button>
+      ) : <p className="text-sm text-muted-foreground">{t('network.values.none')}</p>}
+      {problem ? <ProblemText problem={problem} /> : null}
+      <Link className="justify-self-start text-sm text-primary hover:underline" to="/network" search={{ tab: 'routes' }}>{t('network.routes.manage')}</Link>
     </Group>
   )
 }

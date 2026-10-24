@@ -10,11 +10,12 @@ import { ChangeBar } from './change-bar'
 import { DnsTab } from './dns-tab'
 import { InterfacesTab } from './interfaces-tab'
 import { OverviewTab } from './overview-tab'
+import { RoutesTab } from './routes-tab'
 import { useNetwork } from './use-network'
 import { WifiTab } from './wifi-tab'
 import { WireguardTab } from './wireguard-tab'
 
-export const NETWORK_TABS = ['overview', 'interfaces', 'wifi', 'dns', 'wireguard', 'bluetooth'] as const
+export const NETWORK_TABS = ['overview', 'interfaces', 'routes', 'wifi', 'dns', 'wireguard', 'bluetooth'] as const
 export type NetworkTab = typeof NETWORK_TABS[number]
 
 /// The network area: what the device runs, each interface, and the radios
@@ -47,6 +48,7 @@ export function NetworkPage() {
         </TabsList>
         <TabsContent value="overview" className="grid gap-4 pt-4"><OverviewTab data={data} onTab={select} /></TabsContent>
         <TabsContent value="interfaces" className="grid gap-4 pt-4"><InterfacesTab data={data} /></TabsContent>
+        <TabsContent value="routes" className="grid gap-4 pt-4"><RoutesTab data={data} /></TabsContent>
         {data.serves('wifi') ? <TabsContent value="wifi" className="grid gap-4 pt-4"><WifiTab data={data} onEditing={setCardEditing} /></TabsContent> : null}
         <TabsContent value="dns" className="grid gap-4 pt-4"><DnsTab data={data} onEditing={setCardEditing} /></TabsContent>
         {!data.openrc ? <TabsContent value="wireguard" className="grid gap-4 pt-4"><WireguardTab data={data} tunnel={search.tunnel} onEditing={setCardEditing} /></TabsContent> : null}

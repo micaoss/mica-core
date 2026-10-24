@@ -1,21 +1,19 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Globe } from 'lucide-react'
+import { Globe } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import type { StatusTone } from '@/shared/components/status-badge'
-import { DataTable } from '@/shared/components/data-table'
-import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { dnsLinks, ProbeText, useDns } from './dns-tab'
 import { bridgeOf, usesInternet, vlansOn } from './model'
 import { Led, Tag, useKindLabel, useStatusText, useWifiText } from './parts'
 import type { NetworkData } from './use-network'
-import { computeStatus, exitOf, internalPort, routeTable, type IfaceStatus, type RouteRow } from './view'
+import { computeStatus, exitOf, internalPort, type IfaceStatus } from './view'
 import type { NetworkTab } from './network-page'
 
 /// What the device runs now: the way out to the internet, the ports, DNS, the
-/// radio and the tunnels. Built on the stored map and the observation, never
+/// radio and the tunnels; the routes have their own tab. Built on the stored map and the observation, never
 /// on staged changes.
 export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: NetworkTab) => void }) {
   const { t } = useTranslation()
@@ -23,8 +21,6 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
   const kindLabel = useKindLabel()
   const text = useStatusText()
   const wifiText = useWifiText()
-  const [showRoutes, setShowRoutes] = useState(true)
-  const [allRoutes, setAllRoutes] = useState(false)
   const view = data.applied
   const open = (name: string) => void navigate({ to: '/network/$name', params: { name } })
   const status = (name: string) => computeStatus(view, name)
@@ -32,8 +28,6 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
   const physical = view.order.filter((name) => view.ifaces[name].kind === 'physical')
   const uplink = exitOf(view) ?? physical.find((name) => !bridgeOf(view.map, name) && view.ifaces[name].entry.dhcp)
   const standby = [...new Set(view.routes.map((route) => route.interface))].filter((name) => name !== uplink && view.ifaces[name])
-  const routes = routeTable(view)
-  const shownRoutes = allRoutes ? routes : routes.slice(0, ROUTES_FOLDED)
   const lan = view.order.filter((name) => view.ifaces[name].kind === 'bridge' || view.ifaces[name].kind === 'vlan')
   const tunnels = view.order.filter((name) => view.ifaces[name].kind === 'wireguard')
   const radio = view.wifi.radio && view.ifaces[view.wifi.radio] ? view.wifi.radio : undefined
@@ -62,6 +56,7 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
             />
           )) : <Chip title={t('network.overview.noUplink')} value="—" />}
         </div>
+        <Button size="xs" variant="link" onClick={() => onTab('routes')}>{t('network.overview.routesLink')}</Button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
@@ -146,43 +141,9 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
         </Card>
       </div>
 
-      <div className="rounded-xl bg-card">
-        <button type="button" className="flex w-full items-center gap-2 p-5 text-left text-base font-semibold" aria-expanded={showRoutes} onClick={() => setShowRoutes(!showRoutes)}>
-          {showRoutes ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-          {exit ? t('network.overview.routesTitle', { count: routes.length, exit: exit.interface }) : t('network.overview.routesTitleNone', { count: routes.length })}
-        </button>
-        {showRoutes ? (
-          <div className="border-t">
-            <DataTable<RouteRow>
-              rows={shownRoutes}
-              rowKey={(route) => `${route.interface}-${route.destination}-${route.via ?? ''}-${route.metric ?? ''}`}
-              empty={t('network.overview.noRoutes')}
-              columns={[
-                {
-                  id: 'destination',
-                  header: t('network.overview.columns.destination'),
-                  cell: (route) => route.prefix === 0
-                    ? <span className="flex items-center gap-2">{t('network.overview.default')}{route.role ? <Badge variant={route.role === 'effective' ? 'default' : 'outline'}>{t(`network.overview.roles.${route.role}`)}</Badge> : null}</span>
-                    : <span className="font-mono">{route.destination}</span>,
-                },
-                { id: 'via', header: t('network.overview.columns.via'), cell: (route) => <span className="font-mono">{route.via ?? t('network.values.onLink')}</span> },
-                { id: 'interface', header: t('network.overview.columns.interface'), cell: (route) => <button type="button" className="font-mono text-primary hover:underline" onClick={() => open(route.interface)}>{route.interface}</button> },
-                { id: 'metric', header: t('network.overview.columns.metric'), cell: (route) => route.metric ?? '—' },
-                { id: 'source', header: t('network.overview.columns.source'), cell: (route) => t(`network.overview.sources.${route.source}`) },
-              ]}
-            />
-            {routes.length > ROUTES_FOLDED && !allRoutes ? (
-              <div className="border-t px-4 py-2"><Button size="xs" variant="link" onClick={() => setAllRoutes(true)}>{t('network.overview.showAllRoutes', { count: routes.length })}</Button></div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
     </div>
   )
 }
-
-/// Routes the table shows before it is unfolded.
-const ROUTES_FOLDED = 20
 
 /// An uplink in the strip: the one the default route takes is filled, a
 /// standby is muted.

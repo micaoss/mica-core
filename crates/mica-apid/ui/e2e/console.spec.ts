@@ -107,6 +107,7 @@ test('captures each network page for review', async ({ page }, testInfo) => {
   for (const [name, path] of [
     ['overview', './network?tab=overview'],
     ['interfaces', './network'],
+    ['routes', './network?tab=routes'],
     ['interface-eth0', './network/eth0'],
     ['interface-eth1', './network/eth1'],
     ['interface-can0', './network/can0'],
@@ -191,12 +192,13 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
   // G2 starts from no staged changes.
   await page.evaluate(() => sessionStorage.clear())
 
-  // G2: the route table, the uplink and the standby.
+  // G2: the uplink and the standby, and the route table on its tab.
   await page.goto('./network?tab=overview')
-  await expect(page.getByText('路由表 · 9 条 · 默认经 eth0')).toBeVisible()
   await expect(page.getByText('备用 · wlan0')).toBeVisible()
+  await page.goto('./network?tab=routes')
+  await expect(page.getByText('9 条 · 默认经 eth0')).toBeVisible()
   await page.setViewportSize({ width: 1440, height: 1400 })
-  await page.screenshot({ path: testInfo.outputPath('n7-overview-routes.png') })
+  await page.screenshot({ path: testInfo.outputPath('n7-routes.png') })
   await page.setViewportSize({ width: 1440, height: 1000 })
 
   // A new tunnel starts from free values; deleting one is staged behind a confirmation.
@@ -214,13 +216,14 @@ test('captures the N7 network fixes in Chinese', async ({ page }, testInfo) => {
   await page.screenshot({ path: testInfo.outputPath('n7-wg-delete-pending.png'), fullPage: true })
 
   // A route list changes entry by entry in the review.
-  await page.goto('./network/eth1')
-  await page.getByRole('button', { name: '编辑配置' }).click()
-  await page.getByRole('button', { name: '删除' }).first().click()
-  await page.getByRole('button', { name: '添加路由' }).click()
-  await page.getByRole('textbox', { name: '目标网段' }).last().fill('10.40.0.0/16')
-  await page.getByRole('textbox', { name: '下一跳' }).last().fill('192.168.10.4')
-  await page.getByRole('button', { name: '完成编辑' }).click()
+  await page.goto('./network?tab=routes')
+  await page.getByRole('button', { name: '删除 10.1.1.0/24' }).click()
+  await page.getByRole('button', { name: '添加静态路由' }).click()
+  await page.getByRole('dialog').getByRole('textbox', { name: '目标' }).fill('10.40.0.0/16')
+  await page.getByRole('dialog').getByRole('textbox', { name: '网关' }).fill('192.168.10.4')
+  await page.getByRole('dialog').getByRole('combobox', { name: '接口' }).click()
+  await page.getByRole('option', { name: 'eth1' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '加入待应用的更改' }).click()
   await page.getByRole('button', { name: '审阅并应用' }).click()
   await expect(page.getByRole('dialog', { name: '审阅网络更改' })).toContainText('+ 10.40.0.0/16 → 192.168.10.4')
   await page.screenshot({ path: testInfo.outputPath('n7-review-routes.png'), fullPage: true })
@@ -824,6 +827,36 @@ test('captures the N14 board ports in Chinese', async ({ page }, testInfo) => {
   await page.screenshot({ path: testInfo.outputPath('n14-eth1.png'), fullPage: true })
   await page.goto('./network?tab=overview')
   await page.screenshot({ path: testInfo.outputPath('n14-overview.png'), fullPage: true })
+})
+
+test('captures the N15 routes tab in Chinese', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.addInitScript(() => localStorage.setItem('mica.ui.locale', 'zh-CN'))
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width > 1000 ? 1000 : 844 })
+    await page.goto('./network?tab=overview')
+    await page.getByRole('button', { name: '查看路由表' }).click()
+    await expect(page.getByRole('tab', { name: '路由' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByText('10.30.0.0/16').last()).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`n15-routes-${width}.png`), fullPage: true })
+    await page.getByRole('button', { name: '添加静态路由' }).click()
+    const dialog = page.getByRole('dialog', { name: '添加静态路由' })
+    await dialog.getByRole('textbox', { name: '目标' }).fill('0.0.0.0/0')
+    await expect(dialog.getByText('默认路由由各接口的网关决定，请在接口页设置网关。')).toBeVisible()
+    await expect(dialog).toHaveCSS('opacity', '1')
+    await page.screenshot({ path: testInfo.outputPath(`n15-add-default-${width}.png`) })
+    await dialog.getByRole('textbox', { name: '目标' }).fill('10.50.0.0/16')
+    await dialog.getByRole('textbox', { name: '度量值' }).fill('20')
+    await dialog.getByRole('button', { name: '加入待应用的更改' }).click()
+    await expect(page.getByText('待应用', { exact: true }).first()).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`n15-staged-${width}.png`), fullPage: true })
+    await page.evaluate(() => sessionStorage.clear())
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('./network/eth1')
+  await expect(page.getByRole('link', { name: '在路由页管理' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n15-eth1.png'), fullPage: true })
 })
 
 async function mockNetworkBench(page: Page) {

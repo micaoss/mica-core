@@ -63,7 +63,7 @@ export interface DefaultRoute {
   effective?: boolean
 }
 
-/// One row of the overview's route table.
+/// One row of the routes tab's route table.
 export interface RouteRow {
   destination: string
   prefix: number
