@@ -63,7 +63,13 @@ fn dhcp_static_and_unaddressed_interfaces_render_as_ifupdown_stanzas() {
         ("eth3", fixed("fd00::2/64", Some("fd00::1"), &[])),
     ])
     .network;
-    let text = render(&network, &["eth0".into(), "eth4".into()], None).unwrap();
+    let text = render(
+        &network,
+        &["eth0".into(), "eth4".into()],
+        None,
+        &crate::board::Board::default(),
+    )
+    .unwrap();
     assert_eq!(
         text,
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
@@ -162,7 +168,13 @@ fn a_dhcp_interface_with_its_own_dns_asks_the_lease_for_none() {
         },
     )])
     .network;
-    let text = render(&network, &["eth0".into()], None).unwrap();
+    let text = render(
+        &network,
+        &["eth0".into()],
+        None,
+        &crate::board::Board::default(),
+    )
+    .unwrap();
     assert_eq!(
         text,
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
@@ -195,7 +207,13 @@ fn a_can_interface_is_set_by_iproute2_before_it_comes_up() {
         ("can2", can(None, None, None)),
     ])
     .network;
-    let text = render(&network, &[], Some(Path::new("/usr/sbin/ip"))).unwrap();
+    let text = render(
+        &network,
+        &[],
+        Some(Path::new("/usr/sbin/ip")),
+        &crate::board::Board::default(),
+    )
+    .unwrap();
     let stanza = |iface: &str, set: &str| {
         format!(
             "\nauto {iface}\niface {iface} inet manual\n    pre-up /usr/sbin/ip link set dev {iface} type can bitrate 250000{set}\n    up /usr/sbin/ip link set dev {iface} up\n    down /usr/sbin/ip link set dev {iface} down\n"
@@ -281,7 +299,13 @@ fn dhcp_links_get_distinct_route_metrics_in_name_order() {
         ("eth2", fixed("192.168.1.10/24", Some("192.168.1.1"), &[])),
     ])
     .network;
-    let text = render(&network, &["eth0".into(), "eth3".into()], None).unwrap();
+    let text = render(
+        &network,
+        &["eth0".into(), "eth3".into()],
+        None,
+        &crate::board::Board::default(),
+    )
+    .unwrap();
     let metrics: Vec<(&str, &str)> = text
         .split("\nauto ")
         .skip(2)
@@ -317,11 +341,44 @@ fn a_dhcp_interface_off_the_internet_says_so_to_the_lease_script() {
         },
     )])
     .network;
-    let text = render(&network, &[], None).unwrap();
+    let text = render(&network, &[], None, &crate::board::Board::default()).unwrap();
     assert!(
         text.contains(
             "\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    internet 0\n    udhcpc_opts -b -S\n"
         ),
         "{text}"
     );
+}
+
+/// A board's internal port reaches the lease script as off the internet,
+/// declared or not, until its entry says otherwise.
+#[test]
+fn a_boards_internal_port_is_off_the_internet_until_its_entry_chooses() {
+    let board = crate::board::Board::parse(
+        r#"{"version":1,"interfaces":[
+            {"name":"eth0","kind":"ethernet","label":"LAN1","role":"internal"},
+            {"name":"eth1","kind":"ethernet","label":"LAN2","role":"internal"}]}"#,
+    )
+    .unwrap();
+    let stanza = |text: &str, iface: &str| {
+        text.split("\nauto ")
+            .find(|stanza| stanza.starts_with(&format!("{iface}\n")))
+            .unwrap()
+            .to_string()
+    };
+    let network = settings(&[("eth0", dhcp())]).network;
+    let text = render(&board.effective(&network), &["eth1".into()], None, &board).unwrap();
+    assert!(stanza(&text, "eth0").contains("    internet 0\n"), "{text}");
+    assert!(stanza(&text, "eth1").contains("    internet 0\n"), "{text}");
+
+    let chosen = settings(&[(
+        "eth0",
+        IfaceSettings {
+            internet: Some(true),
+            ..dhcp()
+        },
+    )])
+    .network;
+    let text = render(&board.effective(&chosen), &[], None, &board).unwrap();
+    assert!(!stanza(&text, "eth0").contains("internet"), "{text}");
 }

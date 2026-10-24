@@ -184,6 +184,13 @@ impl MicadService {
         self
     }
 
+    /// Attach the board's declared ports.
+    #[must_use]
+    pub fn with_board(mut self, board: Arc<crate::board::Board>) -> Self {
+        self.board = board;
+        self
+    }
+
     /// Attach the board telemetry adapter (`GetTelemetry`).
     #[must_use]
     pub fn with_telemetry(mut self, telemetry: Arc<dyn TelemetrySource>) -> Self {

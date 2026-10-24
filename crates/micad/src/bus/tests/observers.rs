@@ -212,3 +212,48 @@ pub(super) async fn the_device_code_names_its_source_or_why_there_is_none() {
         serde_json::json!({"code": "LSZJ-2L3T-WFG", "source": "dt-serial"})
     );
 }
+
+/// An observation that answers what it was given.
+struct FixedNetwork(serde_json::Value);
+
+#[async_trait::async_trait]
+impl crate::network_state::NetworkState for FixedNetwork {
+    async fn describe(&self) -> anyhow::Result<serde_json::Value> {
+        Ok(self.0.clone())
+    }
+
+    async fn observe(&self) -> anyhow::Result<serde_json::Value> {
+        Ok(self.0.clone())
+    }
+}
+
+/// The observed network carries what the board declares: the label beside a
+/// listed port, and a declared port the device lacks.
+#[tokio::test]
+pub(super) async fn the_observed_network_carries_the_boards_declaration() {
+    let (service, _calls, _dir) = service_with_mock();
+    let board = crate::board::Board::parse(
+        r#"{"version":1,"interfaces":[
+            {"name":"eth0","kind":"ethernet","label":"LAN1"},
+            {"name":"eth1","kind":"ethernet","label":"LAN2","role":"internal"}]}"#,
+    )
+    .unwrap();
+    let service = service
+        .with_network_state(Arc::new(FixedNetwork(serde_json::json!({
+            "interfaces": { "available": true, "entries": [{ "name": "eth0", "present": true }] },
+        }))))
+        .with_board(Arc::new(board));
+    let observed: serde_json::Value =
+        serde_json::from_str(&service.get_observed_network().await.expect("observed")).unwrap();
+    assert_eq!(observed["board"], "declared");
+    assert_eq!(
+        observed["interfaces"]["entries"][0]["declared"]["label"],
+        "LAN1"
+    );
+    assert_eq!(observed["interfaces"]["entries"][1]["name"], "eth1");
+    assert_eq!(observed["interfaces"]["entries"][1]["present"], false);
+    assert_eq!(
+        observed["interfaces"]["entries"][1]["declared"]["role"],
+        "internal"
+    );
+}

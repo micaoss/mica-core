@@ -51,6 +51,9 @@ pub struct IfupdownReconciler {
     commands: Arc<dyn Commands>,
     /// iproute2's `ip`, which sets CAN parameters; `None` on a root without it.
     ip: Option<PathBuf>,
+    /// The board's declared ports: an internal one's absent `internet` is
+    /// `false`, and a hidden one gets no stanza unless declared.
+    board: Arc<crate::board::Board>,
 }
 
 impl IfupdownReconciler {
@@ -60,12 +63,20 @@ impl IfupdownReconciler {
             net_dir,
             commands,
             ip: None,
+            board: Arc::default(),
         }
     }
 
     /// The `ip` a CAN stanza runs: iproute2's, or `None` without it.
     pub fn with_ip(mut self, ip: Option<PathBuf>) -> Self {
         self.ip = ip;
+        self
+    }
+
+    /// Render with the board's declared ports.
+    #[must_use]
+    pub fn with_board(mut self, board: Arc<crate::board::Board>) -> Self {
+        self.board = board;
         self
     }
 
@@ -76,15 +87,17 @@ impl IfupdownReconciler {
             Arc::new(Host),
         )
         .with_ip(iproute2_ip(&IP_PATHS.map(Path::new)))
+        .with_board(Arc::new(crate::board::host().clone()))
     }
 
-    /// Wired interfaces (`eth*`) the kernel has.
+    /// Wired interfaces (`eth*`) the kernel has, less the ones the board
+    /// hides.
     fn wired(&self) -> Vec<String> {
         let mut names: Vec<String> = std::fs::read_dir(&self.net_dir)
             .into_iter()
             .flatten()
             .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-            .filter(|name| name.starts_with("eth"))
+            .filter(|name| name.starts_with("eth") && !self.board.hidden(name))
             .collect();
         names.sort();
         names
@@ -258,11 +271,12 @@ fn can_stanza(out: &mut String, iface: &str, can: &CanConfig, ip: &Path) {
 /// The file for `network`, with DHCP on every wired interface it does not
 /// declare, as mica-systemd's `80-dhcp.network` gives it, and each DHCP link's
 /// route metric as networkd's units carry it. `ip` is the one a CAN stanza
-/// runs.
+/// runs; `board` keeps an internal port it does not declare off the internet.
 pub(super) fn render(
     network: &BTreeMap<String, IfaceSettings>,
     wired: &[String],
     ip: Option<&Path>,
+    board: &crate::board::Board,
 ) -> Result<String> {
     let mut out = String::from(
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
@@ -299,7 +313,7 @@ pub(super) fn render(
             iface,
             &[],
             metrics.get(iface.as_str()).copied(),
-            true,
+            !board.internal(iface),
         );
     }
     Ok(out)
@@ -319,7 +333,12 @@ impl Reconciler for IfupdownReconciler {
         for (iface, cfg) in &settings.network {
             validate(iface, cfg, self.ip.as_deref())?;
         }
-        let rendered = render(&settings.network, &self.wired(), self.ip.as_deref())?;
+        let rendered = render(
+            &self.board.effective(&settings.network),
+            &self.wired(),
+            self.ip.as_deref(),
+            &self.board,
+        )?;
         if std::fs::read_to_string(&self.path).ok().as_deref() != Some(rendered.as_str()) {
             let down = self.commands.run("ifdown", &["-a"]).await?;
             if down.code != 0 {

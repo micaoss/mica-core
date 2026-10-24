@@ -218,6 +218,9 @@ pub struct NetworkReconciler<R: NetworkReload, D: LinkDelete> {
     /// Where the kernel lists its links (`/sys/class/net`), for the wired
     /// ports nobody declared; `None` renders no unit for them.
     ports_dir: Option<PathBuf>,
+    /// The board's declared ports: an internal one's absent `internet` is
+    /// `false`, and a hidden one gets no unit unless declared.
+    board: Arc<crate::board::Board>,
     applied: AtomicBool,
 }
 
@@ -234,6 +237,7 @@ impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
             kernel: Arc::new(NoClaim),
             settle: Arc::new(NoSettle),
             ports_dir: None,
+            board: Arc::default(),
             applied: AtomicBool::new(false),
         }
     }
@@ -246,9 +250,16 @@ impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
         self
     }
 
+    /// Render with the board's declared ports.
+    #[must_use]
+    pub fn with_board(mut self, board: Arc<crate::board::Board>) -> Self {
+        self.board = board;
+        self
+    }
+
     /// The wired ports in [`Self::ports_dir`] no entry declares: the links
     /// the image's `80-dhcp.network` (`Name=eth*`) would configure, less the
-    /// VLANs on them.
+    /// VLANs on them and the ports the board hides.
     fn undeclared_ports(&self, settings: &Settings) -> BTreeSet<String> {
         let Some(dir) = &self.ports_dir else {
             return BTreeSet::new();
@@ -260,6 +271,7 @@ impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
             .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
             .filter(|name| name.starts_with("eth") && !name.contains('.'))
             .filter(|name| !settings.network.contains_key(name))
+            .filter(|name| !self.board.hidden(name))
             .collect()
     }
 
@@ -337,6 +349,7 @@ impl NetworkReconciler<Networkd, NetworkctlDelete> {
             .with_kernel(Arc::new(DeployedKernel::production()))
             .with_settle(Arc::new(NetworkdSettle))
             .with_ports_dir(Path::new("/").join(crate::network_state::NET_CLASS_DIR))
+            .with_board(Arc::new(crate::board::host().clone()))
     }
 }
 
@@ -443,6 +456,7 @@ impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
         let children = vlan_children(&settings.network);
         let ports = self.undeclared_ports(settings);
         let metrics = route_metrics(&settings.network, &masters, &ports);
+        let effective = self.board.effective(&settings.network);
         std::fs::create_dir_all(&self.target_dir)?;
         let previous = self.managed_files()?;
         let mut files = BTreeMap::new();
@@ -454,7 +468,7 @@ impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
             let file_name = format!("50-mica-{iface}.network");
             let unit = render_unit(
                 iface,
-                cfg,
+                &effective[iface],
                 masters.get(iface.as_str()).copied(),
                 children.get(iface.as_str()).map_or(&[][..], Vec::as_slice),
                 metrics.get(iface.as_str()).copied(),
@@ -487,6 +501,7 @@ impl<R: NetworkReload, D: LinkDelete> NetworkReconciler<R, D> {
         for port in &ports {
             let dhcp = micad_settings::IfaceSettings {
                 dhcp: true,
+                internet: self.board.internal(port).then_some(false),
                 ..micad_settings::IfaceSettings::default()
             };
             files.insert(

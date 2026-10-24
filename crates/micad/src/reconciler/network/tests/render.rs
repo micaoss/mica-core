@@ -317,3 +317,49 @@ pub(super) async fn an_interface_off_the_internet_takes_no_gateway_from_its_leas
     );
     assert!(!unit("eth0").contains("UseGateway"));
 }
+
+/// A board's internal port stays off the internet while its entry does not
+/// say otherwise, declared or not; a port it hides gets no unit of its own.
+#[tokio::test]
+pub(super) async fn a_boards_internal_port_takes_no_gateway_and_a_hidden_one_no_unit() {
+    let dir = tempfile::tempdir().unwrap();
+    let ports = tempfile::tempdir().unwrap();
+    for port in ["eth0", "eth1", "eth2", "eth9"] {
+        std::fs::create_dir(ports.path().join(port)).unwrap();
+    }
+    let board = crate::board::Board::parse(
+        r#"{"version":1,"interfaces":[
+            {"name":"eth0","kind":"ethernet","label":"WAN"},
+            {"name":"eth1","kind":"ethernet","label":"LAN","role":"internal"},
+            {"name":"eth2","kind":"ethernet","label":"AUX","role":"internal"},
+            {"name":"eth9","kind":"ethernet","label":"Debug","hidden":true}]}"#,
+    )
+    .unwrap();
+    let (reconciler, _calls) = reconciler_in(dir.path());
+    let reconciler = reconciler
+        .with_ports_dir(ports.path().to_path_buf())
+        .with_board(std::sync::Arc::new(board));
+    let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
+
+    reconciler
+        .apply(&settings_with(&[
+            ("eth0", dhcp_iface()),
+            ("eth1", dhcp_iface()),
+        ]))
+        .await
+        .unwrap();
+    assert!(!read("50-mica-eth0.network").contains("UseGateway"));
+    assert!(read("50-mica-eth1.network").contains("[DHCPv4]\nRouteMetric=110\nUseGateway=no\n"));
+    assert!(read("60-mica-auto-eth2.network").contains("UseGateway=no"));
+    assert!(!dir.path().join("60-mica-auto-eth9.network").exists());
+
+    let chosen = IfaceSettings {
+        internet: Some(true),
+        ..dhcp_iface()
+    };
+    reconciler
+        .apply(&settings_with(&[("eth0", dhcp_iface()), ("eth1", chosen)]))
+        .await
+        .unwrap();
+    assert!(!read("50-mica-eth1.network").contains("UseGateway"));
+}

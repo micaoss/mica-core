@@ -16,6 +16,7 @@ mod apply_queue;
 mod apps;
 pub mod ble_provisioning;
 mod bluetooth;
+pub mod board;
 mod board_defaults;
 mod bus;
 mod compose;
@@ -423,6 +424,10 @@ async fn serve() -> anyhow::Result<()> {
             }
         }
         .with_container_engine(container_engine);
+        // The board's declared ports, read once; a dry-run daemon declares
+        // none.
+        board::host().log_mismatches(std::path::Path::new("/"));
+        service = service.with_board(Arc::new(board::host().clone()));
         // A BLE scan pauses the access point through its unit, so a dry-run
         // daemon is never given the pause either.
         if features.has(micad_settings::Feature::Wifi) {

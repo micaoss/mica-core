@@ -345,11 +345,12 @@ impl MicadService {
         let mut observed = self.network_state.observe().await.map_err(|err| {
             SettingsFault::Fdo(fdo::Error::Failed(format!("observe network: {err:#}")))
         })?;
-        let (wifi, ap_state) = {
+        let (wifi, ap_state, configured) = {
             let inner = self.inner.read().await;
             (
                 inner.settings.wifi.clone(),
                 inner.state.get("wifiAp").cloned(),
+                inner.settings.network.keys().cloned().collect(),
             )
         };
         // hostapd's own words are read only when they can explain something.
@@ -374,6 +375,7 @@ impl MicadService {
             ap_state.as_ref(),
             &lines,
         );
+        self.board.annotate(&mut observed, &configured);
         Ok(observed.to_string())
     }
 

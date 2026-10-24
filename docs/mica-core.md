@@ -117,7 +117,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | Subtree | Contents |
 | --- | --- |
 | `hostname` | The hostname |
-| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
+| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`, or `false` on a port the board declares internal, section 3.12): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
 | `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
 | `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
@@ -149,7 +149,8 @@ task fails naming the interface, and the stored network map goes back to the one
 Every DHCP link micad renders gets `[DHCPv4] RouteMetric=`: 100 for the first in name order and
 10 more for each next one, so two uplinks never tie. A wired port (`eth*`, not a VLAN) the map
 does not declare gets `60-mica-auto-<iface>.network`, the image's DHCP with its metric, which
-sorts before the image's `80-dhcp.network`; declaring the port removes it. The Wi-Fi client's
+sorts before the image's `80-dhcp.network`; declaring the port removes it, and a port the board
+hides gets none (section 3.12). The Wi-Fi client's
 lease has metric 600. A static gateway keeps networkd's metric 0. On OpenRC the same numbers go
 into each DHCP stanza as `metric <n>` and into `/run/mica/wifi-client.env` as `metric=600`, for
 Base's `mica-udhcpc` to give the lease's default route (section 3.8). An interface with
@@ -273,6 +274,9 @@ absence is reported with its reason rather than as a healthy reading:
   thermal zones, watchdogs, the reset reason.
 - **Failure evidence**: failed services and warnings of this boot (`journalctl`, or `logread`
   and `mica-init failed`).
+- **The board's ports** (section 3.12): the observed network carries `board` (`declared` or
+  `discover`), each listed interface its `declared` (or `null`), and each declared port the
+  device lacks as `{name, present: false, declared}`.
 - **Logs** (`GetLog`): the newest 200 lines of one allowlisted service (`micad`, `apid`, `time`,
   `ssh`, `wifi-client`, `wifi-ap`, `bluetooth`, `mqtt-broker`, `mqttd`), bounded in bytes and
   time.
@@ -742,6 +746,49 @@ on its services page, with the upload, and gives each its own page.
 **A reset** of application data clears `/mica/apps` and `/srv`, with the
 apps' data, and removes the seed record, so the image's seeds are installed again at the next
 boot.
+
+### 3.12 The board's interfaces
+
+The board package may ship `/usr/share/mica/board/interfaces.json`, the physical ports the
+product has:
+
+```json
+{
+  "version": 1,
+  "interfaces": [
+    { "name": "eth0", "kind": "ethernet", "label": "LAN1", "speedMbps": 1000 },
+    { "name": "eth1", "kind": "ethernet", "label": "LAN2", "role": "internal" },
+    { "name": "wlan0", "kind": "wifi", "label": "Wi-Fi", "ap": true, "bands": ["2.4", "5"] },
+    { "name": "can0", "kind": "can", "label": "CAN", "fd": true }
+  ]
+}
+```
+
+A generic board ships `{"version": 1, "discover": true}`, which behaves as a root without the
+file: the ports are what the kernel lists. Unknown members and versions are refused; a refused
+file is logged and the device discovers.
+
+- `name`: the kernel name, unique. Names are matched as they are, so a board whose names are not
+  stable makes them stable in the image and declares the final one.
+- `kind`: `ethernet`, `wifi` or `can`.
+- `label`: 1 to 16 characters, shown beside the kernel name; not editable.
+- The array's order is the order the console lists the ports in.
+- `role` (`ethernet`, `wifi`): `uplink`, the default, or `internal`. It is the default of the
+  port's `internet` (section 3.3): an internal port's entry without `internet` renders as
+  `internet: false`, as does the port with no entry, until its entry sets `internet: true`. The
+  device refuses a gateway only on an explicit `internet: false`; the console treats the role
+  as the switch's starting position and asks for it on before it takes a gateway.
+- Capabilities, each optional, absent meaning not known: `speedMbps` (`ethernet`), `ap` and
+  `bands` (`wifi`, of `2.4`, `5`, `6`), `fd` (`can`). The console offers no access point on a
+  radio with `ap: false` and offers the channels of the declared bands only.
+- `hidden: true`: a port the product does not expose. It is not listed and gets no unit or
+  stanza of micad's own unless the tree has an entry for it.
+
+At start micad logs each declared port the kernel does not list and each physical link
+(`/sys/class/net/<name>/device`) the board does not declare. The console lists declared ports
+first, in order and with their label, an absent one as 未检测到, and tags a physical link the
+board does not declare 未声明; it is still managed. `micad board check <file>` reads a file with
+the same parser, for a build to verify the file it ships.
 
 ## 4. mica-apid
 

@@ -3,7 +3,8 @@
 //! operator's containers command; `micad unit`, the operator's command for
 //! their own services; `micad app`, the operator's command for their apps;
 //! `micad web`, who reaches the API; `micad factory-reset`, the factory
-//! reset; `micad diag`, a diagnostic snapshot.
+//! reset; `micad diag`, a diagnostic snapshot; `micad board check`, whether
+//! a board's interface declaration is one this build takes.
 //!
 //! One executable because the two daemons already are one version --
 //! `mica-apid` depends on `micad` at exactly its version, since both speak
@@ -15,7 +16,7 @@
 
 #![forbid(unsafe_code)]
 
-const USAGE: &str = "usage: micad [--version]\n       micad apid\n       micad update [status|check|install|rollback] [--reboot]\n       micad ctr <command> (micad ctr help)\n       micad unit <command> (micad unit help)\n       micad app <command> (micad app help)\n       micad web status|network|local|off\n       micad factory-reset [--password-file FILE]\n       micad diag\n       micad device-code\n       micad derive-ap-key --secret FILE CODE";
+const USAGE: &str = "usage: micad [--version]\n       micad apid\n       micad update [status|check|install|rollback] [--reboot]\n       micad ctr <command> (micad ctr help)\n       micad unit <command> (micad unit help)\n       micad app <command> (micad app help)\n       micad web status|network|local|off\n       micad factory-reset [--password-file FILE]\n       micad diag\n       micad device-code\n       micad derive-ap-key --secret FILE CODE\n       micad board check FILE";
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -41,6 +42,7 @@ fn main() -> anyhow::Result<()> {
         Some("diag") => mica_apid::diag_main(&args[2..]),
         Some("device-code") => micad::device_code::device_code_main(),
         Some("derive-ap-key") => micad::device_code::derive_ap_key_main(&args[2..]),
+        Some("board") => micad::board::main(&args[2..]),
         // Only the bare name or a version question starts down the daemon's
         // path: a mistyped subcommand must not start a second micad.
         None | Some("--version" | "-V") => micad::main(),

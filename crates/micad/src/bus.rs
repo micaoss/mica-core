@@ -196,6 +196,9 @@ pub struct MicadService {
     /// The access point paused for a BLE scan. The default pauses nothing,
     /// so a test or a dry run never stops a unit.
     ap_pause: Arc<dyn crate::reconciler::wifi_ap::ApPause>,
+    /// The board's declared ports, added to the observed network. The
+    /// default declares none.
+    board: Arc<crate::board::Board>,
     /// The features the product carries. A member or a settings write that
     /// belongs to any other is refused by name.
     features: micad_settings::Features,
@@ -358,6 +361,7 @@ impl MicadService {
             agent: Arc::new(BluetoothAgent::default()),
             provisioning: Arc::default(),
             ap_pause: Arc::new(NoPause),
+            board: Arc::default(),
             containerd: Arc::new(crate::containerd::NoContainerd),
             container_engine: micad_settings::ContainerEngine::default(),
             compose: Arc::new(crate::compose::NoCompose),
