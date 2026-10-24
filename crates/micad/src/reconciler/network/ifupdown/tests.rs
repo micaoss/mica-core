@@ -121,16 +121,16 @@ async fn a_failed_ifup_is_an_error() {
 }
 
 #[tokio::test]
-async fn what_only_networkd_does_is_refused_by_name_and_nothing_is_run() {
+async fn what_only_networkd_does_or_no_one_can_is_refused_by_name_and_nothing_is_run() {
     let (_dir, fake, reconciler) = fixture(&["eth0"]);
     let bridge = IfaceSettings {
         kind: IfaceKind::Bridge,
         bridge: Some(BridgeConfig::default()),
         ..IfaceSettings::default()
     };
-    let routed = IfaceSettings {
+    let misrouted = IfaceSettings {
         routes: vec![RouteConfig {
-            destination: "10.1.0.0/16".into(),
+            destination: "nowhere".into(),
             gateway: None,
             metric: None,
         }],
@@ -143,7 +143,7 @@ async fn what_only_networkd_does_is_refused_by_name_and_nothing_is_run() {
     let mixed = fixed("192.168.1.10/24", Some("fd00::1"), &[]);
     for (cfg, word) in [
         (bridge, "bridge"),
-        (routed, "routes"),
+        (misrouted, "CIDR"),
         (both, "DHCP and a static address"),
         (mixed, "family"),
     ] {
@@ -381,4 +381,63 @@ fn a_boards_internal_port_is_off_the_internet_until_its_entry_chooses() {
     .network;
     let text = render(&board.effective(&chosen), &[], None, &board).unwrap();
     assert!(!stanza(&text, "eth0").contains("internet"), "{text}");
+}
+
+/// Static routes ride their interface's stanza: `ip route` adds each once the
+/// link is up and removes it before it goes down, on any addressing.
+#[test]
+fn static_routes_are_added_and_removed_with_their_interface() {
+    let route = |destination: &str, gateway: Option<&str>, metric: Option<u32>| RouteConfig {
+        destination: destination.into(),
+        gateway: gateway.map(str::to_string),
+        metric,
+    };
+    let network = settings(&[
+        (
+            "eth0",
+            IfaceSettings {
+                routes: vec![route("10.20.0.0/16", Some("192.168.1.2"), Some(5))],
+                ..dhcp()
+            },
+        ),
+        (
+            "eth1",
+            IfaceSettings {
+                routes: vec![route("10.30.0.0/16", None, None)],
+                ..fixed("192.168.10.1/24", None, &[])
+            },
+        ),
+    ])
+    .network;
+    let text = render(&network, &[], None, &crate::board::Board::default()).unwrap();
+    assert!(
+        text.contains(
+            "    up ip route add 10.20.0.0/16 via 192.168.1.2 dev eth0 metric 5\n    down ip route del 10.20.0.0/16 via 192.168.1.2 dev eth0 metric 5 || :\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "    netmask 255.255.255.0\n    up ip route add 10.30.0.0/16 dev eth1\n    down ip route del 10.30.0.0/16 dev eth1 || :\n"
+        ),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn an_interface_with_static_routes_is_applied() {
+    let (_dir, fake, reconciler) = fixture(&["eth0"]);
+    let routed = IfaceSettings {
+        routes: vec![RouteConfig {
+            destination: "10.1.0.0/16".into(),
+            gateway: Some("192.168.1.2".into()),
+            metric: None,
+        }],
+        ..dhcp()
+    };
+    reconciler
+        .apply(&settings(&[("eth0", routed)]))
+        .await
+        .unwrap();
+    assert!(!fake.calls().is_empty());
 }

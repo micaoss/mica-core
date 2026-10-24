@@ -9,10 +9,16 @@
 //! it. DHCP is Base's busybox udhcpc and its script; a static address carries
 //! its DNS servers into Base's `/run/mica/resolv.d/<iface>`.
 //!
-//! Wired DHCP and static addresses, and CAN controllers set with iproute2's
-//! `ip` from their stanza: VLANs, bridges, WireGuard and static routes are
-//! networkd's, and an OpenRC device refuses them by name rather than
-//! half-configuring them.
+//! Wired DHCP and static addresses with their static routes, and CAN
+//! controllers set with iproute2's `ip` from their stanza: VLANs, bridges and
+//! WireGuard are networkd's, and an OpenRC device refuses them by name rather
+//! than half-configuring them.
+//!
+//! A static route is an `up ip route add` line of its interface's stanza and
+//! the matching `down ip route del`. ifupdown runs it once the link is up,
+//! which on DHCP is before udhcpc has a lease when the lease comes late, so a
+//! route via a gateway the lease's subnet reaches fails then and is logged by
+//! ifupdown; an on-link route and one beside a static address do not wait.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -21,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use micad_settings::{CanConfig, IfaceKind, IfaceSettings, Settings, StaticConfig};
+use micad_settings::{CanConfig, IfaceKind, IfaceSettings, RouteConfig, Settings, StaticConfig};
 use serde_json::json;
 
 use super::{
@@ -135,8 +141,6 @@ fn validate(iface: &str, cfg: &IfaceSettings, ip: Option<&Path>) -> Result<()> {
         Some("wireguard")
     } else if cfg.can.is_some() {
         Some("can")
-    } else if !cfg.routes.is_empty() {
-        Some("routes")
     } else {
         None
     };
@@ -144,6 +148,9 @@ fn validate(iface: &str, cfg: &IfaceSettings, ip: Option<&Path>) -> Result<()> {
         bail!(
             "network.{iface}: {what} needs systemd-networkd, which this OpenRC device does not run"
         );
+    }
+    if let Some(("routes", reason)) = micad_settings::routing_problem(cfg) {
+        bail!("network.{iface}.routes: {reason}");
     }
     if let Some(static_) = &cfg.static_ {
         if cfg.dhcp {
@@ -248,6 +255,26 @@ fn static_stanza(out: &mut String, iface: &str, cfg: &StaticConfig) -> Result<()
     Ok(())
 }
 
+/// Each of `routes` added once `iface` is up and removed before it goes down.
+/// The removal may find the route gone with the link, so it never fails the
+/// stanza. Only parsed addresses reach the shell line.
+fn route_lines(out: &mut String, iface: &str, routes: &[RouteConfig]) -> Result<()> {
+    for route in routes {
+        let (destination, prefix) = address_and_prefix(&route.destination)?;
+        let mut spec = format!("{destination}/{prefix}");
+        if let Some(gateway) = &route.gateway {
+            let _ = write!(spec, " via {}", gateway.parse::<IpAddr>()?);
+        }
+        let _ = write!(spec, " dev {iface}");
+        if let Some(metric) = route.metric {
+            let _ = write!(spec, " metric {metric}");
+        }
+        let _ = writeln!(out, "    up ip route add {spec}");
+        let _ = writeln!(out, "    down ip route del {spec} || :");
+    }
+    Ok(())
+}
+
 /// A CAN controller: no address, its parameters set by `ip` while the link
 /// is down, then the link brought up.
 fn can_stanza(out: &mut String, iface: &str, can: &CanConfig, ip: &Path) {
@@ -306,6 +333,7 @@ pub(super) fn render(
                 let _ = write!(out, "\nauto {iface}\niface {iface} inet manual\n");
             }
         }
+        route_lines(&mut out, iface, &cfg.routes)?;
     }
     for iface in &ports {
         dhcp_stanza(
