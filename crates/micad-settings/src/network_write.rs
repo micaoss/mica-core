@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 
 use crate::{
-    IfaceSettings, NetworkViolation, check_iface_name, is_ip_or_cidr, topology_violations,
-    validate_can, validate_peers,
+    IfaceKind, IfaceSettings, NetworkViolation, check_iface_name, is_ip_or_cidr,
+    topology_violations, validate_can, validate_peers,
 };
 
 pub fn valid_ipv4(address: &str) -> bool {
@@ -217,6 +217,42 @@ pub fn entry_violations(iface: &str, cfg: &IfaceSettings) -> Vec<NetworkViolatio
     }
     if let Some((field, message)) = routing_problem(cfg) {
         push(field, "validation_failed", serde_json::json!({}), message);
+    }
+    if !cfg.internet() {
+        if matches!(cfg.kind, IfaceKind::Wireguard | IfaceKind::Can) {
+            push(
+                "internet",
+                "validation_failed",
+                serde_json::json!({}),
+                "`internet` is for physical, bridge and VLAN entries".to_string(),
+            );
+        }
+        if let Some(gateway) = cfg
+            .static_
+            .as_ref()
+            .and_then(|static_| static_.gateway.as_deref())
+        {
+            push(
+                "static.gateway",
+                "gateway_not_allowed",
+                serde_json::json!({ "gateway": gateway }),
+                format!(
+                    "an interface with `internet` false has no gateway; {gateway} would be its default route"
+                ),
+            );
+        }
+        if cfg
+            .routes
+            .iter()
+            .any(|route| route.destination == "0.0.0.0/0")
+        {
+            push(
+                "routes",
+                "gateway_not_allowed",
+                serde_json::json!({}),
+                "an interface with `internet` false carries no default route".to_string(),
+            );
+        }
     }
     found
 }

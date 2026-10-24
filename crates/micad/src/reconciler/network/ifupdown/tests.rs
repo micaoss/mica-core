@@ -304,3 +304,24 @@ fn dhcp_links_get_distinct_route_metrics_in_name_order() {
         ]
     );
 }
+
+/// An interface kept off the internet hands Base's udhcpc script
+/// `IF_INTERNET=0`, which then sets no default route from the lease.
+#[test]
+fn a_dhcp_interface_off_the_internet_says_so_to_the_lease_script() {
+    let network = settings(&[(
+        "eth0",
+        IfaceSettings {
+            internet: Some(false),
+            ..dhcp()
+        },
+    )])
+    .network;
+    let text = render(&network, &[], None).unwrap();
+    assert!(
+        text.contains(
+            "\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    internet 0\n    udhcpc_opts -b -S\n"
+        ),
+        "{text}"
+    );
+}

@@ -173,13 +173,18 @@ fn netmask_v4(prefix: u8) -> String {
 /// `metric` is the lease's default-route metric. ifupdown hands every stanza
 /// option to the commands it runs as `IF_<OPTION>`, so udhcpc and Base's
 /// script see it as `IF_METRIC`.
-fn dhcp_stanza(out: &mut String, iface: &str, dns: &[String], metric: Option<u32>) {
+fn dhcp_stanza(out: &mut String, iface: &str, dns: &[String], metric: Option<u32>, internet: bool) {
     let _ = write!(
         out,
         "\nauto {iface}\niface {iface} inet dhcp\n    script {UDHCPC_SCRIPT}\n"
     );
     if let Some(metric) = metric {
         let _ = writeln!(out, "    metric {metric}");
+    }
+    // Base's udhcpc script reads it as `IF_INTERNET` and then sets no
+    // default route from the lease.
+    if !internet {
+        let _ = writeln!(out, "    internet 0");
     }
     if dns.is_empty() {
         let _ = writeln!(out, "    udhcpc_opts -b -S");
@@ -281,6 +286,7 @@ pub(super) fn render(
                 iface,
                 &cfg.dns,
                 metrics.get(iface.as_str()).copied(),
+                cfg.internet(),
             ),
             None => {
                 let _ = write!(out, "\nauto {iface}\niface {iface} inet manual\n");
@@ -288,7 +294,13 @@ pub(super) fn render(
         }
     }
     for iface in &ports {
-        dhcp_stanza(&mut out, iface, &[], metrics.get(iface.as_str()).copied());
+        dhcp_stanza(
+            &mut out,
+            iface,
+            &[],
+            metrics.get(iface.as_str()).copied(),
+            true,
+        );
     }
     Ok(out)
 }

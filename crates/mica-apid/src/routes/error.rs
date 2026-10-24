@@ -61,7 +61,7 @@ pub(crate) struct ErrorDetail {
     /// `vlan.parent`, `vlan.id`, `bridge.ports`, `routes`, `dns`, ...
     pub(super) field: &'static str,
     /// The rule's code: `name_invalid`, `address_overlap`,
-    /// `gateway_out_of_subnet`, `metric_duplicate`, `vlan_duplicate`,
+    /// `gateway_out_of_subnet`, `gateway_not_allowed`, `metric_duplicate`, `vlan_duplicate`,
     /// `vlan_parent_invalid`, `bridge_port_taken`, `bridge_port_invalid`,
     /// `bridge_port_addressed`, `in_use`, `port_in_use`, or `validation_failed` for a
     /// field's own syntax.

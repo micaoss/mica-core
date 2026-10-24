@@ -4418,7 +4418,7 @@
             }
           },
           "422": {
-            "description": "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a tunnel's listen port another tunnel declares or a service on the device holds (`port_in_use`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), an undeclared VLAN parent whose image configuration an entry cannot say (`vlan_parent_unsupported`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)",
+            "description": "`dryRun` is not a boolean or the body is not a version and a map of interfaces (`validation_failed`); or the map breaks a rule, each in `details` with its own code: a key that is not an interface name (`name_invalid`), two overlapping subnets (`address_overlap`), a gateway outside its subnet (`gateway_out_of_subnet`), a static gateway or a `0.0.0.0/0` route on an interface with `internet` false (`gateway_not_allowed`), two default routes with one metric (`metric_duplicate`), one VLAN id twice on a parent (`vlan_duplicate`), a tunnel's listen port another tunnel declares or a service on the device holds (`port_in_use`), a VLAN parent that is not a declared entry or is a CAN one (`vlan_parent_invalid`), an undeclared VLAN parent whose image configuration an entry cannot say (`vlan_parent_unsupported`), a bridge port that is not a declared entry or is a CAN one (`bridge_port_invalid`), carries addressing (`bridge_port_addressed`) or is claimed twice (`bridge_port_taken`), and a field's own syntax (`validation_failed`); or micad rejected the write (`settings_rejected`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12167,7 +12167,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "The rule's code: `name_invalid`, `address_overlap`,\n`gateway_out_of_subnet`, `metric_duplicate`, `vlan_duplicate`,\n`vlan_parent_invalid`, `bridge_port_taken`, `bridge_port_invalid`,\n`bridge_port_addressed`, `in_use`, `port_in_use`, or `validation_failed` for a\nfield's own syntax."
+            "description": "The rule's code: `name_invalid`, `address_overlap`,\n`gateway_out_of_subnet`, `gateway_not_allowed`, `metric_duplicate`, `vlan_duplicate`,\n`vlan_parent_invalid`, `bridge_port_taken`, `bridge_port_invalid`,\n`bridge_port_addressed`, `in_use`, `port_in_use`, or `validation_failed` for a\nfield's own syntax."
           },
           "field": {
             "type": "string",
@@ -12547,6 +12547,13 @@
               "type": "string"
             },
             "description": "DNS servers a DHCP entry uses instead of the ones its lease gives.\nOnly with `dhcp`; a static entry names its servers in `static.dns`."
+          },
+          "internet": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the interface may carry the default route. `false` takes a\nDHCP lease's address and subnet but not its gateway, and a static\ngateway or a `0.0.0.0/0` route is then refused with\n`gateway_not_allowed`. Absent is `true`. Physical, bridge and VLAN\nentries only. The servers a lease names are kept either way."
           },
           "kind": {
             "type": "string",

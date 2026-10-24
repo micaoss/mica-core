@@ -134,15 +134,31 @@ pub(super) fn render_unit(
             }
         }
     }
-    if master.is_none() && cfg.dhcp && (metric.is_some() || !cfg.dns.is_empty()) {
+    if master.is_none() && cfg.dhcp && (metric.is_some() || !cfg.dns.is_empty() || !cfg.internet())
+    {
         out.push_str("\n[DHCPv4]\n");
         if let Some(metric) = metric {
             out.push_str(&format!("RouteMetric={metric}\n"));
         }
+        // An interface kept off the internet takes the lease's address and
+        // subnet route, and neither the lease's gateway nor a router
+        // advertisement's.
+        if !cfg.internet() {
+            out.push_str("UseGateway=no\n");
+        }
         // The entry's own servers replace the lease's, in every way a lease
         // or a router advertisement can name one.
         if !cfg.dns.is_empty() {
-            out.push_str("UseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n");
+            out.push_str("UseDNS=no\n\n[DHCPv6]\nUseDNS=no\n");
+        }
+        if !cfg.dns.is_empty() || !cfg.internet() {
+            out.push_str("\n[IPv6AcceptRA]\n");
+            if !cfg.internet() {
+                out.push_str("UseGateway=no\n");
+            }
+            if !cfg.dns.is_empty() {
+                out.push_str("UseDNS=no\n");
+            }
         }
     }
     out

@@ -289,3 +289,31 @@ pub(super) async fn an_undeclared_wired_port_gets_a_dhcp_unit_with_its_metric() 
         .unwrap();
     assert!(!dir.path().join("60-mica-auto-eth1.network").exists());
 }
+
+/// An interface kept off the internet takes its lease's address and subnet,
+/// and no gateway from the lease or a router advertisement.
+#[tokio::test]
+pub(super) async fn an_interface_off_the_internet_takes_no_gateway_from_its_lease() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, _calls) = reconciler_in(dir.path());
+    let lan = IfaceSettings {
+        internet: Some(false),
+        ..dhcp_iface()
+    };
+    reconciler
+        .apply(&settings_with(&[("eth0", dhcp_iface()), ("eth1", lan)]))
+        .await
+        .unwrap();
+
+    let unit = |iface: &str| {
+        std::fs::read_to_string(dir.path().join(format!("50-mica-{iface}.network"))).unwrap()
+    };
+    assert!(
+        unit("eth1").ends_with(
+            "\n[DHCPv4]\nRouteMetric=110\nUseGateway=no\n\n[IPv6AcceptRA]\nUseGateway=no\n"
+        ),
+        "{}",
+        unit("eth1")
+    );
+    assert!(!unit("eth0").contains("UseGateway"));
+}

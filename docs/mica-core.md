@@ -117,7 +117,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | Subtree | Contents |
 | --- | --- |
 | `hostname` | The hostname |
-| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes; a `can` entry has its block alone (below) |
+| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
 | `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
 | `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
@@ -152,7 +152,12 @@ does not declare gets `60-mica-auto-<iface>.network`, the image's DHCP with its 
 sorts before the image's `80-dhcp.network`; declaring the port removes it. The Wi-Fi client's
 lease has metric 600. A static gateway keeps networkd's metric 0. On OpenRC the same numbers go
 into each DHCP stanza as `metric <n>` and into `/run/mica/wifi-client.env` as `metric=600`, for
-Base's `mica-udhcpc` to give the lease's default route (section 3.8). Once an apply converges, the
+Base's `mica-udhcpc` to give the lease's default route (section 3.8). An interface with
+`internet: false` takes its lease's address and subnet route and no gateway: `[DHCPv4]` and
+`[IPv6AcceptRA]` `UseGateway=no`, and on OpenRC `internet 0` in its stanza. The servers its lease
+names are used as any lease's are. A static gateway or a `0.0.0.0/0` route on it is refused with
+`gateway_not_allowed`; nothing refuses a map in which no interface keeps `internet`, and the
+console warns about one. Once an apply converges, the
 private key of every WireGuard tunnel the map no longer declares is removed; a rolled-back apply
 keeps them, since the units it puts back name them.
 
@@ -351,7 +356,10 @@ A DHCP lease's default-route metric reaches Base's udhcpc script, `/usr/lib/mica
 as `IF_METRIC` in its environment: busybox ifupdown exports a stanza's `metric <n>` that way to
 the udhcpc it starts, and `mica-wifi-client` passes the `metric` of its environment file the
 same way. The script puts the default route at that metric (`ip -4 route replace default via
-<router> dev <iface> metric <n>`), and at none when `IF_METRIC` is unset or empty.
+<router> dev <iface> metric <n>`), and at none when `IF_METRIC` is unset or empty. An interface
+kept off the internet reaches it as `IF_INTERNET=0`, from its stanza's `internet 0`: the script
+then sets the lease's address and leaves the default route alone, and still writes the lease's
+DNS servers. Any other value, or none, is today's behaviour.
 
 At start micad logs the device code (`device code`, with its source) and writes it to
 `/run/mica/device-code.issue` as `Device code: XXXX-XXXX-XXX` and a blank line, replaced whole; a

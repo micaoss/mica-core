@@ -67,6 +67,19 @@ pub struct IfaceSettings {
     /// build that does not, until someone uses it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routes: Vec<RouteConfig>,
+    /// Whether the interface may carry the default route: `false` takes a
+    /// DHCP lease's address and subnet but not its gateway, and refuses a
+    /// static one. Absent is `true`; physical, bridge and VLAN entries only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub internet: Option<bool>,
+}
+
+impl IfaceSettings {
+    /// Whether the interface may carry the default route ([`Self::internet`]).
+    #[must_use]
+    pub fn internet(&self) -> bool {
+        self.internet != Some(false)
+    }
 }
 
 /// One static route, rendered as networkd's `[Route]`.

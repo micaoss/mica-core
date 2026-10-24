@@ -53,6 +53,7 @@ pub(super) fn the_network_schema_matches_the_settings_model() {
             gateway: Some("10.8.0.1".to_string()),
             metric: Some(200),
         }],
+        internet: Some(false),
     };
 
     for (schema, model) in [

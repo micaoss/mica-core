@@ -333,3 +333,41 @@ pub(super) async fn a_listen_port_in_use_is_refused() {
         StatusCode::ACCEPTED
     );
 }
+
+// An interface kept off the internet carries no default route: a static
+// gateway or a `0.0.0.0/0` route is refused, and `internet` is for the
+// kinds that can carry one.
+#[tokio::test]
+pub(super) async fn an_interface_off_the_internet_takes_no_gateway() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    let error = refused(&router, &token, json!({
+        "eth0": { "dhcp": false, "internet": false, "static": { "address": "192.168.10.2/24", "gateway": "192.168.10.1" } },
+        "eth1": { "dhcp": true, "internet": false, "routes": [{ "destination": "0.0.0.0/0", "gateway": "10.0.0.1" }] },
+        "wg0": { "kind": "wireguard", "internet": false, "static": { "address": "10.8.0.2/24" }, "wireguard": { "peers": [] } },
+    }))
+    .await;
+    assert_eq!(error["code"], "gateway_not_allowed");
+    assert_eq!(
+        codes(&error),
+        [
+            (
+                "eth0".into(),
+                "static.gateway".into(),
+                "gateway_not_allowed".into()
+            ),
+            ("eth1".into(), "routes".into(), "gateway_not_allowed".into()),
+            ("wg0".into(), "internet".into(), "validation_failed".into()),
+        ]
+    );
+
+    let response = put_network_map(
+        &router,
+        &token,
+        &json!({
+            "eth1": { "dhcp": true, "internet": false },
+        }),
+    )
+    .await;
+    assert!(response.status().is_success(), "{}", response.status());
+    assert_eq!(stored_network_map(&fake).await["eth1"]["internet"], false);
+}

@@ -249,6 +249,13 @@ pub(crate) struct NetworkInterface {
     /// `static.gateway` declares. Empty and absent are the same thing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) routes: Vec<StaticRoute>,
+    /// Whether the interface may carry the default route. `false` takes a
+    /// DHCP lease's address and subnet but not its gateway, and a static
+    /// gateway or a `0.0.0.0/0` route is then refused with
+    /// `gateway_not_allowed`. Absent is `true`. Physical, bridge and VLAN
+    /// entries only. The servers a lease names are kept either way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) internet: Option<bool>,
 }
 
 /// One static route.

@@ -328,6 +328,7 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 | `validation_failed` | the network settings refuse the entry for another reason, or could not save it |
 | `name_invalid` | the port's name is not one the network settings accept |
 | `gateway_out_of_subnet` | the gateway is not in the address's subnet |
+| `gateway_not_allowed` | the port is kept off the internet (`internet: false` in the console), and a static entry names a gateway |
 | `address_overlap` | the address's subnet overlaps another interface's |
 | `metric_duplicate` | another interface's default route has the same metric |
 | `vlan_duplicate` | two VLANs on the same parent have the same id |
