@@ -26,6 +26,11 @@ with "refresh the page or update the device" when the device's version is not in
 speaks exactly one version. Members not listed here are not sent; a receiver ignores JSON members it
 does not know.
 
+Compatibility within protocol 1: `status.ap` is new, and `finished.ap` changed from the string
+`on` or `off` to the object `getStatus` describes (`{"on": false}` when the access point is off).
+A device from before the change sends the string; a page or app reads both shapes until every
+device it meets sends the object.
+
 ## Windows
 
 The device advertises the service only while a provisioning window is open. A window has a trigger
@@ -235,7 +240,7 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 
 | `op` | Parameters | Final event | Its own `failed` reasons |
 | --- | --- | --- | --- |
-| `getStatus` | — | `status`: `wifiMode` (`client`, `ap` or `off`), `connected`, `ssid` (or null), `ip` (or null), `interfaces` | — |
+| `getStatus` | — | `status`: `wifiMode` (`client`, `ap` or `off`), `connected`, `ssid` (or null), `ip` (or null), `interfaces`, and `ap` while the access point is on | — |
 | `scanWifi` | — | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}` | `ap_active`, `no_radio`, `scan_failed` |
 | `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
 | `setNetwork` | `interface`, and `dhcp: true` or `static` | `up`: `interface`, `address` (or null) | listed under `setNetwork` |
@@ -247,6 +252,15 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
   (`192.168.1.40/24`), or null. The addresses are networkd's where it runs and the kernel's
   (rtnetlink) otherwise, so an OpenRC device reports them too. A page offers "wired" for an `ethernet` port and "Wi-Fi" for the
   rest of the flow.
+- `ap`, present while the access point is on: `{"on": true, "ssid": "mica-JXHD", "psk":
+  "W3Q3ZERVUME6L2ZV"}`, so a phone can join the hotspot and reach the console for the claim
+  without any other network. `ssid` is the one it broadcasts. `psk` is the key on the label, and
+  only while the device is unclaimed and the access point runs on that key (`pskSource`
+  `derived`, `docs/factory-ap-key.md`); otherwise it is null. A key the user set is never sent,
+  and after the claim `psk` is null. The label key is a first-contact credential: anyone with the
+  product's public image and the printed code derives it, and a BLE peer is in radio range of the
+  access point anyway, so sending it adds no exposure beyond the unclaimed window. The pushed
+  `status` event carries `ap` the same way.
 
 `scanWifi`
 - The device begins a scan when a phone connects and answers with networks scanned at most 30
@@ -319,8 +333,8 @@ codes, one to one.
   `interface`, `{name, kind, address}` of the port the session brought up (the
   `ethernet` port of `up`, or the `wifi` port after `connected`), else of the first port with an
   address, Ethernet first, or null; `consoleUrls`, the console at that address when there is
-  one and at `<hostname>.local`; and `ap`, `on` or `off`, whether the device's access point is
-  on, so the page can tell the user.
+  one and at `<hostname>.local`; and `ap`, `getStatus`'s object, or `{"on": false}` when the
+  access point is off, so the page can tell the user and offer to join it.
 - `consoleUrls` follow `access.web`: `https` and `httpsPort` when HTTPS is enabled, else `http`
   and `httpPort`, the port left out only where it is the scheme's own (80, 443). With the
   defaults, `["http://192.168.1.40:8080", "http://deck-7.local:8080"]`; with HTTPS on 443,
@@ -328,9 +342,9 @@ codes, one to one.
   `access.web.mode` is `local` or `off` the console is not on the network and the list is empty;
   the page then says so instead of offering a link.
 - The access point: after a Wi-Fi session (`setWifi`) the radio is a client and the access point
-  is off (`ap: off`). After a wired-only session the access point stays on with the key on the
-  label (`ap: on`), and it keeps that key after the device is claimed, until the user sets one on
-  the console's Wi-Fi page (`docs/factory-ap-key.md`).
+  is off (`ap: {"on": false}`). After a wired-only session the access point stays on with the key
+  on the label (`ap: {"on": true, ...}`), and it keeps that key after the device is claimed, until
+  the user sets one on the console's Wi-Fi page (`docs/factory-ap-key.md`).
 - After `finished` the device closes the window and disconnects.
 
 ## Sessions

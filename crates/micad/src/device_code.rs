@@ -366,6 +366,16 @@ pub fn device_code(root: &Path) -> Result<DeviceCode, String> {
     })
 }
 
+/// The key the label prints for the device under `root`: its code under the
+/// product secret.
+///
+/// # Errors
+/// The device has no code, or no usable secret.
+pub fn label_key(root: &Path) -> Result<String, String> {
+    let code = device_code(root)?;
+    Ok(key_of(&product_secret(root)?, &code.code))
+}
+
 /// Where micad puts the device code for the login prompt. Base links
 /// `/etc/issue.d/50-mica-device-code.issue` here; agetty shows the files of
 /// `/etc/issue.d` after `/etc/issue`.

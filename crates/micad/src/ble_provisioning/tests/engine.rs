@@ -46,10 +46,14 @@ impl Device for FakeDevice {
             .iter()
             .any(|call| call.starts_with("join"));
         let mode = if joined { "client" } else { "ap" };
-        json!({ "wifiMode": mode, "connected": false, "ssid": null, "ip": null, "interfaces": [
+        let mut status = json!({ "wifiMode": mode, "connected": false, "ssid": null, "ip": null, "interfaces": [
             { "name": "eth0", "kind": "ethernet", "carrier": true, "address": "10.0.0.5/24" },
             { "name": "wlan0", "kind": "wifi", "carrier": false, "address": "192.168.1.40/24" },
-        ] })
+        ] });
+        if !joined {
+            status["ap"] = json!({ "on": true, "ssid": "mica-789Z", "psk": "U8A5TU7RT6A6E8TV" });
+        }
+        status
     }
     async fn scan(&self) -> Result<Vec<Value>, &'static str> {
         Err("ap_active")
@@ -496,7 +500,7 @@ async fn an_unclaimed_device_joins_wi_fi_and_stays_unclaimed() {
             "hostname": "mica-a4e2e69e",
             "interface": { "name": "wlan0", "kind": "wifi", "address": "192.168.1.40/24" },
             "consoleUrls": ["http://192.168.1.40:8080", "http://mica-a4e2e69e.local:8080"],
-            "ap": "off",
+            "ap": { "on": false },
         })]
     );
     assert_eq!(bench.calls(), vec!["join Harbour"]);
@@ -528,6 +532,10 @@ async fn a_start_that_asks_for_the_status_gets_it_after_ready() {
     assert_eq!(pushed.len(), 1);
     assert_eq!(pushed[0]["event"], "status");
     assert_eq!(pushed[0]["wifiMode"], "ap");
+    assert_eq!(
+        pushed[0]["ap"]["ssid"], "mica-789Z",
+        "the pushed status carries the access point"
+    );
     assert!(pushed[0].get("id").is_none());
     let status = bench.command(json!({ "op": "getStatus" })).await;
     assert_eq!(status[0]["id"], 1, "the commands' records follow it");
@@ -586,8 +594,9 @@ async fn an_unclaimed_device_is_set_up_over_its_wired_port() {
     assert_eq!(finished[0]["event"], "finished");
     assert_eq!(finished[0]["claimed"], false);
     assert_eq!(
-        finished[0]["ap"], "on",
-        "a wired session leaves the access point on"
+        finished[0]["ap"],
+        json!({ "on": true, "ssid": "mica-789Z", "psk": "U8A5TU7RT6A6E8TV" }),
+        "a wired session leaves the access point on, and says how to join it"
     );
     assert_eq!(
         finished[0]["interface"],

@@ -74,7 +74,8 @@ pub struct Facts {
 #[async_trait::async_trait]
 pub trait Device: Send + Sync + 'static {
     async fn facts(&self) -> Facts;
-    /// `getStatus`: `wifiMode`, `connected`, `ssid`, `ip`, `interfaces`.
+    /// `getStatus`: `wifiMode`, `connected`, `ssid`, `ip`, `interfaces` and,
+    /// while the access point is on, `ap`.
     async fn status(&self) -> Value;
     /// `scanWifi`: the networks, or a `failed` reason.
     async fn scan(&self) -> Result<Vec<Value>, &'static str>;
@@ -1020,7 +1021,11 @@ impl Engine {
                 "hostname": hostname,
                 "interface": interface,
                 "consoleUrls": urls,
-                "ap": if status["wifiMode"] == "ap" { "on" } else { "off" },
+                "ap": status
+                    .get("ap")
+                    .filter(|ap| ap.is_object())
+                    .cloned()
+                    .unwrap_or_else(|| json!({ "on": false })),
             })
         });
     }

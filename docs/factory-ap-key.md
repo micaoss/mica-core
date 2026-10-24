@@ -81,7 +81,8 @@ The access point's key is, in order:
 An open access point uses no key, and `pskSource` is `null`. Claiming the device changes nothing
 about the key: `POST /api/v1/setup` sets the administrator password and, optionally, the hostname,
 and no key, so whoever claims over the access point stays connected. BLE provisioning sets no key
-either (`docs/ble-provisioning.md`). The derived key applies until the user sets one on the
+either; while the device is unclaimed and runs on the derived key, its `getStatus` sends that key
+to the phone so it can join the access point (`docs/ble-provisioning.md`). The derived key applies until the user sets one on the
 console's Wi-Fi page, which says so while it applies; the access-point form asks for a key only
 when the user edits it. A configuration reset keeps the administrator and `wifi.ap.psk`. A factory
 reset clears both, which makes the derived key apply again. The default SSID is the code's

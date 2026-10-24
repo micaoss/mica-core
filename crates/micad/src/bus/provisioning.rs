@@ -181,13 +181,27 @@ impl MicadService {
                 })
             })
             .collect();
-        json!({
+        let mut status = json!({
             "wifiMode": mode,
             "connected": ssid.is_some() && ip.is_some(),
             "ssid": ssid,
             "ip": ip,
             "interfaces": interfaces,
-        })
+        });
+        let (claimed, ap_state) = {
+            let inner = self.inner.read().await;
+            (
+                inner.settings.access.web_admin.is_some(),
+                inner.state.get("wifiAp").cloned(),
+            )
+        };
+        let root = self.device_root.clone();
+        if let Some(ap) = ap_status(mode == "ap", claimed, ap_state.as_ref(), || {
+            crate::device_code::label_key(root.as_deref()?).ok()
+        }) {
+            status["ap"] = ap;
+        }
+        status
     }
 
     /// `setNetwork`: `entry` as `interface`'s addressing, held to the rules
@@ -521,6 +535,27 @@ impl crate::ble_provisioning::bluez::Reconcile for InterfaceRef<MicadService> {
     async fn bluetooth(&self) {
         self.get().await.apply_bluetooth().await;
     }
+}
+
+/// `getStatus`'s `ap`, while the access point is `on`: its SSID and, only
+/// while the device is unclaimed and the access point runs on the key the
+/// label prints (`pskSource` `derived`), that key, from `label_key`. A key
+/// the user set is never sent, and none after the claim
+/// (`docs/ble-provisioning.md`).
+pub(super) fn ap_status(
+    on: bool,
+    claimed: bool,
+    state: Option<&Value>,
+    label_key: impl FnOnce() -> Option<String>,
+) -> Option<Value> {
+    if !on {
+        return None;
+    }
+    let state = state.cloned().unwrap_or(Value::Null);
+    let psk = (!claimed && state["pskSource"] == "derived")
+        .then(label_key)
+        .flatten();
+    Some(json!({ "on": true, "ssid": state["ssid"], "psk": psk }))
 }
 
 #[async_trait::async_trait]

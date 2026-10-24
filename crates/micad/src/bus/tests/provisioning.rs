@@ -61,3 +61,34 @@ pub(super) async fn wifi_writes_are_refused_while_a_session_holds_the_radio() {
             .is_ok()
     );
 }
+
+/// BLE's `ap`: the access point while it is on, with the key on the label
+/// only while the device is unclaimed and runs on it. A key the user set is
+/// never sent, and none after the claim.
+#[test]
+pub(super) fn the_label_key_is_shown_over_ble_only_while_unclaimed() {
+    use crate::bus::provisioning::ap_status;
+    use serde_json::json;
+    let derived = json!({ "ssid": "mica-JXHD", "pskSource": "derived" });
+    let label = || Some("W3Q3ZERVUME6L2ZV".to_string());
+
+    assert_eq!(ap_status(false, false, Some(&derived), label), None);
+    assert_eq!(
+        ap_status(true, false, Some(&derived), label),
+        Some(json!({ "on": true, "ssid": "mica-JXHD", "psk": "W3Q3ZERVUME6L2ZV" }))
+    );
+    assert_eq!(
+        ap_status(true, true, Some(&derived), label),
+        Some(json!({ "on": true, "ssid": "mica-JXHD", "psk": null }))
+    );
+    let own = json!({ "ssid": "Harbour AP", "pskSource": "settings" });
+    let never = || -> Option<String> { panic!("a user-set key is never read") };
+    assert_eq!(
+        ap_status(true, false, Some(&own), never),
+        Some(json!({ "on": true, "ssid": "Harbour AP", "psk": null }))
+    );
+    assert_eq!(
+        ap_status(true, false, None, never),
+        Some(json!({ "on": true, "ssid": null, "psk": null }))
+    );
+}
