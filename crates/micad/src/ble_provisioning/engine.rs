@@ -1301,7 +1301,7 @@ fn console(
 /// `web` serves it: HTTPS on its port when enabled, else HTTP on its port, the
 /// port left out where it is the scheme's own. None when apid serves no
 /// network (`local` or `off`).
-pub(super) fn console_urls(web: &WebSettings, host: Option<&str>, hostname: &str) -> Vec<String> {
+pub(crate) fn console_urls(web: &WebSettings, host: Option<&str>, hostname: &str) -> Vec<String> {
     if web.mode != WebMode::Network {
         return Vec::new();
     }

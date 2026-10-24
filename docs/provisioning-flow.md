@@ -30,7 +30,7 @@ Every boot then applies the whole tree. On a product with Bluetooth, before the 
 first starts, micad scans once for the networks nearby with a supplicant of its own and keeps the
 list for a BLE session's `scanWifi`; the access point starts after the scan. The access point
 comes up under the label's SSID and key (`pskSource` `derived`). micad logs the device code and writes `/run/mica/device-code.issue`
-for the login prompt.
+for the login prompt, with the console's URL at each address the device holds.
 
 ## 2. Unclaimed
 
@@ -102,6 +102,23 @@ The device opens the BLE windows of a claimed device (`boot`, `offline`, `manual
 through their routes; the access point runs when `wifi.ap.mode` is not `off`, and an access point
 on the station's interface reports `conflict` instead of starting.
 
+## 6. Wired only
+
+A device whose first network is a cable, with or without a radio, takes this path; a product
+without Wi-Fi and Bluetooth has no other.
+
+1. Every wired port (`eth*`) the map does not declare runs DHCP (`docs/mica-core.md` section
+   3.4). With no DHCP server on the wire, networkd gives the port a `169.254.0.0/16` address too;
+   on OpenRC that fallback is Base's `mica-udhcpc` (section 3.8).
+2. The login prompt, on a screen or the serial console, shows the device code and a
+   `Console: <url>` line for each address the device holds and for `<hostname>.local`, refreshed
+   within 5 seconds of a lease or a link-local address.
+3. Cabled to a router, the device is at its lease's address (the prompt, or the router's lease
+   list) or at `<hostname>.local`. Cabled straight to a laptop, both ends take link-local
+   addresses and the console is at the device's `169.254` address from the prompt.
+4. The claim is section 4: the console's setup page, with the device code from the label or the
+   prompt.
+
 ## The paths, end to end
 
 | Path | Ends as |
@@ -112,3 +129,4 @@ on the station's interface reports `conflict` instead of starting.
 | BLE wired `up`, phone leaves without `finish` | the wired entry stays; the access point stays on |
 | BLE Wi-Fi `connected`, no claim, reboot | client on that network, access point off; the `unclaimed` window opens again |
 | Claim from the access point, no BLE | access point on with the label key |
+| Cable, no BLE, claim from the address on the prompt | the port on DHCP, or on its link-local address with no server |

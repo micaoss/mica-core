@@ -331,6 +331,8 @@ async fn serve() -> anyhow::Result<()> {
     )
     .with_features(features.clone());
     let mut dns_probe: Option<Arc<network_state::DnsProbe>> = None;
+    // The device code as printed, for the login prompt micad keeps.
+    let mut printed_code: Option<String> = None;
     if !dry_run {
         // What the init itself answers: the network, the clock and the
         // failure evidence are systemd's services on one root and OpenRC's
@@ -374,7 +376,7 @@ async fn serve() -> anyhow::Result<()> {
         service = service.with_system_info(Arc::new(system_info::HostSystemInfo::production()));
         service = service.with_telemetry(Arc::new(telemetry::SysfsTelemetry::production()));
         service = service.with_device_root(std::path::PathBuf::from("/"));
-        device_code::announce(
+        printed_code = device_code::announce(
             std::path::Path::new("/"),
             std::path::Path::new(device_code::ISSUE_PATH),
         );
@@ -562,7 +564,8 @@ async fn serve() -> anyhow::Result<()> {
             .interface::<_, bus::MicadService>(bus::OBJECT_PATH)
             .await
             .context("look up served MicadService")?;
-        tokio::spawn(bus::app_upkeep(service_ref));
+        tokio::spawn(bus::app_upkeep(service_ref.clone()));
+        tokio::spawn(bus::issue_upkeep(service_ref, printed_code));
     }
     if let Some(probe) = dns_probe {
         tokio::spawn(probe.run());

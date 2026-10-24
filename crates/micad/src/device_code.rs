@@ -10,6 +10,10 @@
 
 use std::path::{Path, PathBuf};
 
+use micad_settings::WebSettings;
+
+use crate::ble_provisioning::engine::console_urls;
+
 /// The board's declaration of its code's source: `source=<name>`.
 pub const CONFIG_PATH: &str = "usr/share/mica/device-code.conf";
 /// The product secret the default access-point key is derived under.
@@ -383,29 +387,78 @@ pub const ISSUE_PATH: &str = "/run/mica/device-code.issue";
 
 /// Put this device's code where whoever has the device in hand reads it: the
 /// login prompt, through `issue`, and the log micad starts with. A device
-/// without a code gets no line.
-pub fn announce(root: &Path, issue: &Path) {
-    match device_code(root) {
+/// without a code gets no line. Returns the code as printed; the console's
+/// addresses join it on the prompt once the network is read.
+pub fn announce(root: &Path, issue: &Path) -> Option<String> {
+    let code = match device_code(root) {
         Ok(code) => {
             let printed = printed(&code.code);
             tracing::info!(code = %printed, source = code.source.name(), "device code");
-            if let Err(err) = write_issue(issue, &format!("Device code: {printed}\n\n")) {
-                tracing::warn!(path = %issue.display(), error = %err, "the device code could not be put on the login prompt");
-            }
+            Some(printed)
         }
         Err(reason) => {
             tracing::info!(%reason, "this device has no code");
-            if let Err(err) = std::fs::remove_file(issue)
-                && err.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(path = %issue.display(), error = %err, "a stale device code could not be removed");
-            }
+            None
         }
+    };
+    if let Err(err) = put_issue(issue, issue_text(code.as_deref(), &[]).as_deref()) {
+        tracing::warn!(path = %issue.display(), error = %err, "the login prompt could not be written");
     }
+    code
 }
 
-/// `text` at `path`, replaced whole: a getty never reads half a file.
-fn write_issue(path: &Path, text: &str) -> std::io::Result<()> {
+/// Interfaces whose addresses the login prompt leaves out: the loopback and
+/// the virtual ends the container engines make, the ones the console's list
+/// hides.
+const UNLISTED_PREFIXES: &[&str] = &["veth", "podman", "cni-", "docker", "dummy"];
+
+/// The console at each of `addresses` (interface, address with prefix), in
+/// order, then at `<hostname>.local`, as `web` serves it. None when apid
+/// serves no network. A link-local address is listed: it is how a laptop
+/// cabled straight to a port with no DHCP server reaches the device.
+pub fn console_lines(
+    web: &WebSettings,
+    hostname: &str,
+    addresses: &[(String, String)],
+) -> Vec<String> {
+    let listed = addresses.iter().filter(|(name, _)| {
+        name != "lo"
+            && !UNLISTED_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+    });
+    listed
+        .filter_map(|(_, address)| {
+            let host = address.split('/').next().unwrap_or(address);
+            console_urls(web, Some(host), hostname).into_iter().next()
+        })
+        .chain(console_urls(web, None, hostname))
+        .collect()
+}
+
+/// The login prompt's lines: the device code, when there is one, and a
+/// `Console:` line per URL. None when there is neither.
+pub fn issue_text(code: Option<&str>, consoles: &[String]) -> Option<String> {
+    if code.is_none() && consoles.is_empty() {
+        return None;
+    }
+    let mut text = code.map_or_else(String::new, |code| format!("Device code: {code}\n"));
+    for console in consoles {
+        text.push_str(&format!("Console: {console}\n"));
+    }
+    text.push('\n');
+    Some(text)
+}
+
+/// `text` at `path`, replaced whole, since a getty never reads half a file;
+/// or no file when there is no text.
+pub fn put_issue(path: &Path, text: Option<&str>) -> std::io::Result<()> {
+    let Some(text) = text else {
+        return match std::fs::remove_file(path) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        };
+    };
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }

@@ -19,14 +19,12 @@ fn the_production_delete_is_networkctl_delete() {
     assert_eq!(command.get_args().collect::<Vec<_>>(), ["delete", "wg0"]);
 }
 
-const GOLDEN_DHCP: &str =
-    "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric=100\n";
+const GOLDEN_DHCP: &str = "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\n\n[DHCPv4]\nRouteMetric=100\n";
 const GOLDEN_STATIC: &str = "[Match]\nName=eth1\n\n[Network]\n\
     Address=192.168.1.10/24\nGateway=192.168.1.1\nDNS=1.1.1.1\nDNS=9.9.9.9\n";
 const GOLDEN_EMPTY: &str = "[Match]\nName=eth2\n\n[Network]\n";
 const GOLDEN_VLAN_NETDEV: &str = "[NetDev]\nName=eth0.100\nKind=vlan\n\n[VLAN]\nId=100\n";
-const GOLDEN_VLAN_PARENT: &str =
-    "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nVLAN=eth0.100\n\n[DHCPv4]\nRouteMetric=100\n";
+const GOLDEN_VLAN_PARENT: &str = "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\nVLAN=eth0.100\n\n[DHCPv4]\nRouteMetric=100\n";
 const GOLDEN_VLAN_CHILD: &str = "[Match]\nName=eth0.100\n\n[Network]\nAddress=192.168.100.2/24\n";
 const GOLDEN_BRIDGE_NETDEV: &str = "[NetDev]\nName=br0\nKind=bridge\n";
 const GOLDEN_BRIDGE_PORT: &str = "[Match]\nName=eth1\n\n[Network]\nBridge=br0\n";

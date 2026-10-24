@@ -146,7 +146,10 @@ or it is `routable`, `degraded` or `enslaved`; one without carrier, or a device 
 is not waited for, and one the apply creates must appear. When one fails or times out, the
 previous units go back, the devices whose `.netdev` changed are deleted, networkd reloads, the
 task fails naming the interface, and the stored network map goes back to the one last applied.
-Every DHCP link micad renders gets `[DHCPv4] RouteMetric=`: 100 for the first in name order and
+Every DHCP link micad renders gets `LinkLocalAddressing=yes`: with no DHCP server on the wire the
+link still takes a `169.254.0.0/16` address, which networkd picks and defends, so a laptop cabled
+straight to the port reaches the console (`yes`, not `ipv4`, keeps the IPv6 link-local address
+DHCPv6 and router advertisements need). Every DHCP link micad renders gets `[DHCPv4] RouteMetric=`: 100 for the first in name order and
 10 more for each next one, so two uplinks never tie. A wired port (`eth*`, not a VLAN) the map
 does not declare gets `60-mica-auto-<iface>.network`, the image's DHCP with its metric, which
 sorts before the image's `80-dhcp.network`; declaring the port removes it, and a port the board
@@ -168,7 +171,7 @@ dry run lists it in `adopted`. micad observes that entry per link as `adoption`:
 networkd chose for the link and its drop-ins (micad's own global-DNS drop-in left out), read for
 `DHCP=` (IPv4), one `Address=` with its `Gateway=` and `DNS=`. `[Match]` is not read: networkd
 already matched the file to the link, so `Name=eth*` adopts like `Name=eth1`, and neither is
-`[DHCPv4] RouteMetric=`, so a `60-mica-auto-` unit adopts as DHCP. Anything else (another
+`[DHCPv4] RouteMetric=` or `LinkLocalAddressing=`, so a `60-mica-auto-` unit adopts as DHCP. Anything else (another
 section or key, DHCP for IPv6, servers or an address beside DHCP) is refused as
 `vlan_parent_unsupported`, naming it.
 
@@ -374,9 +377,20 @@ missing one ignored). A route that fails is logged and the others still apply. U
 does this, a DHCP interface's static routes are not set on OpenRC; a static or manual stanza sets
 its own with `up` and `down` lines (section 3.4).
 
+On OpenRC micad renders no link-local fallback: it is the script's to give. The hand-off: on
+`leasefail` (udhcpc, started with `-b`, goes on asking in the background) the script starts
+BusyBox `zcip` on the interface once, which claims and defends a `169.254.0.0/16` address with no
+route beyond its subnet; on `bound` it stops that `zcip`, and the flush removes the address. Until
+Base's script does this, an OpenRC port with no DHCP server has no IPv4 address.
+
 At start micad logs the device code (`device code`, with its source) and writes it to
-`/run/mica/device-code.issue` as `Device code: XXXX-XXXX-XXX` and a blank line, replaced whole; a
-device without a code gets no file. Base links `/etc/issue.d/50-mica-device-code.issue` to that
+`/run/mica/device-code.issue`, replaced whole: `Device code: XXXX-XXXX-XXX`, then a
+`Console: <url>` line for each IPv4 address the device holds (the loopback and the container
+engines' links left out, a link-local address kept) and one for `<hostname>.local`, as
+`access.web` serves the console (section 4), then a blank line. micad reads the addresses again
+every 5 s and rewrites the file when its text changes, so a lease or a link-local address reaches
+the prompt within that. A device without a code gets only the console lines, and no file when
+apid serves no network either. Base links `/etc/issue.d/50-mica-device-code.issue` to that
 file, so agetty shows it under `/etc/issue` on the serial console and every local login prompt.
 
 Failed services are read with mica-openrc's `/usr/lib/mica/mica-init failed`, the log with

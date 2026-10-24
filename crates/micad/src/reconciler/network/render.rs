@@ -102,7 +102,11 @@ pub(super) fn render_unit(
         // an entry that tried to keep its own.
         out.push_str(&format!("Bridge={bridge}\n"));
     } else if cfg.dhcp {
-        out.push_str("DHCP=yes\n");
+        // With no DHCP server on the wire the link still gets a 169.254
+        // address, so a laptop cabled straight to the port reaches the
+        // console. `yes` rather than `ipv4`: the IPv6 link-local address
+        // DHCPv6 and router advertisements need stays.
+        out.push_str("DHCP=yes\nLinkLocalAddressing=yes\n");
         for dns in &cfg.dns {
             out.push_str(&format!("DNS={dns}\n"));
         }

@@ -13,7 +13,7 @@ fn the_image_dhcp_file_is_adopted_as_a_dhcp_entry() {
 /// with a route metric, which is micad's to render again once declared.
 #[test]
 fn the_auto_dhcp_unit_is_adopted_as_a_dhcp_entry() {
-    let unit = "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric=110\n";
+    let unit = "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\n\n[DHCPv4]\nRouteMetric=110\n";
     assert_eq!(adopted_entry(&[unit]), Ok(json!({ "dhcp": true })));
     assert_eq!(
         adopted_entry(&["[Network]\nDHCP=yes\n[DHCPv4]\nUseDNS=no\n"]),

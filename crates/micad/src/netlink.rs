@@ -331,18 +331,24 @@ pub fn ipv4_address(body: &[u8]) -> Option<(String, String)> {
 
 /// The kernel's IPv4 addresses, the first of each interface, by name.
 pub fn ipv4_addresses() -> io::Result<std::collections::BTreeMap<String, String>> {
+    let mut found = std::collections::BTreeMap::new();
+    for (name, address) in ipv4_address_list()? {
+        found.entry(name).or_insert(address);
+    }
+    Ok(found)
+}
+
+/// Every IPv4 address the kernel holds outside host scope, with its
+/// interface, in the kernel's order.
+pub fn ipv4_address_list() -> io::Result<Vec<(String, String)>> {
     let mut body = vec![0u8; IFADDRMSG];
     body[0] = AF_INET;
     let replies = exchange(None, &message(RTM_GETADDR, NLM_F_DUMP, &body))?;
-    let mut found = std::collections::BTreeMap::new();
-    for (kind, body) in &replies {
-        if *kind == RTM_NEWADDR
-            && let Some((name, address)) = ipv4_address(body)
-        {
-            found.entry(name).or_insert(address);
-        }
-    }
-    Ok(found)
+    Ok(replies
+        .iter()
+        .filter(|(kind, _)| *kind == RTM_NEWADDR)
+        .filter_map(|(_, body)| ipv4_address(body))
+        .collect())
 }
 
 // ---- Route lookup ----------------------------------------------------------

@@ -151,7 +151,7 @@ pub(super) async fn a_dhcp_iface_with_its_own_dns_ignores_the_leases() {
     let rendered = std::fs::read_to_string(dir.path().join("50-mica-eth0.network")).unwrap();
     assert_eq!(
         rendered,
-        "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nDNS=1.1.1.1\nDNS=2606:4700:4700::1111\n\n\
+        "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\nDNS=1.1.1.1\nDNS=2606:4700:4700::1111\n\n\
 [DHCPv4]\nRouteMetric=100\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n"
     );
 }
@@ -277,7 +277,7 @@ pub(super) async fn an_undeclared_wired_port_gets_a_dhcp_unit_with_its_metric() 
     assert_eq!(names, ["50-mica-eth0.network", "60-mica-auto-eth1.network"]);
     assert_eq!(
         std::fs::read_to_string(dir.path().join("60-mica-auto-eth1.network")).unwrap(),
-        "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric=110\n"
+        "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\n\n[DHCPv4]\nRouteMetric=110\n"
     );
 
     reconciler

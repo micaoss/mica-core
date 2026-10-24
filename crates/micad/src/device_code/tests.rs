@@ -258,3 +258,64 @@ fn the_code_is_put_on_the_login_prompt() {
     announce(root.path(), &issue);
     assert!(!issue.exists(), "a device without a code shows none");
 }
+
+#[test]
+fn the_login_prompt_names_the_console_at_each_address_and_by_name() {
+    use micad_settings::{WebMode, WebSettings};
+    let addresses = [
+        ("lo", "127.0.0.1/8"),
+        ("eth0", "192.168.1.24/24"),
+        ("eth1", "169.254.17.4/16"),
+        ("veth3a", "10.88.0.1/16"),
+        ("podman0", "10.88.0.2/16"),
+        ("docker0", "172.17.0.1/16"),
+    ]
+    .map(|(name, address)| (name.to_string(), address.to_string()));
+    let web = WebSettings::default();
+    let consoles = console_lines(&web, "deck-7", &addresses);
+    assert_eq!(
+        consoles,
+        [
+            "http://192.168.1.24:8080",
+            "http://169.254.17.4:8080",
+            "http://deck-7.local:8080"
+        ]
+    );
+    assert_eq!(
+        issue_text(Some("DFN4-L34C-T8N"), &consoles).as_deref(),
+        Some(
+            "Device code: DFN4-L34C-T8N\n\
+             Console: http://192.168.1.24:8080\n\
+             Console: http://169.254.17.4:8080\n\
+             Console: http://deck-7.local:8080\n\n"
+        )
+    );
+    assert_eq!(
+        issue_text(None, &consoles[2..]).as_deref(),
+        Some("Console: http://deck-7.local:8080\n\n")
+    );
+    assert_eq!(
+        issue_text(Some("DFN4-L34C-T8N"), &[]).as_deref(),
+        Some("Device code: DFN4-L34C-T8N\n\n")
+    );
+    assert_eq!(issue_text(None, &[]), None);
+    let local = WebSettings {
+        mode: WebMode::Local,
+        ..web
+    };
+    assert!(console_lines(&local, "deck-7", &addresses).is_empty());
+}
+
+#[test]
+fn the_login_prompt_file_follows_its_text() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let issue = dir.path().join("run/mica/device-code.issue");
+    put_issue(&issue, Some("Console: http://deck-7.local:8080\n\n")).expect("write");
+    assert_eq!(
+        std::fs::read_to_string(&issue).expect("issue"),
+        "Console: http://deck-7.local:8080\n\n"
+    );
+    put_issue(&issue, None).expect("remove");
+    assert!(!issue.exists());
+    put_issue(&issue, None).expect("nothing to remove");
+}

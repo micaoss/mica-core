@@ -34,6 +34,7 @@ mod apps;
 mod builder;
 mod errors;
 mod interface;
+mod issue;
 mod operations;
 mod power;
 mod provisioning;
@@ -41,6 +42,7 @@ mod served;
 
 pub use apps::app_upkeep;
 pub use errors::*;
+pub use issue::issue_upkeep;
 pub use served::*;
 
 /// Well-known bus name owned by the daemon.
