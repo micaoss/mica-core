@@ -2,8 +2,8 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderParamRoute, stubFetch } from '@/shared/testing/panel'
-import { configured, networkRoutes } from '@/shared/testing/network'
-import { resetChangeSet } from './change-set'
+import { configured, networkRoutes, observed } from '@/shared/testing/network'
+import { resetChangeSet, updateChangeSet } from './change-set'
 import { InterfaceDetailPage } from './interface-detail'
 
 afterEach(() => {
@@ -70,6 +70,31 @@ describe('one interface', () => {
     expect(await screen.findByText('LAN only')).toBeTruthy()
     const dialog = await review()
     expect(within(dialog).getByText('No interface is used for internet access')).toBeTruthy()
+  })
+
+  it('shows the board\'s label and keeps an internal port off the internet until it is turned on', async () => {
+    const status = observed()
+    status.board = 'declared'
+    for (const entry of status.interfaces.entries!) {
+      if (entry.name === 'eth0') entry.declared = { kind: 'ethernet', label: 'LAN2', order: 1, role: 'internal', capabilities: {} }
+      if (entry.name === 'eth1') entry.declared = { kind: 'ethernet', label: 'LAN1', order: 0, role: 'uplink', capabilities: {} }
+    }
+    stubFetch(networkRoutes(configured(), status))
+    open('eth0')
+    expect(await screen.findByText('LAN2 · Ethernet port')).toBeTruthy()
+    expect(screen.getByText('LAN only')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    const toggle = screen.getByRole('switch', { name: /^Internet access/ })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(toggle)
+    await userEvent.click(within(screen.getByRole('region', { name: 'Editing eth0' })).getByRole('button', { name: 'Done' }))
+    let staged: unknown
+    updateChangeSet((set) => { staged = set.staged.eth0; return set })
+    expect(staged).toEqual({ dhcp: true, internet: true })
+    cleanup()
+
+    open('eth2')
+    expect(await screen.findByText('Undeclared')).toBeTruthy()
   })
 
   it('refuses a static gateway on a port off the internet', async () => {

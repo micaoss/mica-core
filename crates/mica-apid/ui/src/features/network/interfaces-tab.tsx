@@ -8,7 +8,7 @@ import { CreateWizard } from './create-wizard'
 import { bridgeOf, usesInternet, vlansOn } from './model'
 import { Led, ROLES, roleOf, Tag, TEXT, useCanText, useKindLabel, useStatusText, type Role } from './parts'
 import type { NetworkData } from './use-network'
-import { computeStatus, exitOf } from './view'
+import { computeStatus, exitOf, internalPort, undeclaredPort } from './view'
 
 /// Every interface, grouped by what it is: Ethernet ports, virtual ports
 /// (bridges and VLANs), radios, tunnels and field buses.
@@ -97,11 +97,12 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
       <div className="flex flex-wrap items-center gap-2">
         <Led tone={status.tone} />
         <span className="font-mono font-semibold">{name}</span>
-        <span className="text-xs text-muted-foreground">{kindLabel(iface)}</span>
+        <span className="text-xs text-muted-foreground">{iface.port && iface.port.label !== kindLabel(iface) ? `${iface.port.label} · ${kindLabel(iface)}` : kindLabel(iface)}</span>
         <span className="flex-1" />
         {exitOf(data.applied) === name ? <Tag tone="exit">{t('network.tags.exit')}</Tag> : null}
         {data.session === name ? <Tag tone="info">{t('network.tags.session')}</Tag> : null}
-        {!usesInternet(iface.entry) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null}
+        {!usesInternet(iface.entry, internalPort(data.staged, name)) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null}
+        {undeclaredPort(data.staged, name) ? <Tag>{t('network.tags.undeclared')}</Tag> : null}
         {!iface.declared && iface.kind !== 'wifi' ? <Tag>{t('network.tags.imageDefault')}</Tag> : null}
         {pending ? <Tag tone="pending">{t(pending.op === 'create' ? 'network.tags.pendingCreate' : 'network.tags.pending')}</Tag> : null}
       </div>

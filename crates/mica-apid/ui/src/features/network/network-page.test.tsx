@@ -554,6 +554,19 @@ describe('the Wi-Fi tab as a client', () => {
     await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client', client: { addressing: { dhcp: false, static: { address: '192.168.30.5/24', gateway: '192.168.30.1', dns: [] } } } }))
   })
 
+  it('offers no access point on a radio the board says cannot run one', async () => {
+    const routes = joined()
+    const status = (routes as Record<string, unknown>)['/api/v1/network/status'] as ReturnType<typeof observed>
+    status.board = 'declared'
+    status.interfaces.entries!.find((entry) => entry.name === 'wlan0')!.declared = { kind: 'wifi', label: 'Wi-Fi', order: 0, role: 'uplink', capabilities: { ap: false } }
+    stubFetch(routes)
+    open('wifi')
+    await screen.findByText('-52 dBm · Strong')
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    expect(screen.getByText('This board\'s radio cannot run an access point.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Access point' })).toBeNull()
+  })
+
   it('keeps the radio client off the internet through its addressing', async () => {
     const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'w' }) })
     open('wifi')

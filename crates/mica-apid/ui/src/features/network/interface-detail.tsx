@@ -22,7 +22,7 @@ import {
 import { BackLink, Group, InternetSwitch, Led, Section, StatusLine, Tag, useCanText, useKindLabel } from './parts'
 import { useNetwork, type NetworkData } from './use-network'
 import { addressBook, validateEntry, type Problem, type Problems } from './validate'
-import { computeStatus, exitOf } from './view'
+import { computeStatus, exitOf, internalPort, undeclaredPort } from './view'
 
 /// One interface: what the device observes on it, and its configuration,
 /// edited into the staged change set. Nothing here writes to the device.
@@ -71,7 +71,7 @@ function useProblems(data: NetworkData, name: string): Problems {
   const view = data.staged
   const iface = view.ifaces[name]
   const observed = Object.fromEntries(view.order.map((each) => [each, view.ifaces[each].obs?.address]))
-  return validateEntry(name, iface.kind, view.map[name], view.map, addressBook(view.map, observed), bridgeOf(view.map, name) !== undefined)
+  return validateEntry(name, iface.kind, view.map[name], view.map, addressBook(view.map, observed), bridgeOf(view.map, name) !== undefined, internalPort(view, name))
 }
 
 function Header({ data, name, editing }: { data: NetworkData; name: string; editing: boolean }) {
@@ -89,10 +89,11 @@ function Header({ data, name, editing }: { data: NetworkData; name: string; edit
       <div className="flex flex-wrap items-center gap-2.5">
         <Led tone={status.tone} className="size-2.5" />
         <h1 className="font-mono text-xl font-semibold tracking-tight">{name}</h1>
-        <span className="text-sm text-muted-foreground">{kindLabel(iface)}</span>
+        <span className="text-sm text-muted-foreground">{iface.port && iface.port.label !== kindLabel(iface) ? `${iface.port.label} · ${kindLabel(iface)}` : kindLabel(iface)}</span>
         {exitOf(data.applied) === name ? <Tag tone="exit">{t('network.tags.exit')}</Tag> : null}
         {data.session === name ? <Tag tone="info">{t('network.tags.session')}</Tag> : null}
-        {!usesInternet(iface.entry) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null}
+        {!usesInternet(iface.entry, internalPort(data.staged, name)) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null}
+        {undeclaredPort(data.staged, name) ? <Tag>{t('network.tags.undeclared')}</Tag> : null}
         {!(data.applied.ifaces[name]?.declared ?? true) ? <Tag>{t('network.tags.imageDefault')}</Tag> : null}
         {bridge ? <Tag>{t('network.detail.portOf')} <Link className="font-mono text-primary" to="/network/$name" params={{ name: bridge }}>{bridge}</Link></Tag> : null}
         {iface.kind === 'vlan' && iface.entry.vlan ? <Tag>{t('network.detail.on')} <Link className="font-mono text-primary" to="/network/$name" params={{ name: iface.entry.vlan.parent }}>{iface.entry.vlan.parent}</Link></Tag> : null}
@@ -242,7 +243,7 @@ function ConfigView({ data, name }: { data: NetworkData; name: string }) {
                     { id: 'gateway', label: t('network.fields.gateway'), value: mono(entry.static?.gateway || t('network.values.none')) },
                     { id: 'dns', label: t('network.fields.dns'), value: mono(entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none')) },
                   ]),
-              { id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry) ? 'network.values.on' : 'network.values.off') },
+              { id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry, internalPort(data.staged, name)) ? 'network.values.on' : 'network.values.off') },
             ]} />
           </Group>
         </>
@@ -346,7 +347,7 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
 
       {entry.dhcp ? (
         <Group title={t('network.detail.addressAndDns')}>
-          <InternetRow entry={entry} onChange={(next) => set(() => next)} />
+          <InternetRow entry={entry} internal={internalPort(data.staged, name)} onChange={(next) => set(() => next)} />
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="grid gap-0.5"><span className="font-medium">{t('network.fields.customDns')}</span><span className="text-muted-foreground">{t('network.detail.customDnsHint')}</span></span>
             <Switch checked={customDns} onCheckedChange={(on) => { setCustomDns(on); if (!on) set((current) => ({ ...current, dns: [] })) }} aria-label={t('network.fields.customDns')} />
@@ -359,7 +360,7 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
         </Group>
       ) : (
         <Group title={t('network.detail.addressAndDns')}>
-          <InternetRow entry={entry} onChange={(next) => set(() => next)} />
+          <InternetRow entry={entry} internal={internalPort(data.staged, name)} onChange={(next) => set(() => next)} />
           <FormField label={t('network.fields.address')} hint={problems.address ? <ProblemText problem={problems.address} /> : t('network.detail.cidrHint')}>
             {(id) => <Input id={id} className="font-mono sm:w-80" value={entry.static?.address ?? ''} aria-invalid={Boolean(problems.address)} onChange={(event) => set((current) => ({ ...current, static: { ...current.static, address: event.target.value.trim() } }))} />}
           </FormField>
@@ -436,12 +437,12 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
   )
 }
 
-function InternetRow({ entry, onChange }: { entry: IfaceEntry; onChange: (entry: IfaceEntry) => void }) {
+function InternetRow({ entry, internal, onChange }: { entry: IfaceEntry; internal: boolean; onChange: (entry: IfaceEntry) => void }) {
   const { t } = useTranslation()
   return (
     <label className="flex items-center justify-between gap-3 text-sm">
       <span className="grid gap-0.5"><span className="font-medium">{t('network.fields.internet')}</span><span className="text-muted-foreground">{t('network.detail.internetHint')}</span></span>
-      <InternetSwitch entry={entry} onChange={onChange} />
+      <InternetSwitch entry={entry} internal={internal} onChange={onChange} />
     </label>
   )
 }

@@ -795,6 +795,37 @@ test('captures the N13 overview, the internet switch and the detail headers in C
   }
 })
 
+test('captures the N14 board ports in Chinese', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  // A board that declares eth0 and eth1, a third port the device lacks, and CAN.
+  await page.route('**/api/v1/network/status', async (route) => {
+    const status = benchPayload('/api/v1/network/status') as { interfaces: { entries: { name: string; declared?: unknown }[] } } & Record<string, unknown>
+    const declared: Record<string, unknown> = {
+      eth0: { kind: 'ethernet', label: 'LAN1', order: 0, role: 'uplink', capabilities: { speedMbps: 1000 } },
+      eth1: { kind: 'ethernet', label: 'LAN2', order: 1, role: 'internal', capabilities: { speedMbps: 1000 } },
+      wlan0: { kind: 'wifi', label: 'Wi-Fi', order: 3, role: 'uplink', capabilities: { ap: true, bands: ['2.4', '5'] } },
+      can0: { kind: 'can', label: 'CAN', order: 4, capabilities: { fd: true } },
+    }
+    const entries = status.interfaces.entries.map((entry) => ({ ...entry, declared: declared[entry.name] ?? null }))
+    entries.push({ name: 'eth3', present: false, declared: { kind: 'ethernet', label: 'LAN3', order: 2, role: 'internal', capabilities: {} } } as never)
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...status, board: 'declared', interfaces: { ...status.interfaces, entries } }) })
+  })
+  await page.addInitScript(() => localStorage.setItem('mica.ui.locale', 'zh-CN'))
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width > 1000 ? 1000 : 844 })
+    await page.goto('./network?tab=interfaces')
+    await expect(page.getByText('未检测到').first()).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`n14-interfaces-${width}.png`), fullPage: true })
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('./network/eth1')
+  await expect(page.getByText('LAN2 · 以太网口', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('n14-eth1.png'), fullPage: true })
+  await page.goto('./network?tab=overview')
+  await page.screenshot({ path: testInfo.outputPath('n14-overview.png'), fullPage: true })
+})
+
 async function mockNetworkBench(page: Page) {
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()

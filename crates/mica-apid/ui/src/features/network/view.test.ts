@@ -4,7 +4,7 @@ import type { NetworkMap } from './model'
 import { diffRows } from './summary'
 import { wifiView } from './use-network'
 import { addressBook, validateEntry } from './validate'
-import { buildView, computeStatus, exitOf, keepsInternet, routeTable, sessionInterface, tunnelDefaults, type WifiView } from './view'
+import { buildView, computeStatus, exitOf, internalPort, keepsInternet, routeTable, undeclaredPort, sessionInterface, tunnelDefaults, type WifiView } from './view'
 
 const off: WifiView = { radio: 'wlan0', mode: 'off', apRunning: false, stations: 0 }
 const t = (key: string, params?: Record<string, unknown>) => params ? `${key}${JSON.stringify(params)}` : key
@@ -75,7 +75,7 @@ describe('the joined view', () => {
     status.interfaces.entries!.push({ name: 'eth9', present: false } as never)
     const joined = buildView({ ...configured() as NetworkMap, eth9: { dhcp: true } }, status, ap)
     expect(computeStatus(joined, 'wlan0')).toEqual({ tone: 'danger', label: 'apDown', note: { key: 'network.status.notes.apReason.radio_blocked' } })
-    expect(computeStatus(joined, 'eth9').label).toBe('notCreated')
+    expect(computeStatus(joined, 'eth9').label).toBe('notDetected')
   })
 
   it('warns while the access point runs on the fallback channel', () => {
@@ -222,5 +222,40 @@ describe('the way out', () => {
     expect(keepsInternet(buildView(lan, observed(), off))).toBe(false)
     expect(keepsInternet(buildView(lan, observed(), client))).toBe(true)
     expect(keepsInternet(buildView({ ...lan, br0: { kind: 'bridge', dhcp: true, bridge: { ports: ['eth0'] } } }, observed(), off))).toBe(true)
+  })
+})
+
+describe('a board that declares its ports', () => {
+  const declared = () => {
+    const status = observed()
+    status.board = 'declared'
+    for (const entry of status.interfaces.entries!) {
+      if (entry.name === 'eth1') entry.declared = { kind: 'ethernet', label: 'LAN1', order: 0, role: 'internal', capabilities: {} }
+      if (entry.name === 'eth0') entry.declared = { kind: 'ethernet', label: 'WAN', order: 1, role: 'uplink', capabilities: { speedMbps: 1000 } }
+      if (entry.name === 'can0') entry.declared = { kind: 'can', label: 'CAN', order: 3, capabilities: { fd: true } }
+    }
+    status.interfaces.entries!.push({ name: 'eth3', present: false, declared: { kind: 'ethernet', label: 'LAN2', order: 2, role: 'internal', capabilities: {} } } as never)
+    return status
+  }
+
+  it('lists its ports first, in its order, present or not, and notes a port it does not declare', () => {
+    const view = buildView(configured() as NetworkMap, declared(), off)
+    expect(view.order.slice(0, 4)).toEqual(['eth1', 'eth0', 'eth3', 'can0'])
+    expect(view.ifaces.eth3).toMatchObject({ kind: 'physical', declared: false, port: { label: 'LAN2' } })
+    expect(computeStatus(view, 'eth3').label).toBe('notDetected')
+    expect(undeclaredPort(view, 'eth2')).toBe(true)
+    expect(undeclaredPort(view, 'eth0')).toBe(false)
+    expect(undeclaredPort(buildView(configured() as NetworkMap, observed(), off), 'eth2')).toBe(false)
+  })
+
+  it('keeps an internal port off the internet until its entry says otherwise', () => {
+    const map = { ...configured(), eth0: { dhcp: true, internet: false }, eth2: { dhcp: true, internet: false } } as NetworkMap
+    const view = buildView(map, declared(), off)
+    expect(internalPort(view, 'eth1')).toBe(true)
+    expect(keepsInternet(view)).toBe(false)
+    expect(keepsInternet(buildView({ ...map, eth1: { ...(map.eth1 as object), internet: true } } as NetworkMap, declared(), off))).toBe(true)
+    const entry = { dhcp: false, static: { address: '192.168.10.1/24', gateway: '192.168.10.254' } }
+    expect(validateEntry('eth1', 'physical', entry, map, [], false, true).gateway?.key).toBe('network.problems.gatewayOffInternet')
+    expect(validateEntry('eth1', 'physical', { ...entry, internet: true }, map, [], false, true)).toEqual({})
   })
 })

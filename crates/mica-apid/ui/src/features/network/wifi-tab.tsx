@@ -64,6 +64,10 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
   const ap = data.ap.data
   const client = data.client.data
   const stored = data.applied.ifaces[radio]?.entry ?? { dhcp: true }
+  // What the board declares about the radio: an access point it cannot be
+  // is not offered, and its bands bound the channels.
+  const port = data.applied.ifaces[radio]?.port
+  const apOffered = port?.capabilities.ap !== false
   const [draft, setDraft] = useState<Draft>()
   const [confirming, setConfirming] = useState(false)
   // Where the running access point's key comes from: `derived` is the key on
@@ -97,7 +101,7 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
     enabled: draft !== undefined && draft.mode === 'ap',
     retry: false,
   })
-  const allowed = channels.data ? [...(channels.data.auto ? [0] : []), ...channels.data.channels] : undefined
+  const allowed = channels.data ? [...(channels.data.auto ? [0] : []), ...inBands(channels.data.channels, port?.capabilities.bands)] : undefined
   const errors = draft ? draftErrors(draft, data, allowed, t) : {}
   const errorCount = Object.keys(errors).length
   const modeChanged = draft !== undefined && draft.enabled && wifi.mode !== 'off' && draft.mode !== wifi.mode
@@ -156,7 +160,7 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
         editing={draft !== undefined}
         action={draft ? undefined : <Button size="sm" disabled={!radio || locked} onClick={start}>{t('network.detail.edit')}</Button>}
       >
-        {draft ? <ConfigForm draft={draft} setDraft={setDraft} errors={errors} current={wifi.mode} allowed={allowed} /> : <ConfigView data={data} />}
+        {draft ? <ConfigForm draft={draft} setDraft={setDraft} errors={errors} current={wifi.mode} allowed={allowed} internal={port?.role === 'internal'} apOffered={apOffered} /> : <ConfigView data={data} />}
       </Section>
 
       {draft ? (
@@ -249,7 +253,7 @@ function draftErrors(draft: Draft, data: NetworkData, allowed: number[] | undefi
     if (!address) errors.address = t('network.problems.addressMissing')
     else if (!parseCidr(address)) errors.address = t('network.problems.cidr')
     if (entry.static?.gateway && !inSubnet(entry.static.gateway, address)) errors.gateway = t('network.problems.gatewaySubnet')
-    else if (entry.static?.gateway && entry.internet === false) errors.gateway = t('network.problems.gatewayOffInternet')
+    else if (entry.static?.gateway && !usesInternet(entry, data.applied.ifaces[data.wifi.radio ?? '']?.port?.role === 'internal')) errors.gateway = t('network.problems.gatewayOffInternet')
   }
   const dns = entry.dhcp ? entry.dns : entry.static?.dns
   if ((dns ?? []).some((server) => !isIPv4(server))) errors.dns = t('network.problems.dns', { list: (dns ?? []).filter((server) => !isIPv4(server)).join(', ') })
@@ -295,6 +299,7 @@ function ConfigView({ data }: { data: NetworkData }) {
   const wifi = data.wifi
   const ap = data.ap.data
   const entry = (wifi.radio ? data.applied.ifaces[wifi.radio]?.entry : undefined) ?? { dhcp: true }
+  const internal = (wifi.radio ? data.applied.ifaces[wifi.radio]?.port?.role : undefined) === 'internal'
   const radio = (
     <Group title={t('network.wifi.groups.wifi')}>
       <FactList layout="pairs" facts={[
@@ -350,7 +355,7 @@ function ConfigView({ data }: { data: NetworkData }) {
                   { id: 'gateway', label: t('network.fields.gateway'), value: entry.static?.gateway || t('network.values.none'), mono: true },
                   { id: 'dns', label: t('network.fields.dns'), value: entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none'), mono: true },
                 ]),
-            { id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry) ? 'network.values.on' : 'network.values.off') },
+            { id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry, internal) ? 'network.values.on' : 'network.values.off') },
           ]} />
         </Group>
       </div>
@@ -359,7 +364,7 @@ function ConfigView({ data }: { data: NetworkData }) {
   return radio
 }
 
-function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draft; setDraft: (draft: Draft) => void; errors: Record<string, string>; current: 'off' | 'client' | 'ap'; allowed: number[] | undefined }) {
+function ConfigForm({ draft, setDraft, errors, current, allowed, internal, apOffered }: { draft: Draft; setDraft: (draft: Draft) => void; errors: Record<string, string>; current: 'off' | 'client' | 'ap'; allowed: number[] | undefined; internal: boolean; apOffered: boolean }) {
   const { t, i18n } = useTranslation()
   const locale = i18n.resolvedLanguage ?? 'en'
   const hint = (key: string, fallback?: ReactNode) => errors[key] ? <span className="text-destructive">{errors[key]}</span> : fallback
@@ -374,7 +379,8 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
         description={draft.enabled ? undefined : t('network.wifi.offHint')}
         control={<Switch checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} aria-label={t('network.wifi.enabled')} />}
       />
-      {draft.enabled ? (
+      {draft.enabled && !apOffered && draft.mode === 'client' ? <p className="text-sm text-muted-foreground">{t('network.wifi.noAp')}</p> : null}
+      {draft.enabled && (apOffered || draft.mode === 'ap') ? (
         <FormField label={t('network.wifi.mode')} hint={current !== 'off' && draft.mode !== current ? t('network.wifi.switchHint', { from: t(`network.wifi.modes.${current}`) }) : undefined}>
           {() => <SegmentedControl<'client' | 'ap'> label={t('network.wifi.mode')} value={draft.mode} onValueChange={(mode) => setDraft({ ...draft, mode })} segments={[{ value: 'client', label: t('network.wifi.modes.client') }, { value: 'ap', label: t('network.wifi.modes.ap') }]} />}
         </FormField>
@@ -448,7 +454,7 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
           <FormField label={t('network.detail.preset')}>
             {() => <SegmentedControl<'dhcp' | 'static'> label={t('network.detail.preset')} cards value={entry.dhcp ? 'dhcp' : 'static'} onValueChange={(preset) => setEntry(preset === 'dhcp' ? { ...withoutAddressing(entry), dhcp: true } : { ...withoutAddressing(entry), dhcp: false, static: { address: entry.static?.address ?? '', ...(entry.static?.gateway ? { gateway: entry.static.gateway } : {}), dns: entry.dns ?? entry.static?.dns ?? [] } })} segments={[{ value: 'dhcp', label: t('network.presets.dhcp') }, { value: 'static', label: t('network.presets.static') }]} />}
           </FormField>
-          <ToggleField title={t('network.fields.internet')} description={t('network.detail.internetHint')} control={<InternetSwitch entry={entry} onChange={setEntry} />} />
+          <ToggleField title={t('network.fields.internet')} description={t('network.detail.internetHint')} control={<InternetSwitch entry={entry} internal={internal} onChange={setEntry} />} />
           {entry.dhcp ? (
             <>
               <ToggleField
@@ -482,6 +488,13 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
 }
 
 const split = (text: string) => text.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean)
+
+/// The channels of the bands the board declares; all of them when it does
+/// not say. 2.4 GHz is channels 1-14, 5 GHz the rest this list carries.
+function inBands(channels: number[], bands: string[] | undefined): number[] {
+  if (!bands) return channels
+  return channels.filter((channel) => bands.includes(channel <= 14 ? '2.4' : '5'))
+}
 
 function withoutAddressing(entry: IfaceEntry): IfaceEntry {
   const next = { ...entry }

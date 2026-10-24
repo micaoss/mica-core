@@ -1,5 +1,5 @@
 import { isHiddenInterface } from '@/lib/network'
-import type { ObservedNetworkInterface, ObservedNetworkState } from '@/lib/types'
+import type { BoardPort, ObservedNetworkInterface, ObservedNetworkState } from '@/lib/types'
 import type { StatusTone } from '@/shared/components/status-badge'
 import { bridgeOf, carriesInternet, defaultEntry, overlaps, usesInternet, vlansOn, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
 
@@ -35,6 +35,8 @@ export interface IfaceView {
   entry: IfaceEntry
   /// Absent when the device does not report the interface.
   obs?: Observed
+  /// What the board declares about the port, when it does.
+  port?: BoardPort
 }
 
 export interface WifiView {
@@ -82,6 +84,8 @@ export interface NetView {
   order: string[]
   /// Whether the observation was read; before it is, nothing is "missing".
   observed: boolean
+  /// Whether the board declares its ports, so a port it does not is noted.
+  boardDeclared: boolean
   routes: DefaultRoute[]
   wifi: WifiView
 }
@@ -123,15 +127,31 @@ function observedKind(entry: ObservedNetworkInterface, radios: string[]): ViewKi
 
 const KIND_RANK: Record<ViewKind, number> = { physical: 0, bridge: 1, vlan: 2, wifi: 3, wireguard: 4, can: 5 }
 
+const PORT_KIND: Record<BoardPort['kind'], ViewKind> = { ethernet: 'physical', wifi: 'wifi', can: 'can' }
+
+/// Whether `name` stays off the internet while its entry does not say: the
+/// board declares it internal.
+export const internalPort = (view: NetView, name: string) => view.ifaces[name]?.port?.role === 'internal'
+
+/// A physical port the board does not declare, on a board that declares its
+/// ports.
+export const undeclaredPort = (view: NetView, name: string) => view.boardDeclared && view.ifaces[name]?.kind === 'physical' && !view.ifaces[name]?.port
+
 /// Join a map with what the device observes. Interfaces the device creates
 /// for itself (the loopback, container links) are left out unless declared.
+/// The ports the board declares lead, in its order, present or not.
 export function buildView(map: NetworkMap, status: ObservedNetworkState | undefined, wifi: WifiView, now = Date.now()): NetView {
   const radios = status?.capabilities.wifi.interfaces ?? []
   const entries = status?.interfaces.entries ?? []
   const ifaces: Record<string, IfaceView> = {}
   const index = new Map<string, number>()
+  const ports = new Map(entries.filter((entry) => entry.declared).map((entry) => [entry.name, entry.declared as BoardPort]))
   for (const entry of entries) {
-    if (entry.present === false) continue
+    if (entry.present === false) {
+      const port = entry.declared
+      if (port && map[entry.name] === undefined) ifaces[entry.name] = { name: entry.name, kind: PORT_KIND[port.kind], declared: false, entry: defaultEntry(PORT_KIND[port.kind]) }
+      continue
+    }
     if (map[entry.name] === undefined && isHiddenInterface(entry.name, entry.kind ?? entry.type)) continue
     const kind = map[entry.name]?.kind ?? observedKind(entry, radios)
     ifaces[entry.name] = { name: entry.name, kind, declared: map[entry.name] !== undefined, entry: map[entry.name] ?? defaultEntry(kind), obs: observedOf(entry, now) }
@@ -141,15 +161,18 @@ export function buildView(map: NetworkMap, status: ObservedNetworkState | undefi
     if (ifaces[name]) continue
     ifaces[name] = { name, kind: entry.kind ?? 'physical', declared: true, entry }
   }
+  for (const [name, port] of ports) if (ifaces[name]) ifaces[name].port = port
+  const rank = (name: string) => ports.get(name)?.order ?? Number.MAX_SAFE_INTEGER
   const order = Object.keys(ifaces).sort((left, right) =>
-    KIND_RANK[ifaces[left].kind] - KIND_RANK[ifaces[right].kind]
+    rank(left) - rank(right)
+    || KIND_RANK[ifaces[left].kind] - KIND_RANK[ifaces[right].kind]
     || (index.get(left) ?? Number.MAX_SAFE_INTEGER) - (index.get(right) ?? Number.MAX_SAFE_INTEGER)
     || left.localeCompare(right))
   const routes = (status?.defaultRoutes.entries ?? [])
     .filter((route): route is typeof route & { interface: string } => route.interface !== undefined && (route.family === undefined || route.family === 'ipv4' || route.family === 'inet'))
     .map((route) => ({ gateway: route.gateway, interface: route.interface, metric: route.metric, effective: route.effective }))
     .sort((left, right) => Number(right.effective === true) - Number(left.effective === true) || (left.metric ?? 0) - (right.metric ?? 0))
-  return { map, ifaces, order, observed: status !== undefined, routes, wifi }
+  return { map, ifaces, order, observed: status !== undefined, boardDeclared: status?.board === 'declared', routes, wifi }
 }
 
 /// The interface the default route leaves by: the one the kernel uses, or
@@ -165,7 +188,7 @@ export function keepsInternet(view: NetView): boolean {
   return view.order.some((name) => {
     const iface = view.ifaces[name]
     if (iface.kind === 'wifi' && view.wifi.mode !== 'client') return false
-    return carriesInternet(iface.kind) && !bridgeOf(view.map, name) && usesInternet(iface.entry)
+    return carriesInternet(iface.kind) && !bridgeOf(view.map, name) && usesInternet(iface.entry, internalPort(view, name))
   })
 }
 
@@ -222,8 +245,9 @@ export function computeStatus(view: NetView, name: string): IfaceStatus {
   if (!view.observed) return status('neutral', 'unknown')
   const obs = iface.obs
   if (!obs) {
-    const note = iface.kind === 'physical' || iface.kind === 'can' ? 'deviceMissing' : iface.kind === 'vlan' ? 'parentMissing' : 'createFailed'
-    return status('danger', 'notCreated', { key: `network.status.notes.${note}`, params: { parent: iface.entry.vlan?.parent ?? '' } })
+    const hardware = iface.kind === 'physical' || iface.kind === 'can' || iface.kind === 'wifi'
+    const note = hardware ? 'deviceMissing' : iface.kind === 'vlan' ? 'parentMissing' : 'createFailed'
+    return status('danger', hardware ? 'notDetected' : 'notCreated', { key: `network.status.notes.${note}`, params: { parent: iface.entry.vlan?.parent ?? '' } })
   }
   const entry = iface.entry
   switch (iface.kind) {

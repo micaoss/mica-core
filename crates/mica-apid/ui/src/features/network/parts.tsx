@@ -141,9 +141,11 @@ export function BackLink({ tab, onClick }: { tab: 'interfaces' | 'wireguard'; on
 
 /// Whether an interface may carry the default route. Off, a lease's gateway
 /// is not used and the entry may hold no gateway of its own.
-export function InternetSwitch({ entry, onChange }: { entry: IfaceEntry; onChange: (entry: IfaceEntry) => void }) {
+/// An `internal` port the board declares is off by default, so turning it on
+/// is what its entry stores.
+export function InternetSwitch({ entry, internal = false, onChange }: { entry: IfaceEntry; internal?: boolean; onChange: (entry: IfaceEntry) => void }) {
   const { t } = useTranslation()
-  return <Switch checked={usesInternet(entry)} aria-label={t('network.fields.internet')} onCheckedChange={(on) => { const next = { ...entry }; if (on) delete next.internet; else next.internet = false; onChange(next) }} />
+  return <Switch checked={usesInternet(entry, internal)} aria-label={t('network.fields.internet')} onCheckedChange={(on) => { const next = { ...entry }; if (on === !internal) delete next.internet; else next.internet = on; onChange(next) }} />
 }
 
 export function useKindLabel() {

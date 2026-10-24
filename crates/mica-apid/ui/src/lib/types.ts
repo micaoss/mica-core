@@ -515,6 +515,17 @@ export interface ObservedDhcp extends AvailableFact {
   }
 }
 
+/// What the board declares about one of its ports.
+export interface BoardPort {
+  kind: 'ethernet' | 'wifi' | 'can'
+  label: string
+  order: number
+  /// Ethernet and Wi-Fi only: whether the port is on the internet by default.
+  role?: 'uplink' | 'internal'
+  /// What the board knows the port can do; a missing member is not known.
+  capabilities: { speedMbps?: number; ap?: boolean; bands?: string[]; fd?: boolean }
+}
+
 export interface ObservedNetworkInterface {
   name: string
   index?: number
@@ -534,8 +545,11 @@ export interface ObservedNetworkInterface {
   addresses: ObservedAddress[]
   dhcp: ObservedDhcp
   dns: (string | { address?: string })[]
-  /// False for a configured interface the device does not have.
+  /// False for a configured or declared interface the device does not have.
   present?: boolean
+  /// What the board declares about it: `null` when the board declares
+  /// nothing about it, absent from a device that does not say.
+  declared?: BoardPort | null
   /// The DHCPv4 lease the interface holds.
   lease?: AvailableFact & { server?: string; router?: string; remainingSeconds?: number }
   linkDns?: { address: string; source?: string; provider?: string }[]
@@ -571,6 +585,9 @@ export interface ObservedNetworkInterface {
 }
 
 export interface ObservedNetworkState {
+  /// Whether the board declares its ports or the device discovers them;
+  /// absent from a device that does not say.
+  board?: 'declared' | 'discover'
   /// The interface this request arrived through, `null` when none holds its
   /// address, as behind a proxy.
   session?: { interface: string | null; localAddress?: string | null }

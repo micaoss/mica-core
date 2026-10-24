@@ -11,7 +11,7 @@ import { dnsLinks, ProbeText, useDns } from './dns-tab'
 import { bridgeOf, usesInternet, vlansOn } from './model'
 import { Led, Tag, useKindLabel, useStatusText, useWifiText } from './parts'
 import type { NetworkData } from './use-network'
-import { computeStatus, exitOf, routeTable, type IfaceStatus, type RouteRow } from './view'
+import { computeStatus, exitOf, internalPort, routeTable, type IfaceStatus, type RouteRow } from './view'
 import type { NetworkTab } from './network-page'
 
 /// What the device runs now: the way out to the internet, the ports, DNS, the
@@ -38,7 +38,7 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
   const tunnels = view.order.filter((name) => view.ifaces[name].kind === 'wireguard')
   const radio = view.wifi.radio && view.ifaces[view.wifi.radio] ? view.wifi.radio : undefined
   const wifi = view.wifi
-  const lanOnly = (name: string) => !usesInternet(view.ifaces[name].entry) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null
+  const lanOnly = (name: string) => !usesInternet(view.ifaces[name].entry, internalPort(view, name)) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null
   const dns = useDns()
   const globalDns = dns.data?.mode === 'global'
   const dnsGroups = dnsLinks(data, dns.data).filter((link) => link.servers.length > 0)
@@ -80,7 +80,7 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
                 const address = !iface.obs ? t('network.list.missing') : bridge ? t('network.list.byBridge', { bridge }) : iface.obs.address ? `${iface.obs.address} ${iface.obs.source ?? ''}`.trim() : '—'
                 return (
                   <div key={name} className="grid content-start gap-1 text-[0.8125rem]">
-                    <span className="flex flex-wrap items-center gap-2"><button type="button" className="font-mono text-sm font-semibold hover:text-primary hover:underline" onClick={() => open(name)}>{name}</button>{lanOnly(name)}</span>
+                    <span className="flex flex-wrap items-center gap-2"><button type="button" className="font-mono text-sm font-semibold hover:text-primary hover:underline" onClick={() => open(name)}>{name}</button>{iface.port ? <span className="text-muted-foreground">{iface.port.label}</span> : null}{lanOnly(name)}</span>
                     <span className="flex items-center gap-1.5"><Led tone={status(name).tone} />{text.label(status(name))}</span>
                     <span className="text-muted-foreground">{uses.length ? uses.join(' · ') : t('network.overview.useStandalone')}</span>
                     <span className="font-mono break-all text-muted-foreground">{address}</span>

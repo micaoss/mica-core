@@ -1,4 +1,4 @@
-import { inSubnet, isIPv4, overlaps, parseCidr, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
+import { inSubnet, isIPv4, overlaps, parseCidr, usesInternet, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
 
 /// A field the console refuses to stage as it is, with the message's key and
 /// its values. The device remains the authority: these only catch what it
@@ -21,7 +21,9 @@ export function addressBook(staged: NetworkMap, observed: Record<string, string 
 
 const ipList = (items: string[] | undefined) => (items ?? []).filter((item) => !isIPv4(item))
 
-export function validateEntry(name: string, kind: ViewKind, entry: IfaceEntry | undefined, staged: NetworkMap, book: AddressBook, port: boolean): Problems {
+/// `internal`: the board declares the port internal, so it is off the
+/// internet while its entry does not say otherwise.
+export function validateEntry(name: string, kind: ViewKind, entry: IfaceEntry | undefined, staged: NetworkMap, book: AddressBook, port: boolean, internal = false): Problems {
   const problems: Problems = {}
   if (!entry) return problems
   if (kind === 'can') {
@@ -54,13 +56,13 @@ export function validateEntry(name: string, kind: ViewKind, entry: IfaceEntry | 
     if (gateway) {
       if (!isIPv4(gateway)) problems.gateway = { key: 'network.problems.ipv4' }
       else if (!inSubnet(gateway, address)) problems.gateway = { key: 'network.problems.gatewaySubnet' }
-      else if (entry.internet === false) problems.gateway = { key: 'network.problems.gatewayOffInternet' }
+      else if (!usesInternet(entry, internal)) problems.gateway = { key: 'network.problems.gatewayOffInternet' }
     }
     if (ipList(entry.static.dns).length) problems.dns = { key: 'network.problems.dns', params: { list: ipList(entry.static.dns).join(', ') } }
   }
   for (const route of entry.routes ?? []) {
     if (!parseCidr(route.destination) || (route.gateway && !isIPv4(route.gateway))) { problems.routes = { key: 'network.problems.route' }; break }
-    if (entry.internet === false && route.destination === '0.0.0.0/0') { problems.routes = { key: 'network.problems.defaultRouteOffInternet' }; break }
+    if (!usesInternet(entry, internal) && route.destination === '0.0.0.0/0') { problems.routes = { key: 'network.problems.defaultRouteOffInternet' }; break }
   }
   return problems
 }

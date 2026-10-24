@@ -32,8 +32,9 @@ export interface IfaceEntry {
   internet?: boolean
 }
 
-/// Whether `entry` may carry the default route.
-export const usesInternet = (entry: IfaceEntry | undefined) => entry?.internet !== false
+/// Whether `entry` may carry the default route. An `internal` port the board
+/// declares is off the internet until its entry says otherwise.
+export const usesInternet = (entry: IfaceEntry | undefined, internal = false) => entry?.internet ?? !internal
 
 /// The kinds `internet` is for.
 export const carriesInternet = (kind: ViewKind) => kind === 'physical' || kind === 'bridge' || kind === 'vlan' || kind === 'wifi'
@@ -70,7 +71,8 @@ export function normalize(entry: IfaceEntry): IfaceEntry {
   if (entry.wireguard) out.wireguard = clone(entry.wireguard)
   if (entry.can) out.can = { ...entry.can }
   if (entry.routes?.length) out.routes = entry.routes.map((route) => ({ ...route }))
-  if (entry.internet === false) out.internet = false
+  // An explicit `true` matters on a port the board declares internal.
+  if (entry.internet !== undefined) out.internet = entry.internet
   return out
 }
 
