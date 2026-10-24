@@ -22,8 +22,8 @@ import { failureDetail, notifyFailure, notifySuccess } from '@/shared/feedback/t
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { provisioningQuery } from './bluetooth'
 import { EditBar } from './change-bar'
-import { inSubnet, intToIp, ipToInt, isIPv4, overlaps, parseCidr, sameEntry, type IfaceEntry } from './model'
-import { Group, Section, useWifiText } from './parts'
+import { inSubnet, intToIp, ipToInt, isIPv4, overlaps, parseCidr, sameEntry, usesInternet, type IfaceEntry } from './model'
+import { Group, InternetSwitch, Section, useWifiText } from './parts'
 import { countryName, ELSEWHERE, EUROPE } from './regulatory'
 import type { NetworkData } from './use-network'
 
@@ -249,6 +249,7 @@ function draftErrors(draft: Draft, data: NetworkData, allowed: number[] | undefi
     if (!address) errors.address = t('network.problems.addressMissing')
     else if (!parseCidr(address)) errors.address = t('network.problems.cidr')
     if (entry.static?.gateway && !inSubnet(entry.static.gateway, address)) errors.gateway = t('network.problems.gatewaySubnet')
+    else if (entry.static?.gateway && entry.internet === false) errors.gateway = t('network.problems.gatewayOffInternet')
   }
   const dns = entry.dhcp ? entry.dns : entry.static?.dns
   if ((dns ?? []).some((server) => !isIPv4(server))) errors.dns = t('network.problems.dns', { list: (dns ?? []).filter((server) => !isIPv4(server)).join(', ') })
@@ -349,6 +350,7 @@ function ConfigView({ data }: { data: NetworkData }) {
                   { id: 'gateway', label: t('network.fields.gateway'), value: entry.static?.gateway || t('network.values.none'), mono: true },
                   { id: 'dns', label: t('network.fields.dns'), value: entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none'), mono: true },
                 ]),
+            { id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry) ? 'network.values.on' : 'network.values.off') },
           ]} />
         </Group>
       </div>
@@ -446,6 +448,7 @@ function ConfigForm({ draft, setDraft, errors, current, allowed }: { draft: Draf
           <FormField label={t('network.detail.preset')}>
             {() => <SegmentedControl<'dhcp' | 'static'> label={t('network.detail.preset')} cards value={entry.dhcp ? 'dhcp' : 'static'} onValueChange={(preset) => setEntry(preset === 'dhcp' ? { ...withoutAddressing(entry), dhcp: true } : { ...withoutAddressing(entry), dhcp: false, static: { address: entry.static?.address ?? '', ...(entry.static?.gateway ? { gateway: entry.static.gateway } : {}), dns: entry.dns ?? entry.static?.dns ?? [] } })} segments={[{ value: 'dhcp', label: t('network.presets.dhcp') }, { value: 'static', label: t('network.presets.static') }]} />}
           </FormField>
+          <ToggleField title={t('network.fields.internet')} description={t('network.detail.internetHint')} control={<InternetSwitch entry={entry} onChange={setEntry} />} />
           {entry.dhcp ? (
             <>
               <ToggleField

@@ -27,7 +27,16 @@ export interface IfaceEntry {
   wireguard?: { listenPort?: number; peers: WireguardPeer[] }
   can?: CanConfig
   routes?: StaticRoute[]
+  /// `false` keeps the interface off the default route: a lease's gateway is
+  /// not used, and a static one is refused. Absent is `true`.
+  internet?: boolean
 }
+
+/// Whether `entry` may carry the default route.
+export const usesInternet = (entry: IfaceEntry | undefined) => entry?.internet !== false
+
+/// The kinds `internet` is for.
+export const carriesInternet = (kind: ViewKind) => kind === 'physical' || kind === 'bridge' || kind === 'vlan' || kind === 'wifi'
 
 export type NetworkMap = Record<string, IfaceEntry>
 
@@ -61,6 +70,7 @@ export function normalize(entry: IfaceEntry): IfaceEntry {
   if (entry.wireguard) out.wireguard = clone(entry.wireguard)
   if (entry.can) out.can = { ...entry.can }
   if (entry.routes?.length) out.routes = entry.routes.map((route) => ({ ...route }))
+  if (entry.internet === false) out.internet = false
   return out
 }
 

@@ -1,7 +1,7 @@
 import { isHiddenInterface } from '@/lib/network'
 import type { ObservedNetworkInterface, ObservedNetworkState } from '@/lib/types'
 import type { StatusTone } from '@/shared/components/status-badge'
-import { bridgeOf, defaultEntry, overlaps, vlansOn, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
+import { bridgeOf, carriesInternet, defaultEntry, overlaps, usesInternet, vlansOn, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
 
 /// What the device reports about one interface, in the terms the pages use.
 export interface Observed {
@@ -156,6 +156,17 @@ export function buildView(map: NetworkMap, status: ObservedNetworkState | undefi
 /// the lowest metric when the device did not say.
 export function exitOf(view: NetView): string | undefined {
   return view.routes[0]?.interface
+}
+
+/// Whether some interface may still carry the default route: one of a kind
+/// that can (the radio only as a client), not a bridge port, that keeps
+/// `internet`.
+export function keepsInternet(view: NetView): boolean {
+  return view.order.some((name) => {
+    const iface = view.ifaces[name]
+    if (iface.kind === 'wifi' && view.wifi.mode !== 'client') return false
+    return carriesInternet(iface.kind) && !bridgeOf(view.map, name) && usesInternet(iface.entry)
+  })
 }
 
 function routeSource(iface: IfaceView, route: ObservedRoute): RouteRow['source'] {

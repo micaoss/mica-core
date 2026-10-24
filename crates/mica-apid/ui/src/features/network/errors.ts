@@ -3,7 +3,7 @@ import { ApiError } from '@/shared/lib/http'
 /// The codes a refused network write answers that have copy of their own.
 const KNOWN = [
   'address_overlap', 'bridge_port_addressed', 'bridge_port_invalid', 'bridge_port_taken', 'busy', 'channel_not_allowed',
-  'gateway_out_of_subnet', 'in_use', 'metric_duplicate', 'name_invalid', 'not_supported', 'version_conflict',
+  'gateway_not_allowed', 'gateway_out_of_subnet', 'in_use', 'metric_duplicate', 'name_invalid', 'not_supported', 'version_conflict',
   'vlan_duplicate', 'vlan_parent_invalid', 'vlan_parent_unsupported',
 ] as const
 

@@ -1,10 +1,14 @@
 import type { ReactNode } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+import { ChevronLeft } from 'lucide-react'
 import { formatAge } from '@/i18n/format'
 import { band, channelOf } from '@/lib/wifi-scan'
 import { cn } from '@/shared/lib/utils'
 import { StatusBadge, type StatusTone } from '@/shared/components/status-badge'
 import { Card } from '@/shared/components/ui/card'
+import { Switch } from '@/shared/components/ui/switch'
+import { usesInternet, type IfaceEntry } from './model'
 import type { IfaceStatus, IfaceView, WifiView } from './view'
 
 const LED: Record<StatusTone, string> = {
@@ -122,6 +126,24 @@ export function Tag({ tone = 'neutral', children }: { tone?: 'neutral' | 'info' 
       {children}
     </span>
   )
+}
+
+/// The way back from a detail to the network tab it was opened from, worded
+/// as that parent: 网络 / 接口.
+export function BackLink({ tab, onClick }: { tab: 'interfaces' | 'wireguard'; onClick?: () => void }) {
+  const { t } = useTranslation()
+  return (
+    <Link to="/network" search={{ tab }} onClick={onClick} className="inline-flex items-center gap-1 justify-self-start text-[0.8125rem] text-muted-foreground hover:text-foreground">
+      <ChevronLeft className="size-4" aria-hidden="true" />{t('network.title')} / {t(`network.tabs.${tab}`)}
+    </Link>
+  )
+}
+
+/// Whether an interface may carry the default route. Off, a lease's gateway
+/// is not used and the entry may hold no gateway of its own.
+export function InternetSwitch({ entry, onChange }: { entry: IfaceEntry; onChange: (entry: IfaceEntry) => void }) {
+  const { t } = useTranslation()
+  return <Switch checked={usesInternet(entry)} aria-label={t('network.fields.internet')} onCheckedChange={(on) => { const next = { ...entry }; if (on) delete next.internet; else next.internet = false; onChange(next) }} />
 }
 
 export function useKindLabel() {

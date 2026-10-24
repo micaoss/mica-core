@@ -203,6 +203,15 @@ describe('the network page', () => {
     expect(await screen.findByText('Online')).toBeTruthy()
     expect(screen.getByText('via 192.168.1.1')).toBeTruthy()
     expect(screen.getByText('Uplink eth0')).toBeTruthy()
+    expect(screen.queryByText('mica-bench')).toBeNull()
+  })
+
+  it('tags a port kept off the internet on the overview', async () => {
+    stubFetch(networkRoutes({ ...configured(), eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, internet: false } }))
+    open('overview')
+    const [port] = await screen.findAllByRole('button', { name: 'eth1' })
+    expect(within(port.parentElement!).getByText('LAN only')).toBeTruthy()
+    expect(within(screen.getAllByRole('button', { name: 'eth0' })[0].parentElement!).queryByText('LAN only')).toBeNull()
   })
 
   it('lists every IPv4 route of the main table with its source on the overview', async () => {
@@ -247,7 +256,8 @@ describe('the network page', () => {
     open('overview')
     expect(await screen.findByText('Uplink eth0')).toBeTruthy()
     expect(screen.getByText('Standby wlan0')).toBeTruthy()
-    expect(screen.queryByText('Joined marina')).toBeNull()
+    expect(screen.getByText('Uplink eth0').closest('button')!.className).toContain('bg-primary')
+    expect(screen.getByText('Standby wlan0').closest('button')!.className).toContain('bg-muted')
     const defaults = within(screen.getByRole('table')).getAllByRole('row').slice(1, 3)
     expect(defaults.map((row) => [within(row).getAllByRole('cell')[2].textContent, within(row).getByText(/In use|Standby/).textContent])).toEqual([['eth0', 'In use'], ['wlan0', 'Standby']])
   })
@@ -542,6 +552,16 @@ describe('the Wi-Fi tab as a client', () => {
     await userEvent.type(screen.getByLabelText('Gateway'), '192.168.30.1')
     await userEvent.click(within(bar).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client', client: { addressing: { dhcp: false, static: { address: '192.168.30.5/24', gateway: '192.168.30.1', dns: [] } } } }))
+  })
+
+  it('keeps the radio client off the internet through its addressing', async () => {
+    const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'w' }) })
+    open('wifi')
+    await screen.findByText('-52 dBm · Strong')
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    await userEvent.click(screen.getByRole('switch', { name: 'Internet access' }))
+    await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client', client: { addressing: { dhcp: true, internet: false } } }))
   })
 })
 

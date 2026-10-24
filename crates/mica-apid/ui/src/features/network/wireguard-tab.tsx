@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { formatAge } from '@/i18n/format'
-import { ChevronLeft, KeyRound, Plus, Trash2 } from 'lucide-react'
+import { KeyRound, Plus, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
@@ -24,7 +24,7 @@ import { EditBar } from './change-bar'
 import { updateChangeSet } from './change-set'
 import { CreateWizard } from './create-wizard'
 import { overlaps, parseCidr, stageRemove, stageRevert, stageSet, type WireguardPeerState } from './model'
-import { Led, Section, StatusLine, Tag, TEXT, useStatusText } from './parts'
+import { BackLink, Led, Section, StatusLine, Tag, TEXT, useStatusText } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus } from './view'
 
@@ -186,7 +186,7 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
   return (
     <>
       <div className="grid gap-3">
-        <Button className="justify-self-start" size="sm" variant="outline" onClick={() => void navigate({ to: '/network', search: { tab: 'wireguard' } })}><ChevronLeft />WireGuard</Button>
+        <BackLink tab="wireguard" />
         <div className="flex flex-wrap items-center gap-2.5"><Led tone={status.tone} className="size-2.5" /><h2 className="font-mono text-xl font-semibold">{name}</h2><span className="text-sm text-muted-foreground">WireGuard</span></div>
         <StatusLine status={status} />
       </div>

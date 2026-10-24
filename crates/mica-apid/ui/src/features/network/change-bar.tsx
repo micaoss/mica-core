@@ -22,6 +22,7 @@ import { problemCount, stagedProblems } from './problems'
 import { createdRows, diffRows } from './summary'
 import { useKindLabel } from './parts'
 import type { NetworkData } from './use-network'
+import { keepsInternet } from './view'
 
 const PILL: Record<ChangeOp, string> = {
   create: 'border-success/30 bg-success-background text-success',
@@ -193,6 +194,7 @@ function ReviewDialog({ data, onClose }: { data: NetworkData; onClose: () => voi
               </label>
             </Callout>
           ) : null}
+          {keepsInternet(data.applied) && !keepsInternet(data.staged) ? <Callout tone="warning" title={t('network.review.noInternet')}>{t('network.review.noInternetCopy')}</Callout> : null}
           {error ? <Callout tone="danger" title={t('network.review.refused')}>{error}</Callout> : null}
           {adopted.map((name) => <Callout key={name} tone="accent" title={t('network.review.adopted', { name })} />)}
           <div className="grid gap-1 text-sm">

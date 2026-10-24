@@ -756,6 +756,45 @@ function payload(path: string, method: string): unknown {
 /// A bench device for the network pages: an uplink, a statically addressed LAN,
 /// an unplugged port, a joined radio and a tunnel with one peer. Registered
 /// after the device mock, so its answers take precedence.
+test('captures the N13 overview, the internet switch and the detail headers in Chinese', async ({ page }, testInfo) => {
+  await mockNetworkBench(page)
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  // eth1 kept off the internet.
+  await page.route('**/api/v1/network', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const payload = benchPayload('/api/v1/network') as { configured: Record<string, object> }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...payload, configured: { ...payload.configured, eth1: { ...payload.configured.eth1, internet: false } } }) })
+  })
+  for (const theme of ['light', 'dark']) {
+    await page.addInitScript((value) => {
+      localStorage.setItem('mica.ui.locale', 'zh-CN')
+      localStorage.setItem('mica.ui.theme', value)
+    }, theme)
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width > 1000 ? 1000 : 844 })
+      await page.goto('./network?tab=overview')
+      await expect(page.getByText('上行 · eth0')).toBeVisible()
+      await expect(page.getByText('内网').first()).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath(`n13-overview-${theme}-${width}.png`), fullPage: true })
+
+      await page.goto('./network/eth1')
+      await expect(page.getByRole('link', { name: '网络 / 接口' })).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath(`n13-eth1-${theme}-${width}.png`), fullPage: true })
+      await page.getByRole('button', { name: '编辑配置' }).click()
+      await expect(page.getByRole('switch', { name: '用于上网' })).not.toBeChecked()
+      await expect(page.getByText('关闭后此接口即使通过 DHCP 获得网关也不会成为默认路由')).toBeVisible()
+      // The fixed bars cover the form in a full-page capture: the view, scrolled to the switch.
+      await page.getByRole('switch', { name: '用于上网' }).evaluate((element) => element.scrollIntoView({ block: 'center' }))
+      await page.screenshot({ path: testInfo.outputPath(`n13-eth1-edit-${theme}-${width}.png`) })
+      await page.evaluate(() => sessionStorage.clear())
+
+      await page.goto('./network?tab=wireguard&tunnel=wg0')
+      await expect(page.getByRole('link', { name: '网络 / WireGuard' })).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath(`n13-wg0-${theme}-${width}.png`) })
+    }
+  }
+})
+
 async function mockNetworkBench(page: Page) {
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()

@@ -5,7 +5,7 @@ import { Plus } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/components/ui/button'
 import { CreateWizard } from './create-wizard'
-import { bridgeOf, vlansOn } from './model'
+import { bridgeOf, usesInternet, vlansOn } from './model'
 import { Led, ROLES, roleOf, Tag, TEXT, useCanText, useKindLabel, useStatusText, type Role } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus, exitOf } from './view'
@@ -101,6 +101,7 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
         <span className="flex-1" />
         {exitOf(data.applied) === name ? <Tag tone="exit">{t('network.tags.exit')}</Tag> : null}
         {data.session === name ? <Tag tone="info">{t('network.tags.session')}</Tag> : null}
+        {!usesInternet(iface.entry) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null}
         {!iface.declared && iface.kind !== 'wifi' ? <Tag>{t('network.tags.imageDefault')}</Tag> : null}
         {pending ? <Tag tone="pending">{t(pending.op === 'create' ? 'network.tags.pendingCreate' : 'network.tags.pending')}</Tag> : null}
       </div>

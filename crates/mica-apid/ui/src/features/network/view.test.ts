@@ -4,7 +4,7 @@ import type { NetworkMap } from './model'
 import { diffRows } from './summary'
 import { wifiView } from './use-network'
 import { addressBook, validateEntry } from './validate'
-import { buildView, computeStatus, exitOf, routeTable, sessionInterface, tunnelDefaults, type WifiView } from './view'
+import { buildView, computeStatus, exitOf, keepsInternet, routeTable, sessionInterface, tunnelDefaults, type WifiView } from './view'
 
 const off: WifiView = { radio: 'wlan0', mode: 'off', apRunning: false, stations: 0 }
 const t = (key: string, params?: Record<string, unknown>) => params ? `${key}${JSON.stringify(params)}` : key
@@ -137,6 +137,14 @@ describe('what the console refuses to stage', () => {
     expect(validateEntry('wg1', 'wireguard', { kind: 'wireguard', static: { address: '10.9.0.1/24' }, wireguard: { listenPort: 51820, peers: [] } }, staged, [], false).listenPort?.key).toBe('network.problems.portTaken')
   })
 
+  it('refuses a gateway and a default route on an interface off the internet', () => {
+    const entry = { dhcp: false, internet: false, static: { address: '192.168.10.1/24', gateway: '192.168.10.254' }, routes: [{ destination: '0.0.0.0/0', gateway: '192.168.10.254' }] }
+    const problems = validateEntry('eth1', 'physical', entry, map, [], false)
+    expect(problems.gateway?.key).toBe('network.problems.gatewayOffInternet')
+    expect(problems.routes?.key).toBe('network.problems.defaultRouteOffInternet')
+    expect(validateEntry('eth1', 'physical', { ...entry, internet: true }, map, [], false)).toEqual({})
+  })
+
   it('asks nothing of a bridge port\'s addressing', () => {
     expect(validateEntry('eth1', 'physical', { dhcp: false }, map, [], true)).toEqual({})
   })
@@ -201,5 +209,18 @@ describe('a new tunnel\'s defaults', () => {
     const status = observed()
     status.interfaces.entries = status.interfaces.entries!.filter((entry) => entry.name !== 'wg0')
     expect(tunnelDefaults(buildView(map, status, off), [])).toEqual({ name: 'wg0', address: '10.2.0.1/24', listenPort: 51821 })
+  })
+})
+
+describe('the way out', () => {
+  const client: WifiView = { ...off, mode: 'client' }
+
+  it('is kept while one Ethernet port, bridge, VLAN or radio client keeps the internet', () => {
+    const map = configured() as NetworkMap
+    expect(keepsInternet(buildView(map, observed(), off))).toBe(true)
+    const lan = { ...map, eth0: { dhcp: true, internet: false }, eth1: { ...(map.eth1 as object), internet: false }, eth2: { dhcp: true, internet: false } } as NetworkMap
+    expect(keepsInternet(buildView(lan, observed(), off))).toBe(false)
+    expect(keepsInternet(buildView(lan, observed(), client))).toBe(true)
+    expect(keepsInternet(buildView({ ...lan, br0: { kind: 'bridge', dhcp: true, bridge: { ports: ['eth0'] } } }, observed(), off))).toBe(true)
   })
 })

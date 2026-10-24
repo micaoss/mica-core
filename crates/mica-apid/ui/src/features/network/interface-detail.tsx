@@ -1,14 +1,14 @@
 import { useState, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate, useParams } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { ChevronLeft, Plus, X } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
 import { FactList } from '@/shared/components/fact-list'
 import { FormField } from '@/shared/components/form-field'
 import { Page } from '@/shared/components/page'
 import { SegmentedControl } from '@/shared/components/segmented-control'
-import { Button, buttonVariants } from '@/shared/components/ui/button'
+import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select'
 import { Switch } from '@/shared/components/ui/switch'
@@ -16,10 +16,10 @@ import { notifySuccess } from '@/shared/feedback/toast'
 import { ChangeBar, EditBar } from './change-bar'
 import { updateChangeSet } from './change-set'
 import {
-  bridgeOf, stageRemove, stageRevert, stageSet, vlansOn,
+  bridgeOf, stageRemove, stageRevert, stageSet, usesInternet, vlansOn,
   type ChangeSet, type IfaceEntry,
 } from './model'
-import { Group, Led, Section, StatusLine, Tag, useCanText, useKindLabel } from './parts'
+import { BackLink, Group, InternetSwitch, Led, Section, StatusLine, Tag, useCanText, useKindLabel } from './parts'
 import { useNetwork, type NetworkData } from './use-network'
 import { addressBook, validateEntry, type Problem, type Problems } from './validate'
 import { computeStatus, exitOf } from './view'
@@ -37,7 +37,7 @@ export function InterfaceDetailPage() {
   if (!iface) {
     return (
       <Page>
-        <Back />
+        <BackLink tab="interfaces" />
         <Callout tone={data.network.isPending ? 'neutral' : 'warning'} title={data.network.isPending ? t('common.states.pending') : t('network.detail.unknown', { name })} />
         <ChangeBar data={data} />
       </Page>
@@ -62,11 +62,6 @@ export function InterfaceDetailPage() {
   )
 }
 
-function Back() {
-  const { t } = useTranslation()
-  return <Link to="/network" className={buttonVariants({ variant: 'outline', size: 'sm' })}><ChevronLeft aria-hidden="true" />{t('network.title')} / {t('network.tabs.interfaces')}</Link>
-}
-
 function EditFooter({ data, name, dirty, onCancel, onDone }: { data: NetworkData; name: string; dirty: boolean; onCancel: () => void; onDone: () => void }) {
   const problems = useProblems(data, name)
   return <EditBar what={name} dirty={dirty} errors={Object.keys(problems).length} onCancel={onCancel} onDone={onDone} />
@@ -81,7 +76,6 @@ function useProblems(data: NetworkData, name: string): Problems {
 
 function Header({ data, name, editing }: { data: NetworkData; name: string; editing: boolean }) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const kindLabel = useKindLabel()
   const iface = data.staged.ifaces[name]
   const status = computeStatus(data.applied, name)
@@ -91,19 +85,14 @@ function Header({ data, name, editing }: { data: NetworkData; name: string; edit
   const pending = data.pending.find((change) => change.name === name)
   return (
     <header className="grid gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Back />
-        <Select value={name} onValueChange={(value) => void navigate({ to: '/network/$name', params: { name: String(value) } })}>
-          <SelectTrigger size="sm" className="w-40 font-mono" aria-label={t('network.detail.switch')}><SelectValue /></SelectTrigger>
-          <SelectContent>{data.staged.order.map((each) => <SelectItem key={each} value={each}>{each}</SelectItem>)}</SelectContent>
-        </Select>
-      </div>
+      <BackLink tab="interfaces" />
       <div className="flex flex-wrap items-center gap-2.5">
         <Led tone={status.tone} className="size-2.5" />
         <h1 className="font-mono text-xl font-semibold tracking-tight">{name}</h1>
         <span className="text-sm text-muted-foreground">{kindLabel(iface)}</span>
         {exitOf(data.applied) === name ? <Tag tone="exit">{t('network.tags.exit')}</Tag> : null}
         {data.session === name ? <Tag tone="info">{t('network.tags.session')}</Tag> : null}
+        {!usesInternet(iface.entry) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null}
         {!(data.applied.ifaces[name]?.declared ?? true) ? <Tag>{t('network.tags.imageDefault')}</Tag> : null}
         {bridge ? <Tag>{t('network.detail.portOf')} <Link className="font-mono text-primary" to="/network/$name" params={{ name: bridge }}>{bridge}</Link></Tag> : null}
         {iface.kind === 'vlan' && iface.entry.vlan ? <Tag>{t('network.detail.on')} <Link className="font-mono text-primary" to="/network/$name" params={{ name: iface.entry.vlan.parent }}>{iface.entry.vlan.parent}</Link></Tag> : null}
@@ -244,14 +233,17 @@ function ConfigView({ data, name }: { data: NetworkData; name: string }) {
           <Group title={t('network.detail.preset')}>
             <strong className="text-sm">{t(entry.dhcp ? 'network.presets.dhcp' : entry.static ? 'network.presets.static' : 'network.values.noAddress')}</strong>
           </Group>
-          <Group title={t(entry.dhcp ? 'network.fields.dns' : 'network.detail.addressAndDns')}>
-            <FactList layout="pairs" facts={entry.dhcp
-              ? [{ id: 'dns', label: t('network.fields.dns'), value: entry.dns?.length ? mono(entry.dns.join(', ')) : t('network.detail.leaseDns') }]
-              : [
-                  { id: 'address', label: t('network.fields.address'), value: mono(entry.static?.address || t('network.values.notSet')) },
-                  { id: 'gateway', label: t('network.fields.gateway'), value: mono(entry.static?.gateway || t('network.values.none')) },
-                  { id: 'dns', label: t('network.fields.dns'), value: mono(entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none')) },
-                ]} />
+          <Group title={t('network.detail.addressAndDns')}>
+            <FactList layout="pairs" facts={[
+              ...(entry.dhcp
+                ? [{ id: 'dns', label: t('network.fields.dns'), value: entry.dns?.length ? mono(entry.dns.join(', ')) : t('network.detail.leaseDns') }]
+                : [
+                    { id: 'address', label: t('network.fields.address'), value: mono(entry.static?.address || t('network.values.notSet')) },
+                    { id: 'gateway', label: t('network.fields.gateway'), value: mono(entry.static?.gateway || t('network.values.none')) },
+                    { id: 'dns', label: t('network.fields.dns'), value: mono(entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none')) },
+                  ]),
+              { id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry) ? 'network.values.on' : 'network.values.off') },
+            ]} />
           </Group>
         </>
       )}
@@ -353,7 +345,8 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
       </Group>
 
       {entry.dhcp ? (
-        <Group title={t('network.fields.dns')}>
+        <Group title={t('network.detail.addressAndDns')}>
+          <InternetRow entry={entry} onChange={(next) => set(() => next)} />
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="grid gap-0.5"><span className="font-medium">{t('network.fields.customDns')}</span><span className="text-muted-foreground">{t('network.detail.customDnsHint')}</span></span>
             <Switch checked={customDns} onCheckedChange={(on) => { setCustomDns(on); if (!on) set((current) => ({ ...current, dns: [] })) }} aria-label={t('network.fields.customDns')} />
@@ -366,6 +359,7 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
         </Group>
       ) : (
         <Group title={t('network.detail.addressAndDns')}>
+          <InternetRow entry={entry} onChange={(next) => set(() => next)} />
           <FormField label={t('network.fields.address')} hint={problems.address ? <ProblemText problem={problems.address} /> : t('network.detail.cidrHint')}>
             {(id) => <Input id={id} className="font-mono sm:w-80" value={entry.static?.address ?? ''} aria-invalid={Boolean(problems.address)} onChange={(event) => set((current) => ({ ...current, static: { ...current.static, address: event.target.value.trim() } }))} />}
           </FormField>
@@ -439,6 +433,16 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
 
       {!data.openrc ? <RoutesForm data={data} name={name} problems={problems} /> : null}
     </div>
+  )
+}
+
+function InternetRow({ entry, onChange }: { entry: IfaceEntry; onChange: (entry: IfaceEntry) => void }) {
+  const { t } = useTranslation()
+  return (
+    <label className="flex items-center justify-between gap-3 text-sm">
+      <span className="grid gap-0.5"><span className="font-medium">{t('network.fields.internet')}</span><span className="text-muted-foreground">{t('network.detail.internetHint')}</span></span>
+      <InternetSwitch entry={entry} onChange={onChange} />
+    </label>
   )
 }
 

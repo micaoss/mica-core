@@ -54,11 +54,13 @@ export function validateEntry(name: string, kind: ViewKind, entry: IfaceEntry | 
     if (gateway) {
       if (!isIPv4(gateway)) problems.gateway = { key: 'network.problems.ipv4' }
       else if (!inSubnet(gateway, address)) problems.gateway = { key: 'network.problems.gatewaySubnet' }
+      else if (entry.internet === false) problems.gateway = { key: 'network.problems.gatewayOffInternet' }
     }
     if (ipList(entry.static.dns).length) problems.dns = { key: 'network.problems.dns', params: { list: ipList(entry.static.dns).join(', ') } }
   }
   for (const route of entry.routes ?? []) {
     if (!parseCidr(route.destination) || (route.gateway && !isIPv4(route.gateway))) { problems.routes = { key: 'network.problems.route' }; break }
+    if (entry.internet === false && route.destination === '0.0.0.0/0') { problems.routes = { key: 'network.problems.defaultRouteOffInternet' }; break }
   }
   return problems
 }

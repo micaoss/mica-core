@@ -52,6 +52,36 @@ describe('one interface', () => {
     await waitFor(() => expect(tunnel.router.state.location.href).toBe('/network?tab=wireguard&tunnel=wg0'))
   })
 
+  it('heads the page with the way back to its tab and no interface switcher', async () => {
+    stubFetch(networkRoutes())
+    open('eth0')
+    const back = await screen.findByRole('link', { name: 'Network / Interfaces' })
+    expect(back.getAttribute('href')).toBe('/network?tab=interfaces')
+    expect(screen.queryByRole('combobox')).toBeNull()
+  })
+
+  it('takes a port off the internet, tags it and warns when no port is left on it', async () => {
+    stubFetch(networkRoutes({ ...configured(), eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, internet: false }, eth2: { dhcp: true, internet: false } }))
+    open('eth0')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
+    expect(screen.getByText('When off, this interface never becomes the default route, even when DHCP offers it a gateway.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('switch', { name: /^Internet access/ }))
+    await userEvent.click(within(screen.getByRole('region', { name: 'Editing eth0' })).getByRole('button', { name: 'Done' }))
+    expect(await screen.findByText('LAN only')).toBeTruthy()
+    const dialog = await review()
+    expect(within(dialog).getByText('No interface is used for internet access')).toBeTruthy()
+  })
+
+  it('refuses a static gateway on a port off the internet', async () => {
+    stubFetch(networkRoutes({ ...configured(), eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, internet: false } }))
+    open('eth1')
+    expect(await screen.findByText('LAN only')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    expect(screen.getByRole('switch', { name: /^Internet access/ }).getAttribute('aria-checked')).toBe('false')
+    await userEvent.type(screen.getByLabelText('Gateway'), '192.168.10.254')
+    expect(await screen.findByText('This interface is not used for internet access, so it cannot have a gateway.')).toBeTruthy()
+  })
+
   it('says so when the device has no such interface', async () => {
     stubFetch(networkRoutes())
     open('nope0')
