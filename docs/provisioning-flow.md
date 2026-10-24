@@ -26,8 +26,10 @@ live state and leaves the tree as it is.
 - `provisioning.state` `complete`. Seeding never runs again; a later boot loads the tree as it
   was last written.
 
-Every boot then applies the whole tree. The access point comes up under the label's SSID and key
-(`pskSource` `derived`). micad logs the device code and writes `/run/mica/device-code.issue`
+Every boot then applies the whole tree. On a product with Bluetooth, before the access point
+first starts, micad scans once for the networks nearby with a supplicant of its own and keeps the
+list for a BLE session's `scanWifi`; the access point starts after the scan. The access point
+comes up under the label's SSID and key (`pskSource` `derived`). micad logs the device code and writes `/run/mica/device-code.issue`
 for the login prompt.
 
 ## 2. Unclaimed

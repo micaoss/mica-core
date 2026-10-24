@@ -188,3 +188,34 @@ pub(super) fn an_access_points_status_reads_its_channel() {
     assert!(rendered.get("channel").is_none());
     assert!(rendered.get("frequencyMhz").is_none());
 }
+
+#[test]
+fn a_scan_alone_needs_a_supplicant() {
+    let root = tempfile::tempdir().unwrap();
+    assert_eq!(
+        scan_alone(root.path(), "wlan0"),
+        Err("wpa_supplicant is not installed".to_string())
+    );
+}
+
+/// A supplicant that exits at once is reported, and its configuration
+/// does not stay behind.
+#[test]
+fn a_scan_alone_reports_a_supplicant_that_exits() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let binary = root.path().join("usr/sbin/wpa_supplicant");
+    std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    std::fs::write(&binary, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let scanned = scan_alone(root.path(), "wlan0");
+
+    assert!(
+        scanned
+            .as_ref()
+            .is_err_and(|err| err.starts_with("wpa_supplicant exited")),
+        "{scanned:?}"
+    );
+    assert!(!root.path().join("run/mica-wifi-scan/wlan0.conf").exists());
+}

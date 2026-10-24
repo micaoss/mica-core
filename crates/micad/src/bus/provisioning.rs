@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 
 use super::*;
-use crate::ble_provisioning::engine::{Device, Facts};
+use crate::ble_provisioning::engine::{AP_IN_USE, Device, Facts, Scanned};
 
 /// The sender a provisioning write is recorded as.
 const SENDER: &str = "ble-provisioning";
@@ -281,7 +281,7 @@ impl MicadService {
         }
     }
 
-    async fn provisioning_scan(&self) -> Result<Vec<Value>, &'static str> {
+    async fn provisioning_scan(&self, rescan: bool) -> Result<Vec<Value>, &'static str> {
         if !self.features.has(Feature::Wifi) {
             return Err("no_radio");
         }
@@ -292,11 +292,10 @@ impl MicadService {
             .and_then(|text| serde_json::from_str(&text).ok())
             .ok_or("scan_failed")?;
         if scanned["available"] != true {
-            return Err(if scanned["reason"] == "access-point" {
-                "ap_active"
-            } else {
-                "scan_failed"
-            });
+            if scanned["reason"] != "access-point" {
+                return Err("scan_failed");
+            }
+            return self.scan_beside_access_point(rescan).await;
         }
         Ok(scanned["networks"]
             .as_array()
@@ -311,6 +310,62 @@ impl MicadService {
                 })
             })
             .collect())
+    }
+
+    /// A scan while the access point holds the radio: with no client on it,
+    /// or `rescan`, the access point is paused for the scan; otherwise
+    /// [`AP_IN_USE`], and the last networks scanned answer.
+    async fn scan_beside_access_point(&self, rescan: bool) -> Result<Vec<Value>, &'static str> {
+        let interface = self.inner.read().await.settings.wifi.ap.interface.clone();
+        let name = interface.clone();
+        let clients = tokio::task::spawn_blocking(move || {
+            crate::network_state::observe_access_point(Path::new("/"), &name)
+                .stations
+                .len()
+        })
+        .await
+        .unwrap_or_default();
+        if clients > 0 && !rescan {
+            return Err(AP_IN_USE);
+        }
+        let _apply = self.apply_lock.lock().await;
+        match self.ap_pause.scan(&interface, true).await {
+            Ok(networks) => Ok(networks.iter().map(ble_network).collect()),
+            Err(err) => {
+                tracing::warn!(
+                    error = err,
+                    "the access point could not be paused for a scan"
+                );
+                Err("ap_active")
+            }
+        }
+    }
+
+    /// The scan before the access point first starts, kept for a BLE session:
+    /// while it runs, nothing else can scan (`docs/ble-provisioning.md`).
+    /// None unless the access point is to hold the radio and a BLE session
+    /// could ask.
+    pub(super) async fn boot_scan(&self) -> Option<tokio::task::JoinHandle<()>> {
+        if !self.features.has(Feature::Wifi) || !self.features.has(Feature::Bluetooth) {
+            return None;
+        }
+        let wifi = self.inner.read().await.settings.wifi.clone();
+        let station_holds_radio = wifi.client.enabled && wifi.client.interface == wifi.ap.interface;
+        if wifi.ap.mode == ApMode::Off || station_holds_radio {
+            return None;
+        }
+        let pause = Arc::clone(&self.ap_pause);
+        let provisioning = Arc::clone(&self.provisioning);
+        Some(tokio::spawn(async move {
+            match pause.scan(&wifi.ap.interface, false).await {
+                Ok(networks) => {
+                    provisioning
+                        .remember_scan(networks.iter().map(ble_network).collect())
+                        .await;
+                }
+                Err(err) => tracing::info!(error = err, "no scan before the access point started"),
+            }
+        }))
     }
 
     fn wifi_snapshot_now(settings: &micad_settings::Settings) -> Value {
@@ -537,6 +592,16 @@ impl crate::ble_provisioning::bluez::Reconcile for InterfaceRef<MicadService> {
     }
 }
 
+/// One network as `scanWifi` lists it.
+fn ble_network(network: &crate::network_state::ScannedNetwork) -> Value {
+    json!({
+        "ssid": network.ssid,
+        "signalDbm": network.signal_dbm,
+        "security": crate::network_state::scan_security(&network.flags),
+        "channel": network.frequency_mhz.and_then(crate::network_state::channel_of),
+    })
+}
+
 /// `getStatus`'s `ap`, while the access point is `on`: its SSID and, only
 /// while the device is unclaimed and the access point runs on the key the
 /// label prints (`pskSource` `derived`), that key, from `label_key`. A key
@@ -568,16 +633,16 @@ impl Device for InterfaceRef<MicadService> {
         self.get().await.provisioning_status().await
     }
 
-    async fn scan(&self) -> Result<Vec<Value>, &'static str> {
+    async fn scan(&self, rescan: bool) -> Result<Scanned, &'static str> {
         let service = self.get().await;
         service
             .provisioning
-            .scanned(SCAN_FRESH, service.provisioning_scan())
+            .scanned(SCAN_FRESH, rescan, service.provisioning_scan(rescan))
             .await
     }
 
     async fn warm(&self) {
-        let _ = self.scan().await;
+        let _ = self.scan(false).await;
     }
 
     async fn wifi_snapshot(&self) -> Value {
@@ -613,7 +678,7 @@ impl Device for InterfaceRef<MicadService> {
                 }
             }
         }
-        let scanned = self.get().await.provisioning_scan().await.ok();
+        let scanned = self.get().await.provisioning_scan(false).await.ok();
         Err(connect_failure(&seen, scanned.as_deref(), ssid))
     }
 

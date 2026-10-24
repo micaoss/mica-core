@@ -60,6 +60,26 @@ pub const HOSTAPD_CONTROL_DIR: &str = "run/hostapd";
 /// yields a slightly stale list rather than an empty one.
 const SCAN_SETTLE: Duration = Duration::from_secs(2);
 
+/// The control-socket directory of a scan's own supplicant, relative to the
+/// root: one micad starts while no other runs on the interface
+/// ([`scan_alone`]). Beside `run/wpa_supplicant`, so its replies land in the
+/// same directory.
+pub const SCAN_CONTROL_DIR: &str = "run/mica-wifi-scan";
+
+/// The supplicant a scan starts on its own, the first that exists.
+const WPA_SUPPLICANT_PATHS: &[&str] = &[
+    "usr/sbin/wpa_supplicant",
+    "sbin/wpa_supplicant",
+    "usr/bin/wpa_supplicant",
+];
+
+/// How long that supplicant is given to open its control socket.
+const SCAN_ALONE_START: Duration = Duration::from_secs(3);
+
+/// How long its first scan is given. It has no earlier results to fall back
+/// on, so the read waits for a sweep of every band.
+const SCAN_ALONE_SWEEP: Duration = Duration::from_secs(5);
+
 /// The most stations one access point is walked for.
 ///
 /// A bound and not a guess at a real device's client count: the walk is

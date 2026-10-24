@@ -193,6 +193,9 @@ pub struct MicadService {
     /// BLE provisioning: its verifier and lockout. The default keeps
     /// nothing, so a test or a dry run never writes a secret.
     provisioning: Arc<crate::ble_provisioning::Provisioning>,
+    /// The access point paused for a BLE scan. The default pauses nothing,
+    /// so a test or a dry run never stops a unit.
+    ap_pause: Arc<dyn crate::reconciler::wifi_ap::ApPause>,
     /// The features the product carries. A member or a settings write that
     /// belongs to any other is refused by name.
     features: micad_settings::Features,
@@ -277,6 +280,20 @@ fn object_of(value: &mut Value) -> &mut serde_json::Map<String, Value> {
 /// alone knows the daemon is running on a device, can attach one that can.
 struct NoRotation;
 
+/// The access-point pause of a daemon that drives no access point.
+struct NoPause;
+
+#[async_trait::async_trait]
+impl crate::reconciler::wifi_ap::ApPause for NoPause {
+    async fn scan(
+        &self,
+        _interface: &str,
+        _pause: bool,
+    ) -> Result<Vec<crate::network_state::ScannedNetwork>, String> {
+        Err("this daemon pauses no access point".to_string())
+    }
+}
+
 #[async_trait::async_trait]
 impl WireguardRotate for NoRotation {
     async fn rotate_key(&self, _iface: &str) -> anyhow::Result<String> {
@@ -340,6 +357,7 @@ impl MicadService {
             bluetooth: Arc::new(crate::bluetooth::NoAdapter),
             agent: Arc::new(BluetoothAgent::default()),
             provisioning: Arc::default(),
+            ap_pause: Arc::new(NoPause),
             containerd: Arc::new(crate::containerd::NoContainerd),
             container_engine: micad_settings::ContainerEngine::default(),
             compose: Arc::new(crate::compose::NoCompose),

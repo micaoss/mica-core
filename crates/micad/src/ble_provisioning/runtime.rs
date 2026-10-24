@@ -8,7 +8,7 @@ use anyhow::Result;
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 
-use super::engine::Input;
+use super::engine::{AP_IN_USE, Input, Scanned};
 use super::store::{ITERATIONS, Lockout, Store, make_record};
 use super::window::MANUAL_SECONDS;
 
@@ -28,8 +28,9 @@ pub struct Provisioning {
     engine: OnceLock<mpsc::UnboundedSender<Input>>,
     /// Whether a session holds the radio: the console's Wi-Fi writes wait.
     wifi_locked: Arc<AtomicBool>,
-    /// The last Wi-Fi scan a session made, and when; held while a scan runs,
-    /// so that a second one waits for it.
+    /// The last Wi-Fi scan, a session's or the one before the access point
+    /// first started, and when; held while a scan runs, so that a second one
+    /// waits for it.
     scan: tokio::sync::Mutex<Option<(std::time::Instant, Vec<Value>)>>,
 }
 
@@ -152,28 +153,54 @@ impl Provisioning {
         self.wifi_locked.load(Ordering::SeqCst)
     }
 
-    /// The networks a session scanned at most `fresh` ago, or those `scan`
-    /// finds now.
+    /// The networks scanned at most `fresh` ago unless `rescan`, or those
+    /// `scan` finds now. When `scan` answers [`AP_IN_USE`], the last networks
+    /// scanned, with their age.
     ///
     /// # Errors
-    /// `scan`'s reason.
+    /// `scan`'s reason; `ap_active` for [`AP_IN_USE`] with nothing scanned
+    /// before.
     pub async fn scanned<F>(
         &self,
         fresh: std::time::Duration,
+        rescan: bool,
         scan: F,
-    ) -> Result<Vec<Value>, &'static str>
+    ) -> Result<Scanned, &'static str>
     where
         F: std::future::Future<Output = Result<Vec<Value>, &'static str>>,
     {
         let mut last = self.scan.lock().await;
-        if let Some((at, networks)) = last.as_ref()
+        if !rescan
+            && let Some((at, networks)) = last.as_ref()
             && at.elapsed() < fresh
         {
-            return Ok(networks.clone());
+            return Ok(Scanned {
+                networks: networks.clone(),
+                age: None,
+            });
         }
-        let networks = scan.await?;
-        *last = Some((std::time::Instant::now(), networks.clone()));
-        Ok(networks)
+        match scan.await {
+            Ok(networks) => {
+                *last = Some((std::time::Instant::now(), networks.clone()));
+                Ok(Scanned {
+                    networks,
+                    age: None,
+                })
+            }
+            Err(AP_IN_USE) => last
+                .as_ref()
+                .map(|(at, networks)| Scanned {
+                    networks: networks.clone(),
+                    age: Some(at.elapsed()),
+                })
+                .ok_or("ap_active"),
+            Err(reason) => Err(reason),
+        }
+    }
+
+    /// Keep `networks` as the last scan, made now.
+    pub async fn remember_scan(&self, networks: Vec<Value>) {
+        *self.scan.lock().await = Some((std::time::Instant::now(), networks));
     }
 
     /// Hand the running engine's input to this facade.

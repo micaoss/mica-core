@@ -177,6 +177,13 @@ impl MicadService {
         self
     }
 
+    /// Attach the access-point pause a BLE scan takes.
+    #[must_use]
+    pub fn with_ap_pause(mut self, pause: Arc<dyn crate::reconciler::wifi_ap::ApPause>) -> Self {
+        self.ap_pause = pause;
+        self
+    }
+
     /// Attach the board telemetry adapter (`GetTelemetry`).
     #[must_use]
     pub fn with_telemetry(mut self, telemetry: Arc<dyn TelemetrySource>) -> Self {

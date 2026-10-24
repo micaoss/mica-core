@@ -21,7 +21,9 @@ mod sshd;
 pub mod systemd;
 mod time;
 mod web;
-mod wifi_ap;
+/// Visible to the daemon for the same reason: a BLE scan pauses the access
+/// point this reconciler drives.
+pub mod wifi_ap;
 mod wifi_client;
 
 use micad_settings::Settings;

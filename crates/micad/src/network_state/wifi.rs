@@ -370,6 +370,82 @@ pub fn scan_networks(root: &Path, interface: &str) -> Result<Vec<ScannedNetwork>
     Ok(parse_scan_results(&results))
 }
 
+/// Scan on `interface` with a supplicant of the scan's own, while nothing
+/// else holds the radio: before the access point first starts, or while it
+/// is paused for the scan. The supplicant knows no network, so it joins
+/// nothing, and it is stopped once the results are read.
+///
+/// Blocking, like [`scan_networks`].
+///
+/// # Errors
+/// Why there are no results, in words.
+pub fn scan_alone(root: &Path, interface: &str) -> Result<Vec<ScannedNetwork>, String> {
+    let binary = WPA_SUPPLICANT_PATHS
+        .iter()
+        .map(|path| root.join(path))
+        .find(|path| path.exists())
+        .ok_or_else(|| "wpa_supplicant is not installed".to_string())?;
+    let control_dir = root.join(SCAN_CONTROL_DIR);
+    std::fs::create_dir_all(&control_dir)
+        .map_err(|err| format!("{}: {err}", control_dir.display()))?;
+    let config = control_dir.join(format!("{interface}.conf"));
+    std::fs::write(&config, scan_alone_config(&control_dir))
+        .map_err(|err| format!("{}: {err}", config.display()))?;
+    let mut child = std::process::Command::new(&binary)
+        .args(["-i", interface, "-D", "nl80211,wext", "-c"])
+        .arg(&config)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|err| format!("{}: {err}", binary.display()))?;
+    let scanned = scan_with(&mut child, &control_dir, interface);
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(control_dir.join(interface));
+    let _ = std::fs::remove_file(&config);
+    scanned
+}
+
+/// The configuration of [`scan_alone`]'s supplicant: a control socket and
+/// no network.
+fn scan_alone_config(control_dir: &Path) -> String {
+    format!(
+        "# Written by micad for one scan.\nctrl_interface={}\nupdate_config=0\n",
+        control_dir.display()
+    )
+}
+
+fn scan_with(
+    child: &mut std::process::Child,
+    control_dir: &Path,
+    interface: &str,
+) -> Result<Vec<ScannedNetwork>, String> {
+    let poll = Duration::from_millis(250);
+    let started = std::time::Instant::now();
+    while !control_dir.join(interface).exists() {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!("wpa_supplicant exited ({status})"));
+        }
+        if started.elapsed() >= SCAN_ALONE_START {
+            return Err("wpa_supplicant opened no control socket".to_string());
+        }
+        std::thread::sleep(poll);
+    }
+    wpa_query(control_dir, interface, "SCAN", WPA_TIMEOUT)
+        .map_err(|err| format!("wpa_supplicant could not be asked: {err}"))?;
+    let started = std::time::Instant::now();
+    loop {
+        std::thread::sleep(poll);
+        let results = wpa_query(control_dir, interface, "SCAN_RESULTS", WPA_TIMEOUT)
+            .map_err(|err| format!("wpa_supplicant could not be asked: {err}"))?;
+        let networks = parse_scan_results(&results);
+        if !networks.is_empty() || started.elapsed() >= SCAN_ALONE_SWEEP {
+            return Ok(networks);
+        }
+    }
+}
+
 /// Ask one access point for its channel, then walk its stations, over
 /// hostapd's control socket.
 ///

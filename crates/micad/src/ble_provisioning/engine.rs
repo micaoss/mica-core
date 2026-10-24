@@ -70,6 +70,19 @@ pub struct Facts {
     pub web: WebSettings,
 }
 
+/// `scanWifi`'s networks, and their age when they are not fresh: the last
+/// ones scanned, while the access point has clients that a scan would cut
+/// off.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Scanned {
+    pub networks: Vec<Value>,
+    pub age: Option<std::time::Duration>,
+}
+
+/// A scan's reason for not scanning now: the access point has clients. The
+/// last networks scanned answer instead; it is never sent.
+pub const AP_IN_USE: &str = "ap_in_use";
+
 /// The device side of the operations.
 #[async_trait::async_trait]
 pub trait Device: Send + Sync + 'static {
@@ -77,8 +90,9 @@ pub trait Device: Send + Sync + 'static {
     /// `getStatus`: `wifiMode`, `connected`, `ssid`, `ip`, `interfaces` and,
     /// while the access point is on, `ap`.
     async fn status(&self) -> Value;
-    /// `scanWifi`: the networks, or a `failed` reason.
-    async fn scan(&self) -> Result<Vec<Value>, &'static str>;
+    /// `scanWifi`: the networks, or a `failed` reason. `rescan` scans even
+    /// when that cuts the access point's clients off for the scan.
+    async fn scan(&self, rescan: bool) -> Result<Scanned, &'static str>;
     /// The radio's role, to restore later.
     async fn wifi_snapshot(&self) -> Value;
     /// Save `ssid` first in the list and switch the radio to client mode.
@@ -823,7 +837,11 @@ impl Engine {
         connection.command_at = Some(Instant::now());
         match command["op"].as_str() {
             Some("getStatus") => self.spawn_status(id),
-            Some("scanWifi") => self.spawn_scan(id),
+            Some("scanWifi") => match command["rescan"] {
+                Value::Null => self.spawn_scan(id, false),
+                Value::Bool(rescan) => self.spawn_scan(id, rescan),
+                _ => self.failed(id, "bad_request").await,
+            },
             Some("setWifi") => self.set_wifi(id, &command).await,
             Some("setNetwork") => self.set_network(id, &command).await,
             Some("finish") => self.finish(id).await,
@@ -883,11 +901,21 @@ impl Engine {
         });
     }
 
-    fn spawn_scan(&mut self, id: Value) {
+    fn spawn_scan(&mut self, id: Value, rescan: bool) {
         let device = Arc::clone(&self.device);
         self.spawn_op(id, "scanWifi", async move {
-            match device.scan().await {
-                Ok(networks) => json!({ "event": "networks", "networks": networks }),
+            match device.scan(rescan).await {
+                Ok(scanned) => {
+                    let mut event = json!({
+                        "event": "networks",
+                        "networks": scanned.networks,
+                        "stale": scanned.age.is_some(),
+                    });
+                    if let Some(age) = scanned.age {
+                        event["ageSeconds"] = json!(age.as_secs());
+                    }
+                    event
+                }
                 Err(reason) => json!({ "event": "failed", "reason": reason }),
             }
         });

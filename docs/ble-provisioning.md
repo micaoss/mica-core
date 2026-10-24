@@ -31,6 +31,10 @@ Compatibility within protocol 1: `status.ap` is new, and `finished.ap` changed f
 A device from before the change sends the string; a page or app reads both shapes until every
 device it meets sends the object.
 
+Also within protocol 1: `scanWifi`'s `rescan`, and `networks`' `stale` and `ageSeconds`, are new;
+a device from before them answers `ap_active` while its access point runs, and sends neither
+member, so a page reads a missing `stale` as `false`.
+
 Also within protocol 1: an entry that came up (`setWifi`'s `connected`, `setNetwork`'s `up`) is
 kept however the session ends (Sessions). A device from before the change put such an entry back
 when an unclaimed device's session ended without `finish`, so a page or app sends `finish` once
@@ -246,7 +250,7 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 | `op` | Parameters | Final event | Its own `failed` reasons |
 | --- | --- | --- | --- |
 | `getStatus` | — | `status`: `wifiMode` (`client`, `ap` or `off`), `connected`, `ssid` (or null), `ip` (or null), `interfaces`, and `ap` while the access point is on | — |
-| `scanWifi` | — | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}` | `ap_active`, `no_radio`, `scan_failed` |
+| `scanWifi` | `rescan` (optional) | `networks`: `networks[]` of `{ssid, signalDbm, security, channel}`, `stale`, and `ageSeconds` when `stale` | `ap_active`, `no_radio`, `scan_failed` |
 | `setWifi` | `ssid`, `psk` (`""` for an open network), `hidden` | `connected`: `ip`, `hostname` | `already_claimed`, `invalid_ssid`, `invalid_psk`, `no_radio`, `wrong_password`, `ssid_not_found`, `dhcp_timeout`, `unsupported_security`, `connect_failed` |
 | `setNetwork` | `interface`, and `dhcp: true` or `static` | `up`: `interface`, `address` (or null) | listed under `setNetwork` |
 | `finish` | — | `finished`: `claimed`, `hostname`, `interface` (or null), `consoleUrls`, `ap` | `already_claimed` |
@@ -273,8 +277,19 @@ Events with no `id` answer no command: `status`, when `start` asked for it, carr
 - `security` is `open`, `owe`, `wep`, `wpa-psk`, `wpa2-psk`, `wpa3-sae`, `wpa2-wpa3` or `wpa2-eap`,
   as the console's scan reports it. `channel` is a number; networks are not merged by name (the
   page merges them).
-- While the device runs its access point it cannot scan: `ap_active`, and the page asks for the
-  network name instead.
+- While the device runs its access point the radio cannot scan beside it. The device then:
+  - with no client on the access point, stops the access point for the scan (about 3 to 8
+    seconds) and starts it again, and answers fresh networks;
+  - with a client on it, answers the last networks it scanned, `stale: true` with their age in
+    `ageSeconds`, rather than cut the client off. The last scan may be the one the device makes at
+    boot, before its access point first starts. The page says how old the list is ("列表来自 N
+    分钟前") and offers a rescan that briefly drops the hotspot ("重新扫描（会短暂断开热点）");
+  - with `rescan: true`, scans even with clients on the access point, which lose it for the
+    scan.
+- `stale` is `false` for networks scanned now (or within the last 30 seconds). `ap_active` is
+  left for a device with nothing scanned before whose access point has a client, or whose access
+  point could not be stopped; the page then asks for the network name.
+- `rescan` other than a boolean is `bad_request`.
 
 `setWifi`
 - `ssid`: 1-32 bytes. `psk`: `""`, 8-63 printable ASCII characters, or 64 hex digits; a `psk` is

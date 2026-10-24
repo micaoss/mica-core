@@ -423,6 +423,15 @@ async fn serve() -> anyhow::Result<()> {
             }
         }
         .with_container_engine(container_engine);
+        // A BLE scan pauses the access point through its unit, so a dry-run
+        // daemon is never given the pause either.
+        if features.has(micad_settings::Feature::Wifi) {
+            service = if openrc {
+                service.with_ap_pause(Arc::new(reconciler::wifi_ap::UnitPause::openrc()))
+            } else {
+                service.with_ap_pause(Arc::new(reconciler::wifi_ap::UnitPause::systemd()))
+            };
+        }
         // WireGuard (networkd) is systemd's: an OpenRC daemon is not given the
         // rotation, and answers that it has none.
         if !openrc {

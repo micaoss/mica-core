@@ -235,6 +235,7 @@ impl MicadService {
     /// ones, whose first apply the returned [`DeferredApply`] runs once micad
     /// is on the bus.
     pub async fn apply_startup(&self) -> DeferredApply {
+        let boot_scan = self.boot_scan().await;
         {
             let _apply = self.apply_lock.lock().await;
             reconcile_matching(&self.reconcilers, &self.inner, &self.refusals, "", |name| {
@@ -247,6 +248,7 @@ impl MicadService {
             inner: Arc::clone(&self.inner),
             refusals: Arc::clone(&self.refusals),
             apply_lock: Arc::clone(&self.apply_lock),
+            boot_scan,
             pause: DEFERRED_RETRY_PAUSE,
             retry_for: DEFERRED_RETRY_FOR,
         }
@@ -338,6 +340,8 @@ pub struct DeferredApply {
     inner: Arc<RwLock<Inner>>,
     refusals: Arc<RwLock<Vec<DocumentRefusal>>>,
     apply_lock: Arc<Mutex<()>>,
+    /// The scan before the access point first starts; `wifiAp` waits for it.
+    boot_scan: Option<tokio::task::JoinHandle<()>>,
     pause: Duration,
     retry_for: Duration,
 }
@@ -355,8 +359,18 @@ impl DeferredApply {
     /// Apply the deferred reconcilers, recording each outcome in the
     /// live-state tree as every apply does, and again after a pause while one
     /// fails -- a daemon that was not ready yet -- for at most the retry time.
-    pub async fn run(self) {
+    pub async fn run(mut self) {
         let deadline = tokio::time::Instant::now() + self.retry_for;
+        if let Some(scan) = self.boot_scan.take() {
+            {
+                let _apply = self.apply_lock.lock().await;
+                reconcile_matching(&self.reconcilers, &self.inner, &self.refusals, "", |name| {
+                    DEFERRED.contains(&name) && name != "wifiAp"
+                })
+                .await;
+            }
+            let _ = scan.await;
+        }
         loop {
             let failures = {
                 let _apply = self.apply_lock.lock().await;

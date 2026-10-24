@@ -27,7 +27,9 @@ use crate::device_code;
 use crate::fswrite::write_config_if_changed;
 use crate::identity;
 
+mod pause;
 mod render;
+pub use pause::{ApPause, UnitPause};
 use render::*;
 
 /// Directory hostapd opens its control socket in.

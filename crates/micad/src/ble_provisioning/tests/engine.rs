@@ -29,6 +29,10 @@ struct FakeDevice {
     /// `await_wifi`'s answer; `None` waits until released.
     wifi: Mutex<Option<Result<String, &'static str>>>,
     release: tokio::sync::Notify,
+    /// `scan`'s answer; `ap_active` when unset.
+    scanned: Mutex<Option<Scanned>>,
+    /// The `rescan` of each scan asked for.
+    rescans: Mutex<Vec<bool>>,
     /// `await_network`'s failure, if it fails.
     network: Mutex<Option<&'static str>>,
     /// How many connections began a scan.
@@ -57,8 +61,9 @@ impl Device for FakeDevice {
         }
         status
     }
-    async fn scan(&self) -> Result<Vec<Value>, &'static str> {
-        Err("ap_active")
+    async fn scan(&self, rescan: bool) -> Result<Scanned, &'static str> {
+        self.rescans.lock().unwrap().push(rescan);
+        self.scanned.lock().unwrap().clone().ok_or("ap_active")
     }
     async fn wifi_snapshot(&self) -> Value {
         let joined = self
@@ -1159,4 +1164,46 @@ fn console_urls_follow_the_web_listeners() {
     for mode in [WebMode::Local, WebMode::Off] {
         assert!(urls(WebSettings { mode, ..defaults }, Some("192.168.1.40")).is_empty());
     }
+}
+
+#[tokio::test]
+async fn scan_wifi_answers_the_networks_and_whether_they_are_stale() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    let harbour =
+        json!({ "ssid": "Harbour", "signalDbm": -51, "security": "wpa2-psk", "channel": 6 });
+    *bench.device.scanned.lock().unwrap() = Some(Scanned {
+        networks: vec![harbour.clone()],
+        age: None,
+    });
+    let fresh = bench.command(json!({ "op": "scanWifi" })).await;
+    assert_eq!(
+        fresh,
+        vec![
+            json!({ "id": 1, "event": "networks", "networks": [harbour.clone()], "stale": false })
+        ]
+    );
+
+    *bench.device.scanned.lock().unwrap() = Some(Scanned {
+        networks: vec![harbour.clone()],
+        age: Some(std::time::Duration::from_secs(185)),
+    });
+    let stale = bench
+        .command(json!({ "op": "scanWifi", "rescan": true }))
+        .await;
+    assert_eq!(
+        stale,
+        vec![
+            json!({ "id": 2, "event": "networks", "networks": [harbour], "stale": true, "ageSeconds": 185 })
+        ]
+    );
+    assert_eq!(
+        bench.device.rescans.lock().unwrap().last(),
+        Some(&true),
+        "rescan reaches the device"
+    );
+    let refused = bench
+        .command(json!({ "op": "scanWifi", "rescan": "yes" }))
+        .await;
+    assert_eq!(refused[0]["reason"], "bad_request");
 }
