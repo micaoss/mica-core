@@ -29,6 +29,8 @@ struct FakeDevice {
     /// `await_wifi`'s answer; `None` waits until released.
     wifi: Mutex<Option<Result<String, &'static str>>>,
     release: tokio::sync::Notify,
+    /// `await_network`'s failure, if it fails.
+    network: Mutex<Option<&'static str>>,
     /// How many connections began a scan.
     warmed: AtomicU64,
 }
@@ -59,7 +61,13 @@ impl Device for FakeDevice {
         Err("ap_active")
     }
     async fn wifi_snapshot(&self) -> Value {
-        json!({ "mode": "ap" })
+        let joined = self
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call.starts_with("join"));
+        json!({ "mode": if joined { "client" } else { "ap" } })
     }
     async fn join_wifi(&self, ssid: &str, _psk: &str, _hidden: bool) -> Result<bool, &'static str> {
         self.calls.lock().unwrap().push(format!("join {ssid}"));
@@ -89,6 +97,9 @@ impl Device for FakeDevice {
         _interface: &str,
         entry: &Value,
     ) -> Result<Option<String>, &'static str> {
+        if let Some(reason) = *self.network.lock().unwrap() {
+            return Err(reason);
+        }
         let address = entry["static"]["address"]
             .as_str()
             .unwrap_or("192.168.1.41/24");
@@ -617,12 +628,14 @@ async fn an_unclaimed_device_is_set_up_over_its_wired_port() {
 }
 
 #[tokio::test]
-async fn an_unfinished_unclaimed_session_puts_its_wired_entry_back() {
+async fn an_unfinished_unclaimed_session_puts_back_a_wired_entry_not_up() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
-    bench
+    *bench.device.network.lock().unwrap() = Some("dhcp_timeout");
+    let events = bench
         .command(json!({ "op": "setNetwork", "interface": "eth0", "dhcp": true }))
         .await;
+    assert_eq!(events[1]["reason"], "dhcp_timeout");
     bench
         .engine
         .handle(Input::Disconnected {
@@ -679,15 +692,62 @@ async fn ops_beyond_the_network_are_unknown() {
 }
 
 #[tokio::test]
-async fn an_unfinished_unclaimed_session_undoes_its_wi_fi_after_two_minutes_away() {
+async fn a_wired_entry_that_came_up_stays_when_the_session_ends_without_finish() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    let events = bench
+        .command(json!({ "op": "setNetwork", "interface": "eth0", "dhcp": true }))
+        .await;
+    assert_eq!(events[1]["event"], "up");
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    bench.tick(RECONNECT_SECONDS).await;
+    bench.pump().await;
+    assert_eq!(bench.calls(), vec![r#"network eth0 {"dhcp":true}"#]);
+}
+
+#[tokio::test]
+async fn a_wi_fi_that_connected_stays_when_the_session_ends_without_finish() {
     let mut bench = Bench::new(false).await;
     bench.start_none().await;
     *bench.device.wifi.lock().unwrap() = Some(Ok("192.168.1.40".into()));
-    bench
+    let events = bench
         .command(
             json!({ "op": "setWifi", "ssid": "Harbour", "psk": "sea-breeze-77", "hidden": false }),
         )
         .await;
+    assert_eq!(events[1]["event"], "connected");
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    bench.tick(RECONNECT_SECONDS).await;
+    bench.pump().await;
+    assert_eq!(
+        bench.calls(),
+        vec!["join Harbour"],
+        "the network stays saved and the access point stays off"
+    );
+    assert!(!bench.wifi_locked.load(Ordering::SeqCst));
+    assert_eq!(bench.store.history()[0].outcome, "wifi-connected");
+}
+
+#[tokio::test]
+async fn a_wi_fi_still_connecting_when_the_phone_leaves_is_undone_after_two_minutes() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    let events = bench
+        .command(
+            json!({ "op": "setWifi", "ssid": "Harbour", "psk": "sea-breeze-77", "hidden": false }),
+        )
+        .await;
+    assert_eq!(events, vec![json!({ "id": 1, "event": "connecting" })]);
     bench
         .engine
         .handle(Input::Disconnected {
@@ -708,7 +768,83 @@ async fn an_unfinished_unclaimed_session_undoes_its_wi_fi_after_two_minutes_away
         r#"restore {"mode":"ap"} remove ["Harbour"]"#
     );
     assert!(!bench.wifi_locked.load(Ordering::SeqCst));
-    assert_eq!(bench.store.history()[0].outcome, "wifi-connected");
+    assert_eq!(bench.store.history()[0].outcome, "abandoned");
+}
+
+/// The phone joins the device to Wi-Fi and leaves without `finish`; the
+/// user claims the device on the console meanwhile.
+#[tokio::test]
+async fn a_claim_on_the_console_keeps_the_wi_fi_the_session_connected() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    *bench.device.wifi.lock().unwrap() = Some(Ok("192.168.1.40".into()));
+    bench
+        .command(
+            json!({ "op": "setWifi", "ssid": "Harbour", "psk": "sea-breeze-77", "hidden": false }),
+        )
+        .await;
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    bench.device.facts.lock().unwrap().claimed = true;
+    bench.engine.handle(Input::ClaimedElsewhere).await;
+    bench.pump().await;
+    assert_eq!(bench.calls(), vec!["join Harbour"]);
+    assert!(!bench.wifi_locked.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn a_claim_on_the_console_undoes_a_wi_fi_that_did_not_connect() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    *bench.device.wifi.lock().unwrap() = Some(Err("wrong_password"));
+    bench
+        .command(
+            json!({ "op": "setWifi", "ssid": "Harbour", "psk": "sea-breeze-77", "hidden": false }),
+        )
+        .await;
+    bench.device.facts.lock().unwrap().claimed = true;
+    bench.engine.handle(Input::ClaimedElsewhere).await;
+    bench.pump().await;
+    assert_eq!(
+        bench.calls().last().unwrap(),
+        r#"restore {"mode":"ap"} remove ["Harbour"]"#
+    );
+}
+
+/// A second `setWifi` that does not connect goes back to the first one's
+/// network, not to the access point.
+#[tokio::test]
+async fn a_failed_second_wi_fi_goes_back_to_the_first_that_connected() {
+    let mut bench = Bench::new(false).await;
+    bench.start_none().await;
+    *bench.device.wifi.lock().unwrap() = Some(Ok("192.168.1.40".into()));
+    bench
+        .command(json!({ "op": "setWifi", "ssid": "Harbour", "psk": "", "hidden": false }))
+        .await;
+    *bench.device.wifi.lock().unwrap() = Some(Err("ssid_not_found"));
+    bench
+        .command(json!({ "op": "setWifi", "ssid": "Marina", "psk": "", "hidden": false }))
+        .await;
+    bench
+        .engine
+        .handle(Input::Disconnected {
+            device: PHONE.into(),
+        })
+        .await;
+    bench.tick(RECONNECT_SECONDS).await;
+    bench.pump().await;
+    assert_eq!(
+        bench.calls(),
+        vec![
+            "join Harbour",
+            "join Marina",
+            r#"restore {"mode":"client"} remove ["Marina"]"#,
+        ]
+    );
 }
 
 #[tokio::test]

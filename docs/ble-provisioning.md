@@ -31,6 +31,11 @@ Compatibility within protocol 1: `status.ap` is new, and `finished.ap` changed f
 A device from before the change sends the string; a page or app reads both shapes until every
 device it meets sends the object.
 
+Also within protocol 1: an entry that came up (`setWifi`'s `connected`, `setNetwork`'s `up`) is
+kept however the session ends (Sessions). A device from before the change put such an entry back
+when an unclaimed device's session ended without `finish`, so a page or app sends `finish` once
+the network is up.
+
 ## Windows
 
 The device advertises the service only while a provisioning window is open. A window has a trigger
@@ -359,15 +364,23 @@ codes, one to one.
 - A claimed device's session also ends with its connection. A reconnecting phone authenticates again
   and continues with `getStatus`.
 
-**Wi-Fi after a session.** The device notes `{enabled, mode}` before `setWifi` changes them. When the
-session ends — `finish`, 2 minutes without the phone reconnecting, or the window closing — and no
-`setWifi` of it ever connected, the device restores them. An unclaimed device whose session ends
-without `finish` restores them even after a successful connection, and removes the networks the
-session added. While a session holds the radio, the console's Wi-Fi routes answer
-`423 wifi_locked`.
+**What came up stays.** An entry is committed when it comes up: a network once `setWifi` sends
+`connected`, a wired entry once `setNetwork` sends `up`. It stays however the session ends,
+with `finish` or without. `finish` only ends the session and returns the facts.
+
+**Wi-Fi after a session.** The device notes `{enabled, mode}` before a `setWifi` changes them, and
+drops the note when that `setWifi` connects. When the session ends — `finish`, the device claimed
+on the console, 2 minutes without the phone reconnecting, or the window closing — and a `setWifi`
+has not connected since its note, the device restores them. An unclaimed device whose session
+ends without `finish` also removes the networks such a `setWifi` added. While a session holds the
+radio, the console's Wi-Fi routes answer `423 wifi_locked`.
 
 **Wired entries after a session.** An unclaimed device whose session ends without `finish` puts
-back each entry `setNetwork` replaced. Otherwise the entries stay, as a change in the console does.
+back each entry a `setNetwork` replaced and that did not come up. Otherwise the entries stay, as a
+change in the console does.
+
+`docs/provisioning-flow.md` follows a device from first boot to the claim, with what each step
+writes.
 
 ## Not covered
 

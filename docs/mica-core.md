@@ -819,7 +819,9 @@ device's own console, the login prompt and micad's start line (section 3.8). A m
 at `deviceCode`, a wrong one 403 `device_code_incorrect` and counts in the login backoff (429
 `login_throttled`, at most 300 s). A device without a code is claimed without one. The claim sets
 no access-point key; the key on the label keeps applying until one is set on the console's Wi-Fi
-page (`docs/factory-ap-key.md`), and an `apPsk` member a client still sends is ignored. Browsers exchange the
+page (`docs/factory-ap-key.md`), and an `apPsk` member a client still sends is ignored. The claim
+writes nothing under `wifi`; `docs/provisioning-flow.md` follows a device from first boot through
+BLE to the claim. Browsers exchange the
 password for an HMAC-signed, HttpOnly session cookie and send the session's CSRF token on every
 mutation; automation uses bearer tokens `mica_<id>_<secret>`, stored as digests. Passwords are
 argon2id, failed logins back off persistently, and security-relevant actions go to an audit ring.

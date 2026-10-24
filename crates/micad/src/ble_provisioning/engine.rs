@@ -232,14 +232,17 @@ enum Reached {
     Wired(String),
 }
 
-/// The Wi-Fi and the wired entries a session changed, kept until the
-/// session is over.
+/// The Wi-Fi and the wired entries a session changed and that have not come
+/// up yet, kept until the session is over. An entry that comes up is
+/// committed and leaves the hold.
 struct Hold {
-    /// The radio's role before `setWifi`, when it ran.
+    /// The radio's role before a `setWifi` that has not connected yet.
     snapshot: Option<Value>,
+    /// The networks such a `setWifi` added.
     added: Vec<String>,
+    /// Whether a `setWifi` of the session connected.
     connected: bool,
-    /// The wired entries `setNetwork` replaced, as they were.
+    /// The wired entries a `setNetwork` not up yet replaced, as they were.
     replaced: Vec<(String, Value)>,
     unclaimed: bool,
     away_since: Option<u64>,
@@ -1031,11 +1034,19 @@ impl Engine {
     }
 
     async fn done_op(&mut self, serial: u64, id: Value, op: &'static str, mut event: Value) {
-        if let Some(hold) = &mut self.hold
-            && op == "setWifi"
-            && event["event"] == "connected"
-        {
-            hold.connected = true;
+        // What came up is committed, however the session ends.
+        if let Some(hold) = &mut self.hold {
+            match (op, event["event"].as_str(), event["interface"].as_str()) {
+                ("setWifi", Some("connected"), _) => {
+                    hold.connected = true;
+                    hold.snapshot = None;
+                    hold.added.clear();
+                }
+                ("setNetwork", Some("up"), Some(name)) => {
+                    hold.replaced.retain(|(replaced, _)| replaced != name);
+                }
+                _ => {}
+            }
         }
         let Some(connection) = self.connection.as_mut().filter(|c| c.serial == serial) else {
             return;
@@ -1128,19 +1139,17 @@ impl Engine {
         }
     }
 
-    /// The session's hold is over: put back what it must not leave behind.
+    /// The session's hold is over: put back what did not come up. The radio's
+    /// role always; an unclaimed device's session that did not finish also
+    /// removes the networks it added and puts back the wired entries.
     fn end_hold(&mut self, finished: bool) {
         let Some(hold) = self.hold.take() else {
             return;
         };
         let abandoned = hold.unclaimed && !finished;
-        let (restore, remove) = if abandoned {
-            (true, hold.added)
-        } else {
-            (!hold.connected, Vec::new())
-        };
+        let remove = if abandoned { hold.added } else { Vec::new() };
         let device = Arc::clone(&self.device);
-        if let (true, Some(snapshot)) = (restore, hold.snapshot) {
+        if let Some(snapshot) = hold.snapshot {
             let device = Arc::clone(&device);
             tokio::spawn(async move { device.restore_wifi(snapshot, remove).await });
         }
