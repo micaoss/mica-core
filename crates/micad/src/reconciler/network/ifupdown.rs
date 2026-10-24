@@ -14,11 +14,10 @@
 //! WireGuard are networkd's, and an OpenRC device refuses them by name rather
 //! than half-configuring them.
 //!
-//! A static route is an `up ip route add` line of its interface's stanza and
-//! the matching `down ip route del`. ifupdown runs it once the link is up,
-//! which on DHCP is before udhcpc has a lease when the lease comes late, so a
-//! route via a gateway the lease's subnet reaches fails then and is logged by
-//! ifupdown; an on-link route and one beside a static address do not wait.
+//! A static route on a static or manual stanza is an `up ip route add` line
+//! and the matching `down ip route del`. On a DHCP stanza the link is up
+//! before the lease, so each route is a `route_<n>` option that Base's udhcpc
+//! script applies once the lease is bound and removes on deconfig.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -255,15 +254,27 @@ fn static_stanza(out: &mut String, iface: &str, cfg: &StaticConfig) -> Result<()
     Ok(())
 }
 
-/// Each of `routes` added once `iface` is up and removed before it goes down.
-/// The removal may find the route gone with the link, so it never fails the
-/// stanza. Only parsed addresses reach the shell line.
-fn route_lines(out: &mut String, iface: &str, routes: &[RouteConfig]) -> Result<()> {
-    for route in routes {
+/// Each of `routes` on `iface`'s stanza. A static or manual stanza adds each
+/// once the link is up and removes it before it goes down; the removal may
+/// find the route gone with the link, so it never fails the stanza. A DHCP
+/// stanza's link is up before its lease, so there each route is a
+/// `route_<n>` option instead, `<destination> [via <gateway>] [metric <m>]`,
+/// which Base's udhcpc script reads as `IF_ROUTE_<n>` and applies with
+/// `dev <iface>` once the lease is bound (section 3.8 of docs/mica-core.md).
+/// Only parsed addresses reach the line.
+fn route_lines(out: &mut String, iface: &str, routes: &[RouteConfig], dhcp: bool) -> Result<()> {
+    for (index, route) in routes.iter().enumerate() {
         let (destination, prefix) = address_and_prefix(&route.destination)?;
         let mut spec = format!("{destination}/{prefix}");
         if let Some(gateway) = &route.gateway {
             let _ = write!(spec, " via {}", gateway.parse::<IpAddr>()?);
+        }
+        if dhcp {
+            if let Some(metric) = route.metric {
+                let _ = write!(spec, " metric {metric}");
+            }
+            let _ = writeln!(out, "    route_{} {spec}", index + 1);
+            continue;
         }
         let _ = write!(spec, " dev {iface}");
         if let Some(metric) = route.metric {
@@ -333,7 +344,12 @@ pub(super) fn render(
                 let _ = write!(out, "\nauto {iface}\niface {iface} inet manual\n");
             }
         }
-        route_lines(&mut out, iface, &cfg.routes)?;
+        route_lines(
+            &mut out,
+            iface,
+            &cfg.routes,
+            cfg.static_.is_none() && cfg.dhcp,
+        )?;
     }
     for iface in &ports {
         dhcp_stanza(

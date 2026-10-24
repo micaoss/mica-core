@@ -383,8 +383,10 @@ fn a_boards_internal_port_is_off_the_internet_until_its_entry_chooses() {
     assert!(!stanza(&text, "eth0").contains("internet"), "{text}");
 }
 
-/// Static routes ride their interface's stanza: `ip route` adds each once the
-/// link is up and removes it before it goes down, on any addressing.
+/// Static routes ride their interface's stanza. On a static or manual
+/// stanza `ip route` adds each once the link is up and removes it before it
+/// goes down; on DHCP each is a `route_<n>` option, which Base's udhcpc script
+/// reads as `IF_ROUTE_<n>` and applies once the lease is bound.
 #[test]
 fn static_routes_are_added_and_removed_with_their_interface() {
     let route = |destination: &str, gateway: Option<&str>, metric: Option<u32>| RouteConfig {
@@ -396,7 +398,10 @@ fn static_routes_are_added_and_removed_with_their_interface() {
         (
             "eth0",
             IfaceSettings {
-                routes: vec![route("10.20.0.0/16", Some("192.168.1.2"), Some(5))],
+                routes: vec![
+                    route("10.20.0.0/16", Some("192.168.1.2"), Some(5)),
+                    route("10.21.0.0/16", None, None),
+                ],
                 ..dhcp()
             },
         ),
@@ -412,10 +417,11 @@ fn static_routes_are_added_and_removed_with_their_interface() {
     let text = render(&network, &[], None, &crate::board::Board::default()).unwrap();
     assert!(
         text.contains(
-            "    up ip route add 10.20.0.0/16 via 192.168.1.2 dev eth0 metric 5\n    down ip route del 10.20.0.0/16 via 192.168.1.2 dev eth0 metric 5 || :\n"
+            "    udhcpc_opts -b -S\n    route_1 10.20.0.0/16 via 192.168.1.2 metric 5\n    route_2 10.21.0.0/16\n"
         ),
         "{text}"
     );
+    assert!(!text.contains("dev eth0"), "{text}");
     assert!(
         text.contains(
             "    netmask 255.255.255.0\n    up ip route add 10.30.0.0/16 dev eth1\n    down ip route del 10.30.0.0/16 dev eth1 || :\n"
