@@ -232,7 +232,7 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
 
 /// The access-point service of an OpenRC root, mica-wifi-ap's (Base): one
 /// service told its interface by its environment file.
-const OPENRC_UNIT: &str = "mica-wifi-ap.service";
+pub(super) const OPENRC_UNIT: &str = "mica-wifi-ap.service";
 /// What micad tells that service: `interface=`, `config=`, `address=` and
 /// `udhcpd=`.
 const OPENRC_ENV: &str = "/run/mica/wifi-ap.env";
@@ -325,7 +325,7 @@ fn config_file_name(interface: &str) -> String {
 }
 
 /// Name of the hostapd unit instance for `interface`.
-fn unit_name(interface: &str) -> String {
+pub(super) fn unit_name(interface: &str) -> String {
     format!("hostapd@{interface}.service")
 }
 

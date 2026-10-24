@@ -254,3 +254,57 @@ pub(super) async fn the_first_network_restarts_the_idle_supplicant_and_addresses
 }
 
 // ---- secret hygiene ---------------------------------------------------
+
+/// The access point to client switch: the settings turn the access point
+/// off and the station on, in one write. hostapd still holds the radio
+/// when this reconciler runs, so it goes before the supplicant starts.
+#[tokio::test]
+pub(super) async fn the_access_point_turned_off_stops_before_the_supplicant_starts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, _paths) = fixture(dir.path(), "inactive", "disabled");
+    reconciler
+        .control
+        .set_active_state("hostapd@wlan0.service", "active");
+
+    let state = reconciler
+        .apply(&settings_with(one_psk_network()))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        reconciler.control.calls(),
+        vec![
+            "stop hostapd@wlan0.service".to_string(),
+            "enable wpa_supplicant@wlan0.service".to_string(),
+            "start wpa_supplicant@wlan0.service".to_string(),
+        ]
+    );
+    assert_eq!(state["station"], json!("applied"));
+}
+
+/// An access point the settings keep on is the access-point reconciler's
+/// (a conflict), and one on another interface is not in the way.
+#[tokio::test]
+pub(super) async fn an_access_point_kept_on_or_elsewhere_is_left_alone() {
+    for (mode, interface) in [(ApMode::Always, "wlan0"), (ApMode::Off, "wlan1")] {
+        let dir = tempfile::tempdir().unwrap();
+        let (reconciler, _paths) = fixture(dir.path(), "inactive", "disabled");
+        for unit in ["hostapd@wlan0.service", "hostapd@wlan1.service"] {
+            reconciler.control.set_active_state(unit, "active");
+        }
+        let mut settings = settings_with(one_psk_network());
+        settings.wifi.ap.mode = mode;
+        settings.wifi.ap.interface = interface.to_string();
+
+        reconciler.apply(&settings).await.unwrap();
+
+        assert_eq!(
+            reconciler.control.calls(),
+            vec![
+                "enable wpa_supplicant@wlan0.service".to_string(),
+                "start wpa_supplicant@wlan0.service".to_string(),
+            ],
+            "{mode:?} on {interface}"
+        );
+    }
+}

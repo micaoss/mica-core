@@ -211,9 +211,10 @@ live-state tree under its name.
 | `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
 | `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. A BLE provisioning window keeps the adapter powered while Bluetooth is switched off | the same through `mica-bluetoothd` |
 
-The station and the access point share one radio and take turns. The station is on by default:
-its supplicant runs whenever `wifi.client.enabled` is set, with no network block until one is
-added, so a scan works before any network is chosen and nothing is joined; networkd DHCP is
+The station and the access point share one radio and take turns; when one write turns the access
+point off and the station on, the access point stops before the supplicant starts. The station
+is on by default: its supplicant runs whenever `wifi.client.enabled` is set, with no network
+block until one is added, so a scan works before any network is chosen and nothing is joined; networkd DHCP is
 rendered only once a network exists. A device provisioned before the default changed keeps the
 `enabled` it stored. An access point on the station's interface reports
 `conflict` and does not start; the console asks the operator before switching the other role off,

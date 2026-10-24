@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
-use micad_settings::{Settings, WifiClientSettings, WifiNetwork};
+use micad_settings::{ApMode, Settings, WifiClientSettings, WifiNetwork};
 use serde_json::json;
 
 use super::Reconciler;
@@ -303,6 +303,31 @@ impl<C: UnitControl, R: NetworkReload> WifiClientReconciler<C, R> {
         Ok((wanted, changed))
     }
 
+    /// Stop the access point the settings turn off on the station's
+    /// interface, when the supplicant is about to start there. One radio
+    /// takes one role: a supplicant started while hostapd still holds the
+    /// interface does not take the station role once hostapd goes, and the
+    /// access-point reconciler runs after this one. Reports whether it
+    /// stopped it.
+    async fn stop_access_point(&self, settings: &Settings, unit: &str) -> Result<bool> {
+        let (client, ap) = (&settings.wifi.client, &settings.wifi.ap);
+        if !client.enabled || ap.mode != ApMode::Off || ap.interface != client.interface {
+            return Ok(false);
+        }
+        if is_active(&self.control.active_state(unit).await?) {
+            return Ok(false);
+        }
+        let ap_unit = match self.openrc_env {
+            Some(_) => super::wifi_ap::OPENRC_UNIT.to_string(),
+            None => super::wifi_ap::unit_name(&ap.interface),
+        };
+        if !is_active(&self.control.active_state(&ap_unit).await?) {
+            return Ok(false);
+        }
+        self.control.stop(&ap_unit).await?;
+        Ok(true)
+    }
+
     /// Bring the supplicant unit to the state the settings ask for, and report
     /// whether any call was needed.
     async fn apply_unit(&self, unit: &str, up: bool, config_changed: bool) -> Result<bool> {
@@ -385,7 +410,8 @@ impl<C: UnitControl, R: NetworkReload> Reconciler for WifiClientReconciler<C, R>
         if networkd_changed {
             self.reloader.reload().await?;
         }
-        let unit_changed = self.apply_unit(&unit, up, config_changed).await?;
+        let ap_stopped = self.stop_access_point(settings, &unit).await?;
+        let unit_changed = self.apply_unit(&unit, up, config_changed).await? || ap_stopped;
 
         let station = if !client.enabled {
             Station::Disabled
