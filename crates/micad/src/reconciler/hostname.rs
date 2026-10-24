@@ -4,7 +4,8 @@
 //! appliance -- its ProtectSystem=strict namespace has no writable /etc,
 //! because /etc is a dm-verity squashfs and the one writable path in it is a
 //! bind mount that does not survive into that namespace. The file is micad's to
-//! write, the same way the sshd reconciler owns dropbear's environment file.
+//! write, the same way the sshd reconciler owns the SSH server's environment
+//! file.
 
 use anyhow::Context;
 use micad_settings::Settings;

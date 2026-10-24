@@ -27,7 +27,7 @@ mod lifecycle;
 /// Two accounts, nine fields each — the shape of a Debian `/etc/shadow`. The
 /// daemon under test never writes a password here; the file exists so that
 /// nothing can point it at the host's.
-const SHADOW: &str = "root:!:19000:0:99999:7:::\n\
+const SHADOW: &str = "root:*:19000:0:99999:7:::\n\
     daemon:*:19000:0:99999:7:::\n";
 
 /// The seven mandatory paths, restated here on

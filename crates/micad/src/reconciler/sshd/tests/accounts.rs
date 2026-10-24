@@ -57,7 +57,7 @@ pub(super) async fn published_state_reports_an_empty_key_list_as_an_empty_array(
     assert_eq!(state["authorizedKeys"], json!([]));
 }
 
-// ---- ownership and permissions dropbear checks ------------------------
+// ---- ownership and permissions the server checks ----------------------
 
 #[tokio::test]
 pub(super) async fn every_key_file_is_the_accounts_0600_file_in_its_0700_ssh_directory() {
@@ -106,7 +106,7 @@ pub(super) async fn an_existing_ssh_directory_is_brought_to_0700() {
     );
 }
 
-/// dropbear refuses every key under a home that group or others can write.
+/// The server refuses every key under a home that group or others can write.
 /// The apply fails naming the home, before ANY account's keys or the
 /// server's arguments change, and the home is not repaired.
 #[tokio::test]

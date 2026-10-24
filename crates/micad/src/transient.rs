@@ -9,11 +9,20 @@
 //!
 //! # What authenticates it
 //!
-//! This hash is read by `dropbear` through `crypt(3)` against `/etc/shadow`,
-//! not through PAM: the dropbear the image carries does not link `libpam`, so
-//! this path works whatever state the PAM stack is in. This module depends on
-//! that property; it is asserted where dropbear is pinned and the root is
-//! composed, not here.
+//! This hash is read by the SSH server, dropbear or OpenSSH, through `crypt(3)`
+//! against `/etc/shadow`, not through PAM: the dropbear the image carries does
+//! not link `libpam` and OpenSSH runs with `UsePAM no`, so this path works
+//! whatever state the PAM stack is in. This module depends on that property;
+//! it is asserted where Base pins the server and the root is composed, not
+//! here.
+//!
+//! # The locked root
+//!
+//! Without a transient password, root's hash field is `*`, which Base's
+//! `mica-shadow-reconcile` writes at boot: no password matches it, and both
+//! servers still accept root's keys. `!` would not do: OpenSSH without PAM
+//! refuses an account whose hash starts with `!` for every method, keys
+//! included.
 
 use std::path::{Path, PathBuf};
 
@@ -52,9 +61,9 @@ const SHADOW_HASH_FIELD: usize = 1;
 const BCRYPT_COST: u32 = 12;
 /// Shortest password accepted.
 ///
-/// Not security theatre: the moment dropbear comes up this password is reachable
-/// over the network, so it is guessed at network speed rather than at
-/// keyboard speed. Eight bytes is the floor, not a recommendation.
+/// Not security theatre: the moment the SSH server comes up this password is
+/// reachable over the network, so it is guessed at network speed rather than
+/// at keyboard speed. Eight bytes is the floor, not a recommendation.
 const MIN_PASSWORD_BYTES: usize = 8;
 /// Longest password accepted. bcrypt itself only reads the first 72 bytes, so
 /// this is a bound on the input rather than on the strength of the result: it
@@ -206,8 +215,9 @@ mod tests {
     use super::*;
 
     /// Three accounts, nine fields each, trailing newline — the shape of a
-    /// Debian `/etc/shadow`. `root` starts out locked (`!`).
-    const SHADOW: &str = "root:!:19000:0:99999:7:::\n\
+    /// Debian `/etc/shadow`. `root` starts out locked (`*`, the marker Base's
+    /// shadow reconcile writes).
+    const SHADOW: &str = "root:*:19000:0:99999:7:::\n\
         daemon:*:19000:0:99999:7:::\n\
         operator:$6$rounds=5000$abcd$efgh:19100:0:99999:7:::\n";
     /// The two accounts a transient password must never touch.
@@ -267,7 +277,7 @@ mod tests {
         std::fs::create_dir_all(&etc).unwrap();
 
         let real_shadow = state.join("shadow");
-        std::fs::write(&real_shadow, "root:!:20000:::::\n").unwrap();
+        std::fs::write(&real_shadow, "root:*:20000:::::\n").unwrap();
         let link = etc.join("shadow");
         std::os::unix::fs::symlink(&real_shadow, &link).unwrap();
 
@@ -570,19 +580,19 @@ mod tests {
 
     #[test]
     fn rewrite_does_not_match_an_account_merely_containing_root() {
-        let shadow = "chroot:!:19000:0:99999:7:::\nroot:!:19000:0:99999:7:::\n";
+        let shadow = "chroot:*:19000:0:99999:7:::\nroot:*:19000:0:99999:7:::\n";
 
         let updated = rewrite_root_hash(shadow, CRYPT_HASH).unwrap();
 
         assert_eq!(
             updated,
-            format!("chroot:!:19000:0:99999:7:::\nroot:{CRYPT_HASH}:19000:0:99999:7:::\n")
+            format!("chroot:*:19000:0:99999:7:::\nroot:{CRYPT_HASH}:19000:0:99999:7:::\n")
         );
     }
 
     #[test]
     fn root_hash_reads_the_root_entry_not_a_lookalike() {
-        assert_eq!(root_hash(SHADOW).unwrap(), "!");
+        assert_eq!(root_hash(SHADOW).unwrap(), "*");
         assert_eq!(
             root_hash("chroot:LOOKALIKE:1::::::\nroot:REAL:1::::::\n").unwrap(),
             "REAL"

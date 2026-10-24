@@ -9,7 +9,7 @@ fn units(fake: &Arc<FakeCommands>) -> OpenrcUnits {
 
 #[test]
 fn a_service_unit_maps_onto_its_script_and_a_template_onto_a_multiplexed_one() {
-    assert_eq!(service_name("dropbear.service").unwrap(), "dropbear");
+    assert_eq!(service_name("mica-sshd.service").unwrap(), "mica-sshd");
     assert_eq!(
         service_name("hostapd@wlan0.service").unwrap(),
         "hostapd.wlan0"
@@ -22,12 +22,12 @@ fn a_service_unit_maps_onto_its_script_and_a_template_onto_a_multiplexed_one() {
 #[tokio::test]
 async fn states_are_systemd_s_words_for_openrc_s_exit_codes() {
     let fake = Arc::new(FakeCommands::default());
-    fake.answer("rc-service dropbear status", 0, "");
+    fake.answer("rc-service mica-sshd status", 0, "");
     fake.answer("rc-service mica-mqttd status", 32, "");
     fake.answer("rc-service mica-mqtt-broker status", 3, "");
     let units = units(&fake);
     assert_eq!(
-        units.active_state("dropbear.service").await.unwrap(),
+        units.active_state("mica-sshd.service").await.unwrap(),
         "active"
     );
     assert_eq!(
@@ -42,7 +42,7 @@ async fn states_are_systemd_s_words_for_openrc_s_exit_codes() {
         "inactive"
     );
     assert_eq!(
-        units.unit_file_state("dropbear.service").await.unwrap(),
+        units.unit_file_state("mica-sshd.service").await.unwrap(),
         "static"
     );
 }
@@ -51,17 +51,17 @@ async fn states_are_systemd_s_words_for_openrc_s_exit_codes() {
 async fn verbs_run_rc_service_and_enablement_runs_nothing() {
     let fake = Arc::new(FakeCommands::default());
     let units = units(&fake);
-    units.start("dropbear.service").await.unwrap();
-    units.restart("dropbear.service").await.unwrap();
-    units.stop("dropbear.service").await.unwrap();
-    units.enable("dropbear.service").await.unwrap();
-    units.disable("dropbear.service").await.unwrap();
+    units.start("mica-sshd.service").await.unwrap();
+    units.restart("mica-sshd.service").await.unwrap();
+    units.stop("mica-sshd.service").await.unwrap();
+    units.enable("mica-sshd.service").await.unwrap();
+    units.disable("mica-sshd.service").await.unwrap();
     assert_eq!(
         fake.calls(),
         [
-            "rc-service dropbear start",
-            "rc-service dropbear restart",
-            "rc-service dropbear stop"
+            "rc-service mica-sshd start",
+            "rc-service mica-sshd restart",
+            "rc-service mica-sshd stop"
         ]
     );
 }
@@ -69,23 +69,23 @@ async fn verbs_run_rc_service_and_enablement_runs_nothing() {
 #[tokio::test]
 async fn a_refused_verb_is_an_error() {
     let fake = Arc::new(FakeCommands::default());
-    fake.answer("rc-service dropbear start", 1, "");
-    assert!(units(&fake).start("dropbear.service").await.is_err());
+    fake.answer("rc-service mica-sshd start", 1, "");
+    assert!(units(&fake).start("mica-sshd.service").await.is_err());
 }
 
 #[tokio::test]
 async fn only_a_crashed_service_is_zapped() {
     let fake = Arc::new(FakeCommands::default());
-    fake.answer("rc-service dropbear status", 32, "");
+    fake.answer("rc-service mica-sshd status", 32, "");
     fake.answer("rc-service mica-mqttd status", 0, "");
     let units = units(&fake);
-    units.reset_failed("dropbear.service").await.unwrap();
+    units.reset_failed("mica-sshd.service").await.unwrap();
     units.reset_failed("mica-mqttd.service").await.unwrap();
     assert_eq!(
         fake.calls(),
         [
-            "rc-service dropbear status",
-            "rc-service dropbear zap",
+            "rc-service mica-sshd status",
+            "rc-service mica-sshd zap",
             "rc-service mica-mqttd status"
         ]
     );

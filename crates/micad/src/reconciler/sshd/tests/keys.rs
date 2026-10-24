@@ -339,7 +339,7 @@ pub(super) async fn a_valid_list_renders_and_overwrites_the_previous_content() {
 }
 
 /// Removing every key empties the file rather than deleting it: an absent
-/// file and an empty file mean the same thing to dropbear, and a key removed
+/// file and an empty file mean the same thing to the server, and a key removed
 /// has to stop working immediately either way.
 #[tokio::test]
 pub(super) async fn removing_every_key_empties_the_file_without_deleting_it() {
@@ -385,7 +385,7 @@ pub(super) async fn each_control_character_in_a_comment_fails_and_changes_nothin
 }
 
 /// The other direction: shell metacharacters are ordinary comment text.
-/// The rendered file is read by dropbear, not by a shell, and a guard that
+/// The rendered file is read by the SSH server, not by a shell, and a guard that
 /// rejected these would refuse comments operators really write.
 #[tokio::test]
 pub(super) async fn shell_metacharacters_in_a_comment_render_verbatim() {

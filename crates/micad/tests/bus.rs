@@ -19,7 +19,7 @@ use zbus::export::futures_core::Stream;
 
 /// Two accounts, nine fields each — the shape of a Debian `/etc/shadow`, with
 /// `root` locked the way `mica-shadow-reconcile` leaves it.
-const SHADOW: &str = "root:!:19000:0:99999:7:::\n\
+const SHADOW: &str = "root:*:19000:0:99999:7:::\n\
     daemon:*:19000:0:99999:7:::\n";
 const DEVICE_ID: &str = "00112233445566778899aabbccddeeff";
 

@@ -148,7 +148,7 @@ impl crate::reconciler::Reconciler for RecordingReconciler {
 }
 
 /// Three accounts, nine fields each — the shape of a Debian `/etc/shadow`.
-const SHADOW: &str = "root:!:19000:0:99999:7:::\n\
+const SHADOW: &str = "root:*:19000:0:99999:7:::\n\
     daemon:*:19000:0:99999:7:::\n";
 
 /// A mock's shared call log ([`MockPower::calls`] / [`MockDeployments::calls`]).

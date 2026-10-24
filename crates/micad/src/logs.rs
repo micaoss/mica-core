@@ -56,8 +56,8 @@ pub const LOG_SOURCES: [LogSource<'static>; 9] = [
     LogSource {
         name: "ssh",
         feature: Some(Feature::Ssh),
-        unit: "dropbear.service",
-        tag: "dropbear",
+        unit: "mica-sshd.service",
+        tag: "mica-sshd",
     },
     LogSource {
         name: "wifi-client",

@@ -62,3 +62,26 @@ async fn a_failed_read_is_absent_with_the_reason() {
     assert_eq!(value["available"], false);
     assert_eq!(value["source"], "apid");
 }
+
+/// Either SSH server logs as `mica-sshd`: the unit on systemd, the syslog tag
+/// on OpenRC.
+#[tokio::test]
+async fn the_ssh_log_is_mica_sshd_whichever_server_runs() {
+    let ssh = source("ssh", &micad_settings::Features::all()).unwrap();
+    assert_eq!(ssh.unit, "mica-sshd.service");
+    assert_eq!(ssh.tag, "mica-sshd");
+
+    let fake = Arc::new(FakeCommands::default());
+    fake.answer(
+        "logread",
+        0,
+        "Sep 28 10:00:00 site auth.info mica-sshd[20]: Accepted publickey for root\n\
+         Sep 28 10:00:01 site auth.info dropbear[21]: a line of another tag\n",
+    );
+    let reader = HostLogs::new(Init::Openrc, Arc::clone(&fake) as Arc<dyn Commands>);
+    let value = log_json(&reader, ssh).await;
+    assert_eq!(
+        value["lines"],
+        json!(["Sep 28 10:00:00 auth.info mica-sshd[20]: Accepted publickey for root"])
+    );
+}

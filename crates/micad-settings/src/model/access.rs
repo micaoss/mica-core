@@ -72,14 +72,14 @@ pub enum ClaimChannel {
     Ble,
 }
 
-/// SSH channel policy, reconciled into dropbear's arguments and the managed
-/// accounts' `~/.ssh/authorized_keys`.
+/// SSH channel policy, reconciled into the SSH server's environment and the
+/// managed accounts' `~/.ssh/authorized_keys`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SshSettings {
-    /// Whether dropbear is started.
+    /// Whether the SSH server is started.
     pub enabled: bool,
-    /// TCP port dropbear listens on.
+    /// TCP port the SSH server listens on.
     pub port: u16,
     /// Whether the root account may log in.
     #[serde(rename = "permitRootLogin")]
@@ -88,7 +88,7 @@ pub struct SshSettings {
     /// password.
     #[serde(rename = "passwordAuthentication")]
     pub password_authentication: bool,
-    /// Addresses dropbear binds to (at most 10); empty means every address.
+    /// Addresses the server binds to (at most 10); empty means every address.
     #[serde(rename = "listenAddresses")]
     pub listen_addresses: Vec<String>,
     /// Public keys rendered into every managed account's `authorized_keys`

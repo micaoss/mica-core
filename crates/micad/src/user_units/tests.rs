@@ -345,7 +345,7 @@ async fn an_openrc_script_whose_conf_changed_is_restarted_without_relinking() {
 #[test]
 fn a_write_the_device_cannot_apply_is_refused() {
     let rig = Rig::new(Init::Systemd, "");
-    rig.installed("usr/lib/systemd/system/dropbear.service", "");
+    rig.installed("usr/lib/systemd/system/mica-sshd.service", "");
     let none = ServicesSettings::default();
     let refused = |next: ServicesSettings, says: &str| {
         let err = rig.units.check_written(&none, &next).unwrap_err();
@@ -363,13 +363,13 @@ fn a_write_the_device_cannot_apply_is_refused() {
         "this device runs systemd",
     );
     refused(
-        services(&[("dropbear.service", Init::Systemd, SERVICE, true)]),
-        "dropbear.service is shipped by the root",
+        services(&[("mica-sshd.service", Init::Systemd, SERVICE, true)]),
+        "mica-sshd.service is shipped by the root",
     );
-    let alias = format!("{SERVICE}Alias=dropbear.service\n");
+    let alias = format!("{SERVICE}Alias=mica-sshd.service\n");
     refused(
         services(&[("x.service", Init::Systemd, &alias, true)]),
-        "dropbear.service is shipped by the root",
+        "mica-sshd.service is shipped by the root",
     );
 
     // An entry the write does not touch is not held to it.

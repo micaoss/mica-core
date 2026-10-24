@@ -27,7 +27,7 @@ pub(super) async fn without_a_transient_password_password_authentication_is_off(
 }
 
 #[tokio::test]
-pub(super) async fn a_marker_appearing_between_two_applies_turns_passwords_on_and_restarts_dropbear()
+pub(super) async fn a_marker_appearing_between_two_applies_turns_passwords_on_and_restarts_the_server()
  {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, paths) = fixture(dir.path(), "active", "enabled");
@@ -56,13 +56,13 @@ pub(super) async fn a_marker_appearing_between_two_applies_turns_passwords_on_an
         std::fs::read_to_string(&paths.environment).unwrap(),
         GOLDEN_DEFAULTS
     );
-    // A restart and nothing else: the server has to re-read -s, and a
+    // A restart and nothing else: the server has to re-read SSH_PASSWORD, and a
     // stop/start pair would leave a window with no listener at all.
-    // mica-system's KillMode=process is what keeps the operator's session.
+    // Base's KillMode=process is what keeps the operator's session.
     assert_eq!(
         calls(&reconciler)[calls_before..],
-        ["restart dropbear.service".to_string()],
-        "dropbear must pick up the flipped arguments: {:?}",
+        ["restart mica-sshd.service".to_string()],
+        "the server must pick up the flipped arguments: {:?}",
         calls(&reconciler)
     );
 }

@@ -129,13 +129,17 @@ Sep 28 01:00:04 site-name daemon.crit apid[11]: critical
     #[tokio::test]
     async fn failed_services_come_from_mica_init() {
         let fake = Arc::new(FakeCommands::default());
-        fake.answer("/usr/lib/mica/mica-init failed", 0, "dropbear\nmica-ntpd\n");
+        fake.answer(
+            "/usr/lib/mica/mica-init failed",
+            0,
+            "mica-ntpd\nmica-sshd\n",
+        );
         let units = InitFailedUnits::new(Arc::clone(&fake) as Arc<dyn Commands>)
             .failed_units()
             .await
             .unwrap();
         let names: Vec<_> = units.iter().map(|unit| unit.name.as_str()).collect();
-        assert_eq!(names, ["dropbear", "mica-ntpd"]);
+        assert_eq!(names, ["mica-ntpd", "mica-sshd"]);
         assert!(units.iter().all(|unit| unit.active_state == "failed"));
     }
 }

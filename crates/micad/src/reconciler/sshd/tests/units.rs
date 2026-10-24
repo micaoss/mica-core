@@ -1,4 +1,4 @@
-//! Starting, stopping, restarting and resetting dropbear.
+//! Starting, stopping, restarting and resetting the SSH server.
 
 use super::super::super::systemd::mock::MockUnitControl;
 use std::os::unix::fs::PermissionsExt;
@@ -18,17 +18,17 @@ pub(super) async fn disabled_to_enabled_enables_then_starts() {
     assert_eq!(
         calls(&reconciler),
         vec![
-            "enable dropbear.service".to_string(),
-            "start dropbear.service".to_string()
+            "enable mica-sshd.service".to_string(),
+            "start mica-sshd.service".to_string()
         ]
     );
     // Enablement is a unit STATE change, not a configuration change: the
     // start reads the freshly written arguments, so nothing restarts.
-    assert!(!calls(&reconciler).contains(&"restart dropbear.service".to_string()));
+    assert!(!calls(&reconciler).contains(&"restart mica-sshd.service".to_string()));
     assert_eq!(state["enabled"], json!(true));
     assert_eq!(state["activeState"], json!("active"));
     assert_eq!(state["unitFileState"], json!("enabled-runtime"));
-    assert_eq!(state["unit"], json!("dropbear.service"));
+    assert_eq!(state["unit"], json!("mica-sshd.service"));
     assert_eq!(reconciler.name(), "sshd");
     assert_eq!(reconciler.subtree(), "access.ssh");
 }
@@ -46,8 +46,8 @@ pub(super) async fn enabled_to_disabled_stops_then_disables() {
     assert_eq!(
         calls(&reconciler),
         vec![
-            "stop dropbear.service".to_string(),
-            "disable dropbear.service".to_string()
+            "stop mica-sshd.service".to_string(),
+            "disable mica-sshd.service".to_string()
         ]
     );
     assert_eq!(state["enabled"], json!(false));
@@ -116,11 +116,11 @@ pub(super) async fn reapplying_the_same_settings_changes_nothing() {
     );
 }
 
-/// dropbear reads its arguments only at start, so changed arguments under
+/// The server reads its environment only at start, so changed arguments under
 /// a running server are a restart — and nothing else: the unit is neither
 /// stopped nor re-enabled on the way.
 #[tokio::test]
-pub(super) async fn changing_the_arguments_of_a_running_dropbear_restarts_it() {
+pub(super) async fn changing_the_arguments_of_a_running_server_restarts_it() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, paths) = fixture(dir.path(), "active", "enabled");
     preexisting_environment(&paths, GOLDEN_DEFAULTS_GATED);
@@ -136,17 +136,17 @@ pub(super) async fn changing_the_arguments_of_a_running_dropbear_restarts_it() {
 
     assert_eq!(
         calls(&reconciler),
-        vec!["restart dropbear.service".to_string()]
+        vec!["restart mica-sshd.service".to_string()]
     );
     assert_eq!(
         std::fs::read_to_string(&paths.environment).unwrap(),
-        "DROPBEAR_ARGS=\"-p 2222 -s\"\n"
+        "SSH_LISTEN=\"2222\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=yes\n"
     );
     assert_eq!(state["port"], json!(2222));
 }
 
 #[tokio::test]
-pub(super) async fn changing_the_arguments_of_a_stopped_dropbear_starts_it_without_a_restart() {
+pub(super) async fn changing_the_arguments_of_a_stopped_server_starts_it_without_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, paths) = fixture(dir.path(), "inactive", "enabled");
     preexisting_environment(&paths, GOLDEN_DEFAULTS_GATED);
@@ -164,16 +164,16 @@ pub(super) async fn changing_the_arguments_of_a_stopped_dropbear_starts_it_witho
     // without a restart.
     assert_eq!(
         calls(&reconciler),
-        vec!["start dropbear.service".to_string()]
+        vec!["start mica-sshd.service".to_string()]
     );
     assert!(
         std::fs::read_to_string(&paths.environment)
             .unwrap()
-            .contains("-p 2222")
+            .starts_with("SSH_LISTEN=\"2222\"\n")
     );
 }
 
-/// dropbear.service fails its start without `/run/mica/dropbear.env`
+/// mica-sshd.service fails its start without `/run/mica/sshd.env`
 /// (the EnvironmentFile is required) and would accept only what the key
 /// files say at the moment of the first login, so every unit operation
 /// has to see the finished files. Observed from inside the unit control,
@@ -269,20 +269,20 @@ pub(super) async fn arguments_and_keys_are_on_disk_before_any_unit_operation() {
     assert_eq!(
         seen,
         vec![
-            ("enable dropbear.service".to_string(), true),
-            ("start dropbear.service".to_string(), true),
-            ("restart dropbear.service".to_string(), true),
+            ("enable mica-sshd.service".to_string(), true),
+            ("start mica-sshd.service".to_string(), true),
+            ("restart mica-sshd.service".to_string(), true),
         ]
     );
 }
 
-/// dropbear.service restarts on failure under systemd's default start
+/// mica-sshd.service restarts on failure under systemd's default start
 /// limit, so a server that cannot bind (an address not yet on any
 /// interface) ends up `failed` with start jobs refused. The operator's
 /// corrected settings must bring it up on this apply: the failure is
 /// cleared first, and only when there is one.
 #[tokio::test]
-pub(super) async fn a_failed_dropbear_is_reset_before_it_is_started() {
+pub(super) async fn a_failed_server_is_reset_before_it_is_started() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, _paths) = fixture(dir.path(), "failed", "enabled-runtime");
 
@@ -294,14 +294,14 @@ pub(super) async fn a_failed_dropbear_is_reset_before_it_is_started() {
     assert_eq!(
         calls(&reconciler),
         vec![
-            "reset-failed dropbear.service".to_string(),
-            "start dropbear.service".to_string(),
+            "reset-failed mica-sshd.service".to_string(),
+            "start mica-sshd.service".to_string(),
         ]
     );
 }
 
 #[tokio::test]
-pub(super) async fn a_dropbear_that_is_not_failed_is_not_reset() {
+pub(super) async fn a_server_that_is_not_failed_is_not_reset() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, _paths) = fixture(dir.path(), "inactive", "enabled-runtime");
 
@@ -312,14 +312,15 @@ pub(super) async fn a_dropbear_that_is_not_failed_is_not_reset() {
 
     assert_eq!(
         calls(&reconciler),
-        vec!["start dropbear.service".to_string()]
+        vec!["start mica-sshd.service".to_string()]
     );
 }
 
 /// The whole policy surface through `apply`: root login, the password
 /// setting and whether a transient password is active, with a key list
-/// present. Keys are rendered whatever the password policy; `-s` follows
-/// the EFFECTIVE value; `-w` follows `permitRootLogin` alone.
+/// present. Keys are rendered whatever the password policy; `SSH_PASSWORD`
+/// follows the EFFECTIVE value; `SSH_ROOT_LOGIN` follows `permitRootLogin`
+/// alone.
 #[tokio::test]
 pub(super) async fn every_root_password_and_transient_combination_renders_its_flags() {
     for permit_root_login in [true, false] {
@@ -347,14 +348,12 @@ pub(super) async fn every_root_password_and_transient_combination_renders_its_fl
                     .unwrap();
 
                 let effective = requested && transient;
-                let mut expected = String::from("DROPBEAR_ARGS=\"-p 22");
-                if !effective {
-                    expected.push_str(" -s");
-                }
-                if !permit_root_login {
-                    expected.push_str(" -w");
-                }
-                expected.push_str("\"\n");
+                let yes_no = |on: bool| if on { "yes" } else { "no" };
+                let expected = format!(
+                    "SSH_LISTEN=\"22\"\nSSH_PASSWORD={}\nSSH_ROOT_LOGIN={}\n",
+                    yes_no(effective),
+                    yes_no(permit_root_login)
+                );
                 assert_eq!(
                     std::fs::read_to_string(&paths.environment).unwrap(),
                     expected,
@@ -406,8 +405,8 @@ pub(super) async fn a_port_change_reaches_every_listener_but_one_with_its_own_po
         assert_eq!(
             std::fs::read_to_string(&paths.environment).unwrap(),
             format!(
-                "DROPBEAR_ARGS=\"-p 192.0.2.7:{port} -p [2001:db8::7]:{port} \
-                 -p [2001:db8::8]:2022 -s\"\n"
+                "SSH_LISTEN=\"192.0.2.7:{port} [2001:db8::7]:{port} [2001:db8::8]:2022\"\n\
+                 SSH_PASSWORD=no\nSSH_ROOT_LOGIN=yes\n"
             )
         );
     }
@@ -431,8 +430,8 @@ pub(super) async fn changed_arguments_while_ssh_is_being_disabled_only_stop_the_
     assert_eq!(
         calls(&reconciler),
         vec![
-            "stop dropbear.service".to_string(),
-            "disable dropbear.service".to_string()
+            "stop mica-sshd.service".to_string(),
+            "disable mica-sshd.service".to_string()
         ]
     );
 }
@@ -479,8 +478,8 @@ pub(super) async fn a_shadow_file_that_is_missing_or_broken_does_not_stop_the_re
     assert_eq!(
         reconciler.control.calls(),
         vec![
-            "enable dropbear.service".to_string(),
-            "start dropbear.service".to_string()
+            "enable mica-sshd.service".to_string(),
+            "start mica-sshd.service".to_string()
         ]
     );
 }
@@ -535,14 +534,22 @@ pub(super) async fn every_path_the_reconciler_writes_stays_inside_the_tempdir() 
 // secrets, and these correspond to no device: the private halves were
 // discarded at generation time and exist nowhere.
 
-/// On an OpenRC root the server is mica-ssh's `mica-dropbear`, apart from
-/// any `dropbear` script another package may ship.
+/// The server is Base's `mica-sshd` on either init, whichever
+/// implementation (dropbear or OpenSSH) the product carries.
 #[test]
-pub(super) fn an_openrc_root_drives_mica_dropbear() {
+pub(super) fn both_inits_drive_mica_sshd() {
     let reconciler = SshdReconciler::openrc(MockUnitControl::new("inactive", "static"));
-    assert_eq!(reconciler.unit, "mica-dropbear.service");
+    assert_eq!(reconciler.unit, "mica-sshd.service");
     assert_eq!(
         SshdReconciler::production(MockUnitControl::new("inactive", "static")).unit,
-        "dropbear.service"
+        "mica-sshd.service"
     );
+}
+
+/// The environment file is `/run/mica/sshd.env` unless the override names
+/// another.
+#[test]
+pub(super) fn the_environment_file_is_sshd_env() {
+    assert_eq!(DEFAULT_ENVIRONMENT_FILE, "/run/mica/sshd.env");
+    assert_eq!(ENVIRONMENT_FILE_ENV, "MICAD_SSHD_ENV");
 }

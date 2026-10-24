@@ -1,6 +1,6 @@
 //! Shared systemd unit control: the operations a reconciler needs to converge a
 //! named unit's runtime state. Deliberately unit-name-generic — the sshd
-//! reconciler drives `dropbear.service` through it and the WiFi client and AP
+//! reconciler drives `mica-sshd.service` through it and the WiFi client and AP
 //! reconcilers drive `wpa_supplicant@…` and `hostapd` through the same trait.
 //!
 //! Enablement is runtime-scoped. `EnableUnitFiles` with `runtime = false`

@@ -88,7 +88,7 @@ MQTT units need micad itself, mica-ntpd the network).
 | `MICAD_DRY_RUN` | unset | `1`: no provisioning, no reconcilers, no host access (the tests) |
 
 The tests relocate the rest of what micad writes the same way: the reconcilers' output
-(`MICAD_NETWORK_DIR`, `MICAD_WPA_SUPPLICANT_DIR`, `MICAD_HOSTAPD_DIR`, `MICAD_DROPBEAR_ENV`,
+(`MICAD_NETWORK_DIR`, `MICAD_WPA_SUPPLICANT_DIR`, `MICAD_HOSTAPD_DIR`, `MICAD_SSHD_ENV`,
 `MICAD_PASSWD_PATH`, `MICAD_MQTT_BROKER_CONFIG`), the DATA pool a reset clears (`MICA_DATA_ROOT`,
 `/mnt/data`), the audit ring (`MICA_AUDIT_RING_DIR`) and the recovery inputs
 (`MICA_RECOVERY_DECLARATION_PATH`, `MICA_RECOVERY_CMDLINE_PATH`, `MICA_PRESENCE_MARKER_PATH`).
@@ -113,6 +113,8 @@ The tests relocate the rest of what micad writes the same way: the reconcilers' 
   (section 4). Without the line the claim asks for it whenever the device has one; any word but
   `off` keeps it. `off` changes only the claim: the code is still derived, logged, put on the login
   prompt and read by `GET /api/v1/device/code`, whose answer carries the effective `gate`.
+- `SSH_SERVER` is `dropbear` (the default) or `openssh`: Base's choice of SSH server. micad does
+  not read it; both servers take the same environment and unit (section 3.8).
 
 ### 3.3 Settings
 
@@ -214,7 +216,7 @@ live-state tree under its name.
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
 | `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. Each DHCP stanza carries `metric <n>`, the networkd numbers. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. On a static or manual stanza each static route is an `up ip route add <destination> [via <gateway>] dev <iface> [metric <m>]` line with the matching `down ip route del … \|\| :`; on a DHCP stanza, whose link is up before its lease, each is a `route_<n>` option (`<destination> [via <gateway>] [metric <m>]`, numbered from 1) for Base's `mica-udhcpc` (section 3.8). VLAN, bridge and WireGuard are refused by name |
 | `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf` (resolved restarted when it changes) always empties `FallbackDNS=` and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file. Global servers: `/run/mica/resolv.d/global`, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
-| `sshd` | `/run/mica/dropbear.env`, the authorized keys of `root` and `mica`, `dropbear.service` | the same files, `mica-dropbear` |
+| `sshd` | `/run/mica/sshd.env`, the authorized keys of `root` and `mica`, `mica-sshd.service` | the same files, `mica-sshd` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
 | `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server, which hands out the global DNS servers while they are on and the uplink's otherwise | configuration in `/var/lib/mica/hostapd`, `/run/mica/wifi-ap.env`, busybox udhcpd on the same pool (`/run/mica/wifi-ap-udhcpd.conf`) with the global DNS servers while they are on, `mica-wifi-ap` |
 | `container` | Starts `mica-containerd.service` and declares the projects as one set; switched off, stops every container, then stops the service (section 3.9) | the same, `mica-containerd` |
@@ -355,13 +357,30 @@ The contract between micad and the packages whose services it drives on an OpenR
 
 | Service | Shipped by | micad writes |
 | --- | --- | --- |
-| `mica-dropbear` | mica-ssh | `/run/mica/dropbear.env` (`DROPBEAR_ARGS`) |
+| `mica-sshd` | mica-ssh (dropbear) or mica-openssh | `/run/mica/sshd.env` (`SSH_LISTEN`, `SSH_PASSWORD`, `SSH_ROOT_LOGIN`) |
 | `mica-wifi-client` | mica-wifi | `/run/mica/wifi-client.env` (`interface`, `config`, `metric`) |
 | `mica-wifi-ap` | mica-wifi-ap | `/run/mica/wifi-ap.env` (`interface`, `config`, `address`, `udhcpd`), `/run/mica/wifi-ap-udhcpd.conf` (pidfile `/run/mica-wifi-ap.udhcpd.pid`) |
 | `mica-bluetoothd` | mica-bluetooth | -- |
 | `mica-ntpd` | mica-openrc | `/run/mica/ntpd.conf` (`ntp_servers`) |
 | `mica-network` | mica-openrc | `/var/lib/mica/network/interfaces` |
 | `docker` | mica-docker | -- |
+
+The SSH server is `mica-sshd` on both inits (`mica-sshd.service` on systemd), dropbear or
+OpenSSH as the product's `SSH_SERVER` says; nothing in micad depends on which. Its environment,
+`/run/mica/sshd.env`, is three shell-sourceable lines:
+
+```
+SSH_LISTEN="22"
+SSH_PASSWORD=no
+SSH_ROOT_LOGIN=yes
+```
+
+`SSH_LISTEN` is the bare port, listening on every address, or one `addr:port` per
+`access.ssh.listenAddresses` entry (at most 10), space-separated, IPv6 in brackets
+(`"192.0.2.5:22 [2001:db8::5]:22"`). `SSH_PASSWORD` is `yes` only while password logins are
+asked for and a transient root password is active. `SSH_ROOT_LOGIN=no` refuses root by every
+method. Either server logs as `mica-sshd`: the unit's `SyslogIdentifier` on systemd, the syslog
+tag on OpenRC, which is what the `ssh` log reads.
 
 A DHCP lease's default-route metric reaches Base's udhcpc script, `/usr/lib/mica/mica-udhcpc`,
 as `IF_METRIC` in its environment: busybox ifupdown exports a stanza's `metric <n>` that way to
@@ -946,8 +965,11 @@ activated explicitly, and re-checked against the API at every start.
 
 **Reaching a shell.** Claim the device, then either add a public key to `access.ssh` (SSH is off
 until enabled; keys apply to `root` and `mica`) or set a transient root password (8 to 72 bytes,
-gone at the next boot). dropbear authenticates against `/etc/shadow` through `crypt(3)`, without
-PAM; mica-system-base asserts that of the package it pins.
+gone at the next boot). The SSH server, dropbear or OpenSSH, authenticates against `/etc/shadow`
+through `crypt(3)`, without PAM (OpenSSH runs with `UsePAM no`); mica-system-base asserts that of
+the packages it pins. Without a transient password root's hash is `*`, which Base's shadow
+reconcile writes at boot: no password matches it and both servers still take root's keys (OpenSSH
+without PAM refuses an account locked with `!` for keys too).
 
 ## 5. MQTT
 
@@ -1396,7 +1418,7 @@ make package-gate          # the package rules over both pools
   bounded reads), `micad-settings` for the rules apid and micad share, aws-lc-rs as the only
   crypto library (rustls, digests, HMAC, random, Ed25519, X25519). The password hashes are their
   own crates: argon2id for the admin password and the device credential, bcrypt for the transient root password, the hash
-  `/etc/shadow` and dropbear's `crypt(3)` read.
+  `/etc/shadow` and the SSH server's `crypt(3)` read.
 - AWS-LC seeds from the kernel's `getrandom` alone: `.cargo/config.toml` builds it with
   `AWS_LC_SYS_NO_JITTER_ENTROPY=1`, because its default CPU-jitter seed fails its health test on
   coarse counters (the RK3576's 24 MHz) and AWS-LC then aborts the process on its first draw.

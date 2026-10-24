@@ -10,15 +10,17 @@ mod render;
 mod units;
 use keys::*;
 
-const GOLDEN_DEFAULTS: &str = "DROPBEAR_ARGS=\"-p 22\"\n";
+const GOLDEN_DEFAULTS: &str = "SSH_LISTEN=\"22\"\nSSH_PASSWORD=yes\nSSH_ROOT_LOGIN=yes\n";
 /// What `apply` writes for default settings with **no** transient password
 /// active: the same arguments with password logins turned off.
-const GOLDEN_DEFAULTS_GATED: &str = "DROPBEAR_ARGS=\"-p 22 -s\"\n";
-const GOLDEN_LISTEN: &str = "DROPBEAR_ARGS=\"-p 10.0.0.5:2222 -p [fd00::1]:2222 -s -w\"\n";
+const GOLDEN_DEFAULTS_GATED: &str = "SSH_LISTEN=\"22\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=yes\n";
+const GOLDEN_LISTEN: &str =
+    "SSH_LISTEN=\"10.0.0.5:2222 [fd00::1]:2222\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=no\n";
 
 /// Three accounts, nine fields each, trailing newline — the shape of a
-/// Debian `/etc/shadow`. `root` starts out locked (`!`).
-const SHADOW: &str = "root:!:19000:0:99999:7:::\n\
+/// Debian `/etc/shadow`. `root` starts out locked (`*`, the marker Base's
+/// shadow reconcile writes).
+const SHADOW: &str = "root:*:19000:0:99999:7:::\n\
     daemon:*:19000:0:99999:7:::\n\
     operator:$6$rounds=5000$abcd$efgh:19100:0:99999:7:::\n";
 const SHADOW_MODE: u32 = 0o640;
@@ -84,7 +86,7 @@ fn fixture(dir: &Path, active: &str, file_state: &str) -> (SshdReconciler<MockUn
     let root_home = dir.join("root");
     let mica_home = dir.join("home").join("mica");
     let paths = Paths {
-        environment: dir.join("run").join("mica").join("dropbear.env"),
+        environment: dir.join("run").join("mica").join("sshd.env"),
         passwd: dir.join("passwd"),
         keys: root_home.join(".ssh").join("authorized_keys"),
         mica_keys: mica_home.join(".ssh").join("authorized_keys"),

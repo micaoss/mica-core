@@ -1,8 +1,10 @@
-//! SSH access reconciler: renders dropbear's arguments and the managed
-//! accounts' authorized keys from `access.ssh` and drives `dropbear.service`.
-//! Three system effects, in this order.
+//! SSH access reconciler: renders the SSH server's environment and the
+//! managed accounts' authorized keys from `access.ssh` and drives
+//! `mica-sshd.service`. Three system effects, in this order.
 //!
-//! Dropbear authenticates against `/etc/shadow` through `crypt(3)` and not
+//! The server is Base's, dropbear or OpenSSH as the product chooses; both read
+//! the same environment file, and nothing here depends on which one runs.
+//! Either authenticates against `/etc/shadow` through `crypt(3)` and not
 //! through PAM (`crate::transient`); the key files this module writes and the
 //! transient password are the two ways into a device.
 
@@ -19,13 +21,13 @@ use super::Reconciler;
 use super::systemd::{UnitControl, is_active, is_enabled};
 use crate::transient;
 
-/// Unit implementing the SSH server, shipped by mica-system.
-const SSH_UNIT: &str = "dropbear.service";
+/// Unit implementing the SSH server, shipped by Base on both inits.
+const SSH_UNIT: &str = "mica-sshd.service";
 /// `ActiveState` of a unit that exited unsuccessfully, possibly inside its
 /// start-limit window.
 const FAILED_STATE: &str = "failed";
-/// Environment file carrying dropbear's arguments.
-const DEFAULT_ENVIRONMENT_FILE: &str = "/run/mica/dropbear.env";
+/// Environment file carrying the SSH server's arguments.
+const DEFAULT_ENVIRONMENT_FILE: &str = "/run/mica/sshd.env";
 /// Account database the managed accounts' ids and homes are read from.
 const DEFAULT_PASSWD: &str = "/etc/passwd";
 /// Accounts this reconciler renders authorized keys for, in render order.
@@ -35,7 +37,7 @@ const DEFAULT_PASSWD: &str = "/etc/passwd";
 /// is a root key as much as it is a `mica` key, and the web UI says so.
 const MANAGED_LOGIN_ACCOUNTS: [&str; 2] = ["root", "mica"];
 /// Environment variable overriding the environment file path.
-const ENVIRONMENT_FILE_ENV: &str = "MICAD_DROPBEAR_ENV";
+const ENVIRONMENT_FILE_ENV: &str = "MICAD_SSHD_ENV";
 /// Environment variable overriding the account database path. Nothing in the
 /// image sets it; the override exists for tests.
 const PASSWD_ENV: &str = "MICAD_PASSWD_PATH";
@@ -50,14 +52,13 @@ const AUTHORIZED_KEYS_MODE: u32 = 0o600;
 const AUTHORIZED_KEYS: &str = "authorized_keys";
 /// Temporary sibling a key file is written to before the rename.
 const AUTHORIZED_KEYS_TEMP: &str = ".authorized_keys.micad-tmp";
-/// Most `-p` listeners dropbear binds (`DROPBEAR_MAX_PORTS`); it ignores the
-/// rest without a word.
+/// Most listeners `SSH_LISTEN` carries: dropbear binds ten
+/// (`DROPBEAR_MAX_PORTS`) and ignores the rest without a word.
 const MAX_LISTEN_ADDRESSES: usize = 10;
 
 /// Reconciler for the `access.ssh` settings subtree.
 pub struct SshdReconciler<C: UnitControl> {
-    /// mica-ssh's `dropbear.service`, or on an OpenRC root its
-    /// `mica-dropbear`.
+    /// `mica-sshd.service`, or on an OpenRC root `mica-sshd`.
     unit: &'static str,
     environment_path: PathBuf,
     /// Account database the managed accounts' uid, gid and home come from.
@@ -73,10 +74,10 @@ pub struct SshdReconciler<C: UnitControl> {
 }
 
 impl<C: UnitControl> SshdReconciler<C> {
-    /// Create a reconciler writing dropbear's arguments to `environment_path`
-    /// and each managed account's key file under the home `passwd_path` names,
-    /// tracking the shadow file at `shadow_path`, and driving
-    /// `dropbear.service` through `control`.
+    /// Create a reconciler writing the server's environment to
+    /// `environment_path` and each managed account's key file under the home
+    /// `passwd_path` names, tracking the shadow file at `shadow_path`, and
+    /// driving `mica-sshd.service` through `control`.
     pub fn new(
         environment_path: PathBuf,
         passwd_path: PathBuf,
@@ -111,22 +112,22 @@ impl<C: UnitControl> SshdReconciler<C> {
         )
     }
 
-    /// The production reconciler on an OpenRC root, driving `mica-dropbear`.
+    /// The production reconciler on an OpenRC root, driving `mica-sshd`.
     pub fn openrc(control: C) -> Self {
         Self {
-            unit: "mica-dropbear.service",
+            unit: "mica-sshd.service",
             ..Self::production(control)
         }
     }
 }
 
 /// Refuse a listen address that could not be one, and more of them than
-/// dropbear binds.
+/// the server binds.
 fn validate_listen_addresses(addresses: &[String]) -> Result<()> {
     if addresses.len() > MAX_LISTEN_ADDRESSES {
         bail!(
-            "access.ssh.listenAddresses holds {} entries; dropbear binds at most \
-             {MAX_LISTEN_ADDRESSES} and would silently ignore the rest",
+            "access.ssh.listenAddresses holds {} entries; the SSH server binds at \
+             most {MAX_LISTEN_ADDRESSES} and would silently ignore the rest",
             addresses.len()
         );
     }
@@ -142,7 +143,7 @@ fn validate_listen_addresses(addresses: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// One `-p` listener for `address`: `addr:port`, IPv6 in brackets, and an
+/// One listener for `address`: `addr:port`, IPv6 in brackets, and an
 /// address that carries its own port keeps it. Called only on a validated
 /// address.
 fn listener(address: &str, port: u16) -> String {
@@ -152,27 +153,33 @@ fn listener(address: &str, port: u16) -> String {
     }
 }
 
-/// Render `/run/mica/dropbear.env` for `ssh`.
+/// Render `/run/mica/sshd.env` for `ssh`.
 ///
 /// Pure and deterministic: the same settings always produce the same bytes, so
 /// a re-render can be compared against what is on disk to decide whether
-/// anything changed. Exactly one line, `DROPBEAR_ARGS="..."`.
+/// anything changed. Three shell-sourceable lines, the contract with Base's
+/// server packages:
+///
+/// - `SSH_LISTEN="..."`: the bare port, listening on every address, or one
+///   `addr:port` per listen address, space-separated, IPv6 in brackets;
+/// - `SSH_PASSWORD=yes|no`: `yes` only while password logins are on;
+/// - `SSH_ROOT_LOGIN=yes|no`: `no` refuses root by every method.
 fn render_environment(ssh: &SshSettings, password_authentication: bool) -> String {
-    let mut args: Vec<String> = if ssh.listen_addresses.is_empty() {
-        vec![format!("-p {}", ssh.port)]
+    let listen = if ssh.listen_addresses.is_empty() {
+        ssh.port.to_string()
     } else {
         ssh.listen_addresses
             .iter()
-            .map(|address| format!("-p {}", listener(address, ssh.port)))
-            .collect()
+            .map(|address| listener(address, ssh.port))
+            .collect::<Vec<_>>()
+            .join(" ")
     };
-    if !password_authentication {
-        args.push("-s".to_string());
-    }
-    if !ssh.permit_root_login {
-        args.push("-w".to_string());
-    }
-    format!("DROPBEAR_ARGS=\"{}\"\n", args.join(" "))
+    let yes_no = |on: bool| if on { "yes" } else { "no" };
+    format!(
+        "SSH_LISTEN=\"{listen}\"\nSSH_PASSWORD={}\nSSH_ROOT_LOGIN={}\n",
+        yes_no(password_authentication),
+        yes_no(ssh.permit_root_login)
+    )
 }
 
 /// Render the authorized-keys file for `keys`.
@@ -232,7 +239,7 @@ fn errno(err: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from(err)
 }
 
-/// Open `account`'s home and `~/.ssh` for a key file dropbear will honour.
+/// Open `account`'s home and `~/.ssh` for a key file the server will honour.
 fn open_key_target(account: Account) -> Result<Option<KeyTarget>> {
     let home = match rustix::fs::open(
         &account.home,
@@ -251,7 +258,7 @@ fn open_key_target(account: Account) -> Result<Option<KeyTarget>> {
     if (stat.st_uid != account.uid && stat.st_uid != 0) || stat.st_mode & 0o022 != 0 {
         bail!(
             "{} (home of {}) must be owned by the account or root and not be group- or \
-             world-writable, or dropbear refuses every key under it",
+             world-writable, or the SSH server refuses every key under it",
             account.home.display(),
             account.name
         );
@@ -388,7 +395,7 @@ impl<C: UnitControl> SshdReconciler<C> {
         Ok(targets)
     }
 
-    /// Bring `dropbear.service` to the state `ssh.enabled` asks for. Reads
+    /// Bring `mica-sshd.service` to the state `ssh.enabled` asks for. Reads
     /// before it writes, so a system already in the target state gets no calls
     /// at all.
     async fn apply_unit(&self, ssh: &SshSettings, config_changed: bool) -> Result<()> {
@@ -408,7 +415,7 @@ impl<C: UnitControl> SshdReconciler<C> {
                     })?;
                 }
             } else {
-                // The mqtt.rs start-limit amendment: dropbear.service restarts
+                // The mqtt.rs start-limit amendment: mica-sshd.service restarts
                 // on failure, so a server that could not bind can be `failed`
                 // inside its start-limit window, where systemd refuses start
                 // jobs. Clear the failure first -- only when there is one, so
@@ -455,8 +462,8 @@ impl<C: UnitControl> Reconciler for SshdReconciler<C> {
         // nothing.
         micad_settings::validate_authorized_keys(&ssh.authorized_keys)?;
         // Same boundary, same reasoning: each listen address is interpolated
-        // verbatim into the quoted `DROPBEAR_ARGS` value, where whitespace
-        // splits an argument and a quote or newline ends the value. Requiring
+        // verbatim into the quoted `SSH_LISTEN` value, where whitespace
+        // adds a listener and a quote or newline ends the value. Requiring
         // an actual address makes injection structurally impossible rather
         // than filtering for it.
         validate_listen_addresses(&ssh.listen_addresses)?;
@@ -465,14 +472,14 @@ impl<C: UnitControl> Reconciler for SshdReconciler<C> {
         // operator setting a transient password changes no setting at all, and
         // the bus method that sets one calls back through `apply_all`.
         let transient_active = transient::transient_password_active(&self.shadow_path);
-        // `password_authentication` below is the EFFECTIVE value — what dropbear
+        // `password_authentication` below is the EFFECTIVE value — what the server
         // is actually told. `passwordAuthenticationRequested` in the published
         // state is the raw setting. Two similarly-named keys, so: effective =
         // requested AND a transient password is really active.
         let password_authentication = ssh.password_authentication && transient_active;
 
         // Every home is checked before any key file is written. No "did it
-        // change" comes back from the keys, and none is wanted: dropbear opens
+        // change" comes back from the keys, and none is wanted: the server opens
         // the key file on every authentication attempt, so a key added or
         // removed takes effect without touching the unit at all.
         let targets = self.key_targets(&MANAGED_LOGIN_ACCOUNTS)?;

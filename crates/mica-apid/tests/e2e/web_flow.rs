@@ -31,7 +31,7 @@ pub(super) async fn web_flow_end_to_end() -> anyhow::Result<()> {
     let config_dir = dir.path().join("config");
     std::fs::create_dir_all(&config_dir)?;
     let shadow_path = dir.path().join("shadow");
-    std::fs::write(&shadow_path, "root:!:20000:0:99999:7:::\n")?;
+    std::fs::write(&shadow_path, "root:*:20000:0:99999:7:::\n")?;
     let _micad_guard = ChildGuard(
         Command::new(find_micad()?)
             .env("DBUS_SESSION_BUS_ADDRESS", &address)

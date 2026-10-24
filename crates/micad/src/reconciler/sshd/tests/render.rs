@@ -1,4 +1,4 @@
-//! The dropbear arguments: listeners, ports and the environment file.
+//! The server's environment: listeners, ports and the environment file.
 
 use super::*;
 
@@ -24,7 +24,6 @@ pub(super) fn each_listen_address_becomes_one_listener() {
     );
 
     assert_eq!(rendered, GOLDEN_LISTEN);
-    assert_eq!(rendered.matches("-p ").count(), 2);
 }
 
 #[test]
@@ -37,16 +36,17 @@ pub(super) fn an_address_that_carries_its_own_port_keeps_it() {
         true,
     );
 
-    assert_eq!(
-        rendered,
-        "DROPBEAR_ARGS=\"-p 10.0.0.5:2200 -p [fd00::1]:2201\"\n"
+    assert!(
+        rendered.starts_with("SSH_LISTEN=\"10.0.0.5:2200 [fd00::1]:2201\"\n"),
+        "{rendered}"
     );
 }
 
-/// The contract with mica-system's unit: one line, one variable, and
-/// always a `-p` (its ExecStartPre refuses a start without one).
+/// The contract with Base's server packages (dropbear or OpenSSH): three
+/// shell-sourceable lines in a fixed order, `SSH_LISTEN` quoted and never
+/// empty, the two switches `yes` or `no`.
 #[test]
-pub(super) fn every_render_is_exactly_one_dropbear_args_line_with_a_listener() {
+pub(super) fn every_render_is_the_three_contract_lines() {
     for permit_root_login in [true, false] {
         for password in [true, false] {
             for listen in [vec![], vec!["192.0.2.1".to_string()]] {
@@ -58,31 +58,19 @@ pub(super) fn every_render_is_exactly_one_dropbear_args_line_with_a_listener() {
                     },
                     password,
                 );
-                assert_eq!(rendered.lines().count(), 1, "{rendered}");
-                assert!(rendered.starts_with("DROPBEAR_ARGS=\"-p "), "{rendered}");
-                assert!(rendered.ends_with("\"\n"), "{rendered}");
+                let lines: Vec<&str> = rendered.lines().collect();
+                assert_eq!(lines.len(), 3, "{rendered}");
+                assert!(lines[0].starts_with("SSH_LISTEN=\""), "{rendered}");
+                assert!(lines[0].ends_with('"'), "{rendered}");
+                assert_ne!(lines[0], "SSH_LISTEN=\"\"", "{rendered}");
+                let yes_no = |on: bool| if on { "yes" } else { "no" };
+                assert_eq!(lines[1], format!("SSH_PASSWORD={}", yes_no(password)));
+                assert_eq!(
+                    lines[2],
+                    format!("SSH_ROOT_LOGIN={}", yes_no(permit_root_login))
+                );
+                assert!(rendered.ends_with('\n'), "{rendered}");
             }
-        }
-    }
-}
-
-/// `permitRootLogin = false` refuses root by every method, which is `-w`;
-/// `-g` would refuse only root's password, and the only password this
-/// device has is root's transient one.
-#[test]
-pub(super) fn root_login_refusal_is_w_and_g_is_never_rendered() {
-    for permit_root_login in [true, false] {
-        for password in [true, false] {
-            let rendered = render_environment(
-                &SshSettings {
-                    permit_root_login,
-                    ..SshSettings::default()
-                },
-                password,
-            );
-            assert_eq!(rendered.contains(" -w"), !permit_root_login, "{rendered}");
-            assert_eq!(rendered.contains(" -s"), !password, "{rendered}");
-            assert!(!rendered.contains("-g"), "{rendered}");
         }
     }
 }
@@ -92,8 +80,8 @@ pub(super) async fn apply_rejects_a_listen_address_that_is_not_one() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
     let mut ssh = ssh_settings(true);
-    // A space or a quote here would land verbatim inside DROPBEAR_ARGS,
-    // where it splits the value into arguments dropbear never asked for.
+    // A space or a quote here would land verbatim inside SSH_LISTEN, where
+    // it adds a listener nobody asked for or ends the quoted value.
     ssh.listen_addresses = vec!["10.0.0.5 -B\" -R".to_string()];
 
     let err = reconciler.apply(&settings_with(ssh)).await.unwrap_err();
@@ -108,7 +96,7 @@ pub(super) async fn apply_rejects_a_listen_address_that_is_not_one() {
 }
 
 #[tokio::test]
-pub(super) async fn apply_rejects_more_listen_addresses_than_dropbear_binds() {
+pub(super) async fn apply_rejects_more_than_ten_listen_addresses() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
     let mut ssh = ssh_settings(true);
