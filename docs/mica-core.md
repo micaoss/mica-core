@@ -109,6 +109,10 @@ The tests relocate the rest of what micad writes the same way: the reconcilers' 
   init stops micad.
 - `CONTAINER_ENGINE` is `podman` (the default) or `docker`, and decides the container backend
   (3.9). An unknown engine stops micad.
+- `CLAIM_DEVICE_CODE` is `required` or `off`: whether the console's claim asks for the device code
+  (section 4). Without the line the claim asks for it whenever the device has one; any word but
+  `off` keeps it. `off` changes only the claim: the code is still derived, logged, put on the login
+  prompt and read by `GET /api/v1/device/code`, whose answer carries the effective `gate`.
 
 ### 3.3 Settings
 
@@ -900,7 +904,10 @@ the claimer's proof of holding the device, which reaching its console is not onc
 provisioning has put an unclaimed device on a network. The code is on the label and on the
 device's own console, the login prompt and micad's start line (section 3.8). A missing one is 422
 at `deviceCode`, a wrong one 403 `device_code_incorrect` and counts in the login backoff (429
-`login_throttled`, at most 300 s). A device without a code is claimed without one. The claim sets
+`login_throttled`, at most 300 s). A device without a code is claimed without one, and so is one whose
+product says `CLAIM_DEVICE_CODE=off` (section 3.2): its claim ignores a `deviceCode` sent anyway.
+`GET /api/v1/session` in setup carries `deviceCode`, `required` or `off`, and the setup page asks
+for the code only when it is `required`. The claim sets
 no access-point key; the key on the label keeps applying until one is set on the console's Wi-Fi
 page (`docs/factory-ap-key.md`), and an `apPsk` member a client still sends is ignored. The claim
 writes nothing under `wifi`; `docs/provisioning-flow.md` follows a device from first boot through

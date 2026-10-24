@@ -871,11 +871,16 @@ impl MicadService {
             Some(root) => crate::device_code::device_code(root),
             None => Err("this daemon reads no device".to_string()),
         };
-        match code {
+        let gate = match (&code, &self.device_root) {
+            (Ok(_), Some(root)) => crate::device_code::claim_gate(root),
+            _ => "off",
+        };
+        let mut answer = match code {
             Ok(code) => code.to_json(),
             Err(reason) => serde_json::json!({ "code": null, "reason": reason }),
-        }
-        .to_string()
+        };
+        answer["gate"] = serde_json::json!(gate);
+        answer.to_string()
     }
 
     pub(super) async fn get_telemetry(&self) -> Result<String, SettingsFault> {

@@ -24,7 +24,7 @@ function RootComponent() {
   })
   if (session.isPending) return <BootScreen><Spinner className="size-6" /><p>{t('root.connecting')}</p></BootScreen>
   if (session.error) return <BootScreen><Callout tone="danger" title={t('root.unavailable')} /></BootScreen>
-  if (session.data.state === 'setup') return <SetupView />
+  if (session.data.state === 'setup') return <SetupView deviceCode={session.data.deviceCode} />
   if (session.data.state !== 'authenticated') return <LoginView />
   return <AppShell />
 }

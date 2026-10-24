@@ -197,6 +197,7 @@ pub(super) async fn the_device_code_names_its_source_or_why_there_is_none() {
     let (service, _calls, dir) = service_with_mock();
     let none: serde_json::Value = serde_json::from_str(&service.get_device_code().await).unwrap();
     assert_eq!(none["code"], serde_json::Value::Null);
+    assert_eq!(none["gate"], "off", "a device without a code asks for none");
 
     let root = dir.path().join("root");
     let serial = root.join("sys/firmware/devicetree/base/serial-number");
@@ -205,11 +206,21 @@ pub(super) async fn the_device_code_names_its_source_or_why_there_is_none() {
     let conf = root.join(crate::device_code::CONFIG_PATH);
     std::fs::create_dir_all(conf.parent().unwrap()).unwrap();
     std::fs::write(&conf, "source=dt-serial\n").unwrap();
-    let service = service.with_device_root(root);
+    let service = service.with_device_root(root.clone());
     let code: serde_json::Value = serde_json::from_str(&service.get_device_code().await).unwrap();
     assert_eq!(
         code,
-        serde_json::json!({"code": "LSZJ-2L3T-WFG", "source": "dt-serial"})
+        serde_json::json!({"code": "LSZJ-2L3T-WFG", "source": "dt-serial", "gate": "required"})
+    );
+
+    // A product that turns the gate off still has, and shows, its code.
+    let product = root.join(micad_settings::PRODUCT_FILE.trim_start_matches('/'));
+    std::fs::create_dir_all(product.parent().unwrap()).unwrap();
+    std::fs::write(&product, "INIT=systemd\nCLAIM_DEVICE_CODE=off\n").unwrap();
+    let code: serde_json::Value = serde_json::from_str(&service.get_device_code().await).unwrap();
+    assert_eq!(
+        code,
+        serde_json::json!({"code": "LSZJ-2L3T-WFG", "source": "dt-serial", "gate": "off"})
     );
 }
 

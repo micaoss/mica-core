@@ -110,6 +110,7 @@ export const en = {
     setup: {
       title: 'Make this device yours',
       copy: "Enter the device code and set the administrator password and, optionally, a hostname. Network interfaces can be inspected from the console next.",
+      copyNoCode: 'Set the administrator password and, optionally, a hostname. Network interfaces can be inspected from the console next.',
       deviceCode: 'Device code',
       deviceCodeHint: "On the device's label, or on its console: the login prompt on the serial port or a display. A wrong code only delays the next try.",
       hostname: 'Hostname',

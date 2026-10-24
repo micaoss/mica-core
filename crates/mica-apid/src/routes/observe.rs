@@ -128,9 +128,11 @@ pub(crate) async fn api_v1_system_info(
 
 /// Read the device code.
 ///
-/// The code printed on the device's label, `{code, source}` with the code in
-/// its printed form (`7KQ2-MX9D-HC4`), or `{code: null, reason}` on a device
-/// whose board declares no usable source. Support reads it to identify a
+/// The code printed on the device's label, `{code, source, gate}` with the
+/// code in its printed form (`7KQ2-MX9D-HC4`), or `{code: null, reason,
+/// gate}` on a device whose board declares no usable source. `gate` is
+/// whether the claim asks for the code: `required`, or `off` on a device
+/// without one or whose product turns it off. Support reads it to identify a
 /// device; nothing here or anywhere on the device serves the access-point key
 /// derived from it.
 #[utoipa::path(
@@ -139,7 +141,7 @@ pub(crate) async fn api_v1_system_info(
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "`{code, source}`, or `{code: null, reason}`", body = ResourceValue),
+        (status = 200, description = "`{code, source, gate}`, or `{code: null, reason, gate}`; `gate` is `required` or `off`", body = ResourceValue),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),

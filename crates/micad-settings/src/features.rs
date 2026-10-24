@@ -7,6 +7,9 @@
 //! A root with no `product.conf`, or one whose file has no `FEATURES` line, is a
 //! development host, and every feature is on.
 //!
+//! Its `CLAIM_DEVICE_CODE=required|off` says whether the console's claim asks
+//! for the device code ([`ClaimDeviceCode`]).
+//!
 //! The same file states the product's init (`INIT=systemd|openrc`, systemd when
 //! absent), and its container engine (`CONTAINER_ENGINE=podman|docker`, podman
 //! when absent). Every feature is served on either init: containers run under
@@ -125,6 +128,32 @@ impl ContainerEngine {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::Podman),
             Err(err) => Err(err),
         }
+    }
+}
+
+/// Whether the console's claim asks for the device code, from the
+/// product's `CLAIM_DEVICE_CODE=` line. A product without the line asks for
+/// it whenever the device has one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimDeviceCode {
+    /// The claim carries the code.
+    Required,
+    /// The claim carries no code; the device still shows it.
+    Off,
+}
+
+impl ClaimDeviceCode {
+    /// The gate a `product.conf` states, `None` when it states none. A word
+    /// other than `off` keeps the gate: a misspelt line never opens a claim.
+    #[must_use]
+    pub fn parse(product_conf: &str) -> Option<Self> {
+        line_value(product_conf, "CLAIM_DEVICE_CODE=").map(|value| {
+            if value == "off" {
+                Self::Off
+            } else {
+                Self::Required
+            }
+        })
     }
 }
 
@@ -414,5 +443,23 @@ mod tests {
         assert_eq!(features.refuses("wifi.ap"), Some(Feature::Wifi));
         assert_eq!(features.refuses("mqtt.enabled"), None);
         assert_eq!(features.refuses("hostname"), None);
+    }
+
+    #[test]
+    fn the_claim_asks_for_the_device_code_unless_the_product_turns_it_off() {
+        assert_eq!(ClaimDeviceCode::parse(""), None);
+        assert_eq!(
+            ClaimDeviceCode::parse("CLAIM_DEVICE_CODE=required\n"),
+            Some(ClaimDeviceCode::Required)
+        );
+        assert_eq!(
+            ClaimDeviceCode::parse("CLAIM_DEVICE_CODE=\"off\"\n"),
+            Some(ClaimDeviceCode::Off)
+        );
+        // A word this build does not know keeps the gate.
+        assert_eq!(
+            ClaimDeviceCode::parse("CLAIM_DEVICE_CODE=maybe\n"),
+            Some(ClaimDeviceCode::Required)
+        );
     }
 }

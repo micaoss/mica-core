@@ -380,6 +380,18 @@ pub fn label_key(root: &Path) -> Result<String, String> {
     Ok(key_of(&product_secret(root)?, &code.code))
 }
 
+/// Whether the console's claim asks a device under `root` that has a code
+/// for it: `required`, unless the product's `CLAIM_DEVICE_CODE=off` turns it
+/// off. A product file that cannot be read keeps the gate.
+pub fn claim_gate(root: &Path) -> &'static str {
+    let product = root.join(micad_settings::PRODUCT_FILE.trim_start_matches('/'));
+    let conf = std::fs::read_to_string(product).unwrap_or_default();
+    match micad_settings::ClaimDeviceCode::parse(&conf) {
+        Some(micad_settings::ClaimDeviceCode::Off) => "off",
+        _ => "required",
+    }
+}
+
 /// Where micad puts the device code for the login prompt. Base links
 /// `/etc/issue.d/50-mica-device-code.issue` here; agetty shows the files of
 /// `/etc/issue.d` after `/etc/issue`.

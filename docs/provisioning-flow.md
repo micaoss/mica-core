@@ -82,7 +82,8 @@ boots with what was last written.
 
 `POST /api/v1/setup` (`docs/mica-core.md` section 4), from any network or the access point:
 
-1. The device code and the login backoff gate it; `409` once a password exists.
+1. The device code and the login backoff gate it, unless the product turns the code off
+   (`CLAIM_DEVICE_CODE=off`, `docs/mica-core.md` section 3.2); `409` once a password exists.
 2. `hostname` when the body has one: one write, applied by `hostname` and `dns`.
 3. `network` entries when the body has them: merged into the current map, one write, applied by
    `network` and `dns`. The console's setup page sends none.
@@ -117,7 +118,7 @@ without Wi-Fi and Bluetooth has no other.
    list) or at `<hostname>.local`. Cabled straight to a laptop, both ends take link-local
    addresses and the console is at the device's `169.254` address from the prompt.
 4. The claim is section 4: the console's setup page, with the device code from the label or the
-   prompt.
+   prompt, or without one on a product that turns the code off.
 
 ## The paths, end to end
 

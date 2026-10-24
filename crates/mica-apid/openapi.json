@@ -2996,11 +2996,11 @@
           "resources"
         ],
         "summary": "Read the device code.",
-        "description": "The code printed on the device's label, `{code, source}` with the code in\nits printed form (`7KQ2-MX9D-HC4`), or `{code: null, reason}` on a device\nwhose board declares no usable source. Support reads it to identify a\ndevice; nothing here or anywhere on the device serves the access-point key\nderived from it.",
+        "description": "The code printed on the device's label, `{code, source, gate}` with the\ncode in its printed form (`7KQ2-MX9D-HC4`), or `{code: null, reason,\ngate}` on a device whose board declares no usable source. `gate` is\nwhether the claim asks for the code: `required`, or `off` on a device\nwithout one or whose product turns it off. Support reads it to identify a\ndevice; nothing here or anywhere on the device serves the access-point key\nderived from it.",
         "operationId": "api_v1_device_code",
         "responses": {
           "200": {
-            "description": "`{code, source}`, or `{code: null, reason}`",
+            "description": "`{code, source, gate}`, or `{code: null, reason, gate}`; `gate` is `required` or `off`",
             "content": {
               "application/json": {
                 "schema": {
@@ -6023,7 +6023,7 @@
           "actions"
         ],
         "summary": "First-run setup: set the admin password and, optionally, a hostname and\nnetwork entries.",
-        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nOn a device with a device code the body carries it as `deviceCode`, and a\nwrong one counts in the login backoff.\n\nThe claim sets no access-point key: the key on the label keeps applying\nuntil one is set (`docs/factory-ap-key.md`). An `apPsk` member a client\nstill sends is ignored.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, then `access`.\n\nAnswers **201** with the browser session's CSRF token. It mints no API\ntoken: see [`SetupResult`].",
+        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nOn a device with a device code the body carries it as `deviceCode`, and a\nwrong one counts in the login backoff; a product with\n`CLAIM_DEVICE_CODE=off` asks for none and ignores one sent\n(`GET /api/v1/session` says which).\n\nThe claim sets no access-point key: the key on the label keeps applying\nuntil one is set (`docs/factory-ap-key.md`). An `apPsk` member a client\nstill sends is ignored.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, then `access`.\n\nAnswers **201** with the browser session's CSRF token. It mints no API\ntoken: see [`SetupResult`].",
         "operationId": "api_v1_setup",
         "requestBody": {
           "content": {
@@ -6087,7 +6087,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, `deviceCode` is missing on a device with a code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them",
+            "description": "The body is not this shape, `deviceCode` is missing on a device whose claim asks for its code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them",
             "content": {
               "application/json": {
                 "schema": {
@@ -13027,6 +13027,13 @@
               "null"
             ],
             "description": "Returned only for an authenticated browser session."
+          },
+          "deviceCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "In setup only: `required` when the claim must carry the device code,\n`off` when it carries none."
           },
           "localAddress": {
             "type": [

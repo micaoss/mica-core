@@ -859,6 +859,20 @@ test('captures the N15 routes tab in Chinese', async ({ page }, testInfo) => {
   await page.screenshot({ path: testInfo.outputPath('n15-eth1.png'), fullPage: true })
 })
 
+test('captures the N16 setup page of a product without the device-code gate', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'one browser is enough for review captures')
+  await page.addInitScript(() => localStorage.setItem('mica.ui.locale', 'zh-CN'))
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  await page.route('**/api/v1/session', (route) => route.fulfill(json({ state: 'setup', deviceCode: 'off' })))
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width > 1000 ? 1000 : 844 })
+    await page.goto('./')
+    await expect(page.getByRole('heading', { name: '设置你的设备' })).toBeVisible()
+    await expect(page.getByLabel('设备码')).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath(`n16-setup-off-${width}.png`) })
+  }
+})
+
 async function mockNetworkBench(page: Page) {
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request()

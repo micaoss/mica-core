@@ -141,7 +141,7 @@ impl FakeSettings {
                 "uptime": { "available": true, "seconds": 7 },
             })),
             device_code: std::sync::Mutex::new(
-                serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid" }),
+                serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid", "gate": "required" }),
             ),
             factory_reset: std::sync::Mutex::new(
                 serde_json::json!({ "supported": true, "refusal": null, "last": null }),

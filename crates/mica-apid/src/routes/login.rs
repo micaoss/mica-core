@@ -19,6 +19,10 @@ use super::*;
 pub(crate) struct SessionStatus {
     /// `setup`, `unauthenticated`, or `authenticated`.
     pub(super) state: &'static str,
+    /// In setup only: `required` when the claim must carry the device code,
+    /// `off` when it carries none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) device_code: Option<&'static str>,
     /// Returned only for an authenticated browser session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) csrf_token: Option<String>,
@@ -29,9 +33,10 @@ pub(crate) struct SessionStatus {
 }
 
 impl SessionStatus {
-    pub(super) fn setup() -> Self {
+    pub(super) fn setup(device_code: &'static str) -> Self {
         Self {
             state: "setup",
+            device_code: Some(device_code),
             csrf_token: None,
             local_address: None,
         }
@@ -40,6 +45,7 @@ impl SessionStatus {
     pub(super) fn unauthenticated() -> Self {
         Self {
             state: "unauthenticated",
+            device_code: None,
             csrf_token: None,
             local_address: None,
         }
@@ -48,6 +54,7 @@ impl SessionStatus {
     pub(super) fn authenticated(csrf_token: String) -> Self {
         Self {
             state: "authenticated",
+            device_code: None,
             csrf_token: Some(csrf_token),
             local_address: None,
         }
@@ -81,7 +88,13 @@ pub(crate) async fn api_v1_session_status(
         Err(err) => return bus_api_error(&err, Some("access")),
     };
     if password_hash(&access).is_none() {
-        return api_response(StatusCode::OK, SessionStatus::setup());
+        // What the setup page asks for. Unread, the field stays: the claim
+        // itself reads the gate again.
+        let gate = match state.api.get_device_code().await {
+            Ok(answer) if super::setup::required_code(&answer).is_none() => "off",
+            _ => "required",
+        };
+        return api_response(StatusCode::OK, SessionStatus::setup(gate));
     }
     let status = session::cookie_from_headers(&headers)
         .and_then(|cookie| state.sessions.csrf_token(&cookie))

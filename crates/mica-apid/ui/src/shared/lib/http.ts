@@ -5,6 +5,8 @@ export interface SessionStatus {
   csrfToken?: string
   /// The device address this browser's connection arrived on.
   localAddress?: string
+  /// In setup: whether the claim carries the device code.
+  deviceCode?: 'required' | 'off'
 }
 
 /// A refused Compose file's problem, by service and field.

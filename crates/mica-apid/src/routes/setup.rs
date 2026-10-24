@@ -74,7 +74,9 @@ pub(crate) struct SetupResult {
 /// Answers **409** once a password exists, which closes it permanently.
 ///
 /// On a device with a device code the body carries it as `deviceCode`, and a
-/// wrong one counts in the login backoff.
+/// wrong one counts in the login backoff; a product with
+/// `CLAIM_DEVICE_CODE=off` asks for none and ignores one sent
+/// (`GET /api/v1/session` says which).
 ///
 /// The claim sets no access-point key: the key on the label keeps applying
 /// until one is set (`docs/factory-ap-key.md`). An `apPsk` member a client
@@ -98,7 +100,7 @@ pub(crate) struct SetupResult {
         (status = 403, description = "`deviceCode` is not this device's code (`device_code_incorrect`)", body = ApiError),
         (status = 409, description = "The device already has an admin password, so it is not in setup mode (`already_configured`). Change the password with `POST /api/v1/actions/change-password`", body = ApiError),
         (status = 429, description = "Too many wrong device codes or logins; retry shortly (`login_throttled`)", body = ApiError),
-        (status = 422, description = "The body is not this shape, `deviceCode` is missing on a device with a code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them", body = ApiError),
+        (status = 422, description = "The body is not this shape, `deviceCode` is missing on a device whose claim asks for its code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them", body = ApiError),
         (status = 500, description = "Hashing the password failed (`hash_failed`), the stored `access` subtree could not be read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -337,7 +339,7 @@ async fn check_device_code(
     source: &str,
 ) -> Result<(), Box<Response>> {
     let known = match state.api.get_device_code().await {
-        Ok(value) => value["code"].as_str().map(canonical_code),
+        Ok(value) => required_code(&value),
         Err(err) => return Err(Box::new(bus_api_error(&err, None))),
     };
     let Some(known) = known else {
@@ -380,6 +382,16 @@ async fn check_device_code(
     }
     state.guard.record_success();
     Ok(())
+}
+
+/// The code the claim must carry, canonical, from micad's `GetDeviceCode`
+/// answer: none on a device without a code, or whose product turns the gate
+/// off (`gate: "off"`). A micad that names no gate keeps it.
+pub(super) fn required_code(answer: &Value) -> Option<String> {
+    if answer["gate"] == "off" {
+        return None;
+    }
+    answer["code"].as_str().map(canonical_code)
 }
 
 /// A device code as typed, compared without dashes and spaces and in upper

@@ -159,7 +159,7 @@ async fn the_telemetry_and_network_status_routes_are_read_only_observations() {
 }
 
 // The device code is a support read: authenticated, GET only, and never
-// anything but the code and its source.
+// anything but the code, its source and the claim's gate.
 #[tokio::test]
 async fn the_device_code_is_an_authenticated_read() {
     let (tree, token) = with_token(secret_tree("hunter2secret"));
@@ -168,7 +168,7 @@ async fn the_device_code_is_an_authenticated_read() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         body_json(response).await,
-        serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid" })
+        serde_json::json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid", "gate": "required" })
     );
     assert_eq!(
         unauthenticated(&router, "GET", "/api/v1/device/code").await,

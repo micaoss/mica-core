@@ -200,6 +200,13 @@ pub(super) async fn the_claim_sets_no_access_point_key() {
 #[tokio::test]
 pub(super) async fn the_claim_asks_for_the_device_code_when_the_device_has_one() {
     let (router, fake) = test_app(unconfigured_tree());
+    let session = get(&router, "/api/v1/session", None).await;
+    let session: serde_json::Value =
+        serde_json::from_str(&body_string(session).await).expect("session JSON");
+    assert_eq!(
+        session,
+        json!({ "state": "setup", "deviceCode": "required" })
+    );
     let missing = post_json(
         &router,
         SETUP_PATH,
@@ -252,4 +259,36 @@ pub(super) async fn the_claim_asks_for_the_device_code_when_the_device_has_one()
     )
     .await;
     assert_eq!(response.status(), StatusCode::CREATED);
+}
+
+// A product that turns the gate off is claimed without the code: the setup
+// session says so, and a code sent anyway is not read. A micad that names
+// no gate keeps it for a device with a code.
+#[tokio::test]
+pub(super) async fn a_product_with_the_gate_off_is_claimed_without_the_code() {
+    let (router, fake) = test_app(unconfigured_tree());
+    fake.set_device_code(json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid", "gate": "off" }));
+    let session = get(&router, "/api/v1/session", None).await;
+    let session: serde_json::Value =
+        serde_json::from_str(&body_string(session).await).expect("session JSON");
+    assert_eq!(session, json!({ "state": "setup", "deviceCode": "off" }));
+    let response = post_json(
+        &router,
+        SETUP_PATH,
+        &json!({ "deviceCode": "DFN4-L34C-T8P", "password": "first-boot-pw" }).to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let (router, fake) = test_app(unconfigured_tree());
+    fake.set_device_code(json!({ "code": "DFN4-L34C-T8N", "source": "emmc-cid" }));
+    let missing = post_json(
+        &router,
+        SETUP_PATH,
+        &json!({ "password": "first-boot-pw" }).to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }

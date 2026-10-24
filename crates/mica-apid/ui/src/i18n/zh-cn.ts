@@ -61,6 +61,7 @@ export const zhCN: Translation = {
     setup: {
       title: '设置你的设备',
       copy: '输入设备码，设置管理员密码，并可选设置主机名。完成后可在控制台查看网络接口。',
+      copyNoCode: '设置管理员密码，并可选设置主机名。完成后可在控制台查看网络接口。',
       deviceCode: '设备码',
       deviceCodeHint: '标签上或设备控制台（串口/显示器登录提示）可见。输错只会让下次尝试稍作等待。',
       hostname: '主机名',

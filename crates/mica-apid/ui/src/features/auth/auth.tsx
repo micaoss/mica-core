@@ -76,7 +76,9 @@ interface SetupResult {
   csrfToken: string
 }
 
-export function SetupView() {
+/// `deviceCode` is the session's: `off` on a product whose claim carries no
+/// device code, so the form asks for none.
+export function SetupView({ deviceCode: gate = 'required' }: { deviceCode?: SessionStatus['deviceCode'] }) {
   const { t } = useTranslation()
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -103,11 +105,13 @@ export function SetupView() {
     setup.mutate()
   }
   return (
-    <AuthFrame title={t('auth.setup.title')} copy={t('auth.setup.copy')}>
+    <AuthFrame title={t('auth.setup.title')} copy={t(gate === 'off' ? 'auth.setup.copyNoCode' : 'auth.setup.copy')}>
       <form className="grid gap-5" onSubmit={submit}>
-        <FormField label={t('auth.setup.deviceCode')} hint={t('auth.setup.deviceCodeHint')}>
-          {(id) => <Input id={id} autoFocus autoComplete="off" autoCapitalize="characters" spellCheck={false} value={deviceCode} onChange={(event) => setDeviceCode(event.target.value)} />}
-        </FormField>
+        {gate === 'off' ? null : (
+          <FormField label={t('auth.setup.deviceCode')} hint={t('auth.setup.deviceCodeHint')}>
+            {(id) => <Input id={id} autoFocus autoComplete="off" autoCapitalize="characters" spellCheck={false} value={deviceCode} onChange={(event) => setDeviceCode(event.target.value)} />}
+          </FormField>
+        )}
         <FormField label={t('auth.setup.hostname')} hint={t('auth.setup.hostnameHint')}>
           {(id) => <Input id={id} autoComplete="off" value={hostname} onChange={(event) => setHostname(event.target.value)} placeholder={t('auth.setup.hostnamePlaceholder')} />}
         </FormField>

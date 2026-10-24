@@ -80,4 +80,20 @@ describe('first-run setup', () => {
     const body = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as Record<string, unknown>
     expect(body).toEqual({ deviceCode: 'DFN4-L34C-T8N', password: 'correct-horse', hostname: 'deck-7' })
   })
+
+  /// A product that turns the device-code gate off claims without it: the
+  /// form has no code field and sends none.
+  it('asks for no device code when the product turns the gate off', async () => {
+    const fetch = stubFetch({ 'POST /api/v1/setup': { csrfToken: 'csrf-token' } })
+    renderPanel(withTheme(<SetupView deviceCode="off" />))
+
+    expect(screen.queryByLabelText('Device code')).toBeNull()
+    expect(screen.getByText(/^Set the administrator password/)).toBeTruthy()
+    await userEvent.type(screen.getByLabelText('Admin password'), 'correct-horse')
+    await userEvent.type(screen.getByLabelText('Confirm password'), 'correct-horse')
+    await userEvent.click(screen.getByRole('button', { name: 'Configure device' }))
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled())
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ password: 'correct-horse' })
+  })
 })

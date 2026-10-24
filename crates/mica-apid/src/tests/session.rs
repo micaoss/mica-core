@@ -13,7 +13,7 @@ pub(super) async fn session_api_reports_setup_and_authenticates_the_browser() {
     assert_eq!(setup.status(), StatusCode::OK);
     let setup: serde_json::Value =
         serde_json::from_str(&body_string(setup).await).expect("session JSON");
-    assert_eq!(setup, json!({ "state": "setup" }));
+    assert_eq!(setup, json!({ "state": "setup", "deviceCode": "required" }));
 
     let (router, _) = test_app(configured_tree("hunter2secret"));
     let anonymous = get(&router, "/api/v1/session", None).await;
