@@ -1210,3 +1210,30 @@ async fn the_logs_are_the_units_and_the_first_run() {
     assert_eq!(logs["firstRun"], json!(["ready"]));
     assert_eq!(logs["units"][0]["unit"], json!("demo.service"));
 }
+
+/// An app's mDNS entries are published while the unit each names runs, or
+/// any of its units for one naming none.
+#[tokio::test]
+async fn mdns_entries_follow_their_units() {
+    let rig = Rig::new(Init::Systemd);
+    let mdns = json!({ "mdns": [
+        { "type": "_http._tcp", "port": 8080, "service": "demo.service" },
+        { "type": "_ipp._tcp", "port": 631 },
+    ]});
+    rig.install(&rig.bundle("demo", "1.0", mdns, None), false)
+        .await
+        .unwrap();
+    rig.install(&rig.bundle("plain", "1.0", json!({}), None), false)
+        .await
+        .unwrap();
+
+    let found = rig.apps.mdns_entries().await;
+    assert_eq!(found.len(), 1, "an app with no entries is not listed");
+    assert_eq!(found[0].0, "demo");
+    let kinds: Vec<&str> = found[0].1.iter().map(|e| e.kind.as_str()).collect();
+    assert_eq!(kinds, ["_http._tcp", "_ipp._tcp"]);
+
+    rig.control.set("demo.service", "failed");
+    let found = rig.apps.mdns_entries().await;
+    assert_eq!(found, [("demo".to_string(), Vec::new())]);
+}

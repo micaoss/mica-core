@@ -35,6 +35,7 @@ mod builder;
 mod errors;
 mod interface;
 mod issue;
+mod mdns;
 mod operations;
 mod power;
 mod provisioning;
@@ -43,6 +44,7 @@ mod served;
 pub use apps::app_upkeep;
 pub use errors::*;
 pub use issue::issue_upkeep;
+pub use mdns::mdns_upkeep;
 pub use served::*;
 
 /// Well-known bus name owned by the daemon.
@@ -235,6 +237,9 @@ pub struct MicadService {
     update: Arc<UpdateLifecycle>,
     /// The `/mica/config/` documents this boot found and refused (**the pour**).
     refusals: Arc<RwLock<Vec<DocumentRefusal>>>,
+    /// Told when an app task ends, so the mDNS responder follows the app at
+    /// once ([`mdns_upkeep`]).
+    mdns_kick: Arc<tokio::sync::Notify>,
 }
 
 /// The lifecycle's window onto this service: it records under
@@ -371,6 +376,7 @@ impl MicadService {
             storage_pressure: Arc::new(PressureTracker::default()),
             update,
             refusals: Arc::new(RwLock::new(Vec::new())),
+            mdns_kick: Arc::new(tokio::sync::Notify::new()),
         }
     }
 

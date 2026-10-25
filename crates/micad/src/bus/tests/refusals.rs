@@ -206,7 +206,9 @@ pub(super) async fn an_unrelated_write_preserves_a_refused_document_and_a_reachi
 pub(super) fn every_reconciler_is_backed_by_exactly_one_config_document() {
     for reconciler in [micad_settings::Init::Systemd, micad_settings::Init::Openrc]
         .into_iter()
-        .flat_map(|init| crate::reconciler::all(init, micad_settings::ContainerEngine::Podman))
+        .flat_map(|init| {
+            crate::reconciler::all(init, micad_settings::ContainerEngine::Podman, None)
+        })
     {
         let backing: Vec<&str> = micad_settings::DOCUMENT_SUBTREES
             .iter()

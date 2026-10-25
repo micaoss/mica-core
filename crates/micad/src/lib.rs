@@ -32,6 +32,7 @@ pub mod factory_reset_cli;
 mod fswrite;
 mod identity;
 mod logs;
+pub mod mdns_cli;
 mod netlink;
 mod network_state;
 mod openrc;
@@ -266,10 +267,20 @@ async fn serve() -> anyhow::Result<()> {
         container_engine = container_engine.as_str(),
         "product container engine"
     );
+    // The user's services and apps, made before the reconcilers: the mDNS
+    // responder publishes the running apps' entries.
+    let units_and_apps = (!dry_run).then(|| {
+        let units = Arc::new(user_units::UserUnits::production(init));
+        let apps = Arc::new(apps::Apps::production(Arc::clone(&units)));
+        (units, apps)
+    });
     let reconcilers = if dry_run {
         Vec::new()
     } else {
-        reconciler::for_features(&features, init, container_engine)
+        let apps = units_and_apps
+            .as_ref()
+            .map(|(_, apps)| Arc::clone(apps) as Arc<dyn reconciler::mdns::AppEntries>);
+        reconciler::for_features(&features, init, container_engine, apps)
     };
     // Under dry-run the production control is never constructed, so a daemon
     // started by a test cannot reach systemd's manager at all.
@@ -362,14 +373,14 @@ async fn serve() -> anyhow::Result<()> {
             service = service.with_dns_probe(Arc::clone(probe));
         }
         service = service.with_logs(Arc::new(logs::HostLogs::production(init)));
-        let units = Arc::new(user_units::UserUnits::production(init));
-        let apps = Arc::new(apps::Apps::production(Arc::clone(&units)));
-        // apid takes uploads there, and binds it at start: made before the
-        // web reconciler starts apid.
-        if let Err(err) = std::fs::create_dir_all(apps::INCOMING) {
-            tracing::warn!(dir = apps::INCOMING, %err, "the app uploads directory could not be made");
+        if let Some((units, apps)) = units_and_apps {
+            // apid takes uploads there, and binds it at start: made before the
+            // web reconciler starts apid.
+            if let Err(err) = std::fs::create_dir_all(apps::INCOMING) {
+                tracing::warn!(dir = apps::INCOMING, %err, "the app uploads directory could not be made");
+            }
+            service = service.with_user_units(units).with_apps(apps);
         }
-        service = service.with_user_units(units).with_apps(apps);
         service = service.with_storage_status(Arc::new(storage_status::HostStorage::production()));
         // The diagnostic observers, on the same rule: each reads the host
         // (sysfs, /etc, the journal), so a dry-run daemon is never given one.
@@ -556,8 +567,8 @@ async fn serve() -> anyhow::Result<()> {
         .with_context(|| format!("request name {}", bus::BUS_NAME))?;
     tracing::info!(bus = bus_kind, name = bus::BUS_NAME, "serving");
     tokio::spawn(deferred.run());
-    // The image's app seeds, then the daily update check. Never under
-    // dry-run, whose daemon keeps no apps.
+    // The image's app seeds, then the daily update check, and the mDNS
+    // upkeep. Never under dry-run, whose daemon keeps no apps.
     if !dry_run {
         let service_ref = connection
             .object_server()
@@ -565,6 +576,7 @@ async fn serve() -> anyhow::Result<()> {
             .await
             .context("look up served MicadService")?;
         tokio::spawn(bus::app_upkeep(service_ref.clone()));
+        tokio::spawn(bus::mdns_upkeep(service_ref.clone()));
         tokio::spawn(bus::issue_upkeep(service_ref, printed_code));
     }
     if let Some(probe) = dns_probe {

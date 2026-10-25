@@ -5,13 +5,17 @@
 //! addresses of the interface a query arrives on, on every interface but the
 //! loopback, the container engines' links, WireGuard and CAN, and publishes
 //! DNS-SD services: `_mica._tcp` always, the console while apid serves the
-//! network, SSH while it is on. A query from off the link is not answered.
+//! network, SSH while it is on, then what the drop-in files and the running
+//! apps ask for ([`entries`]). A query from off the link is not answered.
 //! Switched off (`access.mdns.enabled`, else the product's `MDNS=` line),
 //! there is no socket at all.
 
+pub mod entries;
+
 use std::collections::BTreeMap;
 use std::net::IpAddr;
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow};
 use micad_settings::Settings;
@@ -44,7 +48,8 @@ pub(crate) struct Service {
     /// The addresses whose interfaces it is published on; every interface
     /// when empty.
     pub addresses: Vec<IpAddr>,
-    /// Who asked for it: `built-in` here.
+    /// Who asked for it: `built-in`, `image:<name>`, `runtime:<name>` or
+    /// `app:<name>`.
     pub source: String,
 }
 
@@ -54,7 +59,19 @@ impl Service {
         format!("{}.{}.local.", self.instance, self.kind)
     }
 
-    fn json(&self) -> serde_json::Value {
+    /// `entry` of `source`, under `hostname` unless it names its instance.
+    fn asked(hostname: &str, source: &str, entry: entries::Entry) -> Self {
+        Self {
+            instance: entry.instance.unwrap_or_else(|| hostname.to_string()),
+            kind: entry.kind,
+            port: entry.port,
+            txt: entry.txt,
+            addresses: Vec::new(),
+            source: source.to_string(),
+        }
+    }
+
+    fn json(&self, published: bool) -> serde_json::Value {
         json!({
             "instance": self.instance,
             "type": self.kind,
@@ -62,8 +79,16 @@ impl Service {
             "txt": self.txt,
             "addresses": self.addresses.iter().map(ToString::to_string).collect::<Vec<_>>(),
             "source": self.source,
+            "published": published,
         })
     }
+}
+
+/// The entries of the installed apps whose units run.
+#[async_trait::async_trait]
+pub trait AppEntries: Send + Sync {
+    /// By app name, each app's entries that are published now.
+    async fn running(&self) -> Vec<(String, Vec<entries::Entry>)>;
 }
 
 /// A running responder: publishes and withdraws services for one hostname.
@@ -174,25 +199,112 @@ impl Running {
     }
 }
 
+/// Where the entries beside the built-in ones come from.
+pub(crate) struct Sources {
+    pub image_dir: PathBuf,
+    pub runtime_dir: PathBuf,
+    /// Who must own a runtime drop-in: root on a device.
+    pub owner: u32,
+    pub apps: Option<Arc<dyn AppEntries>>,
+}
+
 /// Reconciler for the `access.mdns` settings subtree.
 pub struct MdnsReconciler {
     product: Product,
+    sources: Sources,
     start: Box<dyn StartResponder>,
     running: Mutex<Option<Running>>,
+    /// The refusals last logged, so each is logged once.
+    refused: Mutex<BTreeMap<String, String>>,
 }
 
 impl MdnsReconciler {
-    pub(crate) fn new(product: Product, start: Box<dyn StartResponder>) -> Self {
+    pub(crate) fn new(product: Product, sources: Sources, start: Box<dyn StartResponder>) -> Self {
         Self {
             product,
+            sources,
             start,
             running: Mutex::new(None),
+            refused: Mutex::new(BTreeMap::new()),
         }
     }
 
-    /// The responder on this device's interfaces, for this root's product.
-    pub fn production() -> Self {
-        Self::new(Product::production(), Box::new(MdnsSd))
+    /// The responder on this device's interfaces, for this root's product,
+    /// with the drop-ins and the entries of `apps`.
+    pub fn production(apps: Option<Arc<dyn AppEntries>>) -> Self {
+        Self::new(
+            Product::production(),
+            Sources {
+                image_dir: PathBuf::from(entries::IMAGE_DIR),
+                runtime_dir: PathBuf::from(entries::RUNTIME_DIR),
+                owner: 0,
+                apps,
+            },
+            Box::new(MdnsSd),
+        )
+    }
+
+    /// Every service `settings` and the sources ask for, in order: the
+    /// built-in ones, the drop-ins, the apps'. One whose name is taken
+    /// already, or past [`entries::MAX_PUBLISHED`], is refused, as is a
+    /// broken file; the refusals are returned by source.
+    async fn wanted(&self, settings: &Settings) -> (Vec<Service>, BTreeMap<String, String>) {
+        let hostname = &settings.hostname;
+        let mut wanted = built_in_services(settings, &self.product);
+        let mut refused = BTreeMap::new();
+        let (image, runtime, owner) = (
+            self.sources.image_dir.clone(),
+            self.sources.runtime_dir.clone(),
+            self.sources.owner,
+        );
+        let drop_ins =
+            tokio::task::spawn_blocking(move || entries::drop_ins(&image, &runtime, owner))
+                .await
+                .unwrap_or_default();
+        let mut asked = Vec::new();
+        for (source, read) in drop_ins {
+            match read {
+                Ok(found) => asked.push((source, found)),
+                Err(err) => {
+                    refused.insert(source, err);
+                }
+            }
+        }
+        if let Some(apps) = &self.sources.apps {
+            for (app, found) in apps.running().await {
+                asked.push((format!("app:{app}"), found));
+            }
+        }
+        for (source, found) in asked {
+            for entry in found {
+                let service = Service::asked(hostname, &source, entry);
+                let fullname = service.fullname();
+                if wanted.iter().any(|have| have.fullname() == fullname) {
+                    refused.insert(source.clone(), format!("{fullname} is published already"));
+                } else if wanted.len() >= entries::MAX_PUBLISHED {
+                    refused.insert(
+                        source.clone(),
+                        format!("more than {} services", entries::MAX_PUBLISHED),
+                    );
+                } else {
+                    wanted.push(service);
+                }
+            }
+        }
+        (wanted, refused)
+    }
+
+    /// Log each refusal once, while it lasts.
+    fn log_refusals(&self, refused: &BTreeMap<String, String>) {
+        let Ok(mut logged) = self.refused.lock() else {
+            return;
+        };
+        for (source, err) in refused {
+            if logged.get(source) != Some(err) {
+                tracing::warn!(%source, "mdns: refused: {err}");
+            }
+        }
+        logged.clone_from(refused);
     }
 }
 
@@ -219,6 +331,12 @@ impl Reconciler for MdnsReconciler {
         } else {
             "product"
         };
+        let (wanted, refused) = self.wanted(settings).await;
+        self.log_refusals(&refused);
+        let refused: Vec<_> = refused
+            .iter()
+            .map(|(source, error)| json!({ "source": source, "error": error }))
+            .collect();
         let mut running = self
             .running
             .lock()
@@ -227,15 +345,16 @@ impl Reconciler for MdnsReconciler {
             if let Some(stopped) = running.take() {
                 stopped.stop();
             }
+            // Kept and listed, not published.
             return Ok(json!({
                 "enabled": false,
                 "source": source,
                 "hostname": format!("{}.local", settings.hostname),
-                "services": [],
+                "services": wanted.iter().map(|s| s.json(false)).collect::<Vec<_>>(),
+                "refused": refused,
             }));
         }
 
-        let wanted = built_in_services(settings, &self.product);
         if running.is_none() {
             *running = Some(Running {
                 responder: self.start.start().context("start the mDNS responder")?,
@@ -277,7 +396,8 @@ impl Reconciler for MdnsReconciler {
             "enabled": true,
             "source": source,
             "hostname": format!("{}.local", current.hostname),
-            "services": current.published.values().map(Service::json).collect::<Vec<_>>(),
+            "services": wanted.iter().map(|s| s.json(true)).collect::<Vec<_>>(),
+            "refused": refused,
         }))
     }
 }

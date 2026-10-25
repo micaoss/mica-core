@@ -35,6 +35,7 @@ impl MicadService {
             .await;
         publish_task_transition(&self.apply_queue, &self.inner, &record).await;
         let (queue, inner) = (Arc::clone(&self.apply_queue), Arc::clone(&self.inner));
+        let mdns_kick = Arc::clone(&self.mdns_kick);
         let id = record.id.clone();
         tokio::spawn(async move {
             let _busy = busy;
@@ -45,6 +46,7 @@ impl MicadService {
                 Ok(_) => ("succeeded", None),
                 Err(err) => ("failed", Some(err.to_string())),
             };
+            mdns_kick.notify_one();
             if let Some(finished) = queue.finish(&id, outcome, message, Vec::new()).await {
                 publish_task_transition(&queue, &inner, &finished).await;
             }

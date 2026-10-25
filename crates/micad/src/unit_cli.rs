@@ -58,6 +58,7 @@ pub(crate) trait Micad {
     fn get_settings(&self, path: &str) -> zbus::Result<String>;
     fn set_settings(&self, path: &str, value_json: &str) -> zbus::Result<String>;
     fn get_task(&self, id: &str) -> zbus::Result<String>;
+    fn get_state(&self, path: &str) -> zbus::Result<String>;
     fn get_units(&self) -> zbus::Result<String>;
     fn get_unit_log(&self, name: &str) -> zbus::Result<String>;
     fn start_unit(&self, name: &str) -> zbus::Result<()>;

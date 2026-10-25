@@ -359,6 +359,47 @@ impl Apps {
         owners
     }
 
+    /// By app name, the mDNS entries of each installed app that has any,
+    /// each while the unit it names runs, or any of the app's units when it
+    /// names none.
+    pub async fn mdns_entries(
+        &self,
+    ) -> Vec<(String, Vec<crate::reconciler::mdns::entries::Entry>)> {
+        let init = self.init();
+        let mut found = Vec::new();
+        for (name, entry) in self.read_record().apps {
+            let Ok(manifest) = self.manifest_of(&name, &entry.current.version) else {
+                continue;
+            };
+            if manifest.mdns.is_empty() {
+                continue;
+            }
+            let mut running = BTreeSet::new();
+            for (unit, _) in manifest::units_for(&manifest, init) {
+                let state = self
+                    .units
+                    .control()
+                    .active_state(&self.units.control_name(&unit))
+                    .await;
+                if state.is_ok_and(|state| crate::reconciler::systemd::is_active(&state)) {
+                    running.insert(unit);
+                }
+            }
+            let entries = manifest
+                .mdns
+                .iter()
+                .filter(|entry| match &entry.service {
+                    None => !running.is_empty(),
+                    Some(service) => manifest::unit_of(&manifest, service, init)
+                        .is_some_and(|unit| running.contains(&unit)),
+                })
+                .cloned()
+                .collect();
+            found.push((name, entries));
+        }
+        found
+    }
+
     /// Every installed app, or the one named, as the API shows it.
     ///
     /// # Errors
@@ -448,6 +489,13 @@ impl Apps {
                 "policy": manifest.as_ref().map(|m| m.seed_policy),
             })),
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::reconciler::mdns::AppEntries for Apps {
+    async fn running(&self) -> Vec<(String, Vec<crate::reconciler::mdns::entries::Entry>)> {
+        self.mdns_entries().await
     }
 }
 

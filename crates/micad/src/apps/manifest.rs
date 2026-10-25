@@ -5,6 +5,8 @@ use std::path::Path;
 
 use micad_settings::Init;
 
+use crate::reconciler::mdns::entries::{self, Entry as MdnsEntry};
+
 /// The schema this build reads; any other is refused.
 pub const SCHEMA_VERSION: u32 = 1;
 /// The most units one app ships.
@@ -112,6 +114,9 @@ pub struct Manifest {
     /// What an app running as its own user runs; micad writes their units.
     #[serde(default)]
     pub services: Vec<Service>,
+    /// What the mDNS responder publishes while the app runs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mdns: Vec<MdnsEntry>,
 }
 
 /// Who an app runs as, and what it is given beyond its own files.
@@ -220,6 +225,22 @@ pub fn units_for(manifest: &Manifest, init: Init) -> Vec<(String, bool)> {
                 .map(|service| (service_unit(&service.name, init), service.enable)),
         )
         .collect()
+}
+
+/// The unit on `init` of the service or unit `name` names in `manifest`:
+/// one of its services, or either side of one of its units.
+pub fn unit_of(manifest: &Manifest, name: &str, init: Init) -> Option<String> {
+    if manifest.services.iter().any(|service| service.name == name) {
+        return Some(service_unit(name, init));
+    }
+    manifest
+        .units
+        .iter()
+        .find(|unit| unit.systemd.as_deref() == Some(name) || unit.openrc.as_deref() == Some(name))
+        .and_then(|unit| match init {
+            Init::Systemd => unit.systemd.clone(),
+            Init::Openrc => unit.openrc.clone(),
+        })
 }
 
 /// The unit micad writes for service `name`.
@@ -423,6 +444,21 @@ pub fn check_fields(manifest: &Manifest, init: Init, arch: &str) -> Vec<Problem>
         fail("manifest", "update.url is an https URL".into());
     }
     check_privileges(manifest, &mut fail);
+    if let Err(err) = entries::check_all(&manifest.mdns) {
+        fail("mdns", err);
+    }
+    for entry in &manifest.mdns {
+        if let Some(name) = &entry.service
+            && [Init::Systemd, Init::Openrc]
+                .into_iter()
+                .all(|init| unit_of(manifest, name, init).is_none())
+        {
+            fail(
+                "mdns",
+                format!("mdns names {name:?}, which is none of the app's services or units"),
+            );
+        }
+    }
     problems
 }
 
@@ -797,6 +833,41 @@ mod tests {
         assert_eq!(expand("$A", &vars), None);
         assert_eq!(expand("${B}", &vars), None);
         assert_eq!(expand("${A", &vars), None);
+    }
+
+    #[test]
+    fn mdns_entries_are_held_to_the_responders_rules_and_name_a_unit() {
+        let mut with_mdns = manifest();
+        with_mdns.mdns = vec![
+            serde_json::from_value(serde_json::json!(
+                { "type": "_http._tcp", "port": 8080, "service": "tailscaled.service" }
+            ))
+            .unwrap(),
+            serde_json::from_value(serde_json::json!({ "type": "_ipp._tcp", "port": 631 }))
+                .unwrap(),
+        ];
+        assert_eq!(rules_of(&with_mdns), Vec::<&str>::new());
+        assert_eq!(
+            unit_of(&with_mdns, "tailscaled.service", Init::Openrc).as_deref(),
+            Some("tailscaled")
+        );
+
+        with_mdns.mdns[0].service = Some("other".into());
+        with_mdns.mdns[1].kind = "_mica._tcp".into();
+        assert_eq!(rules_of(&with_mdns), ["mdns", "mdns"]);
+
+        let mut own = own_user();
+        own.mdns = vec![
+            serde_json::from_value(serde_json::json!(
+                { "type": "_http._tcp", "port": 8080, "service": own.services[0].name }
+            ))
+            .unwrap(),
+        ];
+        assert_eq!(rules_of(&own), Vec::<&str>::new());
+        assert_eq!(
+            unit_of(&own, &own.services[0].name, Init::Systemd),
+            Some(format!("{}.service", own.services[0].name))
+        );
     }
 
     #[test]

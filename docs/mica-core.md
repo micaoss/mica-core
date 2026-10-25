@@ -652,6 +652,7 @@ directory or a symbolic link, or one there twice refuses it. The manifest:
 | `firstRun` | Optional, an executable file in `hooks/` |
 | `update` | Optional `{"url", "auto"}`: an `https` version file, and whether a newer version installs on its own |
 | `seedPolicy` | `follow-image` (default) or `once`, below |
+| `mdns` | Optional, at most 8 services the mDNS responder publishes while the app runs, as in a drop-in file (section 3.13), each with an optional `service`: one of the app's `services` or units, by either init's name, whose running it follows; without it, any of the app's units running publishes the entry |
 
 A unit is refused when the root ships its name, `services.units` declares it, another app has it,
 or a hand installed it with `mica-unit`. At most 16 apps are installed.
@@ -857,6 +858,36 @@ engines' links (`veth`, `podman`, `cni-`, `docker`, `dummy`), WireGuard (`wg`) o
   `listenAddresses` it is published only on the interfaces of those addresses; an entry with a
   port of its own is left out, and with only such entries SSH is not published.
 
+**Scripts and apps** add services of their own, after the built-in ones. A drop-in file
+`<name>.json`, `<name>` 1 to 32 of `[a-z0-9-]` starting with a letter or digit, lies in
+`/usr/share/mica/mdns.d/` (the image's) or `/run/mica/mdns.d/` (the running system's, gone at
+reboot); a runtime file replaces the image's of the same name, and must be root's regular file
+and writable by root alone, else it is refused:
+
+```json
+{"version": 1, "services": [
+  {"instance": "Grafana", "type": "_http._tcp", "port": 3000, "txt": {"path": "/dashboards"}}
+]}
+```
+
+`instance` is the hostname when absent, at most 63 bytes, no dot and no control character;
+`type` is `_<name>._tcp` or `_<name>._udp`, `<name>` an RFC 6335 service name of at most 15
+characters, never `_mica._tcp`; `port` is 1 to 65535; `txt` has at most 16 keys of printable
+ASCII without `=`, each `key=value` at most 255 bytes and the record at most 1300. A file has at
+most 8 services, 64 KiB, and no other key; one that breaks a rule is refused whole and named in
+the live state and the log, and the others stay. An app's manifest carries the same services in
+`mdns` (section 3.11), published while the app's unit runs: micad looks after each app task and
+every 10 s. A service whose name (`<instance>.<type>`) is published already, by the device or
+an earlier source, is refused, as is any past 64 published services in all. micad watches
+`/run/mica/mdns.d` with inotify and re-applies within a second of a change, at most once a
+second.
+
+`micad mdns status|list` show the switch, its source, the `.local` name and every service with its
+source (`built-in`, `image:<name>`, `runtime:<name>`, `app:<name>`), and what is refused; `micad
+mdns on|off` write `access.mdns.enabled` and wait for it; `micad mdns add <name> --type <type>
+--port <port> [--instance <label>] [--txt KEY=VALUE]...` writes the runtime file `<name>.json`
+whole, and `micad mdns remove <name>` removes it.
+
 A change sends goodbyes for what went and announces what came; a new hostname withdraws every
 record and publishes them under the new name. The responder answers only a query whose source
 is in a subnet of the interface it arrived on, or link-local (RFC 6762 section 11), so a query
@@ -867,9 +898,10 @@ source check and the cap until a release carries them (keepsimple1/mdns-sd#532).
 
 `access.mdns.enabled` switches it; absent, the product's `MDNS=` line decides (section 3.2), on
 when the product says nothing. Off, there is no socket at all: nothing is announced and nothing
-answered. resolved's mDNS stays off on systemd (section 3.4), so one responder holds the port.
-The live state (`mdns`) names whether it runs, why (`setting` or `product`), the `.local` name
-and the services published.
+answered; drop-ins and apps' entries are kept, and listed as not published. resolved's mDNS stays
+off on systemd (section 3.4), so one responder holds the port. The live state (`mdns`) names
+whether it runs, why (`setting` or `product`), the `.local` name, every service with its source
+and whether it is published, and the refused sources with the reason.
 
 ## 4. mica-apid
 

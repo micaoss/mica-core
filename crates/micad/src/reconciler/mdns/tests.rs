@@ -46,13 +46,62 @@ fn product(default_on: bool) -> Product {
     }
 }
 
-fn reconciler(default_on: bool) -> (MdnsReconciler, Calls) {
+/// Apps' entries as a test sets them.
+#[derive(Default)]
+struct FakeApps(Mutex<Vec<(String, Vec<entries::Entry>)>>);
+
+#[async_trait::async_trait]
+impl AppEntries for FakeApps {
+    async fn running(&self) -> Vec<(String, Vec<entries::Entry>)> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// A reconciler with empty drop-in directories, and the directories.
+struct Rig {
+    reconciler: MdnsReconciler,
+    calls: Calls,
+    apps: Arc<FakeApps>,
+    image: tempfile::TempDir,
+    runtime: tempfile::TempDir,
+}
+
+fn rig(default_on: bool) -> Rig {
     let calls = Calls::default();
+    let apps = Arc::new(FakeApps::default());
+    let (image, runtime) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let reconciler = MdnsReconciler::new(
         product(default_on),
+        Sources {
+            image_dir: image.path().to_path_buf(),
+            runtime_dir: runtime.path().to_path_buf(),
+            owner: rustix::process::geteuid().as_raw(),
+            apps: Some(Arc::clone(&apps) as Arc<dyn AppEntries>),
+        },
         Box::new(StartRecorder(Arc::clone(&calls))),
     );
-    (reconciler, calls)
+    Rig {
+        reconciler,
+        calls,
+        apps,
+        image,
+        runtime,
+    }
+}
+
+fn reconciler(default_on: bool) -> (MdnsReconciler, Calls) {
+    let rig = rig(default_on);
+    (rig.reconciler, rig.calls)
+}
+
+fn entry(kind: &str, port: u16) -> entries::Entry {
+    entries::Entry {
+        instance: None,
+        kind: kind.to_string(),
+        port,
+        txt: BTreeMap::new(),
+        service: None,
+    }
 }
 
 fn taken(calls: &Calls) -> Vec<String> {
@@ -267,7 +316,10 @@ async fn off_withdraws_everything_and_stops_the_responder() {
     );
     assert_eq!(state["enabled"], json!(false));
     assert_eq!(state["source"], json!("setting"));
-    assert_eq!(state["services"], json!([]));
+    // Still listed, as not published.
+    let services = state["services"].as_array().unwrap();
+    assert_eq!(services.len(), 2);
+    assert!(services.iter().all(|s| s["published"] == json!(false)));
 
     reconciler.apply(&off).await.unwrap();
     assert!(taken(&calls).is_empty());
@@ -322,4 +374,90 @@ fn the_silent_prefixes_cover_loopback_containers_wireguard_and_can() {
             "{name}"
         );
     }
+}
+
+/// The drop-ins of the image and of the running system and the running
+/// apps' entries are published after the built-in services, each with its
+/// source; a broken file is refused by name and the rest goes on.
+#[tokio::test]
+async fn drop_ins_and_apps_are_published_with_their_source() {
+    let rig = rig(true);
+    std::fs::write(
+        rig.image.path().join("grafana.json"),
+        r#"{"version":1,"services":[{"instance":"Grafana","type":"_http._tcp","port":3000}]}"#,
+    )
+    .unwrap();
+    std::fs::write(rig.runtime.path().join("broken.json"), "{").unwrap();
+    *rig.apps.0.lock().unwrap() = vec![("printer".to_string(), vec![entry("_ipp._tcp", 631)])];
+
+    let state = rig.reconciler.apply(&settings()).await.unwrap();
+
+    assert_eq!(
+        taken(&rig.calls),
+        [
+            "start",
+            "publish mica-ab12._mica._tcp.local. on mica-ab12.local",
+            "publish mica-ab12._http._tcp.local. on mica-ab12.local",
+            "publish Grafana._http._tcp.local. on mica-ab12.local",
+            "publish mica-ab12._ipp._tcp.local. on mica-ab12.local",
+        ]
+    );
+    let sources: Vec<&str> = state["services"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["source"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        sources,
+        ["built-in", "built-in", "image:grafana", "app:printer"]
+    );
+    assert_eq!(state["refused"][0]["source"], json!("runtime:broken"));
+
+    // The app stops and the file goes: both are withdrawn.
+    rig.apps.0.lock().unwrap().clear();
+    std::fs::remove_file(rig.image.path().join("grafana.json")).unwrap();
+    rig.reconciler.apply(&settings()).await.unwrap();
+    assert_eq!(
+        taken(&rig.calls),
+        [
+            "withdraw Grafana._http._tcp.local.",
+            "withdraw mica-ab12._ipp._tcp.local.",
+        ]
+    );
+}
+
+/// A name taken already, by the console or by an earlier file, is refused;
+/// so is what goes past the limit.
+#[tokio::test]
+async fn a_taken_name_or_one_past_the_limit_is_refused() {
+    let rig = rig(true);
+    let many = |app: usize| -> Vec<_> {
+        (0..entries::MAX_SERVICES)
+            .map(|i| entries::Entry {
+                instance: Some(format!("a{app}-s{i}")),
+                ..entry("_x._tcp", 1)
+            })
+            .collect()
+    };
+    // The console's own name first, then 8 apps of 8: 2 past the limit.
+    let apps: Vec<_> = [("console".to_string(), vec![entry("_http._tcp", 80)])]
+        .into_iter()
+        .chain((0..8).map(|app| (format!("a{app}"), many(app))))
+        .collect();
+    *rig.apps.0.lock().unwrap() = apps;
+
+    let state = rig.reconciler.apply(&settings()).await.unwrap();
+
+    assert_eq!(
+        state["services"].as_array().unwrap().len(),
+        entries::MAX_PUBLISHED
+    );
+    let refused: Vec<&str> = state["refused"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["source"].as_str().unwrap())
+        .collect();
+    assert_eq!(refused, ["app:a7", "app:console"]);
 }
