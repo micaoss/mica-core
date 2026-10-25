@@ -261,7 +261,6 @@ export interface MdnsService {
   type: string
   port: number
   txt: Record<string, string>
-  addresses: string[]
   /// `built-in`, `image:<name>`, `runtime:<name>` or `app:<name>`.
   source: string
   published: boolean

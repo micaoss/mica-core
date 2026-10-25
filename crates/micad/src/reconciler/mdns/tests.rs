@@ -137,7 +137,6 @@ fn a_default_device_publishes_itself_and_its_console() {
     );
     assert_eq!(services[1].port, 8080);
     assert_eq!(services[1].txt["path"], "/");
-    assert!(services.iter().all(|s| s.addresses.is_empty()));
     assert!(services.iter().all(|s| s.source == "built-in"));
 }
 
@@ -185,42 +184,6 @@ fn a_console_off_the_network_is_not_announced() {
     }
 }
 
-#[test]
-fn ssh_is_announced_while_it_is_on_where_it_listens() {
-    let mut settings = settings();
-    settings.access.ssh.enabled = true;
-    settings.access.ssh.port = 2222;
-
-    let services = built_in_services(&settings, &product(true));
-    let ssh = services.iter().find(|s| s.kind == "_ssh._tcp").unwrap();
-    assert_eq!(ssh.port, 2222);
-    assert!(ssh.addresses.is_empty());
-
-    settings.access.ssh.listen_addresses = vec![
-        "192.0.2.5".to_string(),
-        "2001:db8::5".to_string(),
-        "[2001:db8::8]:2022".to_string(),
-    ];
-    let services = built_in_services(&settings, &product(true));
-    let ssh = services.iter().find(|s| s.kind == "_ssh._tcp").unwrap();
-    assert_eq!(
-        ssh.addresses,
-        [
-            "192.0.2.5".parse::<IpAddr>().unwrap(),
-            "2001:db8::5".parse().unwrap()
-        ]
-    );
-
-    settings.access.ssh.listen_addresses = vec!["[2001:db8::8]:2022".to_string()];
-    let services = built_in_services(&settings, &product(true));
-    assert!(!kinds(&services).contains(&"_ssh._tcp"));
-
-    settings.access.ssh.enabled = false;
-    settings.access.ssh.listen_addresses.clear();
-    let services = built_in_services(&settings, &product(true));
-    assert!(!kinds(&services).contains(&"_ssh._tcp"));
-}
-
 #[tokio::test]
 async fn on_starts_the_responder_and_publishes_once() {
     let (reconciler, calls) = reconciler(true);
@@ -241,7 +204,7 @@ async fn on_starts_the_responder_and_publishes_once() {
     assert_eq!(state["services"].as_array().unwrap().len(), 2);
     assert_eq!(reconciler.name(), "mdns");
     assert_eq!(reconciler.subtree(), "access.mdns");
-    assert_eq!(reconciler.reads(), ["hostname", "access.web", "access.ssh"]);
+    assert_eq!(reconciler.reads(), ["hostname", "access.web"]);
 
     // The same settings again change nothing on the wire.
     reconciler.apply(&settings()).await.unwrap();
@@ -256,6 +219,7 @@ async fn a_change_withdraws_what_went_and_publishes_what_came() {
 
     let mut next = settings();
     next.access.web.https_enabled = true;
+    // SSH is never announced.
     next.access.ssh.enabled = true;
     reconciler.apply(&next).await.unwrap();
 
@@ -267,7 +231,6 @@ async fn a_change_withdraws_what_went_and_publishes_what_came() {
             "withdraw mica-ab12._mica._tcp.local.",
             "publish mica-ab12._mica._tcp.local. on mica-ab12.local",
             "publish mica-ab12._https._tcp.local. on mica-ab12.local",
-            "publish mica-ab12._ssh._tcp.local. on mica-ab12.local",
         ]
     );
 }

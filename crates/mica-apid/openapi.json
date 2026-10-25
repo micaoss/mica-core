@@ -12419,18 +12419,10 @@
           "type",
           "port",
           "txt",
-          "addresses",
           "source",
           "published"
         ],
         "properties": {
-          "addresses": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The addresses whose interfaces it is published on; every interface\nwhen empty."
-          },
           "instance": {
             "type": "string",
             "description": "The instance label, such as the hostname."

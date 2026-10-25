@@ -11,8 +11,8 @@ const mdns = (enabled: boolean) => ({
     source: 'product',
     hostname: 'mica-ab12.local',
     services: [
-      { instance: 'mica-ab12', type: '_mica._tcp', port: 8080, txt: { txtvers: '1' }, addresses: [], source: 'built-in', published: enabled },
-      { instance: 'Grafana', type: '_http._tcp', port: 3000, txt: {}, addresses: [], source: 'image:grafana', published: enabled },
+      { instance: 'mica-ab12', type: '_mica._tcp', port: 8080, txt: { txtvers: '1' }, source: 'built-in', published: enabled },
+      { instance: 'Grafana', type: '_http._tcp', port: 3000, txt: {}, source: 'image:grafana', published: enabled },
     ],
     refused: [{ source: 'runtime:broken', error: 'EOF while parsing' }],
   },

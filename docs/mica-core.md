@@ -226,7 +226,7 @@ live-state tree under its name.
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
 | `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; `apid.service` started for `mode` `network` or `local` (restarted when the file changed) and stopped for `off` | the same, `apid` |
-| `mdns` | micad's own mDNS responder (section 3.13), from `access.mdns`, the hostname, `access.web` and `access.ssh` | the same |
+| `mdns` | micad's own mDNS responder (section 3.13), from `access.mdns`, the hostname and `access.web` | the same |
 | `ssdp` | micad's own SSDP responder (section 3.14), from `access.ssdp`, the hostname and `access.web` | the same |
 | `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
 | `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. A BLE provisioning window keeps the adapter powered while Bluetooth is switched off | the same through `mica-bluetoothd` |
@@ -856,9 +856,8 @@ engines' links (`veth`, `podman`, `cni-`, `docker`, `dummy`), WireGuard (`wg`) o
   claim state, no device code, no key.
 - The console while `access.web.mode` is `network`: `_https._tcp` on `httpsPort` with HTTPS on,
   else `_http._tcp` on `httpPort`, instance `<hostname>`, TXT `path=/`.
-- `_ssh._tcp` on `access.ssh.port` while SSH is on, instance `<hostname>`. With
-  `listenAddresses` it is published only on the interfaces of those addresses; an entry with a
-  port of its own is left out, and with only such entries SSH is not published.
+
+SSH is never announced, over mDNS or SSDP.
 
 **Scripts and apps** add services of their own, after the built-in ones. A drop-in file
 `<name>.json`, `<name>` 1 to 32 of `[a-z0-9-]` starting with a letter or digit, lies in

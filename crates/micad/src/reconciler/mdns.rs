@@ -4,16 +4,15 @@
 //! A responder on mdns-sd, on either init, answers `<hostname>.local` with the
 //! addresses of the interface a query arrives on, on every interface but the
 //! loopback, the container engines' links, WireGuard and CAN, and publishes
-//! DNS-SD services: `_mica._tcp` always, the console while apid serves the
-//! network, SSH while it is on, then what the drop-in files and the running
-//! apps ask for ([`entries`]). A query from off the link is not answered.
+//! DNS-SD services: `_mica._tcp` always and the console while apid serves the
+//! network, then what the drop-in files and the running apps ask for
+//! ([`entries`]); SSH is never announced. A query from off the link is not answered.
 //! Switched off (`access.mdns.enabled`, else the product's `MDNS=` line),
 //! there is no socket at all.
 
 pub mod entries;
 
 use std::collections::BTreeMap;
-use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -45,9 +44,6 @@ pub(crate) struct Service {
     pub kind: String,
     pub port: u16,
     pub txt: BTreeMap<String, String>,
-    /// The addresses whose interfaces it is published on; every interface
-    /// when empty.
-    pub addresses: Vec<IpAddr>,
     /// Who asked for it: `built-in`, `image:<name>`, `runtime:<name>` or
     /// `app:<name>`.
     pub source: String,
@@ -66,7 +62,6 @@ impl Service {
             kind: entry.kind,
             port: entry.port,
             txt: entry.txt,
-            addresses: Vec::new(),
             source: source.to_string(),
         }
     }
@@ -77,7 +72,6 @@ impl Service {
             "type": self.kind,
             "port": self.port,
             "txt": self.txt,
-            "addresses": self.addresses.iter().map(ToString::to_string).collect::<Vec<_>>(),
             "source": self.source,
             "published": published,
         })
@@ -135,7 +129,6 @@ pub(crate) fn built_in_services(settings: &Settings, product: &Product) -> Vec<S
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect(),
-        addresses: Vec::new(),
         source: "built-in".to_string(),
     };
     let web = &settings.access.web;
@@ -158,25 +151,6 @@ pub(crate) fn built_in_services(settings: &Settings, product: &Product) -> Vec<S
     )];
     if let Some((kind, port)) = console {
         services.push(built_in(hostname, kind, port, &[("path", "/")]));
-    }
-    let ssh = &settings.access.ssh;
-    if ssh.enabled {
-        let mut service = built_in(hostname, "_ssh._tcp", ssh.port, &[]);
-        // Listening on chosen addresses, SSH is announced on their
-        // interfaces. An entry with a port of its own is not on `port`, so
-        // it is left out, and with only such entries SSH is not announced.
-        if ssh.listen_addresses.is_empty() {
-            services.push(service);
-        } else {
-            service.addresses = ssh
-                .listen_addresses
-                .iter()
-                .filter_map(|entry| entry.parse::<IpAddr>().ok())
-                .collect();
-            if !service.addresses.is_empty() {
-                services.push(service);
-            }
-        }
     }
     services
 }
@@ -319,9 +293,9 @@ impl Reconciler for MdnsReconciler {
     }
 
     fn reads(&self) -> &'static [&'static str] {
-        // The hostname names every record, the console's mode and ports and
-        // SSH's switch and port decide what is published.
-        &["hostname", "access.web", "access.ssh"]
+        // The hostname names every record; the console's mode and ports
+        // decide what is published.
+        &["hostname", "access.web"]
     }
 
     async fn apply(&self, settings: &Settings) -> Result<serde_json::Value> {
@@ -430,7 +404,7 @@ impl Responder for Daemon {
     fn publish(&mut self, hostname: &str, service: &Service) -> Result<()> {
         let txt: std::collections::HashMap<String, String> =
             service.txt.clone().into_iter().collect();
-        let mut info = mdns_sd::ServiceInfo::new(
+        let info = mdns_sd::ServiceInfo::new(
             &format!("{}.local.", service.kind),
             &service.instance,
             &format!("{hostname}.local."),
@@ -440,15 +414,6 @@ impl Responder for Daemon {
         )
         .map_err(|err| anyhow!("{err}"))?
         .enable_addr_auto();
-        if !service.addresses.is_empty() {
-            info.set_interfaces(
-                service
-                    .addresses
-                    .iter()
-                    .map(|address| mdns_sd::IfKind::Addr(*address))
-                    .collect(),
-            );
-        }
         self.0
             .register(info)
             .map_err(|err| anyhow!("publish {}: {err}", service.fullname()))

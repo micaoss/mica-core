@@ -16,12 +16,12 @@ fn mdns_state(enabled: bool) -> serde_json::Value {
         "services": [
             {
                 "instance": "mica", "type": "_mica._tcp", "port": 8080,
-                "txt": { "txtvers": "1", "hostname": "mica" }, "addresses": [],
+                "txt": { "txtvers": "1", "hostname": "mica" },
                 "source": "built-in", "published": enabled,
             },
             {
                 "instance": "Grafana", "type": "_http._tcp", "port": 3000,
-                "txt": {}, "addresses": [], "source": "image:grafana", "published": enabled,
+                "txt": {}, "source": "image:grafana", "published": enabled,
             },
         ],
         "refused": [{ "source": "runtime:broken", "error": "EOF while parsing" }],

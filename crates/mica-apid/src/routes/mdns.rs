@@ -21,9 +21,6 @@ pub(crate) struct MdnsService {
     pub(super) kind: String,
     pub(super) port: u16,
     pub(super) txt: BTreeMap<String, String>,
-    /// The addresses whose interfaces it is published on; every interface
-    /// when empty.
-    pub(super) addresses: Vec<String>,
     /// `built-in`, `image:<name>`, `runtime:<name>` or `app:<name>`.
     pub(super) source: String,
     /// Whether it is on the wire now: false while the responder is off.
