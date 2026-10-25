@@ -42,6 +42,7 @@ mod health;
 mod keys;
 mod local;
 mod logs;
+mod mdns;
 mod meta;
 mod mqtt;
 mod network_ifaces;

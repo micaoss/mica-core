@@ -71,6 +71,7 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
         .route(V1_SETTINGS_PATH, patch(api_v1_settings_patch))
         .route(V1_STATE_ROUTE, get(api_v1_state))
         .route(V1_WEB_PATH, get(api_v1_web_read).put(api_v1_web_write))
+        .route(V1_MDNS_PATH, get(api_v1_mdns_read))
         .route(
             V1_WEB_CERTIFICATE_PATH,
             get(api_v1_web_certificate_read).put(api_v1_web_certificate_upload),

@@ -168,6 +168,18 @@ export const en = {
       daysHours: '{{days}}d {{hours}}h',
       hoursMinutes: '{{hours}}h {{minutes}}m',
     },
+    discovery: {
+      title: 'LAN discovery',
+      mdns: 'mDNS',
+      mdnsCopy: 'Answers {{hostname}} and announces the services below on the local network · {{source}}',
+      source: { setting: 'set here', product: 'product default' },
+      enabled: 'mDNS turned on.',
+      disabled: 'mDNS turned off.',
+      service: 'port {{port}} · {{source}}',
+      published: 'Published',
+      notPublished: 'Not published',
+      refused: 'Refused {{source}}: {{error}}',
+    },
     recentTasks: 'Recent apply tasks',
     noTasks: 'No apply tasks have run this boot.',
     tasks: {

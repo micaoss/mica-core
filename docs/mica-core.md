@@ -964,7 +964,7 @@ the active custom console bundle or a redirect to `/_ui/`.
 
 **The API**, by group: session, setup and password; API tokens; settings, state and tasks;
 network, Wi-Fi, containers, the user's services (`/units`, section 3.10), apps (`/apps`, section
-3.11), Bluetooth, MQTT and SSH keys; observation (time, storage, system
+3.11), Bluetooth, MQTT, SSH keys and LAN discovery (`/mdns`); observation (time, storage, system
 information, telemetry, service logs at `/system/logs/{source}`, network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
 fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,
@@ -983,6 +983,13 @@ another tunnel's or, for a new or changed port, held by a userspace UDP socket o
 /api/v1/network/wireguard/defaults` answers the first free `wg<N>`, `10.<N>.0.1/24` (then
 `172.16.<N>.1/24`) and listen port from 51821, past declared and observed names and subnets,
 peers' allowed IPs, observed routes and held ports, and the held ports themselves.
+
+**LAN discovery** (section 3.13). `GET /api/v1/mdns` answers the `mdns` live state as
+`{available, state?, error?}`: the switch, its source, the `.local` name, every service with its
+source and whether it is published, and the refused files and entries; `available` is false, with
+the reason, while micad has reported none or its last apply failed. `access.mdns.enabled` is
+written through `PUT /api/v1/settings/access.mdns.enabled`. The overview's "LAN discovery" card
+("局域网发现") shows the switch, which reads the effective state, and the services, read-only.
 
 **Authentication.** Until an admin password exists, `POST /setup` sets it. On a device with a
 device code the body carries the code as `deviceCode` (dashes, spaces and case ignored): that is

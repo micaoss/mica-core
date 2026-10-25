@@ -303,6 +303,12 @@ pub(super) const V1_NETWORK_WIREGUARD_DEFAULTS_PATH: &str = "/v1/network/wiregua
 /// raised about the whole map names.
 pub(super) const NETWORK_SETTINGS_PATH: &str = "network";
 
+/// What the device announces on the LAN over mDNS, read-only.
+pub(super) const V1_MDNS_PATH: &str = "/v1/mdns";
+
+/// The live-state key the mDNS reconciler reports under.
+pub(super) const MDNS_STATE_PATH: &str = "mdns";
+
 /// The MQTT resource: the whole `mqtt` subtree, read with the reconciler's
 /// live state beside it and written in one call.
 ///

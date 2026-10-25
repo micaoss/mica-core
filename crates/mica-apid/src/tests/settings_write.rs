@@ -33,6 +33,7 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
     for (path, body) in [
         ("hostname", r#""router7""#),
         ("access.ssh.enabled", "true"),
+        ("access.mdns.enabled", "false"),
         ("container.enabled", "true"),
         ("mqtt.enabled", "true"),
         ("wifi.client.enabled", "true"),
@@ -68,6 +69,7 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
         vec![
             "hostname",
             "access.ssh.enabled",
+            "access.mdns.enabled",
             "container.enabled",
             "mqtt.enabled",
             "wifi.client.enabled",
@@ -80,7 +82,7 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
 
     let tasks = bearer(&router, "GET", "/api/v1/tasks", &token).await;
     assert_eq!(tasks.status(), StatusCode::OK);
-    assert_eq!(body_json(tasks).await.as_array().unwrap().len(), 8);
+    assert_eq!(body_json(tasks).await.as_array().unwrap().len(), 9);
 
     let missing = bearer(&router, "GET", "/api/v1/tasks/not-retained", &token).await;
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);

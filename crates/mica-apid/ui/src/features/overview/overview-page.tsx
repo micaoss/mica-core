@@ -14,6 +14,7 @@ import { StatusBadge } from '@/shared/components/status-badge'
 import { buttonVariants } from '@/shared/components/ui/button'
 import { formatAge, formatKnownState } from '@/i18n/format'
 import { freshnessLabel } from '@/features/shell/connection'
+import { LanDiscoveryPanel } from './lan-discovery-panel'
 
 interface UpdateLifecycle {
   lifecycle?: { state?: string; available?: { name?: string; version?: string } }
@@ -133,6 +134,7 @@ export function OverviewPage() {
           render={(card) => <Link to="/system" hash="information" className="contents">{card}</Link>}
         />
       </div>
+      <LanDiscoveryPanel />
       <CollectionPanel
         title={t('overview.device.title')}
         action={

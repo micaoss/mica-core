@@ -255,6 +255,33 @@ export interface MqttOverview {
   }
 }
 
+/// One service the mDNS responder publishes, or would while it is off.
+export interface MdnsService {
+  instance: string
+  type: string
+  port: number
+  txt: Record<string, string>
+  addresses: string[]
+  /// `built-in`, `image:<name>`, `runtime:<name>` or `app:<name>`.
+  source: string
+  published: boolean
+}
+
+/// `GET /api/v1/mdns`: the `mdns` reconciler's last report, or why there is
+/// none.
+export interface MdnsOverview {
+  available: boolean
+  state?: {
+    enabled: boolean
+    /// `setting` (`access.mdns.enabled`) or `product`.
+    source: string
+    hostname: string
+    services: MdnsService[]
+    refused: { source: string; error: string }[]
+  }
+  error?: string
+}
+
 /// What a whole-map write would do, answered by `?dryRun=true`.
 export interface NetworkDryRun {
   /// VLAN parents the write would declare, with the configuration they run.

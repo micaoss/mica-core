@@ -33,6 +33,7 @@ const routes = {
   '/api/v1/tasks': [{ id: 'task-1', operation: 'set', dotPath: 'hostname', source: 'api', status: 'finished', outcome: 'succeeded', enqueuedAt: FIVE_MINUTES_AGO, foldedCount: 0 }],
   '/api/v1/update': { lifecycle: { state: 'ready', available: { name: 'mica', version: '2026.09.0' } } },
   '/api/v1/time/status': { status: 'synchronized', synchronized: true },
+  '/api/v1/mdns': { available: true, state: { enabled: true, source: 'product', hostname: 'mica-cm4.local', services: [], refused: [] } },
 }
 
 afterEach(() => {

@@ -111,9 +111,10 @@ pub(super) enum ScalarShape {
 /// undeclared `wg9` writes a physical-kind `network.wg9` carrying a WireGuard
 /// block. Every path this list does not carry is refused by
 /// [`settings_write_refusal`] before any bus call is made.
-pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 8] = [
+pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 9] = [
     ("hostname", ScalarShape::Hostname),
     ("access.ssh.enabled", ScalarShape::Flag),
+    ("access.mdns.enabled", ScalarShape::Flag),
     ("container.enabled", ScalarShape::Flag),
     ("mqtt.enabled", ScalarShape::Flag),
     ("wifi.client.enabled", ScalarShape::Flag),
@@ -129,7 +130,7 @@ pub(super) const SETTINGS_COLLECTION: &str = "settings";
 /// The sentence a refusal carries when nothing more specific is true of the
 /// path: it is a real part of the tree, and this route is not how it is
 /// written.
-pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` and `time.timezone` and no other dot-path; every other subtree is written through its own resource route";
+pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` and `time.timezone` and no other dot-path; every other subtree is written through its own resource route";
 
 /// The shape `path` is written with, when this route writes it at all.
 pub(super) fn writable_shape(path: &str) -> Option<ScalarShape> {
@@ -277,9 +278,10 @@ pub(crate) struct SettingsWrite(pub(super) Value);
 // which would invite a client to trust the echo over its own GET.
 /// Write one scalar setting by dot-path.
 ///
-/// Accepts eight paths and no others: `hostname`, `access.ssh.enabled`,
-/// `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,
-/// `time.ntp.servers` and `time.timezone`. Any other path is refused.
+/// Accepts nine paths and no others: `hostname`, `access.ssh.enabled`,
+/// `access.mdns.enabled`, `container.enabled`, `mqtt.enabled`,
+/// `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` and
+/// `time.timezone`. Any other path is refused.
 ///
 /// Answers **202** with the queued task id on success. Takes a bearer token.
 #[utoipa::path(
@@ -287,7 +289,7 @@ pub(crate) struct SettingsWrite(pub(super) Value);
     path = V1_SETTINGS_DOC,
     context_path = API,
     tag = "resources",
-    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` or `time.timezone`")),
+    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` or `time.timezone`")),
     request_body = SettingsWrite,
     responses(
         (status = 202, description = "The value was persisted and its scoped reconciliation was queued", body = TaskAccepted),

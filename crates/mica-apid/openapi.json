@@ -4041,6 +4041,38 @@
         }
       }
     },
+    "/api/v1/mdns": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "What the device announces on the LAN over mDNS.",
+        "description": "Read-only: the switch is `access.mdns.enabled`; services come from the\ndevice, the image's and the running system's drop-in files and the\nrunning apps.",
+        "operationId": "api_v1_mdns_read",
+        "responses": {
+          "200": {
+            "description": "The responder's last reported state, or why there is none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MdnsOverview"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No API credential was supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/meta": {
       "get": {
         "tags": [
@@ -5880,13 +5912,13 @@
           "resources"
         ],
         "summary": "Write one scalar setting by dot-path.",
-        "description": "Accepts eight paths and no others: `hostname`, `access.ssh.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,\n`time.ntp.servers` and `time.timezone`. Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
+        "description": "Accepts nine paths and no others: `hostname`, `access.ssh.enabled`,\n`access.mdns.enabled`, `container.enabled`, `mqtt.enabled`,\n`wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` and\n`time.timezone`. Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
         "operationId": "api_v1_settings_write",
         "parameters": [
           {
             "name": "path",
             "in": "path",
-            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` or `time.timezone`",
+            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` or `time.timezone`",
             "required": true,
             "schema": {
               "type": "string"
@@ -12298,6 +12330,140 @@
           "supported": {
             "type": "boolean",
             "description": "Whether this device's boot carries out a factory reset."
+          }
+        }
+      },
+      "MdnsOverview": {
+        "type": "object",
+        "description": "The responder's report, or why there is none.",
+        "required": [
+          "available"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether the reconciler reported a state."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why there is no state: none published, or the last apply failed."
+          },
+          "state": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MdnsState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MdnsRefusal": {
+        "type": "object",
+        "description": "A drop-in file or an app entry the responder refused.",
+        "required": [
+          "source",
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "MdnsService": {
+        "type": "object",
+        "description": "One service the responder publishes, or would while it is off.",
+        "required": [
+          "instance",
+          "type",
+          "port",
+          "txt",
+          "addresses",
+          "source",
+          "published"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses whose interfaces it is published on; every interface\nwhen empty."
+          },
+          "instance": {
+            "type": "string",
+            "description": "The instance label, such as the hostname."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "published": {
+            "type": "boolean",
+            "description": "Whether it is on the wire now: false while the responder is off."
+          },
+          "source": {
+            "type": "string",
+            "description": "`built-in`, `image:<name>`, `runtime:<name>` or `app:<name>`."
+          },
+          "txt": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "type": {
+            "type": "string",
+            "description": "The DNS-SD type, `_<name>._tcp` or `_<name>._udp`."
+          }
+        }
+      },
+      "MdnsState": {
+        "type": "object",
+        "description": "The responder as the reconciler last reported it.",
+        "required": [
+          "enabled",
+          "source",
+          "hostname",
+          "services"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the responder runs."
+          },
+          "hostname": {
+            "type": "string",
+            "description": "The name it answers, `<hostname>.local`."
+          },
+          "refused": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MdnsRefusal"
+            }
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MdnsService"
+            }
+          },
+          "source": {
+            "type": "string",
+            "description": "What decided it: `setting` (`access.mdns.enabled`) or `product`."
           }
         }
       },
