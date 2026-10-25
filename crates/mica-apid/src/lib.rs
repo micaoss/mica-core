@@ -310,7 +310,7 @@ async fn serve() -> anyhow::Result<()> {
     // (`audit::Source`); without it every audit line would say `unknown`.
     // Both listeners also add `local_addr::LocalAddr`.
     if let Some((https_listener, https_addr, http_listener)) = tcp {
-        let app = routes::app(state);
+        let app = routes::app(state.clone());
         match (https_listener, https_addr, rustls_config) {
             (Some(https_listener), Some(https_addr), Some(rustls_config)) => {
                 let acceptor = axum_server::tls_rustls::RustlsAcceptor::new(rustls_config)
@@ -322,7 +322,7 @@ async fn serve() -> anyhow::Result<()> {
                 // network in the clear.
                 let http = axum::serve(
                     http_listener,
-                    routes::redirect_app(https_addr.port()).into_make_service(),
+                    routes::redirect_app(https_addr.port(), state.clone()).into_make_service(),
                 );
                 tokio::spawn(async move {
                     if let Err(err) = https.await {

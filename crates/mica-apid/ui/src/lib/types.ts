@@ -282,6 +282,23 @@ export interface MdnsOverview {
   error?: string
 }
 
+/// `GET /api/v1/ssdp`: the `ssdp` reconciler's last report, or why there is
+/// none.
+export interface SsdpOverview {
+  available: boolean
+  state?: {
+    enabled: boolean
+    /// `setting` (`access.ssdp.enabled`) or `product`.
+    source: string
+    /// On, with the console on the network.
+    active: boolean
+    reason?: string
+    udn?: string
+    friendlyName: string
+  }
+  error?: string
+}
+
 /// What a whole-map write would do, answered by `?dryRun=true`.
 export interface NetworkDryRun {
   /// VLAN parents the write would declare, with the configuration they run.

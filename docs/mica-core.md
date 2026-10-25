@@ -70,8 +70,8 @@ applied; a staged provisioning document is imported; first-boot provisioning min
 credentials; the product file is read; the reconcilers are built; the reconcilers that only
 render files and make bus calls (hostname, network, web) are applied once; the bus name is
 claimed; then the ones that start or restart another service (sshd, wifiClient, wifiAp,
-container, mqtt, time, bluetooth) and the mDNS responder are applied, again every 10 s while
-one fails, for up to five minutes. micad's readiness thus waits on no other service: the
+container, mqtt, time, bluetooth) and the mDNS and SSDP responders are applied, again every 10 s
+while one fails, for up to five minutes. micad's readiness thus waits on no other service: the
 container reconciler waits for mica-containerd, and on OpenRC `rc-service start` waits for the
 service and what it needs (the MQTT units need micad itself, mica-ntpd the network).
 
@@ -115,6 +115,7 @@ The tests relocate the rest of what micad writes the same way: the reconcilers' 
   prompt and read by `GET /api/v1/device/code`, whose answer carries the effective `gate`.
 - `MDNS` is `on` (the default) or `off`: whether the device announces itself over mDNS while
   `access.mdns.enabled` is unset (section 3.13). Any word but `off` is on.
+- `SSDP` is the same for UPnP discovery while `access.ssdp.enabled` is unset (section 3.14).
 - `SSH_SERVER` is `dropbear` (the default) or `openssh`: Base's choice of SSH server. micad does
   not read it; both servers take the same environment and unit (section 3.8).
 
@@ -127,7 +128,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `hostname` | The hostname |
 | `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`, or `false` on a port the board declares internal, section 3.12): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
 | `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
-| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), LAN discovery (`mdns.enabled`, section 3.13; absent is the product's choice, and it is written only once set), the admin password hash, the device credential, API tokens, claim state |
+| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), LAN discovery (`mdns.enabled` and `ssdp.enabled`, sections 3.13 and 3.14; absent is the product's choice, and each is written only once set), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
 | `container` | The engine switch (`enabled`) and the declared Compose projects (`projects`, section 3.9) |
 | `bluetooth` | The switch (on by default), the trust list, and `provisioning.autoWhenOffline` (BLE provisioning, `docs/ble-provisioning.md`; on by default). Documents that still carry `discoverable`, `alias` or `pin` load, and the keys are dropped at the next save |
@@ -226,6 +227,7 @@ live-state tree under its name.
 | `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; `apid.service` started for `mode` `network` or `local` (restarted when the file changed) and stopped for `off` | the same, `apid` |
 | `mdns` | micad's own mDNS responder (section 3.13), from `access.mdns`, the hostname, `access.web` and `access.ssh` | the same |
+| `ssdp` | micad's own SSDP responder (section 3.14), from `access.ssdp`, the hostname and `access.web` | the same |
 | `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
 | `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. A BLE provisioning window keeps the adapter powered while Bluetooth is switched off | the same through `mica-bluetoothd` |
 
@@ -903,6 +905,33 @@ off on systemd (section 3.4), so one responder holds the port. The live state (`
 whether it runs, why (`setting` or `product`), the `.local` name, every service with its source
 and whether it is published, and the refused sources with the reason.
 
+### 3.14 LAN discovery: SSDP
+
+micad also answers UPnP discovery, so the device shows in a computer's network view: a responder
+of its own on `239.255.255.250:1900`, IPv4 only, on the interfaces mDNS serves (section 3.13).
+It announces one root device, type `urn:micaos:device:mica:1`, under three targets
+(`upnp:rootdevice`, its UUID, its type): `ssdp:alive` twice at start, on each new address, on a
+new hostname or HTTP port (after a `ssdp:byebye` for the old one, with the next `BOOTID.UPNP.ORG`)
+and every 900 s with `max-age=1800`, and `ssdp:byebye` when it stops. It answers an M-SEARCH for
+`ssdp:all` (three answers), `upnp:rootdevice`, its type or its UUID, unicast and at once, and only
+when the searcher is in a subnet of the interface the search arrived on; anything else is
+dropped, so it neither reflects nor answers a spoofed source elsewhere. It answers at most 2
+searches a second from one searcher and 20 in all, each answer under 400 bytes; nothing heard on
+one interface is sent on another.
+
+`LOCATION` is `http://<the interface's address>:<httpPort>/ssdp/device.xml`, which apid serves
+without a credential, on the HTTP listener even with HTTPS on: `friendlyName` the hostname,
+`manufacturer` Mica, `modelName` the product, `serialNumber` and `UDN` each an HMAC-SHA256 of
+its own label under the machine id (neither the id nor the device code), `presentationURL` the
+console on the address asked, and no services. It is 404 while the responder does not run.
+
+`access.ssdp.enabled` switches it; absent, the product's `SSDP=` line decides (section 3.2), on
+when the product says nothing. It runs only while it is on and apid serves the network
+(`access.web.mode`), and on a device with a machine id; otherwise there is no socket. `micad ssdp
+status` shows the switch, its source, whether it runs and why not, and what it announces; `micad
+ssdp on|off` write the switch and wait for it. The live state (`ssdp`) carries the same, and the
+description's fields.
+
 ## 4. mica-apid
 
 The same executable as micad, run as `mica-apid` or `micad apid`: the API and the console. It holds
@@ -959,12 +988,13 @@ with no restart. A configuration reset removes it.
 the handlers) and `--healthcheck` (for the boot health gate) answer without starting a daemon.
 
 **URL space.** `/api/v1/...` is the API; `/api/versions` lists the versions served; `/healthz` is
-liveness; `/_ui/` is the built-in console from `mica-apid-ui` (404 without the package); `/` is
-the active custom console bundle or a redirect to `/_ui/`.
+liveness; `/ssdp/device.xml` the UPnP description (section 3.14); `/_ui/` is the built-in console
+from `mica-apid-ui` (404 without the package); `/` is the active custom console bundle or a
+redirect to `/_ui/`.
 
 **The API**, by group: session, setup and password; API tokens; settings, state and tasks;
 network, Wi-Fi, containers, the user's services (`/units`, section 3.10), apps (`/apps`, section
-3.11), Bluetooth, MQTT, SSH keys and LAN discovery (`/mdns`); observation (time, storage, system
+3.11), Bluetooth, MQTT, SSH keys and LAN discovery (`/mdns`, `/ssdp`); observation (time, storage, system
 information, telemetry, service logs at `/system/logs/{source}`, network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
 fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,
@@ -984,12 +1014,14 @@ another tunnel's or, for a new or changed port, held by a userspace UDP socket o
 `172.16.<N>.1/24`) and listen port from 51821, past declared and observed names and subnets,
 peers' allowed IPs, observed routes and held ports, and the held ports themselves.
 
-**LAN discovery** (section 3.13). `GET /api/v1/mdns` answers the `mdns` live state as
+**LAN discovery** (sections 3.13 and 3.14). `GET /api/v1/mdns` answers the `mdns` live state as
 `{available, state?, error?}`: the switch, its source, the `.local` name, every service with its
 source and whether it is published, and the refused files and entries; `available` is false, with
-the reason, while micad has reported none or its last apply failed. `access.mdns.enabled` is
-written through `PUT /api/v1/settings/access.mdns.enabled`. The overview's "LAN discovery" card
-("局域网发现") shows the switch, which reads the effective state, and the services, read-only.
+the reason, while micad has reported none or its last apply failed. `GET /api/v1/ssdp` answers
+the `ssdp` live state the same way, and `/ssdp/device.xml`, outside `/api`, the UPnP description.
+`access.mdns.enabled` and `access.ssdp.enabled` are written through `PUT
+/api/v1/settings/...`. The overview's "LAN discovery" card ("局域网发现") shows both switches,
+which read the effective state, and the mDNS services, read-only.
 
 **Authentication.** Until an admin password exists, `POST /setup` sets it. On a device with a
 device code the body carries the code as `deviceCode` (dashes, spaces and case ignored): that is

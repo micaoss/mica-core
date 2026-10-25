@@ -34,6 +34,7 @@ const routes = {
   '/api/v1/update': { lifecycle: { state: 'ready', available: { name: 'mica', version: '2026.09.0' } } },
   '/api/v1/time/status': { status: 'synchronized', synchronized: true },
   '/api/v1/mdns': { available: true, state: { enabled: true, source: 'product', hostname: 'mica-cm4.local', services: [], refused: [] } },
+  '/api/v1/ssdp': { available: true, state: { enabled: true, source: 'product', active: true, friendlyName: 'mica-cm4' } },
 }
 
 afterEach(() => {

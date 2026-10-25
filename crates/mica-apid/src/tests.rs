@@ -58,6 +58,7 @@ mod schemas;
 mod session;
 mod settings_write;
 mod setup;
+mod ssdp;
 mod tasks;
 mod tokens;
 mod ui_bundles;

@@ -23,6 +23,8 @@ abd = "abd"
 BA = "BA"
 # setpriv's `--inh-caps`, the inheritable capabilities.
 inh = "inh"
+# UPnP, which the checker splits into `U`, `Pn` and `P`.
+Pn = "Pn"
 
 [default.extend-identifiers]
 # O_WRONLY.

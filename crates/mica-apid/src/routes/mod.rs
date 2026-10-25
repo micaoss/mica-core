@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 
-use axum::extract::{OriginalUri, Request, State};
+use axum::extract::{OriginalUri, Request};
 use axum::http::StatusCode;
 use axum::http::header::{HOST, LOCATION};
 use axum::response::{IntoResponse, Response};
@@ -58,6 +58,7 @@ mod router;
 mod settings;
 mod setup;
 mod snapshots;
+mod ssdp;
 mod ssh;
 mod tokens;
 mod ui;
@@ -95,6 +96,7 @@ use router::*;
 pub(crate) use settings::*;
 pub(crate) use setup::*;
 pub(crate) use snapshots::*;
+pub(crate) use ssdp::*;
 pub(crate) use ssh::*;
 pub(crate) use tokens::*;
 pub(crate) use ui::*;
@@ -542,6 +544,7 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/_ui/", get(crate::assets::builtin::index))
         .route("/healthz", get(healthz))
+        .route(SSDP_DESCRIPTION_PATH, get(ssdp::ssdp_description))
         .nest(API, api_router(&state.features))
         .route("/api/", any(api_not_found))
         .fallback(serve::fallback)
@@ -563,15 +566,18 @@ async fn api_not_found(OriginalUri(uri): OriginalUri) -> Response {
 // The API surface: the reserved subtree's declared routes, their bodies
 // and the session check that guards them.
 
-/// Redirect-only router served on the HTTP listener: 308 every request to
-/// the HTTPS origin derived from the `Host` header.
-pub fn redirect_app(https_port: u16) -> Router {
+/// The router served on the HTTP listener while HTTPS is on: the SSDP
+/// device description, which UPnP clients fetch over HTTP and which carries
+/// nothing a login protects, and a 308 for every other request to the HTTPS
+/// origin derived from the `Host` header.
+pub fn redirect_app(https_port: u16, state: AppState) -> Router {
     Router::new()
-        .fallback(redirect_to_https)
-        .with_state(https_port)
+        .route(SSDP_DESCRIPTION_PATH, get(ssdp::ssdp_description))
+        .with_state(state)
+        .fallback(move |request: Request| redirect_to_https(https_port, request))
 }
 
-async fn redirect_to_https(State(https_port): State<u16>, request: Request) -> Response {
+async fn redirect_to_https(https_port: u16, request: Request) -> Response {
     let host = request
         .headers()
         .get(HOST)

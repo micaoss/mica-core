@@ -18,6 +18,7 @@ mod mqtt;
 /// reconciler's mechanism reached from outside a reconcile.
 pub mod network;
 mod services;
+mod ssdp;
 mod sshd;
 /// Visible to the daemon for the same reason: the container actions are
 /// systemd verbs, and the bus needs the trait they are spoken through.
@@ -107,6 +108,7 @@ fn openrc_reconcilers(
         Box::new(time::TimeReconciler::openrc()),
         Box::new(web::WebReconciler::production(OpenrcUnits::production())),
         Box::new(mdns::MdnsReconciler::production(apps)),
+        Box::new(ssdp::SsdpReconciler::production()),
         Box::new(services::ServicesReconciler::production(
             micad_settings::Init::Openrc,
         )),
@@ -138,6 +140,7 @@ fn systemd_reconcilers(
         Box::new(time::TimeReconciler::production()),
         Box::new(web::WebReconciler::production(systemd::Systemd::new())),
         Box::new(mdns::MdnsReconciler::production(apps)),
+        Box::new(ssdp::SsdpReconciler::production()),
         Box::new(services::ServicesReconciler::production(
             micad_settings::Init::Systemd,
         )),
@@ -178,6 +181,7 @@ mod feature_tests {
             "time",
             "access.web",
             "access.mdns",
+            "access.ssdp",
             "services",
         ] {
             assert!(minimal.contains(&always), "{always}: {minimal:?}");
@@ -224,6 +228,7 @@ mod feature_tests {
                 "time",
                 "access.web",
                 "access.mdns",
+                "access.ssdp",
                 "services",
                 "bluetooth"
             ]

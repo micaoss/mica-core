@@ -1462,6 +1462,8 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "socket-pktinfo",
+ "socket2",
  "tar",
  "tempfile",
  "thiserror",

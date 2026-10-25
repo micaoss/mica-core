@@ -18,6 +18,17 @@ const mdns = (enabled: boolean) => ({
   },
 })
 
+const ssdp = (enabled: boolean, active = enabled) => ({
+  available: true,
+  state: {
+    enabled,
+    source: 'setting',
+    active,
+    ...(enabled && !active ? { reason: 'the console is not on the network' } : {}),
+    friendlyName: 'mica-ab12',
+  },
+})
+
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
@@ -25,7 +36,7 @@ afterEach(() => {
 
 describe('the LAN discovery card', () => {
   it('lists every service with its source, and what is refused', async () => {
-    stubFetch({ '/api/v1/mdns': mdns(true) })
+    stubFetch({ '/api/v1/mdns': mdns(true), '/api/v1/ssdp': ssdp(true) })
     renderPanel(<LanDiscoveryPanel />)
 
     expect(await screen.findByText('mica-ab12._mica._tcp')).toBeTruthy()
@@ -36,7 +47,7 @@ describe('the LAN discovery card', () => {
   })
 
   it('lists the services as not published while it is off', async () => {
-    stubFetch({ '/api/v1/mdns': mdns(false) })
+    stubFetch({ '/api/v1/mdns': mdns(false), '/api/v1/ssdp': ssdp(false) })
     renderPanel(<LanDiscoveryPanel />)
 
     expect((await screen.findAllByText('Not published')).length).toBe(2)
@@ -45,7 +56,7 @@ describe('the LAN discovery card', () => {
 
   it('writes the switch and reports it', async () => {
     const write = vi.fn(() => jsonResponse({ taskId: 'task-1' }, 202))
-    stubFetch({ '/api/v1/mdns': mdns(true), 'PUT /api/v1/settings/access.mdns.enabled': write })
+    stubFetch({ '/api/v1/mdns': mdns(true), '/api/v1/ssdp': ssdp(true), 'PUT /api/v1/settings/access.mdns.enabled': write })
     renderPanel(<LanDiscoveryPanel />)
 
     await userEvent.click(await screen.findByRole('switch', { name: 'mDNS' }))
@@ -55,10 +66,24 @@ describe('the LAN discovery card', () => {
   })
 
   it('says why there is no state', async () => {
-    stubFetch({ '/api/v1/mdns': { available: false, error: 'the mDNS reconciler has published no state' } })
+    stubFetch({ '/api/v1/mdns': { available: false, error: 'the mDNS reconciler has published no state' }, '/api/v1/ssdp': ssdp(true) })
     renderPanel(<LanDiscoveryPanel />)
 
     expect(await screen.findByText('the mDNS reconciler has published no state')).toBeTruthy()
     expect((await screen.findByRole('switch', { name: 'mDNS' })).hasAttribute('disabled') || (await screen.findByRole('switch', { name: 'mDNS' })).getAttribute('aria-disabled') === 'true').toBe(true)
+  })
+
+  it('writes the SSDP switch, and says why it does not answer while on', async () => {
+    const write = vi.fn(() => jsonResponse({ taskId: 'task-2' }, 202))
+    stubFetch({ '/api/v1/mdns': mdns(true), '/api/v1/ssdp': ssdp(true, false), 'PUT /api/v1/settings/access.ssdp.enabled': write })
+    renderPanel(<LanDiscoveryPanel />)
+
+    expect(await screen.findByText('Not answering: the console is not on the network')).toBeTruthy()
+    const toggle = await screen.findByRole('switch', { name: 'UPnP (SSDP)' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(toggle)
+
+    expect((await screen.findAllByText('UPnP discovery turned off.')).length).toBeGreaterThan(0)
+    expect(write).toHaveBeenCalledOnce()
   })
 })

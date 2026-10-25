@@ -26,7 +26,7 @@ use super::Reconciler;
 /// Interfaces the responder leaves out by name prefix: the loopback, the
 /// virtual ends the container engines make (the ones the login prompt also
 /// leaves out), WireGuard, which carries no multicast, and CAN.
-const SILENT_PREFIXES: &[&str] = &[
+pub(crate) const SILENT_PREFIXES: &[&str] = &[
     "lo", "veth", "podman", "cni-", "docker", "dummy", "wg", "can", "vcan",
 ];
 

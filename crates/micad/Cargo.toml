@@ -55,8 +55,13 @@ zbus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 mdns-sd = { workspace = true }
-# The interface type mdns-sd's interface predicate takes; already in its graph.
+# The interface type mdns-sd's interface predicate takes, and the SSDP
+# responder's interface list; already in its graph.
 if-addrs = "0.15"
+# The SSDP responder's socket and the interface a search arrived on; both
+# already in mdns-sd's graph.
+socket-pktinfo = "0.4"
+socket2 = "0.6"
 
 [dev-dependencies]
 tempfile = { workspace = true }

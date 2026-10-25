@@ -115,6 +115,7 @@ use utoipa::OpenApi;
         crate::routes::api_v1_mqtt_write,
         crate::routes::api_v1_web_read,
         crate::routes::api_v1_mdns_read,
+        crate::routes::api_v1_ssdp_read,
         crate::routes::api_v1_web_write,
         crate::routes::api_v1_web_certificate_read,
         crate::routes::api_v1_web_certificate_upload,

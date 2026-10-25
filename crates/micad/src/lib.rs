@@ -43,6 +43,7 @@ mod reconciler;
 mod recovery;
 mod reset;
 mod scan;
+pub mod ssdp_cli;
 mod storage_status;
 mod system_info;
 mod telemetry;

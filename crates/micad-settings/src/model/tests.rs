@@ -216,11 +216,12 @@ fn an_empty_token_list_is_not_serialized() {
     assert!(text.contains("[[access.apiTokens]]"), "{text}");
 }
 
-/// `access.mdns` is not written while unset, so the document of a device
-/// that never touched it is one an older micad, which has no such member,
-/// still reads; set through the dot path, it is written and read back.
+/// `access.mdns` and `access.ssdp` are not written while unset, so the
+/// document of a device that never touched them is one an older micad, which
+/// has no such member, still reads; set through the dot path, each is written
+/// and read back.
 #[test]
-fn the_mdns_switch_is_written_only_once_set() {
+fn the_discovery_switches_are_written_only_once_set() {
     let text = toml::to_string(&Settings::default()).unwrap();
     assert!(!text.contains("mdns"), "{text}");
     assert!(Settings::default().access.mdns.effective(true));
@@ -247,6 +248,16 @@ fn the_mdns_switch_is_written_only_once_set() {
             .set("access.mdns.other", Value::Bool(true))
             .is_err()
     );
+
+    // The SSDP switch on the same rule.
+    assert!(!text.contains("ssdp"), "{text}");
+    settings
+        .set("access.ssdp.enabled", Value::Bool(true))
+        .unwrap();
+    assert_eq!(settings.access.ssdp.enabled, Some(true));
+    let text = toml::to_string(&settings).unwrap();
+    assert!(text.contains("[access.ssdp]\nenabled = true"), "{text}");
+    assert_eq!(toml::from_str::<Settings>(&text).unwrap(), settings);
 }
 
 /// The wire names are the tree's camelCase convention, and the entry

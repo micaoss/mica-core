@@ -27,6 +27,9 @@ pub struct AccessSettings {
     /// document an older micad reads.
     #[serde(default, skip_serializing_if = "LanDiscoverySettings::is_unset")]
     pub mdns: LanDiscoverySettings,
+    /// Whether the device answers UPnP discovery (SSDP), on the same rule.
+    #[serde(default, skip_serializing_if = "LanDiscoverySettings::is_unset")]
+    pub ssdp: LanDiscoverySettings,
     /// Device credential metadata; never holds a plaintext secret.
     #[serde(default)]
     pub device: DeviceCredentialSettings,
@@ -132,7 +135,7 @@ pub struct AuthorizedKey {
     pub comment: Option<String>,
 }
 
-/// A LAN discovery switch (`access.mdns`).
+/// A LAN discovery switch (`access.mdns`, `access.ssdp`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LanDiscoverySettings {

@@ -8,8 +8,9 @@
 //! development host, and every feature is on.
 //!
 //! Its `CLAIM_DEVICE_CODE=required|off` says whether the console's claim asks
-//! for the device code ([`ClaimDeviceCode`]), and `MDNS=on|off` whether LAN
-//! discovery runs while its setting is unset ([`product_switch`]).
+//! for the device code ([`ClaimDeviceCode`]), and `MDNS=on|off` and
+//! `SSDP=on|off` whether each kind of LAN discovery runs while its setting is
+//! unset ([`product_switch`]).
 //!
 //! The same file states the product's init (`INIT=systemd|openrc`, systemd when
 //! absent), and its container engine (`CONTAINER_ENGINE=podman|docker`, podman

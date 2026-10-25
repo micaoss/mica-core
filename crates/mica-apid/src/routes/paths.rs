@@ -309,6 +309,16 @@ pub(super) const V1_MDNS_PATH: &str = "/v1/mdns";
 /// The live-state key the mDNS reconciler reports under.
 pub(super) const MDNS_STATE_PATH: &str = "mdns";
 
+/// Whether the device answers UPnP discovery, read-only.
+pub(super) const V1_SSDP_PATH: &str = "/v1/ssdp";
+
+/// The live-state key the SSDP reconciler reports under.
+pub(super) const SSDP_STATE_PATH: &str = "ssdp";
+
+/// The UPnP device description SSDP's `LOCATION` names, outside `/api`: no
+/// credential, and on the HTTP listener too.
+pub(super) const SSDP_DESCRIPTION_PATH: &str = "/ssdp/device.xml";
+
 /// The MQTT resource: the whole `mqtt` subtree, read with the reconciler's
 /// live state beside it and written in one call.
 ///

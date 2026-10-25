@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api, json } from '@/shared/lib/http'
-import type { MdnsOverview, TaskAccepted } from '@/lib/types'
+import type { MdnsOverview, SsdpOverview, TaskAccepted } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { CollectionPanel } from '@/shared/components/panel'
 import { RowItem, RowList } from '@/shared/components/row-item'
@@ -10,9 +10,10 @@ import { TaskProgress } from '@/shared/components/task-progress'
 import { Switch } from '@/shared/components/ui/switch'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 
-/// What the device announces on the LAN: the mDNS switch, and every service
-/// with its source, read-only. The switch reads the effective state, since
-/// `access.mdns.enabled` is absent while the product default holds.
+/// What the device announces on the LAN: the mDNS and SSDP switches, and
+/// every mDNS service with its source, read-only. Each switch reads the
+/// effective state, since its setting is absent while the product default
+/// holds.
 export function LanDiscoveryPanel() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -23,9 +24,20 @@ export function LanDiscoveryPanel() {
     failure: t('overview.discovery.mdns'),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['mdns'] }),
   })
+  const ssdp = useQuery({ queryKey: ['ssdp'], queryFn: () => api<SsdpOverview>('/api/v1/ssdp'), refetchInterval: 10_000 })
+  const ssdpToggle = useMutationFeedback<TaskAccepted, boolean>({
+    mutationFn: (value) => api<TaskAccepted>('/api/v1/settings/access.ssdp.enabled', json('PUT', value)),
+    success: (_data, value) => t(value ? 'overview.discovery.ssdpEnabled' : 'overview.discovery.ssdpDisabled'),
+    failure: t('overview.discovery.ssdp'),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ssdp'] }),
+  })
   const state = mdns.data?.state
   const source = state?.source === 'setting' ? 'setting' : 'product'
-  const unavailable = mdns.error ? t('common.requestFailed') : mdns.data && !mdns.data.available ? mdns.data.error ?? t('common.notAvailable') : undefined
+  const upnp = ssdp.data?.state
+  const upnpSource = upnp?.source === 'setting' ? 'setting' : 'product'
+  const unavailable = [mdns, ssdp]
+    .map((query) => query.error ? t('common.requestFailed') : query.data && !query.data.available ? query.data.error ?? t('common.notAvailable') : undefined)
+    .find((reason) => reason !== undefined)
 
   return (
     <CollectionPanel title={t('overview.discovery.title')}>
@@ -38,6 +50,13 @@ export function LanDiscoveryPanel() {
           })}
           actions={<Switch checked={state?.enabled === true} onCheckedChange={(value) => toggle.mutate(value)} disabled={state === undefined || toggle.isPending} aria-label={t('overview.discovery.mdns')} />}
         />
+        <RowItem
+          title={t('overview.discovery.ssdp')}
+          description={upnp?.enabled && !upnp.active && upnp.reason
+            ? t('overview.discovery.ssdpHeld', { reason: upnp.reason })
+            : t('overview.discovery.ssdpCopy', { source: t(`overview.discovery.source.${upnpSource}`) })}
+          actions={<Switch checked={upnp?.enabled === true} onCheckedChange={(value) => ssdpToggle.mutate(value)} disabled={upnp === undefined || ssdpToggle.isPending} aria-label={t('overview.discovery.ssdp')} />}
+        />
         {state?.services.map((service) => (
           <RowItem
             key={`${service.instance}.${service.type}`}
@@ -47,7 +66,7 @@ export function LanDiscoveryPanel() {
           />
         ))}
       </RowList>
-      <div className="px-3 pb-3"><TaskProgress taskId={toggle.data?.taskId} /></div>
+      <div className="px-3 pb-3"><TaskProgress taskId={toggle.data?.taskId ?? ssdpToggle.data?.taskId} /></div>
       {state?.refused.map((refused) => (
         <div key={refused.source} className="px-3 pb-3">
           <Callout tone="warning" title={t('overview.discovery.refused', { source: refused.source, error: refused.error })} />
