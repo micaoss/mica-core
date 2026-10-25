@@ -216,6 +216,39 @@ fn an_empty_token_list_is_not_serialized() {
     assert!(text.contains("[[access.apiTokens]]"), "{text}");
 }
 
+/// `access.mdns` is not written while unset, so the document of a device
+/// that never touched it is one an older micad, which has no such member,
+/// still reads; set through the dot path, it is written and read back.
+#[test]
+fn the_mdns_switch_is_written_only_once_set() {
+    let text = toml::to_string(&Settings::default()).unwrap();
+    assert!(!text.contains("mdns"), "{text}");
+    assert!(Settings::default().access.mdns.effective(true));
+    assert!(!Settings::default().access.mdns.effective(false));
+
+    let mut settings = Settings::default();
+    settings
+        .set("access.mdns.enabled", Value::Bool(false))
+        .unwrap();
+    assert_eq!(settings.access.mdns.enabled, Some(false));
+    assert!(!settings.access.mdns.effective(true));
+    let text = toml::to_string(&settings).unwrap();
+    assert!(text.contains("[access.mdns]\nenabled = false"), "{text}");
+    let parsed: Settings = toml::from_str(&text).unwrap();
+    assert_eq!(parsed, settings);
+
+    assert!(
+        settings
+            .set("access.mdns.enabled", Value::from("yes"))
+            .is_err()
+    );
+    assert!(
+        settings
+            .set("access.mdns.other", Value::Bool(true))
+            .is_err()
+    );
+}
+
 /// The wire names are the tree's camelCase convention, and the entry
 /// carries the four fields and no fifth.
 #[test]

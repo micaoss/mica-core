@@ -49,7 +49,10 @@ pub use documents::{
     TimeDocument, WIFI_DOCUMENT, WIFI_SCHEMA_VERSION, WifiDocument, document_subtrees,
 };
 pub use error::SettingsError;
-pub use features::{ClaimDeviceCode, ContainerEngine, Feature, Features, Init, PRODUCT_FILE};
+pub use features::{
+    ClaimDeviceCode, ContainerEngine, Feature, Features, Init, PRODUCT_FILE, product_name,
+    product_switch,
+};
 pub use model::{
     APID_LISTENERS_PATH, APID_LOCAL_SOCKET_PATH, AccessSettings, ApMode, ApPool, ApSecurity,
     ApiToken, AuthorizedKey, BleProvisioningSettings, BluetoothSettings, BridgeConfig, CanConfig,

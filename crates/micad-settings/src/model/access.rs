@@ -1,5 +1,5 @@
 //! Access settings: the web administrator, the claim, SSH, the console, the web
-//! listeners, device credentials and API tokens.
+//! listeners, LAN discovery, device credentials and API tokens.
 
 /// Access control settings.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
@@ -21,6 +21,12 @@ pub struct AccessSettings {
     /// Where apid listens.
     #[serde(default)]
     pub web: WebSettings,
+    /// Whether the device announces itself over mDNS.
+    ///
+    /// Not written while unset, so a device that never set it keeps a
+    /// document an older micad reads.
+    #[serde(default, skip_serializing_if = "LanDiscoverySettings::is_unset")]
+    pub mdns: LanDiscoverySettings,
     /// Device credential metadata; never holds a plaintext secret.
     #[serde(default)]
     pub device: DeviceCredentialSettings,
@@ -124,6 +130,29 @@ pub struct AuthorizedKey {
     /// Operator-supplied label; absent when the key was pasted without one.
     #[serde(rename = "comment", default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
+}
+
+/// A LAN discovery switch (`access.mdns`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LanDiscoverySettings {
+    /// On or off; absent is the product's choice, on when it makes none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+impl LanDiscoverySettings {
+    /// Whether nothing is set, so the member is not written.
+    #[must_use]
+    pub fn is_unset(&self) -> bool {
+        self.enabled.is_none()
+    }
+
+    /// Whether discovery runs: the setting, else `product_default`.
+    #[must_use]
+    pub fn effective(&self, product_default: bool) -> bool {
+        self.enabled.unwrap_or(product_default)
+    }
 }
 
 /// Local console policy.

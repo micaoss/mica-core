@@ -314,9 +314,11 @@ impl MicadService {
 /// and the MQTT units need micad itself, mica-ntpd needs the network. Their
 /// startup apply runs after micad claims its bus name, so micad's readiness
 /// waits on none of them; the ones that run before it only render files and
-/// bus calls.
-pub(super) const DEFERRED: [&str; 10] = [
+/// bus calls. The mDNS responder opens its sockets there too, once the links
+/// are configured.
+pub(super) const DEFERRED: [&str; 11] = [
     "web",
+    "mdns",
     "dns",
     "sshd",
     "wifiClient",

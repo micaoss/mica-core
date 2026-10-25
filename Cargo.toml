@@ -87,6 +87,15 @@ zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate
 # backend the zip reader already resolves.
 tar = { version = "0.4", default-features = false }
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+# The mDNS responder (section 3.13): its own thread on mio, no async runtime
+# and no D-Bus. Without `logging`, which would only feed the `log` facade.
+mdns-sd = { version = "0.21", default-features = false }
+
+# mdns-sd with the RFC 6762 section 11 source check (a query from off the link
+# is not answered) and a cap of 50 legacy unicast answers a second, until a
+# release carries them (keepsimple1/mdns-sd#532).
+[patch.crates-io]
+mdns-sd = { git = "https://github.com/micaoss/mdns-sd", rev = "dbc16d7cc6f9460136bbb11efdd27b6545f5b385" }
 
 # Every shipped executable is stripped: nothing on a device reads a symbol
 # table. A backtrace from a device is resolved against an unstripped build of

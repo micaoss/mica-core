@@ -70,10 +70,10 @@ applied; a staged provisioning document is imported; first-boot provisioning min
 credentials; the product file is read; the reconcilers are built; the reconcilers that only
 render files and make bus calls (hostname, network, web) are applied once; the bus name is
 claimed; then the ones that start or restart another service (sshd, wifiClient, wifiAp,
-container, mqtt, time, bluetooth) are applied, again every 10 s while one fails, for up to five
-minutes. micad's readiness thus waits on no other service: the container reconciler waits for
-mica-containerd, and on OpenRC `rc-service start` waits for the service and what it needs (the
-MQTT units need micad itself, mica-ntpd the network).
+container, mqtt, time, bluetooth) and the mDNS responder are applied, again every 10 s while
+one fails, for up to five minutes. micad's readiness thus waits on no other service: the
+container reconciler waits for mica-containerd, and on OpenRC `rc-service start` waits for the
+service and what it needs (the MQTT units need micad itself, mica-ntpd the network).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -113,6 +113,8 @@ The tests relocate the rest of what micad writes the same way: the reconcilers' 
   (section 4). Without the line the claim asks for it whenever the device has one; any word but
   `off` keeps it. `off` changes only the claim: the code is still derived, logged, put on the login
   prompt and read by `GET /api/v1/device/code`, whose answer carries the effective `gate`.
+- `MDNS` is `on` (the default) or `off`: whether the device announces itself over mDNS while
+  `access.mdns.enabled` is unset (section 3.13). Any word but `off` is on.
 - `SSH_SERVER` is `dropbear` (the default) or `openssh`: Base's choice of SSH server. micad does
   not read it; both servers take the same environment and unit (section 3.8).
 
@@ -125,7 +127,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `hostname` | The hostname |
 | `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`, or `false` on a port the board declares internal, section 3.12): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
 | `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
-| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), the admin password hash, the device credential, API tokens, claim state |
+| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), LAN discovery (`mdns.enabled`, section 3.13; absent is the product's choice, and it is written only once set), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
 | `container` | The engine switch (`enabled`) and the declared Compose projects (`projects`, section 3.9) |
 | `bluetooth` | The switch (on by default), the trust list, and `provisioning.autoWhenOffline` (BLE provisioning, `docs/ble-provisioning.md`; on by default). Documents that still carry `discoverable`, `alias` or `pin` load, and the keys are dropped at the next save |
@@ -215,7 +217,7 @@ live-state tree under its name.
 | --- | --- | --- |
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
 | `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. Each DHCP stanza carries `metric <n>`, the networkd numbers. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. On a static or manual stanza each static route is an `up ip route add <destination> [via <gateway>] dev <iface> [metric <m>]` line with the matching `down ip route del … \|\| :`; on a DHCP stanza, whose link is up before its lease, each is a `route_<n>` option (`<destination> [via <gateway>] [metric <m>]`, numbered from 1) for Base's `mica-udhcpc` (section 3.8). VLAN, bridge and WireGuard are refused by name |
-| `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf` (resolved restarted when it changes) always empties `FallbackDNS=` and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file. Global servers: `/run/mica/resolv.d/global`, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
+| `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf` (resolved restarted when it changes) always empties `FallbackDNS=` and sets `MulticastDNS=no` (micad's own responder holds the port, section 3.13) and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file. Global servers: `/run/mica/resolv.d/global`, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
 | `sshd` | `/run/mica/sshd.env`, the authorized keys of `root` and `mica`, `mica-sshd.service` | the same files, `mica-sshd` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
 | `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server, which hands out the global DNS servers while they are on and the uplink's otherwise | configuration in `/var/lib/mica/hostapd`, `/run/mica/wifi-ap.env`, busybox udhcpd on the same pool (`/run/mica/wifi-ap-udhcpd.conf`) with the global DNS servers while they are on, `mica-wifi-ap` |
@@ -223,6 +225,7 @@ live-state tree under its name.
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
 | `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; `apid.service` started for `mode` `network` or `local` (restarted when the file changed) and stopped for `off` | the same, `apid` |
+| `mdns` | micad's own mDNS responder (section 3.13), from `access.mdns`, the hostname, `access.web` and `access.ssh` | the same |
 | `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
 | `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. A BLE provisioning window keeps the adapter powered while Bluetooth is switched off | the same through `mica-bluetoothd` |
 
@@ -835,6 +838,38 @@ At start micad logs each declared port the kernel does not list and each physica
 first, in order and with their label, an absent one as 未检测到, and tags a physical link the
 board does not declare 未声明; it is still managed. `micad board check <file>` reads a file with
 the same parser, for a build to verify the file it ships.
+
+### 3.13 LAN discovery: mDNS
+
+micad answers mDNS itself, on either init, with no avahi and no D-Bus: a responder on mdns-sd
+(its own thread). It publishes on every interface that has an address, the access point's
+included and whatever its `internet` or board role, but not on the loopback, the container
+engines' links (`veth`, `podman`, `cni-`, `docker`, `dummy`), WireGuard (`wg`) or CAN:
+
+- `<hostname>.local`, A and AAAA, with the addresses of the interface a query arrives on,
+  link-local ones included.
+- `_mica._tcp`, instance `<hostname>`, on the console's port (0 when apid serves no network),
+  TXT `txtvers=1`, `product=<PRODUCT>` and `hostname=<hostname>`. Nothing else: no version, no
+  claim state, no device code, no key.
+- The console while `access.web.mode` is `network`: `_https._tcp` on `httpsPort` with HTTPS on,
+  else `_http._tcp` on `httpPort`, instance `<hostname>`, TXT `path=/`.
+- `_ssh._tcp` on `access.ssh.port` while SSH is on, instance `<hostname>`. With
+  `listenAddresses` it is published only on the interfaces of those addresses; an entry with a
+  port of its own is left out, and with only such entries SSH is not published.
+
+A change sends goodbyes for what went and announces what came; a new hostname withdraws every
+record and publishes them under the new name. The responder answers only a query whose source
+is in a subnet of the interface it arrived on, or link-local (RFC 6762 section 11), so a query
+routed in from elsewhere, spoofed or not, gets nothing; it multicasts a record at most once a
+second per interface (section 6) and answers at most 50 legacy unicast queries a second. Nothing
+heard on one interface is repeated on another. mdns-sd is pinned to `micaoss/mdns-sd` for the
+source check and the cap until a release carries them (keepsimple1/mdns-sd#532).
+
+`access.mdns.enabled` switches it; absent, the product's `MDNS=` line decides (section 3.2), on
+when the product says nothing. Off, there is no socket at all: nothing is announced and nothing
+answered. resolved's mDNS stays off on systemd (section 3.4), so one responder holds the port.
+The live state (`mdns`) names whether it runs, why (`setting` or `product`), the `.local` name
+and the services published.
 
 ## 4. mica-apid
 

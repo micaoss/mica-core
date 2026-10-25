@@ -9,6 +9,7 @@ pub mod container;
 mod dns;
 mod hostname;
 pub use hostname::HostnameExecutor;
+mod mdns;
 mod mqtt;
 /// Visible to the daemon rather than to this module alone: the WireGuard key
 /// rotation the bus surfaces ([`network::WireguardRotate`]) is this
@@ -97,6 +98,7 @@ fn openrc_reconcilers(engine: micad_settings::ContainerEngine) -> Vec<Box<dyn Re
         )),
         Box::new(time::TimeReconciler::openrc()),
         Box::new(web::WebReconciler::production(OpenrcUnits::production())),
+        Box::new(mdns::MdnsReconciler::production()),
         Box::new(services::ServicesReconciler::production(
             micad_settings::Init::Openrc,
         )),
@@ -124,6 +126,7 @@ fn systemd_reconcilers(engine: micad_settings::ContainerEngine) -> Vec<Box<dyn R
         Box::new(mqtt::MqttReconciler::production(systemd::Systemd::new())),
         Box::new(time::TimeReconciler::production()),
         Box::new(web::WebReconciler::production(systemd::Systemd::new())),
+        Box::new(mdns::MdnsReconciler::production()),
         Box::new(services::ServicesReconciler::production(
             micad_settings::Init::Systemd,
         )),
@@ -162,6 +165,7 @@ mod feature_tests {
             "dns",
             "time",
             "access.web",
+            "access.mdns",
             "services",
         ] {
             assert!(minimal.contains(&always), "{always}: {minimal:?}");
@@ -206,6 +210,7 @@ mod feature_tests {
                 "container",
                 "time",
                 "access.web",
+                "access.mdns",
                 "services",
                 "bluetooth"
             ]

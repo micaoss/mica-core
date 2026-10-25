@@ -54,6 +54,9 @@ rustix = { workspace = true, features = ["net", "process", "system", "termios", 
 zbus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+mdns-sd = { workspace = true }
+# The interface type mdns-sd's interface predicate takes; already in its graph.
+if-addrs = "0.15"
 
 [dev-dependencies]
 tempfile = { workspace = true }

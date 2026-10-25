@@ -91,7 +91,7 @@ async fn the_hosts_file_carries_the_hostname_and_the_records() {
     // is touched.
     assert_eq!(
         std::fs::read_to_string(host.dir.path().join("resolved.conf.d/60-mica-dns.conf")).unwrap(),
-        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nFallbackDNS=\n"
+        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nFallbackDNS=\nMulticastDNS=no\n"
     );
     assert_eq!(host.control.calls(), ["restart systemd-resolved.service"]);
     assert_eq!(*host.reloads.0.lock().unwrap(), 0);
@@ -107,7 +107,7 @@ async fn global_servers_replace_every_links_own_and_go_away_again() {
 
     assert_eq!(
         std::fs::read_to_string(host.dir.path().join("resolved.conf.d/60-mica-dns.conf")).unwrap(),
-        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nDNS=9.9.9.9 1.1.1.1\nFallbackDNS=\n"
+        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nDNS=9.9.9.9 1.1.1.1\nFallbackDNS=\nMulticastDNS=no\n"
     );
     let run = host.dir.path().join("run");
     for unit in ["80-dhcp.network", "50-mica-eth1.network"] {
@@ -147,7 +147,7 @@ async fn global_servers_replace_every_links_own_and_go_away_again() {
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(host.dir.path().join("resolved.conf.d/60-mica-dns.conf")).unwrap(),
-        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nFallbackDNS=\n"
+        "# Managed by micad from dns.global. Do not edit.\n[Resolve]\nFallbackDNS=\nMulticastDNS=no\n"
     );
     assert!(!run.join("80-dhcp.network.d").exists());
     assert!(!run.join("50-mica-eth1.network.d").exists());

@@ -8,7 +8,8 @@
 //! development host, and every feature is on.
 //!
 //! Its `CLAIM_DEVICE_CODE=required|off` says whether the console's claim asks
-//! for the device code ([`ClaimDeviceCode`]).
+//! for the device code ([`ClaimDeviceCode`]), and `MDNS=on|off` whether LAN
+//! discovery runs while its setting is unset ([`product_switch`]).
 //!
 //! The same file states the product's init (`INIT=systemd|openrc`, systemd when
 //! absent), and its container engine (`CONTAINER_ENGINE=podman|docker`, podman
@@ -155,6 +156,19 @@ impl ClaimDeviceCode {
             }
         })
     }
+}
+
+/// A product's on/off line `<key>`, such as `MDNS=`: `false` for `off`,
+/// `true` for any other word and when the line is absent.
+#[must_use]
+pub fn product_switch(product_conf: &str, key: &str) -> bool {
+    line_value(product_conf, key) != Some("off")
+}
+
+/// The product's name, its `PRODUCT=` line.
+#[must_use]
+pub fn product_name(product_conf: &str) -> Option<&str> {
+    line_value(product_conf, "PRODUCT=").filter(|name| !name.is_empty())
 }
 
 /// The value of the first `<key>` line, unquoted.
@@ -443,6 +457,31 @@ mod tests {
         assert_eq!(features.refuses("wifi.ap"), Some(Feature::Wifi));
         assert_eq!(features.refuses("mqtt.enabled"), None);
         assert_eq!(features.refuses("hostname"), None);
+    }
+
+    #[test]
+    fn a_product_switch_is_on_unless_the_product_says_off() {
+        assert!(product_switch("", "MDNS="));
+        assert!(product_switch("PRODUCT=x\n", "MDNS="));
+        assert!(product_switch("MDNS=on\n", "MDNS="));
+        assert!(product_switch("MDNS=maybe\n", "MDNS="));
+        assert!(!product_switch("MDNS=off\n", "MDNS="));
+        assert!(!product_switch("SSDP=\"off\"\n", "SSDP="));
+        assert!(product_switch("SSDP=off\n", "MDNS="));
+    }
+
+    #[test]
+    fn the_product_name_is_its_product_line() {
+        assert_eq!(
+            product_name("PRODUCT=cx3576.full\nBOARD=cx3576\n"),
+            Some("cx3576.full")
+        );
+        assert_eq!(
+            product_name("PRODUCT=\"mini-x64.basic\"\n"),
+            Some("mini-x64.basic")
+        );
+        assert_eq!(product_name("PRODUCT=\n"), None);
+        assert_eq!(product_name("BOARD=x\n"), None);
     }
 
     #[test]

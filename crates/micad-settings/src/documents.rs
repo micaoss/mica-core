@@ -12,9 +12,9 @@ use std::collections::BTreeMap;
 
 use crate::model::{
     AccessSettings, ApiToken, BluetoothSettings, ClaimSettings, ConsoleSettings, ContainerSettings,
-    DeviceCredentialSettings, DnsSettings, IfaceSettings, MqttSettings, ProvisioningSettings,
-    ResetSettings, ServicesSettings, Settings, SshSettings, TimeSettings, WebAdminSettings,
-    WebSettings, WifiSettings,
+    DeviceCredentialSettings, DnsSettings, IfaceSettings, LanDiscoverySettings, MqttSettings,
+    ProvisioningSettings, ResetSettings, ServicesSettings, Settings, SshSettings, TimeSettings,
+    WebAdminSettings, WebSettings, WifiSettings,
 };
 
 /// Directory the `/mica/config/` documents live in when nothing relocates it.
@@ -46,7 +46,7 @@ pub const CONFIG_DOCUMENTS: [&str; 10] = [
 pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 10] = [
     (
         SYSTEM_DOCUMENT,
-        &["hostname", "access.console", "access.web"],
+        &["hostname", "access.console", "access.web", "access.mdns"],
     ),
     (NETWORK_DOCUMENT, &["network"]),
     (DNS_DOCUMENT, &["dns"]),
@@ -121,8 +121,8 @@ pub const SERVICES_SCHEMA_VERSION: u32 = 1;
 /// from the per-document version for being what is left over.
 pub const STATE_SCHEMA_VERSION: u32 = 1;
 
-/// `system.json`: the hostname, the local console policy and where apid
-/// listens.
+/// `system.json`: the hostname, the local console policy, where apid
+/// listens and whether the device announces itself on the LAN.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemDocument {
@@ -137,6 +137,9 @@ pub struct SystemDocument {
     /// default.
     #[serde(default, skip_serializing_if = "WebSettings::is_default")]
     pub web: WebSettings,
+    /// `access.mdns` in the addressed tree. Not written while unset.
+    #[serde(default, skip_serializing_if = "LanDiscoverySettings::is_unset")]
+    pub mdns: LanDiscoverySettings,
 }
 
 /// `network.json`: the per-interface network configuration.
@@ -354,6 +357,7 @@ impl DocumentSet {
                 hostname: settings.hostname.clone(),
                 console: settings.access.console.clone(),
                 web: settings.access.web,
+                mdns: settings.access.mdns,
             },
             network: NetworkDocument {
                 schema_version: NETWORK_SCHEMA_VERSION,
@@ -421,6 +425,7 @@ impl DocumentSet {
                 ssh: self.ssh.ssh,
                 console: self.system.console,
                 web: self.system.web,
+                mdns: self.system.mdns,
                 device: self.state.access.device,
                 api_tokens: self.state.access.api_tokens,
             },

@@ -154,14 +154,15 @@ fn render_hosts(hostname: &str, dns: &DnsSettings) -> String {
     out
 }
 
-/// resolved's drop-in: the global servers when they are on, and never a
-/// fallback server, so a lookup goes only where the settings say.
+/// resolved's drop-in: the global servers when they are on, never a
+/// fallback server, so a lookup goes only where the settings say, and no
+/// mDNS, whose port micad's own responder holds (section 3.13).
 fn render_resolved(global: &micad_settings::GlobalDns) -> String {
     let mut out = "# Managed by micad from dns.global. Do not edit.\n[Resolve]\n".to_string();
     if global.enabled {
         out.push_str(&format!("DNS={}\n", global.servers.join(" ")));
     }
-    out.push_str("FallbackDNS=\n");
+    out.push_str("FallbackDNS=\nMulticastDNS=no\n");
     out
 }
 
