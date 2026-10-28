@@ -34,11 +34,15 @@ pub enum Outcome {
 }
 
 /// Provision this device if STATE says it has not been provisioned yet.
+///
+/// `ssh_on` is the product's `SSH=` line ([`micad_settings::product_ssh`]):
+/// whether SSH is on at first boot.
 pub fn ensure_provisioned(
     store: &Store,
     state_dir: &Path,
     settings: &mut Settings,
     features: &Features,
+    ssh_on: bool,
 ) -> Result<Outcome> {
     if settings.provisioning.state == ProvisioningState::Complete {
         return Ok(Outcome::AlreadyProvisioned);
@@ -60,9 +64,9 @@ pub fn ensure_provisioned(
         seeded.hostname = seeded_hostname(&device_id);
     }
 
-    // SSH is off on a fresh device, whatever image it booted; the operator
-    // opens it.
-    seeded.access.ssh.enabled = false;
+    // SSH on a fresh device is the product's, whatever the tree held: off
+    // unless the product turns it on, and then the operator decides.
+    seeded.access.ssh.enabled = ssh_on;
 
     // A product with Wi-Fi comes up with its access point on, under the SSID
     // and key its label prints (`docs/factory-ap-key.md`). The station has no
@@ -146,8 +150,14 @@ mod tests {
         let store = store_in(dir.path());
         let mut settings = Settings::default();
 
-        let outcome = ensure_provisioned(&store, dir.path(), &mut settings, &Features::only(&[]))
-            .expect("ensure_provisioned");
+        let outcome = ensure_provisioned(
+            &store,
+            dir.path(),
+            &mut settings,
+            &Features::only(&[]),
+            false,
+        )
+        .expect("ensure_provisioned");
         assert_eq!(outcome, Outcome::Seeded);
 
         let device_id = settings
@@ -201,8 +211,14 @@ mod tests {
         let mut settings = Settings::default();
 
         assert_eq!(
-            ensure_provisioned(&store, dir.path(), &mut settings, &Features::only(&[]))
-                .expect("first"),
+            ensure_provisioned(
+                &store,
+                dir.path(),
+                &mut settings,
+                &Features::only(&[]),
+                false
+            )
+            .expect("first"),
             Outcome::Seeded
         );
         let first_tree = settings.clone();
@@ -214,7 +230,7 @@ mod tests {
         let mut second = store.load().expect("reload");
         assert_eq!(second, first_tree);
         assert_eq!(
-            ensure_provisioned(&store, dir.path(), &mut second, &Features::only(&[]))
+            ensure_provisioned(&store, dir.path(), &mut second, &Features::only(&[]), false)
                 .expect("second"),
             Outcome::AlreadyProvisioned
         );
@@ -242,7 +258,14 @@ mod tests {
         let store = store_in(dir.path());
 
         let mut settings = Settings::default();
-        ensure_provisioned(&store, dir.path(), &mut settings, &Features::only(&[])).expect("seed");
+        ensure_provisioned(
+            &store,
+            dir.path(),
+            &mut settings,
+            &Features::only(&[]),
+            false,
+        )
+        .expect("seed");
 
         // The operator names the device and opens SSH, as they are entitled to.
         settings.hostname = "edge-42".to_string();
@@ -252,8 +275,14 @@ mod tests {
 
         let mut reloaded = store.load().expect("reload");
         assert_eq!(
-            ensure_provisioned(&store, dir.path(), &mut reloaded, &Features::only(&[]))
-                .expect("re-run"),
+            ensure_provisioned(
+                &store,
+                dir.path(),
+                &mut reloaded,
+                &Features::only(&[]),
+                false
+            )
+            .expect("re-run"),
             Outcome::AlreadyProvisioned
         );
 
@@ -280,7 +309,14 @@ mod tests {
         };
         assert_eq!(settings.provisioning.state, ProvisioningState::Pending);
 
-        ensure_provisioned(&store, dir.path(), &mut settings, &Features::only(&[])).expect("seed");
+        ensure_provisioned(
+            &store,
+            dir.path(),
+            &mut settings,
+            &Features::only(&[]),
+            false,
+        )
+        .expect("seed");
         assert_eq!(settings.hostname, "edge-42");
         assert_eq!(settings.provisioning.state, ProvisioningState::Complete);
     }
@@ -293,7 +329,7 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let store = store_in(dir.path());
         let mut settings = Settings::default();
-        ensure_provisioned(&store, dir.path(), &mut settings, &wifi).expect("seed");
+        ensure_provisioned(&store, dir.path(), &mut settings, &wifi, false).expect("seed");
         assert_eq!(settings.wifi.ap.mode, ApMode::Always);
         assert!(!settings.wifi.client.enabled);
         assert_eq!(store.load().expect("reload").wifi.ap.mode, ApMode::Always);
@@ -304,9 +340,34 @@ mod tests {
         settings.wifi.client.networks.push(
             serde_json::from_value(serde_json::json!({ "ssid": "harbour" })).expect("network"),
         );
-        ensure_provisioned(&store, dir.path(), &mut settings, &wifi).expect("seed");
+        ensure_provisioned(&store, dir.path(), &mut settings, &wifi, false).expect("seed");
         assert_eq!(settings.wifi.ap.mode, ApMode::Off);
         assert!(settings.wifi.client.enabled);
+    }
+
+    // A product that turns SSH on seeds it on, and nothing else about it moves.
+    #[test]
+    fn a_product_with_ssh_on_seeds_ssh_on() {
+        let dir = TempDir::new().expect("tempdir");
+        let store = store_in(dir.path());
+        let mut settings = Settings::default();
+
+        ensure_provisioned(
+            &store,
+            dir.path(),
+            &mut settings,
+            &Features::only(&[]),
+            true,
+        )
+        .expect("seed");
+        assert_eq!(
+            settings.access.ssh,
+            SshSettings {
+                enabled: true,
+                ..SshSettings::default()
+            }
+        );
+        assert!(store.load().expect("reload").access.ssh.enabled);
     }
 
     // SSH is seeded off, and nothing else about SSH moves from the schema
@@ -319,7 +380,14 @@ mod tests {
         let store = store_in(dir.path());
         let mut settings = Settings::default();
 
-        ensure_provisioned(&store, dir.path(), &mut settings, &Features::only(&[])).expect("seed");
+        ensure_provisioned(
+            &store,
+            dir.path(),
+            &mut settings,
+            &Features::only(&[]),
+            false,
+        )
+        .expect("seed");
         assert!(!settings.access.ssh.enabled);
         assert!(!store.load().expect("reload").access.ssh.enabled);
         assert_eq!(
@@ -347,8 +415,14 @@ mod tests {
                 },
                 ..Settings::default()
             };
-            ensure_provisioned(&store, dir.path(), &mut settings, &Features::only(&[]))
-                .expect("seed");
+            ensure_provisioned(
+                &store,
+                dir.path(),
+                &mut settings,
+                &Features::only(&[]),
+                false,
+            )
+            .expect("seed");
             // The pre-set identity is kept, not replaced.
             assert_eq!(settings.provisioning.device_id.as_deref(), Some(device_id));
             settings.hostname
@@ -388,8 +462,14 @@ mod tests {
         let store = Store::new(blocker.join("settings.toml"), config);
 
         let mut settings = Settings::default();
-        let err = ensure_provisioned(&store, dir.path(), &mut settings, &Features::only(&[]))
-            .expect_err("save must fail");
+        let err = ensure_provisioned(
+            &store,
+            dir.path(),
+            &mut settings,
+            &Features::only(&[]),
+            false,
+        )
+        .expect_err("save must fail");
         assert!(
             format!("{err:#}").contains("persist the seeded settings"),
             "unexpected error: {err:#}"
@@ -428,6 +508,7 @@ mod tests {
             &state_dir,
             &mut settings,
             &micad_settings::Features::only(&[]),
+            false,
         )
         .expect_err("identity must fail");
         assert!(
@@ -459,7 +540,14 @@ mod tests {
         let mut settings = Settings::default();
         assert_eq!(settings.provisioning.seeded_generation, 0);
 
-        ensure_provisioned(&store, dir.path(), &mut settings, &Features::only(&[])).expect("seed");
+        ensure_provisioned(
+            &store,
+            dir.path(),
+            &mut settings,
+            &Features::only(&[]),
+            false,
+        )
+        .expect("seed");
         assert_eq!(settings.provisioning.seeded_generation, 1);
         assert_eq!(
             store.load().expect("reload").provisioning.seeded_generation,
@@ -478,8 +566,14 @@ mod tests {
             },
             ..Settings::default()
         };
-        ensure_provisioned(&store, dir.path(), &mut interrupted, &Features::only(&[]))
-            .expect("re-seed");
+        ensure_provisioned(
+            &store,
+            dir.path(),
+            &mut interrupted,
+            &Features::only(&[]),
+            false,
+        )
+        .expect("re-seed");
         assert_eq!(interrupted.provisioning.seeded_generation, 1);
     }
 }

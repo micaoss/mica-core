@@ -222,6 +222,9 @@ async fn serve() -> anyhow::Result<()> {
             &state_dir,
             &mut settings,
             &product_features(std::path::Path::new(micad_settings::PRODUCT_FILE)),
+            micad_settings::product_ssh(
+                &std::fs::read_to_string(micad_settings::PRODUCT_FILE).unwrap_or_default(),
+            ),
         )
         .context("first-boot provisioning")?;
         tracing::info!(?outcome, state_dir = %state_dir.display(), "provisioning checked");

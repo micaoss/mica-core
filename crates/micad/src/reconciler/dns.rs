@@ -2,11 +2,13 @@
 //! servers in place of every interface's.
 //!
 //! `/etc/hosts` links to [`HOSTS_PATH`], which Base seeds at boot with the
-//! lines this reconciler starts with. Global servers are resolved's drop-in on
-//! systemd, which also empties resolved's fallback list whether they are on or
-//! not, with a networkd drop-in beside every `.network` that takes the link's
-//! own servers and search domains away; on OpenRC they are `resolv.d/global`, which Base's
-//! `mica-resolv` makes the whole of `resolv.conf`.
+//! lines this reconciler starts with, then the records it saved on DATA in
+//! [`RECORDS_PATH`]. Global servers are resolved's drop-in on systemd, which
+//! also empties resolved's fallback list whether they are on or not, with a
+//! networkd drop-in beside every `.network` that takes the link's own servers
+//! and search domains away; Base links both directories under `/run` to DATA,
+//! so the init applies them at boot. On OpenRC they are [`GLOBAL_PATH`] on
+//! DATA, which Base's `mica-resolv` makes the whole of `resolv.conf`.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -24,6 +26,10 @@ use crate::openrc::{Commands, Host};
 
 /// The hosts file `/etc/hosts` links to.
 const HOSTS_PATH: &str = "/run/mica/hosts";
+/// The static records on DATA, which Base's `mica-hosts` adds at boot.
+const RECORDS_PATH: &str = "/var/lib/mica/dns/hosts";
+/// The OpenRC global servers on DATA, which Base's `mica-resolv` reads.
+const GLOBAL_PATH: &str = "/var/lib/mica/dns/resolv.global";
 /// Mode of every file this reconciler writes: none carries a secret.
 const FILE_MODE: u32 = 0o644;
 /// resolved's drop-in carrying the global servers.
@@ -46,8 +52,6 @@ const LINK_DROP_IN: &str = "90-mica-global-dns.conf";
 const LINK_DROP_IN_TEXT: &str = "# Managed by micad from dns.global. Do not edit.\n\
      [Network]\nDNS=\n\n[DHCPv4]\nUseDNS=no\nUseDomains=no\n\n\
      [DHCPv6]\nUseDNS=no\nUseDomains=no\n\n[IPv6AcceptRA]\nUseDNS=no\nUseDomains=no\n";
-/// The OpenRC resolver directory and the global file in it.
-const RESOLVERS_DIR: &str = "/run/mica/resolv.d";
 /// Base's program building `resolv.conf` from [`RESOLVERS_DIR`].
 const MICA_RESOLV: &str = "/usr/lib/mica/mica-resolv";
 
@@ -61,9 +65,9 @@ enum Global {
         control: Arc<dyn UnitControl>,
         reloader: Arc<dyn NetworkReload>,
     },
-    /// `resolv.d/global` and `mica-resolv`.
+    /// The global file and `mica-resolv`.
     Resolvd {
-        dir: PathBuf,
+        file: PathBuf,
         rebuild: PathBuf,
         commands: Arc<dyn Commands>,
     },
@@ -72,15 +76,18 @@ enum Global {
 /// Reconciler for the `dns` settings subtree.
 pub struct DnsReconciler {
     hosts: PathBuf,
+    records: PathBuf,
     global: Global,
 }
 
 impl DnsReconciler {
     /// A reconciler for a systemd root, writing the hosts file to `hosts`,
-    /// resolved's drop-in to `drop_in` and the link drop-ins under
-    /// `runtime_dir` for each `.network` in `network_dirs`.
+    /// the static records to `records`, resolved's drop-in to `drop_in` and
+    /// the link drop-ins under `runtime_dir` for each `.network` in
+    /// `network_dirs`.
     pub fn resolved(
         hosts: PathBuf,
+        records: PathBuf,
         drop_in: PathBuf,
         network_dirs: Vec<PathBuf>,
         runtime_dir: PathBuf,
@@ -89,6 +96,7 @@ impl DnsReconciler {
     ) -> Self {
         Self {
             hosts,
+            records,
             global: Global::Resolved {
                 drop_in,
                 network_dirs,
@@ -99,18 +107,20 @@ impl DnsReconciler {
         }
     }
 
-    /// A reconciler for an OpenRC root, writing `global` in `dir` and running
-    /// `rebuild` after it changes.
+    /// A reconciler for an OpenRC root, writing the global servers to `file`
+    /// and running `rebuild` after it changes.
     pub fn resolvd(
         hosts: PathBuf,
-        dir: PathBuf,
+        records: PathBuf,
+        file: PathBuf,
         rebuild: PathBuf,
         commands: Arc<dyn Commands>,
     ) -> Self {
         Self {
             hosts,
+            records,
             global: Global::Resolvd {
-                dir,
+                file,
                 rebuild,
                 commands,
             },
@@ -121,6 +131,7 @@ impl DnsReconciler {
     pub fn production() -> Self {
         Self::resolved(
             PathBuf::from(HOSTS_PATH),
+            PathBuf::from(RECORDS_PATH),
             PathBuf::from(RESOLVED_DROP_IN),
             NETWORK_DIRS.iter().map(PathBuf::from).collect(),
             PathBuf::from(RUNTIME_NETWORK_DIR),
@@ -133,7 +144,8 @@ impl DnsReconciler {
     pub fn openrc() -> Self {
         Self::resolvd(
             PathBuf::from(HOSTS_PATH),
-            PathBuf::from(RESOLVERS_DIR),
+            PathBuf::from(RECORDS_PATH),
+            PathBuf::from(GLOBAL_PATH),
             PathBuf::from(MICA_RESOLV),
             Arc::new(Host),
         )
@@ -141,9 +153,17 @@ impl DnsReconciler {
 }
 
 /// The hosts file for `hostname` and the static records: Base's three lines,
-/// then one line per record with its comment.
+/// then [`render_records`].
 fn render_hosts(hostname: &str, dns: &DnsSettings) -> String {
-    let mut out = format!("127.0.0.1\tlocalhost\n::1\tlocalhost\n127.0.1.1\t{hostname}\n");
+    format!(
+        "127.0.0.1\tlocalhost\n::1\tlocalhost\n127.0.1.1\t{hostname}\n{}",
+        render_records(dns)
+    )
+}
+
+/// One hosts line per static record, with its comment.
+fn render_records(dns: &DnsSettings) -> String {
+    let mut out = String::new();
     for record in &dns.static_records {
         out.push_str(&format!("{}\t{}", record.address, record.hostname));
         if let Some(comment) = &record.comment {
@@ -249,6 +269,11 @@ impl Reconciler for DnsReconciler {
             &render_hosts(&settings.hostname, dns),
             FILE_MODE,
         )?;
+        if dns.static_records.is_empty() {
+            remove_if_present(&self.records)?;
+        } else {
+            write_config_if_changed(&self.records, &render_records(dns), FILE_MODE)?;
+        }
         let global = &dns.global;
         match &self.global {
             Global::Resolved {
@@ -273,15 +298,14 @@ impl Reconciler for DnsReconciler {
                 }
             }
             Global::Resolvd {
-                dir,
+                file,
                 rebuild,
                 commands,
             } => {
-                let path = dir.join("global");
                 let changed = if global.enabled {
-                    write_config_if_changed(&path, &render_resolvd(&global.servers), FILE_MODE)?
+                    write_config_if_changed(file, &render_resolvd(&global.servers), FILE_MODE)?
                 } else {
-                    remove_if_present(&path)?
+                    remove_if_present(file)?
                 };
                 if changed {
                     let program = rebuild.display().to_string();

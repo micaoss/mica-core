@@ -60,6 +60,7 @@ fn systemd() -> Systemd {
     let reloads = Arc::new(Reloads::default());
     let reconciler = DnsReconciler::resolved(
         dir.path().join("hosts"),
+        dir.path().join("records"),
         dir.path().join("resolved.conf.d/60-mica-dns.conf"),
         vec![image, runtime.clone()],
         runtime,
@@ -86,6 +87,11 @@ async fn the_hosts_file_carries_the_hostname_and_the_records() {
         std::fs::read_to_string(host.dir.path().join("hosts")).unwrap(),
         "127.0.0.1\tlocalhost\n::1\tlocalhost\n127.0.1.1\tedge\n\
          192.168.1.5\tnas.lan\t# the NAS\n"
+    );
+    // The records alone are saved on DATA, for Base to add at boot.
+    assert_eq!(
+        std::fs::read_to_string(host.dir.path().join("records")).unwrap(),
+        "192.168.1.5\tnas.lan\t# the NAS\n"
     );
     // Off, resolved is only told to keep no fallback servers, and no link
     // is touched.
@@ -175,7 +181,8 @@ async fn on_openrc_the_global_file_stands_alone_and_mica_resolv_rebuilds() {
     let commands = Arc::new(FakeCommands::default());
     let reconciler = DnsReconciler::resolvd(
         dir.path().join("hosts"),
-        dir.path().join("resolv.d"),
+        dir.path().join("records"),
+        dir.path().join("resolv.global"),
         PathBuf::from("/usr/lib/mica/mica-resolv"),
         commands.clone(),
     );
@@ -185,7 +192,7 @@ async fn on_openrc_the_global_file_stands_alone_and_mica_resolv_rebuilds() {
         .await
         .unwrap();
     assert_eq!(
-        std::fs::read_to_string(dir.path().join("resolv.d/global")).unwrap(),
+        std::fs::read_to_string(dir.path().join("resolv.global")).unwrap(),
         "nameserver 9.9.9.9\nnameserver 1.1.1.1\n"
     );
     assert_eq!(commands.calls(), ["/usr/lib/mica/mica-resolv"]);
@@ -194,7 +201,8 @@ async fn on_openrc_the_global_file_stands_alone_and_mica_resolv_rebuilds() {
         .apply(&settings(false, &["9.9.9.9"], Vec::new()))
         .await
         .unwrap();
-    assert!(!dir.path().join("resolv.d/global").exists());
+    assert!(!dir.path().join("resolv.global").exists());
+    assert!(!dir.path().join("records").exists());
     assert_eq!(commands.calls().len(), 2);
 }
 
@@ -211,4 +219,21 @@ async fn a_hand_edited_record_the_rule_refuses_writes_nothing() {
             .is_err()
     );
     assert!(!host.dir.path().join("hosts").exists());
+    assert!(!host.dir.path().join("records").exists());
+}
+
+#[tokio::test]
+async fn the_saved_records_go_away_with_the_last_record() {
+    let host = systemd();
+    host.reconciler
+        .apply(&settings(false, &[], vec![nas()]))
+        .await
+        .unwrap();
+    assert!(host.dir.path().join("records").exists());
+
+    host.reconciler
+        .apply(&settings(false, &[], Vec::new()))
+        .await
+        .unwrap();
+    assert!(!host.dir.path().join("records").exists());
 }

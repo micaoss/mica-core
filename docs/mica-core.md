@@ -61,6 +61,12 @@ reconcilers that turn them into system configuration, keeps the live-state tree 
 read-only observers, provisions the device, executes power, reset and recovery, drives updates
 through `mica-deploy`, and keeps a registry of the other `com.mica.*` services on the bus.
 
+micad is optional: a product without the feature `micad` composes no daemon, and its root still
+boots, runs and updates (`mica:docs/architecture.md` 1.1). So what micad drives is Base's to
+start: each service it configures reads a file on DATA at boot, which micad writes and then
+restarts or stops the service, never enabling or disabling one. SSH and time hold to this today;
+the table there lists the services still to follow (sections 3.4 and 3.8 say what each drives).
+
 ### 3.1 Startup
 
 In order: `--version` is answered before anything is read; the settings are loaded, and micad
@@ -217,8 +223,8 @@ live-state tree under its name.
 | Reconciler | systemd | OpenRC |
 | --- | --- | --- |
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
-| `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. Each DHCP stanza carries `metric <n>`, the networkd numbers. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. On a static or manual stanza each static route is an `up ip route add <destination> [via <gateway>] dev <iface> [metric <m>]` line with the matching `down ip route del … \|\| :`; on a DHCP stanza, whose link is up before its lease, each is a `route_<n>` option (`<destination> [via <gateway>] [metric <m>]`, numbered from 1) for Base's `mica-udhcpc` (section 3.8). VLAN, bridge and WireGuard are refused by name |
-| `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf` (resolved restarted when it changes) always empties `FallbackDNS=` and sets `MulticastDNS=no` (micad's own responder holds the port, section 3.13) and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file. Global servers: `/run/mica/resolv.d/global`, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
+| `network` | networkd `.network`/`.netdev` under `/run/systemd/network`, which Base links to `/var/lib/mica/network/networkd` on DATA, for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. Each DHCP stanza carries `metric <n>`, the networkd numbers. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. On a static or manual stanza each static route is an `up ip route add <destination> [via <gateway>] dev <iface> [metric <m>]` line with the matching `down ip route del … \|\| :`; on a DHCP stanza, whose link is up before its lease, each is a `route_<n>` option (`<destination> [via <gateway>] [metric <m>]`, numbered from 1) for Base's `mica-udhcpc` (section 3.8). VLAN, bridge and WireGuard are refused by name |
+| `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes; the records alone are saved in `/var/lib/mica/dns/hosts`, which Base's `mica-hosts` adds at boot. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf`, a directory Base links to DATA (resolved restarted when it changes) always empties `FallbackDNS=` and sets `MulticastDNS=no` (micad's own responder holds the port, section 3.13) and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file and records. Global servers: `/var/lib/mica/dns/resolv.global` on DATA, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
 | `sshd` | `/var/lib/mica/ssh/sshd.env`, the authorized keys of `root` and `mica`, `mica-sshd.service` (restarted or stopped, never enabled or disabled) | the same files, `mica-sshd` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
 | `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server, which hands out the global DNS servers while they are on and the uplink's otherwise | configuration in `/var/lib/mica/hostapd`, `/run/mica/wifi-ap.env`, busybox udhcpd on the same pool (`/run/mica/wifi-ap-udhcpd.conf`) with the global DNS servers while they are on, `mica-wifi-ap` |
@@ -298,7 +304,8 @@ absence is reported with its reason rather than as a healthy reading:
 ### 3.7 Lifecycle
 
 - **Provisioning.** First boot generates identity and per-device credentials on the device;
-  nothing secret is baked into an image. A provisioning document on the boot medium or removable
+  nothing secret is baked into an image. SSH starts on or off as the product's `SSH=on|off` line
+  says (off when it names none), and the operator decides from then on. A provisioning document on the boot medium or removable
   media is validated whole, applied atomically and recorded, so a second application is a no-op.
 - **Updates.** micad runs `mica-deploy` with bounded time and output, and adds the operator's
   policy: the check cadence and its optional time of day, the maintenance window, the
@@ -1074,7 +1081,7 @@ bundle to `/mica/ui`; it is validated (`crates/mica-ui-bundle`), installed as a 
 activated explicitly, and re-checked against the API at every start.
 
 **Reaching a shell.** Claim the device, then either add a public key to `access.ssh` (SSH is off
-until enabled; keys apply to `root` and `mica`) or set a transient root password (8 to 72 bytes,
+until enabled, unless the product turns it on; keys apply to `root` and `mica`) or set a transient root password (8 to 72 bytes,
 gone at the next boot). The SSH server, dropbear or OpenSSH, authenticates against `/etc/shadow`
 through `crypt(3)`, without PAM (OpenSSH runs with `UsePAM no`); mica-system-base asserts that of
 the packages it pins. Without a transient password root's hash is `*`, which Base's shadow

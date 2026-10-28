@@ -10,7 +10,8 @@
 //! Its `CLAIM_DEVICE_CODE=required|off` says whether the console's claim asks
 //! for the device code ([`ClaimDeviceCode`]), and `MDNS=on|off` and
 //! `SSDP=on|off` whether each kind of LAN discovery runs while its setting is
-//! unset ([`product_switch`]).
+//! unset ([`product_switch`]). `SSH=on|off` says whether SSH is on at first
+//! boot ([`product_ssh`]).
 //!
 //! The same file states the product's init (`INIT=systemd|openrc`, systemd when
 //! absent), and its container engine (`CONTAINER_ENGINE=podman|docker`, podman
@@ -164,6 +165,14 @@ impl ClaimDeviceCode {
 #[must_use]
 pub fn product_switch(product_conf: &str, key: &str) -> bool {
     line_value(product_conf, key) != Some("off")
+}
+
+/// Whether a product turns SSH on at first boot, its `SSH=` line: `true` for
+/// `on` alone, so a product that names none, or misspells it, starts with SSH
+/// off.
+#[must_use]
+pub fn product_ssh(product_conf: &str) -> bool {
+    line_value(product_conf, "SSH=") == Some("on")
 }
 
 /// The product's name, its `PRODUCT=` line.
@@ -469,6 +478,15 @@ mod tests {
         assert!(!product_switch("MDNS=off\n", "MDNS="));
         assert!(!product_switch("SSDP=\"off\"\n", "SSDP="));
         assert!(product_switch("SSDP=off\n", "MDNS="));
+    }
+
+    #[test]
+    fn a_product_turns_ssh_on_only_by_saying_on() {
+        assert!(product_ssh("SSH_SERVER=dropbear\nSSH=on\n"));
+        assert!(!product_ssh(""));
+        assert!(!product_ssh("SSH_SERVER=dropbear\n"));
+        assert!(!product_ssh("SSH=off\n"));
+        assert!(!product_ssh("SSH=yes\n"));
     }
 
     #[test]

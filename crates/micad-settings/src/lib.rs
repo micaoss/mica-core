@@ -51,7 +51,7 @@ pub use documents::{
 pub use error::SettingsError;
 pub use features::{
     ClaimDeviceCode, ContainerEngine, Feature, Features, Init, PRODUCT_FILE, product_name,
-    product_switch,
+    product_ssh, product_switch,
 };
 pub use model::{
     APID_LISTENERS_PATH, APID_LOCAL_SOCKET_PATH, AccessSettings, ApMode, ApPool, ApSecurity,

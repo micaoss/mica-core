@@ -110,6 +110,7 @@ pub(super) fn an_injected_identity_is_the_one_first_boot_seeds_from() {
         dir.path(),
         &mut settings,
         &micad_settings::Features::only(&[]),
+        false,
     )
     .expect("seed");
 
@@ -146,6 +147,7 @@ pub(super) fn a_refused_document_leaves_a_working_unclaimed_appliance() {
         dir.path(),
         &mut settings,
         &micad_settings::Features::only(&[]),
+        false,
     )
     .expect("seed");
     assert_eq!(settings.provisioning.state, ProvisioningState::Complete);
