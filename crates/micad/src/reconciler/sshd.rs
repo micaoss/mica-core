@@ -2,6 +2,12 @@
 //! managed accounts' authorized keys from `access.ssh` and drives
 //! `mica-sshd.service`. Three system effects, in this order.
 //!
+//! The environment file lives on DATA and says whether SSH is on, so the init
+//! starts the server at boot as it was last configured, before micad or without
+//! it: systemd through the unit's `ExecCondition=`, OpenRC through
+//! `mica-sshd-boot`. micad never enables or disables the unit; it only restarts
+//! the server for new settings and stops it when SSH is turned off.
+//!
 //! The server is Base's, dropbear or OpenSSH as the product chooses; both read
 //! the same environment file, and nothing here depends on which one runs.
 //! Either authenticates against `/etc/shadow` through `crypt(3)` and not
@@ -18,7 +24,7 @@ use rustix::fs::{AtFlags, Mode, OFlags};
 use serde_json::json;
 
 use super::Reconciler;
-use super::systemd::{UnitControl, is_active, is_enabled};
+use super::systemd::{UnitControl, is_active};
 use crate::transient;
 
 /// Unit implementing the SSH server, shipped by Base on both inits.
@@ -26,8 +32,8 @@ const SSH_UNIT: &str = "mica-sshd.service";
 /// `ActiveState` of a unit that exited unsuccessfully, possibly inside its
 /// start-limit window.
 const FAILED_STATE: &str = "failed";
-/// Environment file carrying the SSH server's arguments.
-const DEFAULT_ENVIRONMENT_FILE: &str = "/run/mica/sshd.env";
+/// Environment file carrying the SSH server's settings, read by the init at boot.
+const DEFAULT_ENVIRONMENT_FILE: &str = "/var/lib/mica/ssh/sshd.env";
 /// Account database the managed accounts' ids and homes are read from.
 const DEFAULT_PASSWD: &str = "/etc/passwd";
 /// Accounts this reconciler renders authorized keys for, in render order.
@@ -153,13 +159,14 @@ fn listener(address: &str, port: u16) -> String {
     }
 }
 
-/// Render `/run/mica/sshd.env` for `ssh`.
+/// Render `/var/lib/mica/ssh/sshd.env` for `ssh`.
 ///
 /// Pure and deterministic: the same settings always produce the same bytes, so
 /// a re-render can be compared against what is on disk to decide whether
-/// anything changed. Three shell-sourceable lines, the contract with Base's
+/// anything changed. Four shell-sourceable lines, the contract with Base's
 /// server packages:
 ///
+/// - `SSH_ENABLED=yes|no`: whether the init starts the server at boot;
 /// - `SSH_LISTEN="..."`: the bare port, listening on every address, or one
 ///   `addr:port` per listen address, space-separated, IPv6 in brackets;
 /// - `SSH_PASSWORD=yes|no`: `yes` only while password logins are on;
@@ -176,7 +183,8 @@ fn render_environment(ssh: &SshSettings, password_authentication: bool) -> Strin
     };
     let yes_no = |on: bool| if on { "yes" } else { "no" };
     format!(
-        "SSH_LISTEN=\"{listen}\"\nSSH_PASSWORD={}\nSSH_ROOT_LOGIN={}\n",
+        "SSH_ENABLED={}\nSSH_LISTEN=\"{listen}\"\nSSH_PASSWORD={}\nSSH_ROOT_LOGIN={}\n",
+        yes_no(ssh.enabled),
         yes_no(password_authentication),
         yes_no(ssh.permit_root_login)
     )
@@ -395,14 +403,12 @@ impl<C: UnitControl> SshdReconciler<C> {
         Ok(targets)
     }
 
-    /// Bring `mica-sshd.service` to the state `ssh.enabled` asks for. Reads
-    /// before it writes, so a system already in the target state gets no calls
-    /// at all.
+    /// Bring `mica-sshd.service` to the state `ssh.enabled` asks for: running or
+    /// stopped. Never enabled or disabled; the environment file decides boot.
+    /// Reads before it writes, so a system already in the target state gets no
+    /// calls at all.
     async fn apply_unit(&self, ssh: &SshSettings, config_changed: bool) -> Result<()> {
         if ssh.enabled {
-            if !is_enabled(&self.control.unit_file_state(self.unit).await?) {
-                self.control.enable(self.unit).await?;
-            }
             let active_state = self.control.active_state(self.unit).await?;
             if is_active(&active_state) {
                 if config_changed {
@@ -425,13 +431,8 @@ impl<C: UnitControl> SshdReconciler<C> {
                 }
                 self.control.start(self.unit).await?;
             }
-        } else {
-            if is_active(&self.control.active_state(self.unit).await?) {
-                self.control.stop(self.unit).await?;
-            }
-            if is_enabled(&self.control.unit_file_state(self.unit).await?) {
-                self.control.disable(self.unit).await?;
-            }
+        } else if is_active(&self.control.active_state(self.unit).await?) {
+            self.control.stop(self.unit).await?;
         }
         Ok(())
     }

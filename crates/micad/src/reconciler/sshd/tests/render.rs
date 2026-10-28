@@ -4,7 +4,13 @@ use super::*;
 
 #[test]
 pub(super) fn empty_listen_addresses_render_one_listener_on_every_address() {
-    let rendered = render_environment(&SshSettings::default(), true);
+    let rendered = render_environment(
+        &SshSettings {
+            enabled: true,
+            ..SshSettings::default()
+        },
+        true,
+    );
 
     assert_eq!(rendered, GOLDEN_DEFAULTS);
 }
@@ -37,39 +43,43 @@ pub(super) fn an_address_that_carries_its_own_port_keeps_it() {
     );
 
     assert!(
-        rendered.starts_with("SSH_LISTEN=\"10.0.0.5:2200 [fd00::1]:2201\"\n"),
+        rendered.starts_with("SSH_ENABLED=no\nSSH_LISTEN=\"10.0.0.5:2200 [fd00::1]:2201\"\n"),
         "{rendered}"
     );
 }
 
-/// The contract with Base's server packages (dropbear or OpenSSH): three
+/// The contract with Base's server packages (dropbear or OpenSSH): four
 /// shell-sourceable lines in a fixed order, `SSH_LISTEN` quoted and never
-/// empty, the two switches `yes` or `no`.
+/// empty, the three switches `yes` or `no`.
 #[test]
-pub(super) fn every_render_is_the_three_contract_lines() {
-    for permit_root_login in [true, false] {
-        for password in [true, false] {
-            for listen in [vec![], vec!["192.0.2.1".to_string()]] {
-                let rendered = render_environment(
-                    &SshSettings {
-                        permit_root_login,
-                        listen_addresses: listen,
-                        ..SshSettings::default()
-                    },
-                    password,
-                );
-                let lines: Vec<&str> = rendered.lines().collect();
-                assert_eq!(lines.len(), 3, "{rendered}");
-                assert!(lines[0].starts_with("SSH_LISTEN=\""), "{rendered}");
-                assert!(lines[0].ends_with('"'), "{rendered}");
-                assert_ne!(lines[0], "SSH_LISTEN=\"\"", "{rendered}");
-                let yes_no = |on: bool| if on { "yes" } else { "no" };
-                assert_eq!(lines[1], format!("SSH_PASSWORD={}", yes_no(password)));
-                assert_eq!(
-                    lines[2],
-                    format!("SSH_ROOT_LOGIN={}", yes_no(permit_root_login))
-                );
-                assert!(rendered.ends_with('\n'), "{rendered}");
+pub(super) fn every_render_is_the_four_contract_lines() {
+    let yes_no = |on: bool| if on { "yes" } else { "no" };
+    for enabled in [true, false] {
+        for permit_root_login in [true, false] {
+            for password in [true, false] {
+                for listen in [vec![], vec!["192.0.2.1".to_string()]] {
+                    let rendered = render_environment(
+                        &SshSettings {
+                            enabled,
+                            permit_root_login,
+                            listen_addresses: listen,
+                            ..SshSettings::default()
+                        },
+                        password,
+                    );
+                    let lines: Vec<&str> = rendered.lines().collect();
+                    assert_eq!(lines.len(), 4, "{rendered}");
+                    assert_eq!(lines[0], format!("SSH_ENABLED={}", yes_no(enabled)));
+                    assert!(lines[1].starts_with("SSH_LISTEN=\""), "{rendered}");
+                    assert!(lines[1].ends_with('"'), "{rendered}");
+                    assert_ne!(lines[1], "SSH_LISTEN=\"\"", "{rendered}");
+                    assert_eq!(lines[2], format!("SSH_PASSWORD={}", yes_no(password)));
+                    assert_eq!(
+                        lines[3],
+                        format!("SSH_ROOT_LOGIN={}", yes_no(permit_root_login))
+                    );
+                    assert!(rendered.ends_with('\n'), "{rendered}");
+                }
             }
         }
     }

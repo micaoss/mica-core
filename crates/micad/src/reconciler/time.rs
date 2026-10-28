@@ -1,5 +1,11 @@
-//! Time reconciler: the `time` settings subtree rendered into timesyncd
-//! runtime configuration and the runtime presentation timezone.
+//! Time reconciler: the `time` settings subtree rendered into the time
+//! service's server list and the runtime presentation timezone.
+//!
+//! The server list lives on DATA, where the time service reads it at boot, so
+//! the operator's servers apply from the first poll, before micad or without
+//! it: timesyncd through Base's `/etc/systemd/timesyncd.conf.d/60-mica-servers.conf`
+//! link onto it, `mica-ntpd` by sourcing it. micad only restarts the service
+//! when the list changes.
 //!
 //! There is no enable or pause path in this reconciler. timesyncd is an
 //! always-running base service enabled by the image, so convergence only ever
@@ -21,11 +27,12 @@ const TIMESYNCD_UNIT: &str = "systemd-timesyncd.service";
 /// servers in [`NTPD_SERVERS_PATH`].
 const NTPD_UNIT: &str = "mica-ntpd.service";
 /// Where micad renders ntpd's servers, which `mica-ntpd` reads.
-const NTPD_SERVERS_PATH: &str = "/run/mica/ntpd.conf";
-/// Where the managed server list is rendered. `60-` so it sorts after the
-/// shipped `50-mica.conf` and under a name the read-only `/etc` copy cannot
-/// shadow (drop-ins of the SAME name resolve to `/etc` first).
-const DEFAULT_SERVERS_PATH: &str = "/run/systemd/timesyncd.conf.d/60-mica-servers.conf";
+const NTPD_SERVERS_PATH: &str = "/var/lib/mica/time/ntpd.conf";
+/// Where the managed server list is rendered: the target of Base's
+/// `/etc/systemd/timesyncd.conf.d/60-mica-servers.conf`, `60-` so it sorts
+/// after the shipped `50-mica.conf`. Until micad writes it the link dangles,
+/// which timesyncd skips.
+const DEFAULT_SERVERS_PATH: &str = "/var/lib/mica/time/timesyncd.conf";
 /// Where the presentation timezone is published for on-device consumers.
 const DEFAULT_TIMEZONE_PATH: &str = "/run/mica/timezone";
 /// Where zone files live, for the reconcile-time existence check.
@@ -545,5 +552,13 @@ mod tests {
                 .unwrap()
                 .contains("ntp_servers")
         );
+    }
+
+    /// Both server lists live on DATA, where the time service reads them at
+    /// boot without waiting for micad.
+    #[test]
+    fn the_server_lists_are_saved_on_data() {
+        assert_eq!(DEFAULT_SERVERS_PATH, "/var/lib/mica/time/timesyncd.conf");
+        assert_eq!(NTPD_SERVERS_PATH, "/var/lib/mica/time/ntpd.conf");
     }
 }

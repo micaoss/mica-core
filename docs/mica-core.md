@@ -219,12 +219,12 @@ live-state tree under its name.
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
 | `network` | networkd `.network`/`.netdev` under `/run/systemd/network` for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. Each DHCP stanza carries `metric <n>`, the networkd numbers. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. On a static or manual stanza each static route is an `up ip route add <destination> [via <gateway>] dev <iface> [metric <m>]` line with the matching `down ip route del … \|\| :`; on a DHCP stanza, whose link is up before its lease, each is a `route_<n>` option (`<destination> [via <gateway>] [metric <m>]`, numbered from 1) for Base's `mica-udhcpc` (section 3.8). VLAN, bridge and WireGuard are refused by name |
 | `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf` (resolved restarted when it changes) always empties `FallbackDNS=` and sets `MulticastDNS=no` (micad's own responder holds the port, section 3.13) and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file. Global servers: `/run/mica/resolv.d/global`, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
-| `sshd` | `/run/mica/sshd.env`, the authorized keys of `root` and `mica`, `mica-sshd.service` | the same files, `mica-sshd` |
+| `sshd` | `/var/lib/mica/ssh/sshd.env`, the authorized keys of `root` and `mica`, `mica-sshd.service` (restarted or stopped, never enabled or disabled) | the same files, `mica-sshd` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
 | `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server, which hands out the global DNS servers while they are on and the uplink's otherwise | configuration in `/var/lib/mica/hostapd`, `/run/mica/wifi-ap.env`, busybox udhcpd on the same pool (`/run/mica/wifi-ap-udhcpd.conf`) with the global DNS servers while they are on, `mica-wifi-ap` |
 | `container` | Starts `mica-containerd.service` and declares the projects as one set; switched off, stops every container, then stops the service (section 3.9) | the same, `mica-containerd` |
 | `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
-| `time` | A timesyncd drop-in, `/run/mica/timezone` | `ntp_servers` in `/run/mica/ntpd.conf`, `mica-ntpd` restarted |
+| `time` | `/var/lib/mica/time/timesyncd.conf`, the target of the image's timesyncd drop-in link, `/run/mica/timezone` | `ntp_servers` in `/var/lib/mica/time/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; `apid.service` started for `mode` `network` or `local` (restarted when the file changed) and stopped for `off` | the same, `apid` |
 | `mdns` | micad's own mDNS responder (section 3.13), from `access.mdns`, the hostname and `access.web` | the same |
 | `ssdp` | micad's own SSDP responder (section 3.14), from `access.ssdp`, the hostname and `access.web` | the same |
@@ -362,25 +362,30 @@ The contract between micad and the packages whose services it drives on an OpenR
 
 | Service | Shipped by | micad writes |
 | --- | --- | --- |
-| `mica-sshd` | mica-ssh (dropbear) or mica-openssh | `/run/mica/sshd.env` (`SSH_LISTEN`, `SSH_PASSWORD`, `SSH_ROOT_LOGIN`) |
+| `mica-sshd` | mica-ssh (dropbear) or mica-openssh | `/var/lib/mica/ssh/sshd.env` (`SSH_ENABLED`, `SSH_LISTEN`, `SSH_PASSWORD`, `SSH_ROOT_LOGIN`) |
 | `mica-wifi-client` | mica-wifi | `/run/mica/wifi-client.env` (`interface`, `config`, `metric`) |
 | `mica-wifi-ap` | mica-wifi-ap | `/run/mica/wifi-ap.env` (`interface`, `config`, `address`, `udhcpd`), `/run/mica/wifi-ap-udhcpd.conf` (pidfile `/run/mica-wifi-ap.udhcpd.pid`) |
 | `mica-bluetoothd` | mica-bluetooth | -- |
-| `mica-ntpd` | mica-openrc | `/run/mica/ntpd.conf` (`ntp_servers`) |
+| `mica-ntpd` | mica-openrc | `/var/lib/mica/time/ntpd.conf` (`ntp_servers`) |
 | `mica-network` | mica-openrc | `/var/lib/mica/network/interfaces` |
 | `docker` | mica-docker | -- |
 
 The SSH server is `mica-sshd` on both inits (`mica-sshd.service` on systemd), dropbear or
 OpenSSH as the product's `SSH_SERVER` says; nothing in micad depends on which. Its environment,
-`/run/mica/sshd.env`, is three shell-sourceable lines:
+`/var/lib/mica/ssh/sshd.env` on DATA, is four shell-sourceable lines:
 
 ```
+SSH_ENABLED=yes
 SSH_LISTEN="22"
 SSH_PASSWORD=no
 SSH_ROOT_LOGIN=yes
 ```
 
-`SSH_LISTEN` is the bare port, listening on every address, or one `addr:port` per
+`SSH_ENABLED` is what the init reads at boot, so SSH starts as it was last configured without
+waiting for micad: `mica-sshd.service` is enabled in the image and its `ExecCondition=` skips the
+start unless `SSH_ENABLED=yes`; on OpenRC, `mica-sshd-boot` in the default runlevel starts
+`mica-sshd` the same way. micad writes the file whatever `access.ssh.enabled` says, restarts the
+server when it changed and stops it when SSH is turned off. `SSH_LISTEN` is the bare port, listening on every address, or one `addr:port` per
 `access.ssh.listenAddresses` entry (at most 10), space-separated, IPv6 in brackets
 (`"192.0.2.5:22 [2001:db8::5]:22"`). `SSH_PASSWORD` is `yes` only while password logins are
 asked for and a transient root password is active. `SSH_ROOT_LOGIN=no` refuses root by every

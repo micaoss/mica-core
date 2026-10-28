@@ -6,7 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use super::*;
 
 #[tokio::test]
-pub(super) async fn disabled_to_enabled_enables_then_starts() {
+pub(super) async fn turning_ssh_on_starts_the_server_without_enabling_it() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, _paths) = fixture(dir.path(), "inactive", "disabled");
 
@@ -15,28 +15,25 @@ pub(super) async fn disabled_to_enabled_enables_then_starts() {
         .await
         .unwrap();
 
+    // The boot path is the environment file's SSH_ENABLED, not the unit's
+    // enablement; the start reads the freshly written arguments.
     assert_eq!(
         calls(&reconciler),
-        vec![
-            "enable mica-sshd.service".to_string(),
-            "start mica-sshd.service".to_string()
-        ]
+        vec!["start mica-sshd.service".to_string()]
     );
-    // Enablement is a unit STATE change, not a configuration change: the
-    // start reads the freshly written arguments, so nothing restarts.
-    assert!(!calls(&reconciler).contains(&"restart mica-sshd.service".to_string()));
     assert_eq!(state["enabled"], json!(true));
     assert_eq!(state["activeState"], json!("active"));
-    assert_eq!(state["unitFileState"], json!("enabled-runtime"));
+    assert_eq!(state["unitFileState"], json!("disabled"));
     assert_eq!(state["unit"], json!("mica-sshd.service"));
     assert_eq!(reconciler.name(), "sshd");
     assert_eq!(reconciler.subtree(), "access.ssh");
 }
 
 #[tokio::test]
-pub(super) async fn enabled_to_disabled_stops_then_disables() {
+pub(super) async fn turning_ssh_off_stops_the_server_and_saves_it_off_for_boot() {
     let dir = tempfile::tempdir().unwrap();
-    let (reconciler, _paths) = fixture(dir.path(), "active", "enabled");
+    let (reconciler, paths) = fixture(dir.path(), "active", "enabled");
+    preexisting_environment(&paths, GOLDEN_DEFAULTS_GATED);
 
     let state = reconciler
         .apply(&settings_with(ssh_settings(false)))
@@ -45,14 +42,17 @@ pub(super) async fn enabled_to_disabled_stops_then_disables() {
 
     assert_eq!(
         calls(&reconciler),
-        vec![
-            "stop mica-sshd.service".to_string(),
-            "disable mica-sshd.service".to_string()
-        ]
+        vec!["stop mica-sshd.service".to_string()]
+    );
+    assert!(
+        std::fs::read_to_string(&paths.environment)
+            .unwrap()
+            .starts_with("SSH_ENABLED=no\n"),
+        "the init must not start the server again at the next boot"
     );
     assert_eq!(state["enabled"], json!(false));
     assert_eq!(state["activeState"], json!("inactive"));
-    assert_eq!(state["unitFileState"], json!("disabled"));
+    assert_eq!(state["unitFileState"], json!("enabled"));
 }
 
 #[tokio::test]
@@ -117,8 +117,8 @@ pub(super) async fn reapplying_the_same_settings_changes_nothing() {
 }
 
 /// The server reads its environment only at start, so changed arguments under
-/// a running server are a restart — and nothing else: the unit is neither
-/// stopped nor re-enabled on the way.
+/// a running server are a restart — and nothing else: the unit is not
+/// stopped on the way.
 #[tokio::test]
 pub(super) async fn changing_the_arguments_of_a_running_server_restarts_it() {
     let dir = tempfile::tempdir().unwrap();
@@ -140,7 +140,7 @@ pub(super) async fn changing_the_arguments_of_a_running_server_restarts_it() {
     );
     assert_eq!(
         std::fs::read_to_string(&paths.environment).unwrap(),
-        "SSH_LISTEN=\"2222\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=yes\n"
+        "SSH_ENABLED=yes\nSSH_LISTEN=\"2222\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=yes\n"
     );
     assert_eq!(state["port"], json!(2222));
 }
@@ -169,12 +169,12 @@ pub(super) async fn changing_the_arguments_of_a_stopped_server_starts_it_without
     assert!(
         std::fs::read_to_string(&paths.environment)
             .unwrap()
-            .starts_with("SSH_LISTEN=\"2222\"\n")
+            .starts_with("SSH_ENABLED=yes\nSSH_LISTEN=\"2222\"\n")
     );
 }
 
-/// mica-sshd.service fails its start without `/run/mica/sshd.env`
-/// (the EnvironmentFile is required) and would accept only what the key
+/// mica-sshd.service skips its start without `/var/lib/mica/ssh/sshd.env`
+/// (its ExecCondition needs SSH_ENABLED=yes) and would accept only what the key
 /// files say at the moment of the first login, so every unit operation
 /// has to see the finished files. Observed from inside the unit control,
 /// at the moment each call is made.
@@ -269,7 +269,6 @@ pub(super) async fn arguments_and_keys_are_on_disk_before_any_unit_operation() {
     assert_eq!(
         seen,
         vec![
-            ("enable mica-sshd.service".to_string(), true),
             ("start mica-sshd.service".to_string(), true),
             ("restart mica-sshd.service".to_string(), true),
         ]
@@ -350,7 +349,7 @@ pub(super) async fn every_root_password_and_transient_combination_renders_its_fl
                 let effective = requested && transient;
                 let yes_no = |on: bool| if on { "yes" } else { "no" };
                 let expected = format!(
-                    "SSH_LISTEN=\"22\"\nSSH_PASSWORD={}\nSSH_ROOT_LOGIN={}\n",
+                    "SSH_ENABLED=yes\nSSH_LISTEN=\"22\"\nSSH_PASSWORD={}\nSSH_ROOT_LOGIN={}\n",
                     yes_no(effective),
                     yes_no(permit_root_login)
                 );
@@ -405,7 +404,7 @@ pub(super) async fn a_port_change_reaches_every_listener_but_one_with_its_own_po
         assert_eq!(
             std::fs::read_to_string(&paths.environment).unwrap(),
             format!(
-                "SSH_LISTEN=\"192.0.2.7:{port} [2001:db8::7]:{port} [2001:db8::8]:2022\"\n\
+                "SSH_ENABLED=yes\nSSH_LISTEN=\"192.0.2.7:{port} [2001:db8::7]:{port} [2001:db8::8]:2022\"\n\
                  SSH_PASSWORD=no\nSSH_ROOT_LOGIN=yes\n"
             )
         );
@@ -429,11 +428,39 @@ pub(super) async fn changed_arguments_while_ssh_is_being_disabled_only_stop_the_
 
     assert_eq!(
         calls(&reconciler),
-        vec![
-            "stop mica-sshd.service".to_string(),
-            "disable mica-sshd.service".to_string()
-        ]
+        vec!["stop mica-sshd.service".to_string()]
     );
+}
+
+/// Whatever the unit's enablement and state, micad never enables or
+/// disables it: the init owns boot, and the environment file decides it.
+#[tokio::test]
+pub(super) async fn the_unit_is_never_enabled_or_disabled() {
+    for (active, file_state) in [
+        ("inactive", "disabled"),
+        ("active", "enabled"),
+        ("failed", "enabled"),
+        ("inactive", "enabled"),
+        ("active", "disabled"),
+    ] {
+        for enabled in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let (reconciler, _paths) = fixture(dir.path(), active, file_state);
+
+            reconciler
+                .apply(&settings_with(ssh_settings(enabled)))
+                .await
+                .unwrap();
+
+            let calls = calls(&reconciler);
+            assert!(
+                !calls
+                    .iter()
+                    .any(|call| call.starts_with("enable ") || call.starts_with("disable ")),
+                "{active}/{file_state} enabled={enabled}: {calls:?}"
+            );
+        }
+    }
 }
 
 // ---- the device password does not reach the shadow file ---------------
@@ -477,10 +504,7 @@ pub(super) async fn a_shadow_file_that_is_missing_or_broken_does_not_stop_the_re
     );
     assert_eq!(
         reconciler.control.calls(),
-        vec![
-            "enable mica-sshd.service".to_string(),
-            "start mica-sshd.service".to_string()
-        ]
+        vec!["start mica-sshd.service".to_string()]
     );
 }
 
@@ -546,10 +570,10 @@ pub(super) fn both_inits_drive_mica_sshd() {
     );
 }
 
-/// The environment file is `/run/mica/sshd.env` unless the override names
-/// another.
+/// The environment file is `/var/lib/mica/ssh/sshd.env`, on DATA where the
+/// init reads it at boot, unless the override names another.
 #[test]
 pub(super) fn the_environment_file_is_sshd_env() {
-    assert_eq!(DEFAULT_ENVIRONMENT_FILE, "/run/mica/sshd.env");
+    assert_eq!(DEFAULT_ENVIRONMENT_FILE, "/var/lib/mica/ssh/sshd.env");
     assert_eq!(ENVIRONMENT_FILE_ENV, "MICAD_SSHD_ENV");
 }

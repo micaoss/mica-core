@@ -10,12 +10,13 @@ mod render;
 mod units;
 use keys::*;
 
-const GOLDEN_DEFAULTS: &str = "SSH_LISTEN=\"22\"\nSSH_PASSWORD=yes\nSSH_ROOT_LOGIN=yes\n";
+const GOLDEN_DEFAULTS: &str =
+    "SSH_ENABLED=yes\nSSH_LISTEN=\"22\"\nSSH_PASSWORD=yes\nSSH_ROOT_LOGIN=yes\n";
 /// What `apply` writes for default settings with **no** transient password
 /// active: the same arguments with password logins turned off.
-const GOLDEN_DEFAULTS_GATED: &str = "SSH_LISTEN=\"22\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=yes\n";
-const GOLDEN_LISTEN: &str =
-    "SSH_LISTEN=\"10.0.0.5:2222 [fd00::1]:2222\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=no\n";
+const GOLDEN_DEFAULTS_GATED: &str =
+    "SSH_ENABLED=yes\nSSH_LISTEN=\"22\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=yes\n";
+const GOLDEN_LISTEN: &str = "SSH_ENABLED=yes\nSSH_LISTEN=\"10.0.0.5:2222 [fd00::1]:2222\"\nSSH_PASSWORD=no\nSSH_ROOT_LOGIN=no\n";
 
 /// Three accounts, nine fields each, trailing newline — the shape of a
 /// Debian `/etc/shadow`. `root` starts out locked (`*`, the marker Base's
@@ -86,7 +87,7 @@ fn fixture(dir: &Path, active: &str, file_state: &str) -> (SshdReconciler<MockUn
     let root_home = dir.join("root");
     let mica_home = dir.join("home").join("mica");
     let paths = Paths {
-        environment: dir.join("run").join("mica").join("sshd.env"),
+        environment: dir.join("var/lib/mica/ssh/sshd.env"),
         passwd: dir.join("passwd"),
         keys: root_home.join(".ssh").join("authorized_keys"),
         mica_keys: mica_home.join(".ssh").join("authorized_keys"),
