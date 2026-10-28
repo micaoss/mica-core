@@ -1404,7 +1404,6 @@ dependencies = [
  "anyhow",
  "aws-lc-rs",
  "base64",
- "clap",
  "hex",
  "lifecycle-sys",
  "linux-keyutils",

@@ -1306,9 +1306,18 @@ by the `component-contract-fixtures` example, signed with test-only keys, and co
 ### 6.3 mica-deploy
 
 `/usr/bin/mica-deploy <command>` prints JSON, exits non-zero on failure and bounds every read by
-the caller's budget (`--max-bytes`, required by all but `discard`): `status`, `check`, `fetch`,
-`import`, `install`, `set-check`, `set-fetch`, `set-install`, `booted`, `confirm`, `reject`,
-`rollback`, `fail-boot`, `probe`, `discard`, `gc`, `firmware-readback`.
+a budget (`--max-bytes`): `status`, `check`, `fetch`, `import`, `install`, `set-check`,
+`set-fetch`, `set-install`, `booted`, `confirm`, `reject`, `rollback`, `fail-boot`, `probe`,
+`discard`, `gc`, `firmware-readback`. micad names the source, the channel and the budget; left
+out, they are the device's, resolved as micad resolves them (section 6.2): `source.url` of
+`/mica/config/updates.json` over the image's `update.source`, the channel each names for the
+kind of set, else `general`, and `source.maxBytes`, else 500 MB.
+
+`mica-deploy update [--source <url>] [--channel <channel>] [--reboot]` is micad's install run by
+hand, for a device without micad or with micad broken: the core line first, then the product's
+system with the channel's latest set for its new root on `general`, installed and reported in a
+line of text; `--reboot` reboots into it, as `rollback --reboot` does. `mica-deploy help` lists
+the commands.
 Installation is a durable file transaction, proven by a fault suite that interrupts it before
 and after every observed IO.
 
@@ -1321,8 +1330,10 @@ path is trusted: the result is verified like a whole download, and any failure f
 whole object. An origin that publishes no index is still conforming.
 
 **Confirm** means the slot can still be reached and changed: the boot health gate (mica-system's
-`mica-health`) checks that the boot settled, micad answers on the bus and apid answers
-`/healthz`, then confirms. Failed units are reported, never fatal.
+`mica-health`) checks what `/etc/mica/health.conf` requires, then confirms. Base's default is the
+init up and not in `maintenance` or `stopping`, and micad answering on the bus where the image
+carries it (`if-installed=micad`), so a device without micad confirms on the init alone and
+`mica-deploy update` keeps it updatable. Failed units are reported, never fatal.
 
 ### 6.4 The board, from the signed policy
 

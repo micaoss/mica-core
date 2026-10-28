@@ -110,3 +110,10 @@ codegen-units = 1
 # Size over speed: a quarter to two fifths off every executable (micad 17.4 -> 11.6 MB). The
 # hot path, hashing an update's objects, is aws-lc's assembly, which this does not touch.
 opt-level = "s"
+
+# mica-deploy's package build (pkgs/deploy/prepare.sh): a panic aborts. Nothing in the
+# client catches one or runs a thread, so a panic ends the process either way, and the
+# unwind tables it no longer carries are a tenth of it.
+[profile.deploy]
+inherits = "release"
+panic = "abort"

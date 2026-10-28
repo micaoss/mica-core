@@ -2,7 +2,7 @@
 # A producer's prepare step: compile its binaries and stage them.
 #
 #   bash scripts/build/build-deb.sh --producer <name> --bins "<binary> ..." \
-#        --arch <amd64|arm64|armhf> --stage <dir>
+#        --arch <amd64|arm64|armhf> --stage <dir> [--profile <cargo profile>]
 #
 # Compiles only the named binaries, in the mica-build-env rust image of the
 # host's architecture (native, or a cargo cross-compile; never emulation), into
@@ -10,8 +10,9 @@
 # image of its own and is cross-compiled on an amd64 host. It then fails if that
 # directory holds a binary the producer does not own, checks each binary's ELF
 # class and architecture (and that mica-runkit is static), and copies the
-# binaries into --stage. The repository is mounted read-only at /src so rustc's
-# recorded paths do not depend on where the checkout lives.
+# binaries into --stage. --profile (default release) builds every binary but
+# mica-runkit with that Cargo profile. The repository is mounted read-only at
+# /src so rustc's recorded paths do not depend on where the checkout lives.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -19,14 +20,15 @@ die() { echo "build-deb.sh: error: $*" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || die "docker is required"
 
 ALL_BINARIES=(micad mica-apid mica-deploy mica-runkit)
-PRODUCER="" BINS="" ARCH="" STAGE=""
+PRODUCER="" BINS="" ARCH="" STAGE="" PROFILE=release
 while [ "$#" -gt 0 ]; do
     case "$1" in
     --producer) PRODUCER="${2:?}"; shift 2 ;;
     --bins) BINS="${2:?}"; shift 2 ;;
     --arch) ARCH="${2:?}"; shift 2 ;;
     --stage) STAGE="${2:?}"; shift 2 ;;
-    *) die "usage: bash scripts/build/build-deb.sh --producer <name> --bins \"<binary> ...\" --arch <amd64|arm64|armhf> --stage <dir>" ;;
+    --profile) PROFILE="${2:?}"; shift 2 ;;
+    *) die "usage: bash scripts/build/build-deb.sh --producer <name> --bins \"<binary> ...\" --arch <amd64|arm64|armhf> --stage <dir> [--profile <cargo profile>]" ;;
     esac
 done
 [ -n "${PRODUCER}" ] && [ -n "${BINS}" ] && [ -d "${STAGE}" ] || die "--producer, --bins and an existing --stage are required"
@@ -65,7 +67,7 @@ docker run --rm --label ai-agent=true --platform "linux/${HOST_ARCH}" \
     -v "${CARGO_CACHE}/registry:/usr/local/cargo/registry" \
     -v "${CARGO_CACHE}/git:/usr/local/cargo/git" \
     -w /src \
-    -e "TARGET=${TRIPLE}" -e "ELF_CLASS=${ELF_CLASS}" -e "ELF_ARCH=${ELF_ARCH}" -e "BINS=${BINS}" \
+    -e "TARGET=${TRIPLE}" -e "ELF_CLASS=${ELF_CLASS}" -e "ELF_ARCH=${ELF_ARCH}" -e "BINS=${BINS}" -e "PROFILE=${PROFILE}" \
     -e "RUNKIT_FLAGS=${RUNKIT_FLAGS}" \
     -e "CARGO_TARGET_DIR=/target" -e "MICA_PACKAGE_VERSION=${MICA_DEB_VERSION}" \
     --entrypoint /bin/bash "${RUST_IMAGE}" -c '
@@ -75,7 +77,7 @@ docker run --rm --label ai-agent=true --platform "linux/${HOST_ARCH}" \
         bins=""
         for b in ${BINS}; do [ "${b}" = mica-runkit ] || bins="${bins} --bin ${b}"; done
         # shellcheck disable=SC2086
-        [ -z "${bins}" ] || cargo build --release --locked --target "${TARGET}" ${bins}
+        [ -z "${bins}" ] || cargo build --profile "${PROFILE}" --locked --target "${TARGET}" ${bins}
         for name in ${BINS}; do
             if [ "${name}" = mica-runkit ]; then
                 # Static, in its own target directory so its rustflags reach no other binary.
@@ -89,7 +91,7 @@ docker run --rm --label ai-agent=true --platform "linux/${HOST_ARCH}" \
                     exit 1
                 fi
             else
-                bin="${CARGO_TARGET_DIR}/${TARGET}/release/${name}"
+                bin="${CARGO_TARGET_DIR}/${TARGET}/${PROFILE}/${name}"
             fi
             [ -f "${bin}" ] || { echo "build-deb.sh: error: ${name} was not produced" >&2; exit 1; }
             case "$(file -b "${bin}")" in
@@ -108,7 +110,7 @@ for name in ${BINS}; do
     if [ "${name}" = mica-runkit ]; then
         cp "${TARGET_DIR}/runkit-static/${TRIPLE}/release/${name}" "${STAGE}/${name}"
     else
-        cp "${TARGET_DIR}/${TRIPLE}/release/${name}" "${STAGE}/${name}"
+        cp "${TARGET_DIR}/${TRIPLE}/${PROFILE}/${name}" "${STAGE}/${name}"
     fi
 done
 echo "build-deb.sh: staged ${BINS} into ${STAGE}"

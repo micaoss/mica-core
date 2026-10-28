@@ -9,6 +9,7 @@ pub mod chunks;
 pub mod components;
 pub mod core_set;
 pub mod debian_version;
+pub mod defaults;
 pub mod deployments;
 pub mod factory_reset;
 pub mod firmware;
