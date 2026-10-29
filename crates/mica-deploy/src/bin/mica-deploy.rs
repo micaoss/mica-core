@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use mica_deploy::{
     acquisition::Acquisition,
+    acquisition::Imported,
     board::{BoardFacts, Storage},
     boot::BootKind,
     components::BootIdentity,
@@ -13,7 +14,7 @@ use mica_deploy::{
         BootBackend, BootReceipt, DeploymentStore, SetTarget, SharedDataFailure, Target,
         read_bounded,
     },
-    set_state,
+    factory_reset, set_state,
     ubi::SysUbi,
     update_set::SetKind,
 };
@@ -33,8 +34,16 @@ Updating by hand, with or without micad:
   update [--source <url>] [--channel <channel>] [--reboot]
                   check, download and install the newest core set, else
                   the newest system
+  update --archive <file> [--reboot]
+                  install the system or set an offline update archive
+                  carries
+  update --auto   what the update timer runs: the online update when the
+                  update policy is auto, else nothing; it never reboots
   rollback [--reboot]
                   return to the retained previous system
+  factory-reset [--reboot]
+                  erase DATA at the next boot, all but its meta/; the
+                  software stays at its version
   import <archive>
                   stage an offline update archive
   status          the boot, the deployments and the sets
@@ -50,7 +59,7 @@ The steps, as micad runs them:
   set-install <set> --objects <dir>
   firmware-readback [<manifest>] [--record]
 
-Every command but update and help answers in JSON.
+Every command but update, factory-reset and help answers in JSON.
 
   --source <url>    the update root; source.url of /mica/config/updates.json,
                     else the image's update.source
@@ -70,10 +79,19 @@ struct Cli {
 }
 enum Action {
     Help,
-    /// Check, fetch and install the newest the channel offers.
+    /// Check, fetch and install the newest the channel offers, or what an
+    /// archive carries.
     Update {
         source: Option<String>,
         channel: Option<String>,
+        /// An offline archive in place of the online source.
+        archive: Option<PathBuf>,
+        /// Only under the update policy `auto`, and never rebooting.
+        auto: bool,
+        reboot: bool,
+    },
+    /// Stage the erase of DATA for the next boot.
+    FactoryReset {
         reboot: bool,
     },
     Status,
@@ -232,7 +250,7 @@ impl Cli {
             ensure!(max_bytes.is_none(), "--max-bytes is given twice");
             max_bytes = Some(value.parse().context("invalid --max-bytes")?);
         };
-        let mut words = Words::read(args, &["record", "reboot"])?;
+        let mut words = Words::read(args, &["record", "reboot", "auto"])?;
         if let Some(value) = words.option("max-bytes") {
             ensure!(max_bytes.is_none(), "--max-bytes is given twice");
             max_bytes = Some(value.parse().context("invalid --max-bytes")?);
@@ -240,9 +258,27 @@ impl Cli {
         let kind = |words: &mut Words| -> Result<SetKind> { Ok(words.required("kind")?.parse()?) };
         let command = match name.as_str() {
             "help" => Action::Help,
-            "update" => Action::Update {
-                source: words.option("source"),
-                channel: words.option("channel"),
+            "update" => {
+                let (source, channel) = (words.option("source"), words.option("channel"));
+                let archive = words.option("archive").map(PathBuf::from);
+                let (auto, reboot) = (words.flag("auto"), words.flag("reboot"));
+                ensure!(
+                    archive.is_none() || (source.is_none() && channel.is_none()),
+                    "--archive takes no --source or --channel"
+                );
+                ensure!(
+                    !auto || (archive.is_none() && !reboot),
+                    "--auto takes no --archive or --reboot"
+                );
+                Action::Update {
+                    source,
+                    channel,
+                    archive,
+                    auto,
+                    reboot,
+                }
+            }
+            "factory-reset" => Action::FactoryReset {
                 reboot: words.flag("reboot"),
             },
             "status" => Action::Status,
@@ -600,18 +636,100 @@ fn execute() -> Result<()> {
         );
         return Ok(());
     }
+    if let Action::FactoryReset { reboot } = cli.command {
+        let runkit = read_bounded(Path::new(factory_reset::CAPABILITIES), 4096)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        ensure!(
+            runkit.is_some_and(|value| value["factoryReset"] == json!(true)),
+            "the booted runkit does not carry out a factory reset"
+        );
+        let requested = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        factory_reset::request(
+            Path::new("/mnt/data/meta"),
+            &factory_reset::Request {
+                v: 1,
+                requested,
+                by: factory_reset::Requester::Cli,
+                source: "mica-deploy factory-reset".to_owned(),
+            },
+        )?;
+        return finish("factory reset staged: DATA is erased", reboot);
+    }
     if let Action::Update {
         source,
         channel,
+        archive,
+        auto,
         reboot,
     } = cli.command
     {
         require_workspace(policy.board.storage)?;
         let defaults = Defaults::read()?;
+        if auto && !defaults.automatic {
+            println!("automatic updates are off: the update policy is not auto");
+            return Ok(());
+        }
+        let (product, features) = (product()?, features()?);
+        if let Some(archive) = archive {
+            ensure!(
+                archive.symlink_metadata()?.is_file(),
+                "archive is not a regular file"
+            );
+            let acquisition = Acquisition {
+                root: "/mica/updates".into(),
+                store: &store,
+                keys: &keys,
+                board: &policy.identity.board,
+                arch: &policy.identity.arch,
+                product: &product,
+                max_bytes: Some(cli.max_bytes.unwrap_or(defaults.max_bytes)),
+            };
+            match acquisition.import_any(&mut std::fs::File::open(archive)?)? {
+                Imported::Set(set) => {
+                    let running = running_deployment(&keys)?;
+                    writable(backend, true, || {
+                        store.install_set(
+                            &read_bounded(&set.path, set_state::MAX_ENVELOPE_BYTES)?,
+                            &keys,
+                            &SetTarget {
+                                arch: &policy.identity.arch,
+                                features: &features,
+                                root: running.rootfs.facts(),
+                            },
+                            &set.objects,
+                        )
+                    })?;
+                    return finish(
+                        &format!("installed {} set {}", set.set_kind.as_str(), set.version),
+                        reboot,
+                    );
+                }
+                Imported::Deployment(system) => {
+                    writable(backend, true, || {
+                        store.install(
+                            &read_bounded(&system.path, 24576)?,
+                            &keys,
+                            &Target {
+                                board: &policy.identity.board,
+                                arch: &policy.identity.arch,
+                                product: &product,
+                                features: &features,
+                            },
+                            &system.objects,
+                            &receipt,
+                            None,
+                        )
+                    })?;
+                    return finish(&format!("installed system {}", system.version), reboot);
+                }
+            }
+        }
         let source = source.or(defaults.source.clone()).context(NO_SOURCE)?;
         let channel =
             channel.unwrap_or_else(|| defaults.channel(SetKind::Core.as_str()).to_owned());
-        let (product, features) = (product()?, features()?);
         let acquisition = Acquisition {
             root: "/mica/updates".into(),
             store: &store,
@@ -876,6 +994,7 @@ fn execute() -> Result<()> {
             .map(|value| json!(value)),
         Action::Help
         | Action::Update { .. }
+        | Action::FactoryReset { .. }
         | Action::Status
         | Action::Probe
         | Action::Discard
@@ -1123,14 +1242,38 @@ mod tests {
             Action::Update {
                 source: None,
                 channel: None,
+                archive: None,
+                auto: false,
                 reboot: false
             }
+        ));
+        assert!(matches!(
+            parse("update --archive /media/u.micaupd --reboot").unwrap().command,
+            Action::Update { archive: Some(a), source: None, auto: false, reboot: true, .. }
+                if a == Path::new("/media/u.micaupd")
+        ));
+        assert!(matches!(
+            parse("update --auto").unwrap().command,
+            Action::Update {
+                auto: true,
+                reboot: false,
+                archive: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse("factory-reset").unwrap().command,
+            Action::FactoryReset { reboot: false }
+        ));
+        assert!(matches!(
+            parse("factory-reset --reboot").unwrap().command,
+            Action::FactoryReset { reboot: true }
         ));
         let cli = parse("update --reboot --source https://u/ --channel lts --max-bytes 9").unwrap();
         assert_eq!(cli.max_bytes, Some(9));
         assert!(matches!(
             cli.command,
-            Action::Update { source: Some(s), channel: Some(c), reboot: true } if s == "https://u/" && c == "lts"
+            Action::Update { source: Some(s), channel: Some(c), reboot: true, .. } if s == "https://u/" && c == "lts"
         ));
         assert!(matches!(
             parse("rollback").unwrap().command,
@@ -1180,6 +1323,14 @@ mod tests {
             "update --reboot=yes",
             "update --kind core",
             "rollback --source s",
+            "update --archive",
+            "update --archive a --source s",
+            "update --archive a --channel c",
+            "update --auto --reboot",
+            "update --auto --archive a",
+            "update --auto=yes",
+            "factory-reset now",
+            "factory-reset --source s",
             "status --reboot",
             "help me",
         ] {

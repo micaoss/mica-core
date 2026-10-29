@@ -1323,8 +1323,14 @@ kind of set, else `general`, and `source.maxBytes`, else 500 MB.
 `mica-deploy update [--source <url>] [--channel <channel>] [--reboot]` is micad's install run by
 hand, for a device without micad or with micad broken: the core line first, then the product's
 system with the channel's latest set for its new root on `general`, installed and reported in a
-line of text; `--reboot` reboots into it, as `rollback --reboot` does. `mica-deploy help` lists
-the commands.
+line of text; `--reboot` reboots into it, as `rollback --reboot` does. `update --archive <file>`
+installs what an offline archive carries, a system or a set, in one step. `update --auto` is
+what Base's daily `mica-update.timer` runs on a systemd device without micad: the online update
+when the update policy (`policy` of `updates.json` over the image's `update.policy`) is `auto`,
+and nothing otherwise; it never reboots, so what it installs runs from the next boot, and it
+keeps none of micad's interval, maintenance window or reboot gate. `factory-reset [--reboot]`
+stages the reset micad's `FactoryReset` stages (section 3.7), without its password, for the
+root on the device. `mica-deploy help` lists the commands.
 Installation is a durable file transaction, proven by a fault suite that interrupts it before
 and after every observed IO.
 

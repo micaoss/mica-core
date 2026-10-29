@@ -6,8 +6,10 @@
 //! `/usr/share/mica/meta/updates/manifest.json`, per key: the source
 //! (`source.url` over `update.source`; absent and `null` both take the
 //! image's), the channel of each kind of set (`channels` over
-//! `update.channels`, else `general`) and the download budget
-//! (`source.maxBytes`, else [`DEFAULT_MAX_BYTES`]).
+//! `update.channels`, else `general`), the download budget
+//! (`source.maxBytes`, else [`DEFAULT_MAX_BYTES`]) and whether the device
+//! updates on its own (`policy` over `update.policy`, `auto` alone; else
+//! micad's default, `check`).
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
@@ -30,6 +32,8 @@ pub struct Defaults {
     /// `None`: no online source anywhere.
     pub source: Option<String>,
     pub max_bytes: u64,
+    /// The update policy is `auto`.
+    pub automatic: bool,
     channels: BTreeMap<String, String>,
 }
 
@@ -62,6 +66,15 @@ impl Defaults {
                 .with_context(|| format!("{UPDATES_PATH}: source.maxBytes is not a byte count"))?,
             None => DEFAULT_MAX_BYTES,
         };
+        let policy = match updates.and_then(|u| u.get("policy")) {
+            Some(Value::Null) | None => baked.and_then(|b| b.get("policy")),
+            given => given,
+        };
+        let automatic = match policy {
+            Some(Value::String(mode)) => mode == "auto",
+            Some(Value::Null) | None => false,
+            Some(_) => anyhow::bail!("the update policy is not a string"),
+        };
         let mut channels = BTreeMap::new();
         for (path, named) in [
             (MANIFEST_PATH, baked.and_then(|b| b.get("channels"))),
@@ -81,6 +94,7 @@ impl Defaults {
         Ok(Self {
             source,
             max_bytes,
+            automatic,
             channels,
         })
     }
@@ -135,6 +149,31 @@ mod tests {
         assert_eq!(both.max_bytes, 7);
         assert_eq!(both.channel("core"), "beta");
         assert_eq!(both.channel("x"), "a");
+    }
+
+    #[test]
+    fn the_device_updates_on_its_own_only_under_auto() {
+        let auto = json!({"update": {"policy": "auto"}});
+        let check = json!({"update": {"policy": "check"}});
+        assert!(!Defaults::parse(None, None).unwrap().automatic);
+        assert!(Defaults::parse(Some(&auto), None).unwrap().automatic);
+        assert!(!Defaults::parse(Some(&check), None).unwrap().automatic);
+        assert!(
+            Defaults::parse(Some(&check), Some(&json!({"policy": "auto"})))
+                .unwrap()
+                .automatic
+        );
+        assert!(
+            !Defaults::parse(Some(&auto), Some(&json!({"policy": "off"})))
+                .unwrap()
+                .automatic
+        );
+        assert!(
+            Defaults::parse(Some(&auto), Some(&json!({"policy": null})))
+                .unwrap()
+                .automatic
+        );
+        assert!(Defaults::parse(None, Some(&json!({"policy": 1}))).is_err());
     }
 
     #[test]
