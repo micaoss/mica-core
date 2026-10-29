@@ -48,6 +48,7 @@ Updating by hand, with or without micad:
                   stage an offline update archive
   status          the boot, the deployments and the sets
   help            this text
+  version         the version, as mica-deploy <version>
 
 The steps, as micad runs them:
   probe | discard | gc | confirm | booted | fail-boot | reject <id>
@@ -59,7 +60,7 @@ The steps, as micad runs them:
   set-install <set> --objects <dir>
   firmware-readback [<manifest>] [--record]
 
-Every command but update, factory-reset and help answers in JSON.
+Every command but update, factory-reset, help and version answers in JSON.
 
   --source <url>    the update root; source.url of /mica/config/updates.json,
                     else the image's update.source
@@ -79,6 +80,7 @@ struct Cli {
 }
 enum Action {
     Help,
+    Version,
     /// Check, fetch and install the newest the channel offers, or what an
     /// archive carries.
     Update {
@@ -237,6 +239,9 @@ impl Cli {
             if arg == "-h" || arg == "--help" {
                 break "help".to_owned();
             }
+            if arg == "-V" || arg == "--version" {
+                break "version".to_owned();
+            }
             let Some(option) = arg.strip_prefix("--") else {
                 break arg;
             };
@@ -258,6 +263,7 @@ impl Cli {
         let kind = |words: &mut Words| -> Result<SetKind> { Ok(words.required("kind")?.parse()?) };
         let command = match name.as_str() {
             "help" => Action::Help,
+            "version" => Action::Version,
             "update" => {
                 let (source, channel) = (words.option("source"), words.option("channel"));
                 let archive = words.option("archive").map(PathBuf::from);
@@ -561,6 +567,10 @@ fn execute() -> Result<()> {
     )?;
     if matches!(cli.command, Action::Help) {
         print!("{USAGE}");
+        return Ok(());
+    }
+    if matches!(cli.command, Action::Version) {
+        println!("mica-deploy {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     let receipt = receipt().context("authenticated boot receipt is unavailable")?;
@@ -993,6 +1003,7 @@ fn execute() -> Result<()> {
             )
             .map(|value| json!(value)),
         Action::Help
+        | Action::Version
         | Action::Update { .. }
         | Action::FactoryReset { .. }
         | Action::Status
@@ -1234,6 +1245,12 @@ mod tests {
         for line in ["help", "-h", "--help"] {
             assert!(
                 matches!(parse(line).unwrap().command, Action::Help),
+                "{line}"
+            );
+        }
+        for line in ["version", "-V", "--version"] {
+            assert!(
+                matches!(parse(line).unwrap().command, Action::Version),
                 "{line}"
             );
         }
