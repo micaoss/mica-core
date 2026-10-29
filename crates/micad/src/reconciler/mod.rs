@@ -7,6 +7,7 @@ pub mod bluetooth;
 /// the bus surfaces drive the unit name this reconciler renders.
 pub mod container;
 mod dns;
+mod enabled;
 mod hostname;
 pub use hostname::HostnameExecutor;
 /// Visible to the daemon: apps' manifests and `micad mdns` hold their
@@ -83,6 +84,8 @@ pub fn all(
     }
 }
 
+use enabled::Saved;
+
 /// An OpenRC root's: the same subtrees, through `rc-service`,
 /// ifupdown, busybox ntpd and the OpenRC services of the option packages
 /// (mica-ssh, mica-wifi, mica-wifi-ap, Bluetooth), which ship them.
@@ -96,13 +99,17 @@ fn openrc_reconcilers(
         Box::new(network::IfupdownReconciler::production()),
         Box::new(dns::DnsReconciler::openrc()),
         Box::new(sshd::SshdReconciler::openrc(OpenrcUnits::production())),
-        Box::new(wifi_client::WifiClientReconciler::openrc(
+        Box::new(wifi_client::WifiClientReconciler::openrc(Saved::new(
             OpenrcUnits::production(),
-        )),
-        Box::new(wifi_ap::WifiApReconciler::openrc(OpenrcUnits::production())),
-        Box::new(mqtt::MqttReconciler::production(OpenrcUnits::production())),
+        ))),
+        Box::new(wifi_ap::WifiApReconciler::openrc(Saved::new(
+            OpenrcUnits::production(),
+        ))),
+        Box::new(mqtt::MqttReconciler::production(Saved::new(
+            OpenrcUnits::production(),
+        ))),
         Box::new(container::ContainerReconciler::production(
-            OpenrcUnits::production(),
+            Saved::new(OpenrcUnits::production()),
             engine,
         )),
         Box::new(time::TimeReconciler::openrc()),
@@ -133,10 +140,12 @@ fn systemd_reconcilers(
         Box::new(wifi_client::WifiClientReconciler::production()),
         Box::new(wifi_ap::WifiApReconciler::production()),
         Box::new(container::ContainerReconciler::production(
-            systemd::Systemd::new(),
+            Saved::new(systemd::Systemd::new()),
             engine,
         )),
-        Box::new(mqtt::MqttReconciler::production(systemd::Systemd::new())),
+        Box::new(mqtt::MqttReconciler::production(Saved::new(
+            systemd::Systemd::new(),
+        ))),
         Box::new(time::TimeReconciler::production()),
         Box::new(web::WebReconciler::production(systemd::Systemd::new())),
         Box::new(mdns::MdnsReconciler::production(apps)),

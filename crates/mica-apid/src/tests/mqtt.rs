@@ -29,7 +29,7 @@ pub(super) const MQTT_PUBLISHED_STATE: &str = r#"{
     "enabled": true,
     "listen": { "address": "127.0.0.1", "port": 1883 },
     "auth": { "enabled": false },
-    "configPath": "/run/mica/mqtt-broker.toml",
+    "configPath": "/var/lib/mica/mqtt/broker.toml",
     "units": [
         {
             "unit": "mica-mqtt-broker.service",

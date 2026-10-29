@@ -159,7 +159,9 @@ async fn the_access_point_link_carries_udhcpd_s_leases() {
     let (root, fake) = fixture();
     let run = root.path().join("run/mica");
     std::fs::create_dir_all(&run).unwrap();
-    std::fs::write(run.join("wifi-ap.env"), "interface=eth1\nconfig=/x\n").unwrap();
+    let wifi = root.path().join("var/lib/mica/wifi");
+    std::fs::create_dir_all(&wifi).unwrap();
+    std::fs::write(wifi.join("ap.env"), "interface=eth1\nconfig=/x\n").unwrap();
     let mut file = 1_792_000_000u64.to_be_bytes().to_vec();
     for (last, hostname) in [(1u8, &b"phone"[..]), (2, &b""[..])] {
         file.extend(3600u32.to_be_bytes());

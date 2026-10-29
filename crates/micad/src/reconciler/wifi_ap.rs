@@ -237,9 +237,10 @@ impl<C: UnitControl, R: NetworkReload> WifiApReconciler<C, R> {
 pub(super) const OPENRC_UNIT: &str = "mica-wifi-ap.service";
 /// What micad tells that service: `interface=`, `config=`, `address=` and
 /// `udhcpd=`.
-const OPENRC_ENV: &str = "/run/mica/wifi-ap.env";
-/// busybox udhcpd's configuration, and the pidfile it names.
-const OPENRC_UDHCPD: &str = "/run/mica/wifi-ap-udhcpd.conf";
+/// On DATA, so the service starts at boot as last configured.
+const OPENRC_ENV: &str = "/var/lib/mica/wifi/ap.env";
+/// busybox udhcpd's configuration, on DATA beside it, and the pidfile it names.
+const OPENRC_UDHCPD: &str = "/var/lib/mica/wifi/ap-udhcpd.conf";
 const OPENRC_UDHCPD_PID: &str = "/run/mica-wifi-ap.udhcpd.pid";
 /// The configuration on STATE, writable on an OpenRC root, where no mount
 /// binds `/etc/hostapd`.
@@ -297,7 +298,7 @@ fn production_state_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(identity::DEFAULT_STATE_DIR))
 }
 
-impl WifiApReconciler<Systemd, Networkd> {
+impl WifiApReconciler<super::enabled::Saved<Systemd>, Networkd> {
     /// Production reconciler: paths from [`CONFIG_DIR_ENV`],
     /// [`NETWORK_DIR_ENV`] and the directory of [`SETTINGS_PATH_ENV`] if set,
     /// else the system locations.
@@ -312,7 +313,7 @@ impl WifiApReconciler<Systemd, Networkd> {
             config_dir,
             network_dir,
             production_state_dir(),
-            Systemd::new(),
+            super::enabled::Saved::new(Systemd::new()),
             Networkd,
         )
         .with_acs(production_acs())

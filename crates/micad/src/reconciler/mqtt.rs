@@ -15,17 +15,16 @@ use crate::fswrite::write_config_if_changed;
 const BROKER_UNIT: &str = "mica-mqtt-broker.service";
 /// Unit of the bridge from enrolled applications to the broker.
 const BRIDGE_UNIT: &str = "mica-mqttd.service";
-/// Config the broker binary reads, rendered by micad at runtime.
+/// Config the broker binary reads, rendered by micad.
 ///
-/// On `/run`, not on STATE: it is derived entirely from the settings tree and
-/// is re-rendered on every boot before the broker starts, so persisting it
-/// would only create a second copy of the truth that could disagree with the
-/// first.
-const DEFAULT_CONFIG_PATH: &str = "/run/mica/mqtt-broker.toml";
+/// On DATA, so the broker starts at boot as last configured with or without
+/// micad, which re-renders it from the settings tree on every start.
+const DEFAULT_CONFIG_PATH: &str = "/var/lib/mica/mqtt/broker.toml";
 /// Root-rendered runtime identity read by `mica-mqttd.service`.
 const IDENTITY_FILE_NAME: &str = "mqttd-device.env";
-/// Fixed production path required by `mica-mqttd.service`.
-const DEFAULT_IDENTITY_PATH: &str = "/run/mica/mqttd-device.env";
+/// Fixed production path required by `mica-mqttd.service`, on DATA beside the
+/// broker's configuration.
+const DEFAULT_IDENTITY_PATH: &str = "/var/lib/mica/mqtt/mqttd-device.env";
 /// Environment variable overriding the rendered config path.
 ///
 /// Nothing in the image sets it; the override exists so tests run entirely

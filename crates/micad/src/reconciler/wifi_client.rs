@@ -99,7 +99,8 @@ impl<C: UnitControl, R: NetworkReload> WifiClientReconciler<C, R> {
 /// would be a link in the read-only `/etc/init.d`.
 const OPENRC_UNIT: &str = "mica-wifi-client.service";
 /// What micad tells that service: `interface=`, `config=` and `metric=`.
-const OPENRC_ENV: &str = "/run/mica/wifi-client.env";
+/// On DATA, so the service starts at boot as last configured.
+const OPENRC_ENV: &str = "/var/lib/mica/wifi/client.env";
 /// The configuration on STATE, writable on an OpenRC root, where no mount
 /// binds `/etc/wpa_supplicant`.
 const OPENRC_CONFIG_DIR: &str = "/var/lib/mica/wpa_supplicant";
@@ -124,7 +125,7 @@ impl<C: UnitControl> WifiClientReconciler<C, NoReload> {
     }
 }
 
-impl WifiClientReconciler<Systemd, Networkd> {
+impl WifiClientReconciler<super::enabled::Saved<Systemd>, Networkd> {
     /// Production reconciler: paths from [`CONFIG_DIR_ENV`] and
     /// [`NETWORK_DIR_ENV`] if set, else the system locations.
     pub fn production() -> Self {
@@ -134,7 +135,12 @@ impl WifiClientReconciler<Systemd, Networkd> {
         let network_dir = std::env::var(NETWORK_DIR_ENV)
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(DEFAULT_NETWORK_DIR));
-        Self::new(config_dir, network_dir, Systemd::new(), Networkd)
+        Self::new(
+            config_dir,
+            network_dir,
+            super::enabled::Saved::new(Systemd::new()),
+            Networkd,
+        )
     }
 }
 

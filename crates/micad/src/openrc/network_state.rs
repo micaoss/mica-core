@@ -24,7 +24,7 @@ use crate::network_state::{
 const RESOLVERS_DIR: &str = "run/mica/resolv.d";
 /// The access point's service parameters micad writes, relative to the root:
 /// `interface=` names the link udhcpd serves.
-const AP_ENV: &str = "run/mica/wifi-ap.env";
+const AP_ENV: &str = "var/lib/mica/wifi/ap.env";
 /// The lease file the access point's udhcpd writes, relative to the root.
 const AP_LEASES: &str = "run/mica/wifi-ap-udhcpd.leases";
 /// One busybox `struct dyn_lease`: expiry, address, MAC, a 20-byte hostname

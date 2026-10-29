@@ -14,7 +14,7 @@ const loopback = {
   observed: {
     available: true,
     state: {
-      configPath: '/run/mica/mqtt-broker.toml',
+      configPath: '/var/lib/mica/mqtt/broker.toml',
       listen: { address: '127.0.0.1', port: 1883 },
       auth: { enabled: false },
       units: [
@@ -35,7 +35,7 @@ describe('the MQTT panel', () => {
     expect(await screen.findByDisplayValue('127.0.0.1')).toBeTruthy()
     expect((screen.getByLabelText(/Port/) as HTMLInputElement).value).toBe('1883')
     expect(screen.getByText('127.0.0.1:1883')).toBeTruthy()
-    expect(screen.getByText('/run/mica/mqtt-broker.toml')).toBeTruthy()
+    expect(screen.getByText('/var/lib/mica/mqtt/broker.toml')).toBeTruthy()
   })
 
   /// The listener is one decision: address, port and the auth flag reach the

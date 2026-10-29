@@ -170,7 +170,7 @@ does not declare gets `60-mica-auto-<iface>.network`, the image's DHCP with its 
 sorts before the image's `80-dhcp.network`; declaring the port removes it, and a port the board
 hides gets none (section 3.12). The Wi-Fi client's
 lease has metric 600. A static gateway keeps networkd's metric 0. On OpenRC the same numbers go
-into each DHCP stanza as `metric <n>` and into `/run/mica/wifi-client.env` as `metric=600`, for
+into each DHCP stanza as `metric <n>` and into `/var/lib/mica/wifi/client.env` as `metric=600`, for
 Base's `mica-udhcpc` to give the lease's default route (section 3.8). An interface with
 `internet: false` takes its lease's address and subnet route and no gateway: `[DHCPv4]` and
 `[IPv6AcceptRA]` `UseGateway=no`, and on OpenRC `internet 0` in its stanza. The servers its lease
@@ -226,16 +226,22 @@ live-state tree under its name.
 | `network` | networkd `.network`/`.netdev` under `/run/systemd/network`, which Base links to `/var/lib/mica/network/networkd` on DATA, for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. Each DHCP stanza carries `metric <n>`, the networkd numbers. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. On a static or manual stanza each static route is an `up ip route add <destination> [via <gateway>] dev <iface> [metric <m>]` line with the matching `down ip route del … \|\| :`; on a DHCP stanza, whose link is up before its lease, each is a `route_<n>` option (`<destination> [via <gateway>] [metric <m>]`, numbered from 1) for Base's `mica-udhcpc` (section 3.8). VLAN, bridge and WireGuard are refused by name |
 | `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes; the records alone are saved in `/var/lib/mica/dns/hosts`, which Base's `mica-hosts` adds at boot. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf`, a directory Base links to DATA (resolved restarted when it changes) always empties `FallbackDNS=` and sets `MulticastDNS=no` (micad's own responder holds the port, section 3.13) and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file and records. Global servers: `/var/lib/mica/dns/resolv.global` on DATA, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
 | `sshd` | `/var/lib/mica/ssh/sshd.env`, the authorized keys of `root` and `mica`, `mica-sshd.service` (restarted or stopped, never enabled or disabled) | the same files, `mica-sshd` |
-| `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/run/mica/wifi-client.env`, `mica-wifi-client` |
-| `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server, which hands out the global DNS servers while they are on and the uplink's otherwise | configuration in `/var/lib/mica/hostapd`, `/run/mica/wifi-ap.env`, busybox udhcpd on the same pool (`/run/mica/wifi-ap-udhcpd.conf`) with the global DNS servers while they are on, `mica-wifi-ap` |
+| `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/var/lib/mica/wifi/client.env`, `mica-wifi-client` |
+| `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server, which hands out the global DNS servers while they are on and the uplink's otherwise | configuration in `/var/lib/mica/hostapd`, `/var/lib/mica/wifi/ap.env`, busybox udhcpd on the same pool (`/var/lib/mica/wifi/ap-udhcpd.conf`) with the global DNS servers while they are on, `mica-wifi-ap` |
 | `container` | Starts `mica-containerd.service` and declares the projects as one set; switched off, stops every container, then stops the service (section 3.9) | the same, `mica-containerd` |
-| `mqtt` | `/run/mica/mqtt-broker.toml`, `/run/mica/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
+| `mqtt` | `/var/lib/mica/mqtt/broker.toml`, `/var/lib/mica/mqtt/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
 | `time` | `/var/lib/mica/time/timesyncd.conf`, the target of the image's timesyncd drop-in link, `/run/mica/timezone` | `ntp_servers` in `/var/lib/mica/time/ntpd.conf`, `mica-ntpd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; `apid.service` started for `mode` `network` or `local` (restarted when the file changed) and stopped for `off` | the same, `apid` |
 | `mdns` | micad's own mDNS responder (section 3.13), from `access.mdns`, the hostname and `access.web` | the same |
 | `ssdp` | micad's own SSDP responder (section 3.14), from `access.ssdp`, the hostname and `access.web` | the same |
 | `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
 | `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. A BLE provisioning window keeps the adapter powered while Bluetooth is switched off | the same through `mica-bluetoothd` |
+
+The units `wifi_client`, `wifi_ap`, `container` and `mqtt` enable and disable are also saved in
+`/var/lib/mica/units/enabled` on DATA, one unit a line, and whether a unit is enabled is answered
+from that file (a unit the init reports `masked` stays masked): enablement on the read-only root
+lasts only until the next boot. Base's `mica-units` starts every listed unit at boot, with or
+without micad, so these services come back as last configured.
 
 The station and the access point share one radio and take turns; when one write turns the access
 point off and the station on, the access point stops before the supplicant starts. The station
@@ -370,8 +376,8 @@ The contract between micad and the packages whose services it drives on an OpenR
 | Service | Shipped by | micad writes |
 | --- | --- | --- |
 | `mica-sshd` | mica-ssh (dropbear) or mica-openssh | `/var/lib/mica/ssh/sshd.env` (`SSH_ENABLED`, `SSH_LISTEN`, `SSH_PASSWORD`, `SSH_ROOT_LOGIN`) |
-| `mica-wifi-client` | mica-wifi | `/run/mica/wifi-client.env` (`interface`, `config`, `metric`) |
-| `mica-wifi-ap` | mica-wifi-ap | `/run/mica/wifi-ap.env` (`interface`, `config`, `address`, `udhcpd`), `/run/mica/wifi-ap-udhcpd.conf` (pidfile `/run/mica-wifi-ap.udhcpd.pid`) |
+| `mica-wifi-client` | mica-wifi | `/var/lib/mica/wifi/client.env` (`interface`, `config`, `metric`) |
+| `mica-wifi-ap` | mica-wifi-ap | `/var/lib/mica/wifi/ap.env` (`interface`, `config`, `address`, `udhcpd`), `/var/lib/mica/wifi/ap-udhcpd.conf` (pidfile `/run/mica-wifi-ap.udhcpd.pid`) |
 | `mica-bluetoothd` | mica-bluetooth | -- |
 | `mica-ntpd` | mica-openrc | `/var/lib/mica/time/ntpd.conf` (`ntp_servers`) |
 | `mica-network` | mica-openrc | `/var/lib/mica/network/interfaces` |
@@ -1095,15 +1101,16 @@ MQTT carries application data only; nothing of configuration, state, credentials
 The broker and the bridge are the packages `mica-mqtt-broker` and `mica-mqttd` of mica-pkgs; what
 they are is `mica-pkgs:docs/mica-pkgs.md` section 2. micad's side is the contract of its section 3:
 
-- **The broker's configuration**, `/run/mica/mqtt-broker.toml`: exactly `listen_address`,
+- **The broker's configuration**, `/var/lib/mica/mqtt/broker.toml` on DATA: exactly `listen_address`,
   `listen_port` and `auth_enabled`, rendered from the `mqtt` settings before the broker starts
   (3.1). Accounts are not micad's: the broker reads them from
   `/var/lib/mica/mqtt-broker-users.toml`.
-- **The bridge's device id**, `/run/mica/mqttd-device.env`: the one assignment
+- **The bridge's device id**, `/var/lib/mica/mqtt/mqttd-device.env`: the one assignment
   `MICA_MQTT_DEVICE_ID=<id>` (3.2).
 - **The services** (3.3): `mica-mqtt-broker.service` and `mica-mqttd.service` on systemd,
   `mica-mqtt-broker` and `mica-mqttd` on OpenRC, started when MQTT is on and stopped when it is
-  off. The packages enable neither.
+  off. The packages enable neither; micad saves the enablement in `/var/lib/mica/units/enabled`
+  and Base's `mica-units` starts both at boot from it, with or without micad.
 
 A product carries MQTT when its `FEATURES` has `mqtt` and its root holds both packages.
 
