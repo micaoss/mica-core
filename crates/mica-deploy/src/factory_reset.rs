@@ -70,6 +70,10 @@ pub struct Request {
     pub by: Requester,
     /// The peer or mechanism that asked, for the record.
     pub source: String,
+    /// The deployment the reset returns to, the confirmed running one when it
+    /// was staged: in a request of version 2, which is staged on SYSTEM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployment: Option<String>,
 }
 
 /// The record of a completed reset.
@@ -84,11 +88,19 @@ pub struct Done {
     pub completed: u64,
     /// Entries the erase could not remove; 0 on a clean erase.
     pub unremoved: u64,
+    /// Of a reset of version 2: whether DATA was made again, or, its
+    /// format failing, erased in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formatted: Option<bool>,
 }
 
 impl Request {
     fn validate(&self) -> Result<()> {
-        ensure!(self.v == 1, "unknown factory reset request version");
+        match (self.v, &self.deployment) {
+            (1, None) => {}
+            (2, Some(id)) => crate::deployments::valid_id(id)?,
+            _ => anyhow::bail!("unknown factory reset request version"),
+        }
         ensure!(
             self.source.len() <= 256 && !self.source.chars().any(char::is_control),
             "invalid factory reset source"
@@ -104,6 +116,10 @@ impl Request {
 /// An invalid request, or one that cannot be written durably.
 pub fn request(meta: &Path, request: &Request) -> Result<()> {
     request.validate()?;
+    ensure!(
+        request.v == 1,
+        "a factory reset of version 2 is staged on SYSTEM"
+    );
     let path = meta.join(REQUEST);
     if let Ok(metadata) = path.symlink_metadata() {
         ensure!(
@@ -185,6 +201,52 @@ pub fn apply(
             return Ok(None);
         }
     };
+    let unremoved = erase_in_place(data, keepalive, log)?;
+    let done = Done {
+        v: 1,
+        requested: request.requested,
+        by: request.by,
+        source: request.source,
+        completed: now,
+        unremoved,
+        formatted: None,
+    };
+    record(&meta, &done)?;
+    fs::remove_file(&path)?;
+    mica_fs::sync_dir(&meta)?;
+    Ok(Some(done))
+}
+
+/// Replace the record of the last completed reset in `meta` with `done`.
+///
+/// # Errors
+///
+/// The record cannot be written durably.
+pub fn record(meta: &Path, done: &Done) -> Result<()> {
+    let record = meta.join(DONE);
+    if let Ok(metadata) = record.symlink_metadata()
+        && !metadata.is_file()
+    {
+        fs::remove_dir_all(&record)?;
+    }
+    mica_fs::Replace::new(&record, "pending")?
+        .mode(0o600)
+        .write(serde_json::to_vec(done)?)?;
+    Ok(())
+}
+
+/// Remove every entry of the DATA filesystem mounted at `data` but `meta/`,
+/// and make the factory layout again, as [`apply`] does; answer the entries
+/// that could not be removed.
+///
+/// # Errors
+///
+/// `keepalive`'s error, or DATA's root or the layout failing.
+pub fn erase_in_place(
+    data: &Path,
+    keepalive: &mut dyn FnMut() -> Result<()>,
+    log: &mut dyn FnMut(&str),
+) -> Result<u64> {
     let root = open_dir(None, data)?;
     let device = rustix::fs::fstat(&root)?.st_dev;
     let mut erase = Erase {
@@ -194,34 +256,24 @@ pub fn apply(
         unremoved: 0,
     };
     erase.clear(&root, c"DATA", 0, Some(KEPT))?;
-    for (name, mode) in SKELETON {
-        fs::DirBuilder::new()
-            .mode(mode)
-            .create(data.join(name))
-            .with_context(|| format!("make {name} on DATA"))?;
-        fs::set_permissions(data.join(name), fs::Permissions::from_mode(mode))?;
-    }
+    skeleton(data)?;
     rustix::fs::fsync(&root)?;
-    let done = Done {
-        v: 1,
-        requested: request.requested,
-        by: request.by,
-        source: request.source,
-        completed: now,
-        unremoved: erase.unremoved,
-    };
-    let record = meta.join(DONE);
-    if let Ok(metadata) = record.symlink_metadata()
-        && !metadata.is_file()
-    {
-        fs::remove_dir_all(&record)?;
+    Ok(erase.unremoved)
+}
+
+/// Make the factory DATA layout, `meta/` among it, as the image makes it.
+fn skeleton(data: &Path) -> Result<()> {
+    for (name, mode) in SKELETON.into_iter().chain([(KEPT, 0o700)]) {
+        let path = data.join(name);
+        if path.symlink_metadata().is_err() {
+            fs::DirBuilder::new()
+                .mode(mode)
+                .create(&path)
+                .with_context(|| format!("make {name} on DATA"))?;
+        }
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode))?;
     }
-    mica_fs::Replace::new(&record, "pending")?
-        .mode(0o600)
-        .write(serde_json::to_vec(&done)?)?;
-    fs::remove_file(&path)?;
-    mica_fs::sync_dir(&meta)?;
-    Ok(Some(done))
+    Ok(())
 }
 
 struct Erase<'a> {
@@ -341,6 +393,9 @@ fn open_dir(at: Option<&OwnedFd>, path: impl rustix::path::Arg) -> std::io::Resu
         None => rustix::fs::open(path, flags, Mode::empty())?,
     })
 }
+
+mod system;
+pub use system::*;
 
 #[cfg(test)]
 mod tests;

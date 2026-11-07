@@ -7,7 +7,7 @@
 #[path = "support/ubi.rs"]
 mod ubi;
 
-use mica_deploy::ubi::{DataGrowth, UbiDevice, VolumeKind, find, grow_data, space};
+use mica_deploy::ubi::{DataGrowth, UbiDevice, VolumeKind, find, grow_data, space, wipe_data};
 use std::fs;
 use tempfile::TempDir;
 use ubi::{DirUbi, LEB};
@@ -143,4 +143,48 @@ fn status_reports_the_space_in_lebs() {
     );
     let without = space(&device, 4 * MIB, None).unwrap();
     assert!(without.get("storeReserveLebs").is_none());
+}
+
+/// A factory reset empties a formatted `data` volume and keeps its size, so
+/// the growth after it sees an empty volume and nothing else changes.
+#[test]
+fn a_factory_reset_empties_data_and_keeps_its_size() {
+    let dir = TempDir::new().unwrap();
+    let device = device(&dir);
+    assert_eq!(
+        grow_data(&device, 32 * MIB).unwrap(),
+        DataGrowth::Grown { from: 64, to: 269 }
+    );
+    let data = find(&device, "data").unwrap().unwrap();
+    fs::write(device.path(data.id), vec![1; 3 * LEB as usize]).unwrap();
+    let others: Vec<_> = device
+        .names()
+        .into_iter()
+        .filter(|name| name != "data")
+        .map(|name| (device.read(&name), name))
+        .collect();
+
+    assert_eq!(wipe_data(&device).unwrap(), 269);
+    let data = find(&device, "data").unwrap().unwrap();
+    assert!(data.sound());
+    assert_eq!(data.kind, VolumeKind::Dynamic);
+    assert_eq!(data.reserved_lebs, 269);
+    assert_eq!(fs::metadata(device.path(data.id)).unwrap().len(), 0);
+    for (bytes, name) in others {
+        assert_eq!(device.read(&name), bytes, "{name}");
+    }
+    // The growth after it finds an empty volume with nothing left to give.
+    assert!(matches!(
+        grow_data(&device, 32 * MIB).unwrap(),
+        DataGrowth::Kept { lebs: 269, .. }
+    ));
+    // Interrupted and run again, it is the same.
+    assert_eq!(wipe_data(&device).unwrap(), 269);
+
+    let dir = TempDir::new().unwrap();
+    let device = DirUbi::create(dir.path(), 600);
+    assert!(wipe_data(&device).is_err());
+    device.put_static("data", b"image");
+    let error = format!("{:#}", wipe_data(&device).unwrap_err());
+    assert!(error.contains("not a dynamic volume"), "{error}");
 }

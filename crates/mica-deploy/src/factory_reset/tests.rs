@@ -8,6 +8,7 @@ fn staged() -> Request {
         requested: 1_700_000_000,
         by: Requester::Console,
         source: "192.0.2.7".into(),
+        deployment: None,
     }
 }
 
@@ -100,6 +101,7 @@ fn erases_a_seeded_tree(data: &Path, outside: &Path) {
             source: "192.0.2.7".into(),
             completed: 1_700_000_100,
             unremoved: 0,
+            formatted: None,
         }
     );
     assert_eq!(tree(data), factory_tree());
@@ -257,4 +259,114 @@ fn a_request_is_checked_before_it_is_written() {
         fs::metadata(dir.path().join(REQUEST)).unwrap().mode() & 0o777,
         0o600
     );
+}
+
+fn staged_v2() -> Request {
+    Request {
+        v: 2,
+        deployment: Some("d".repeat(64)),
+        ..staged()
+    }
+}
+
+#[test]
+fn a_request_names_its_deployment_exactly_in_version_2() {
+    let dir = tempfile::tempdir().unwrap();
+    for bad in [
+        Request {
+            deployment: Some("d".repeat(64)),
+            ..staged()
+        },
+        Request {
+            deployment: None,
+            ..staged_v2()
+        },
+        Request {
+            deployment: Some("not an id".into()),
+            ..staged_v2()
+        },
+        Request {
+            v: 3,
+            ..staged_v2()
+        },
+    ] {
+        assert!(bad.validate().is_err(), "{bad:?}");
+        assert!(stage(dir.path(), dir.path(), &bad).is_err(), "{bad:?}");
+    }
+    // Version 2 is staged on SYSTEM, never in meta/.
+    assert!(request(dir.path(), &staged_v2()).is_err());
+    assert!(stage(dir.path(), dir.path(), &staged()).is_err());
+}
+
+/// The snapshot goes to SYSTEM before the request, and a DATA made again gets
+/// it back with the factory layout; what the snapshot does not name is gone.
+#[test]
+fn a_reset_on_system_restores_its_snapshot_into_a_new_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let (system, data, outside) = (
+        dir.path().join("system"),
+        dir.path().join("data"),
+        dir.path().join("outside"),
+    );
+    for path in [&system, &data, &outside] {
+        fs::create_dir(path).unwrap();
+    }
+    seed(&data, &outside);
+    fs::write(data.join("meta/deployments.json"), "state").unwrap();
+    fs::write(data.join("meta/set-trial.json"), "trial").unwrap();
+    assert_eq!(system::staged(&system).unwrap(), None);
+    stage(&system, &data.join("meta"), &staged_v2()).unwrap();
+    assert_eq!(system::staged(&system).unwrap(), Some(staged_v2()));
+    // A snapshot left by a staging interrupted before its request is
+    // replaced; the request is what makes a reset staged.
+    fs::remove_file(system.join(SYSTEM_DIR).join("request.json")).unwrap();
+    fs::write(
+        system.join(SYSTEM_DIR).join("snapshot/firmware.json"),
+        "stale",
+    )
+    .unwrap();
+    assert_eq!(system::staged(&system).unwrap(), None);
+    stage(&system, &data.join("meta"), &staged_v2()).unwrap();
+    // The runkit makes DATA again: here, an empty directory.
+    fs::remove_dir_all(&data).unwrap();
+    fs::create_dir(&data).unwrap();
+    restore(&system, &data).unwrap();
+    let mut expected = factory_tree();
+    expected.retain(|path| path != "meta/factory-reset-done.json");
+    expected.push("meta/deployments.json".into());
+    expected.sort();
+    assert_eq!(tree(&data), expected);
+    assert_eq!(
+        fs::read_to_string(data.join("meta/firmware.json")).unwrap(),
+        "receipt"
+    );
+    for (name, mode) in SKELETON.into_iter().chain([("meta", 0o700)]) {
+        assert_eq!(
+            fs::metadata(data.join(name)).unwrap().mode() & 0o7777,
+            mode,
+            "{name}"
+        );
+    }
+    // Restored again, as a boot after an interruption does, it is the same.
+    restore(&system, &data).unwrap();
+    assert_eq!(tree(&data), expected);
+    assert!(unstage(&system).unwrap());
+    assert_eq!(fs::read_dir(&system).unwrap().count(), 0);
+}
+
+#[test]
+fn the_runkits_account_is_read_only_when_present() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("factory-reset.json");
+    assert_eq!(progress(&path).unwrap(), None);
+    let written = Progress {
+        v: 2,
+        requested: 1,
+        formatted: false,
+        unremoved: 3,
+    };
+    fs::write(&path, serde_json::to_vec(&written).unwrap()).unwrap();
+    assert_eq!(progress(&path).unwrap(), Some(written));
+    fs::write(&path, b"{\"v\":2}").unwrap();
+    assert!(progress(&path).is_err());
 }

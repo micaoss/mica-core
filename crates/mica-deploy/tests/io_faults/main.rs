@@ -355,6 +355,25 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
             .unwrap();
         }
     }
+    if operation.starts_with("reset-") {
+        // What DATA's meta/ holds beside the deployment state, for the
+        // snapshot a staged reset keeps.
+        write(&store.meta.join("catalog.json"), b"{\"checkpoints\":[]}");
+        write(&store.meta.join("firmware.json"), b"{\"receipt\":true}");
+    }
+    if operation == "reset-finish" {
+        // The candidate is confirmed and runs; the reset to it is staged, and
+        // the runkit has made DATA again at this boot.
+        let running = receipt(&deployments[2], kind);
+        store.confirm(&running).unwrap();
+        mica_deploy::factory_reset::stage(
+            &store.system,
+            &store.meta,
+            &reset_request(&running.deployment_id),
+        )
+        .unwrap();
+        write(&root.join("retained-id"), running.deployment_id.as_bytes());
+    }
     if operation == "gc" {
         store.confirm(&receipt(&deployments[2], kind)).unwrap();
         if kind == Kind::Ubi {
@@ -455,7 +474,105 @@ fn run_operation(root: &Path, kind: Kind, operation: &str) {
             .import_any(&mut fs::File::open(root.join("candidate.archive")).unwrap())
             .unwrap();
         }
+        "reset-stage" => {
+            // The running deployment, the one before the pending candidate.
+            let running: BootReceipt =
+                serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())
+                    .unwrap();
+            if mica_deploy::factory_reset::staged(&store.system)
+                .unwrap()
+                .is_none()
+            {
+                store.prepare_factory_reset(&running).unwrap();
+                mica_deploy::factory_reset::stage(
+                    &store.system,
+                    &store.meta,
+                    &reset_request(&running.deployment_id),
+                )
+                .unwrap();
+            }
+        }
+        "reset-finish" => {
+            if let Some(request) = mica_deploy::factory_reset::staged(&store.system).unwrap() {
+                store.finish_factory_reset(&receipt, &[public]).unwrap();
+                mica_deploy::factory_reset::record(
+                    &store.meta,
+                    &mica_deploy::factory_reset::Done {
+                        v: 2,
+                        requested: request.requested,
+                        by: request.by,
+                        source: request.source,
+                        completed: request.requested + 60,
+                        unremoved: 0,
+                        formatted: Some(true),
+                    },
+                )
+                .unwrap();
+                mica_deploy::factory_reset::unstage(&store.system).unwrap();
+            } else {
+                // Interrupted once the request was gone: the rest goes, as
+                // mica-deploy's next command removes it.
+                mica_deploy::factory_reset::unstage(&store.system).unwrap();
+            }
+        }
         _ => panic!("unknown operation"),
+    }
+}
+/// A factory reset of version 2 back to deployment `id`.
+fn reset_request(id: &str) -> mica_deploy::factory_reset::Request {
+    mica_deploy::factory_reset::Request {
+        v: 2,
+        requested: 1_700_000_000,
+        by: mica_deploy::factory_reset::Requester::Cli,
+        source: "io faults".into(),
+        deployment: Some(id.into()),
+    }
+}
+/// After a factory reset is staged or finished, whatever was interrupted: a
+/// staged request always has its whole snapshot, and a finished one left the
+/// running deployment and its core set alone.
+fn validate_reset(root: &Path, kind: Kind, operation: &str) {
+    let store = store(root, kind);
+    let snapshot = store.system.join("factory-reset/snapshot");
+    match mica_deploy::factory_reset::staged(&store.system).unwrap() {
+        Some(request) => {
+            for name in ["catalog.json", "firmware.json", "deployments.json"] {
+                assert_eq!(
+                    fs::read(snapshot.join(name)).unwrap(),
+                    fs::read(store.meta.join(name)).unwrap(),
+                    "{name}"
+                );
+            }
+            if operation == "reset-stage" {
+                assert!(store.effective_state().unwrap().candidate.is_none());
+                assert_eq!(
+                    request.deployment.as_deref(),
+                    Some(
+                        fs::read_to_string(root.join("retained-id"))
+                            .unwrap()
+                            .as_str()
+                    )
+                );
+            }
+        }
+        None if operation == "reset-finish" => {
+            let running = fs::read_to_string(root.join("retained-id")).unwrap();
+            let entries = store.entries().unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].id, running);
+            let state = store.effective_state().unwrap();
+            assert_eq!(state.fallback, None);
+            assert_eq!(state.current.as_deref(), Some(running.as_str()));
+            assert!(!store.system.join("factory-reset").exists());
+            assert_eq!(
+                mica_deploy::factory_reset::done(&store.meta)
+                    .unwrap()
+                    .unwrap()
+                    .formatted,
+                Some(true)
+            );
+        }
+        None => {}
     }
 }
 /// After an import on UBI, run again past any interruption: the candidate's

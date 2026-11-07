@@ -21,7 +21,16 @@ pub(super) fn bounded_file(path: &str, limit: u64) -> Result<Vec<u8>> {
 }
 
 pub(super) fn run(control: &mut BootControl, operation: Startup) -> Result<String> {
-    control.supervisor.run_startup(native::command(operation)?)
+    // Formatting DATA, a secure erase first when the board asks, takes as long
+    // as the medium needs; the watchdog is fed meanwhile.
+    let limit = if matches!(operation, Startup::FormatData { .. }) {
+        600_000
+    } else {
+        30_000
+    };
+    control
+        .supervisor
+        .run_startup_within(native::command(operation)?, limit)
 }
 
 pub(super) fn mount(

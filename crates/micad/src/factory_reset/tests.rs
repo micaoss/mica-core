@@ -54,6 +54,7 @@ fn a_staged_reset_is_the_runkit_s_request() {
             requested: 1_700_000_000,
             by: Requester::Cli,
             source: "uid 0".into(),
+            deployment: None,
         }
     );
 }
@@ -90,4 +91,66 @@ fn a_requester_is_one_of_three() {
     assert_eq!(requester("cli"), Some(Requester::Cli));
     assert_eq!(requester("ble"), None);
     assert_eq!(requester("fleet"), None);
+}
+
+/// A fake mica-deploy at `dir/deploy` that appends its arguments to
+/// `dir/calls` and exits with `status`.
+fn fake_deploy(dir: &std::path::Path, status: u8) -> FactoryReset {
+    use std::os::unix::fs::PermissionsExt;
+    let script = dir.join("deploy");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\necho '{{\"finished\":true}}'\nexit {status}\n",
+            dir.join("calls").display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    at(dir).with_deploy(script, dir.join("run/factory-reset.json"))
+}
+
+fn calls(dir: &std::path::Path) -> String {
+    fs::read_to_string(dir.join("calls")).unwrap_or_default()
+}
+
+#[test]
+fn a_runkit_of_version_2_has_mica_deploy_stage_the_reset() {
+    let (dir, _) = device();
+    let reset = fake_deploy(dir.path(), 0);
+    fs::write(
+        dir.path().join("run/runkit.json"),
+        r#"{"factoryReset":true,"factoryResetVersion":2}"#,
+    )
+    .unwrap();
+    assert!(reset.supported());
+    reset.stage(Requester::Api, "192.0.2.7", 10).unwrap();
+    assert_eq!(
+        calls(dir.path()),
+        "factory-reset --by api --source 192.0.2.7\n"
+    );
+    assert!(
+        !dir.path().join("data/meta").join(erase::REQUEST).exists(),
+        "no request of version 1"
+    );
+
+    let refusing = fake_deploy(dir.path(), 1);
+    assert!(refusing.stage(Requester::Console, "x", 10).is_err());
+}
+
+#[test]
+fn only_a_boot_that_carried_out_a_reset_finishes_it() {
+    let (dir, _) = device();
+    let reset = fake_deploy(dir.path(), 0);
+    reset.finish().unwrap();
+    assert_eq!(calls(dir.path()), "", "no progress, no finish");
+
+    fs::write(
+        dir.path().join("run/factory-reset.json"),
+        r#"{"v":2,"requested":10,"formatted":true,"unremoved":0}"#,
+    )
+    .unwrap();
+    reset.finish().unwrap();
+    assert_eq!(calls(dir.path()), "factory-reset --finish\n");
+    assert!(fake_deploy(dir.path(), 1).finish().is_err());
 }

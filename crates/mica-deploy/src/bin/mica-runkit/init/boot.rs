@@ -223,6 +223,44 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         fs::read_to_string("/support/kernel.release")?.trim() == config.identity.kernel_release,
         "support module release mismatch"
     );
+    // A factory reset staged on SYSTEM makes DATA again before anything
+    // mounts it (`docs/mica-core.md` 3.7). One staged while another
+    // deployment ran waits for a boot of that one; one that cannot be read
+    // resets nothing.
+    let reset = match factory_reset::staged(Path::new("/system")) {
+        Ok(Some(request)) if request.deployment.as_deref() == Some(id.as_str()) => Some(request),
+        Ok(Some(_)) => {
+            eprintln!("mica-init: factory reset staged for another deployment; not at this boot");
+            None
+        }
+        Ok(None) => None,
+        Err(error) => {
+            eprintln!("mica-init: factory reset request unreadable, not resetting: {error:#}");
+            None
+        }
+    };
+    // Whether DATA was made again; `false`, its format failed and it is
+    // erased in place once mounted.
+    let mut formatted = None;
+    if let (Some(_), Some(policy), Some(_)) = (&ubi, &config.board.ubi, &reset) {
+        formatted = Some(
+            match run(
+                control,
+                Startup::UbiWipeData {
+                    mtd: policy.mtd.clone(),
+                },
+            ) {
+                Ok(done) => {
+                    eprintln!("mica-init: factory reset: DATA {done}");
+                    true
+                }
+                Err(error) => {
+                    eprintln!("mica-init: factory reset: DATA not emptied: {error:#}");
+                    false
+                }
+            },
+        );
+    }
     // DATA is mounted before the core components are chosen: the trial of a
     // pending core set is counted there, and the count is spent before the
     // set is tried. Nothing is bound into `/usr` or `/etc` yet, which the
@@ -288,6 +326,27 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
                     == config.board.gpt_partitions()?.data.to_string(),
             "DATA is not on the authenticated system disk"
         );
+        if reset.is_some() {
+            formatted = Some(
+                match run(
+                    control,
+                    Startup::FormatData {
+                        device: data.clone(),
+                        arch: config.identity.arch.clone(),
+                        format: config.board.data_format(),
+                    },
+                ) {
+                    Ok(done) => {
+                        eprintln!("mica-init: factory reset: {done}");
+                        true
+                    }
+                    Err(error) => {
+                        eprintln!("mica-init: factory reset: DATA not formatted: {error:#}");
+                        false
+                    }
+                },
+            );
+        }
         // `prjquota` is applied HERE, at mount time, every boot, as the signed
         // policy's `board.dataQuotas` says (on unless the board turns it off);
         // nothing from the product, profile or command line can change it.
@@ -321,7 +380,33 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());
         let supervisor = &mut control.supervisor;
-        if let Some(done) = factory_reset::apply(
+        if let Some((request, formatted)) = reset.as_ref().zip(formatted) {
+            let data = Path::new("/newroot/mnt/data");
+            let unremoved = if formatted {
+                0
+            } else {
+                factory_reset::erase_in_place(
+                    data,
+                    &mut || supervisor.kick(),
+                    &mut |line| eprintln!("mica-init: {line}"),
+                )?
+            };
+            factory_reset::restore(Path::new("/system"), data)?;
+            fs::create_dir_all("/run/mica")?;
+            fs::write(
+                factory_reset::PROGRESS,
+                serde_json::to_vec(&factory_reset::Progress {
+                    v: 2,
+                    requested: request.requested,
+                    formatted,
+                    unremoved,
+                })?,
+            )?;
+            eprintln!(
+                "mica-init: factory reset to deployment {id}: DATA {}, {unremoved} entries not removed",
+                if formatted { "made again" } else { "erased in place" }
+            );
+        } else if let Some(done) = factory_reset::apply(
             Path::new("/newroot/mnt/data"),
             now,
             &mut || supervisor.kick(),
@@ -453,7 +538,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     // receipt, whose readers refuse fields they do not know.
     fs::write(
         factory_reset::CAPABILITIES,
-        serde_json::to_vec(&serde_json::json!({ "factoryReset": true }))?,
+        serde_json::to_vec(&serde_json::json!({ "factoryReset": true, "factoryResetVersion": 2 }))?,
     )?;
     fs::write("/run/mica/deployment.json", &envelope)?;
     fs::write(core_set::BOOT_FILE, serde_json::to_vec(&core_boot)?)?;

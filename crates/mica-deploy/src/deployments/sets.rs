@@ -425,7 +425,7 @@ impl DeploymentStore {
     }
 
     /// Remove every component object of `kind` no held set names.
-    fn release_unreferenced(&self, kind: SetKind, keys: &[[u8; 32]]) -> Result<usize> {
+    pub(super) fn release_unreferenced(&self, kind: SetKind, keys: &[[u8; 32]]) -> Result<usize> {
         let kept = self.held_components(kind, keys)?;
         let cores = set_state::objects_dir(&self.system, kind);
         let mut removed = 0;
@@ -474,7 +474,7 @@ impl DeploymentStore {
 }
 
 /// Every set the state names.
-fn named_sets(state: &SetState) -> BTreeSet<String> {
+pub(super) fn named_sets(state: &SetState) -> BTreeSet<String> {
     [&state.current, &state.pending]
         .into_iter()
         .flatten()

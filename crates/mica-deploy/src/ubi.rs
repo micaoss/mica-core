@@ -11,7 +11,7 @@ use std::{
 pub use lifecycle_sys::UbiVolumeKind as VolumeKind;
 
 mod growth;
-pub use growth::{DataGrowth, grow_data, space};
+pub use growth::{DataGrowth, grow_data, space, wipe_data};
 
 /// The volume holding SYSTEM's files.
 pub const SYSTEM: &str = "system";

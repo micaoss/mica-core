@@ -346,13 +346,28 @@ absence is reported with its reason rather than as a healthy reading:
   under it. A board-declared physical recovery action at boot maps to a tier. A
   transient root password lives in `/etc/shadow` until the next boot and in no setting.
 - **Factory reset.** The software stays at its current version; everything configured is
-  erased. `FactoryReset` checks the administrator password and stages a request in DATA's
-  `meta/` (`factory-reset.json`), then reboots after 3 s; the runkit erases at the next boot
-  (6.5). Everything on DATA but `meta/` goes: STATE with the settings, the claim, the API
-  tokens, the keys, the SSH host keys and the machine-id, the containers, the apps, `/srv`,
-  `/mica` and the logs kept there. SYSTEM, the boot records and the core set are untouched, and
-  the device code, derived from the hardware, is unchanged, so the device comes back unclaimed,
-  on its factory access point. It is refused, with a `code`, when the booted runkit does not
+  erased. `FactoryReset` checks the administrator password, has mica-deploy stage the reset
+  (6.3), then reboots after 3 s; the runkit carries it out at the next boot (6.5). Everything
+  on DATA goes: STATE with the settings, the claim, the API tokens, the keys, the SSH host keys
+  and the machine-id, the containers, the apps, `/srv`, `/mica` and the logs kept there. The
+  device code, derived from the hardware, is unchanged, so the device comes back unclaimed, on
+  its factory access point.
+
+  The reset returns the device to the deployment that is running, which must be confirmed. The
+  request and a snapshot of the files of DATA's `meta/` that describe SYSTEM (the firmware
+  receipt, the catalog checkpoints, the deployment state) are staged on SYSTEM
+  (6.1), the snapshot first; a pending candidate is rejected. The runkit makes DATA again
+  instead of emptying it: a `gpt` board's with the root's `mke2fs` as `board.dataFormat` says
+  (6.4), a `ubi` board's by emptying the `data` volume (6.6). A DATA it cannot make again is
+  erased in place, and the reset goes on. It then restores the snapshot. The first start of the
+  root after it finishes the reset on SYSTEM: micad runs `mica-deploy factory-reset --finish`
+  before anything else, and every locked mica-deploy command finishes it first. The finish
+  removes every other deployment and every core set but the running deployment's, with the
+  objects only they held, records the reset in `meta/` and removes the request last, so an
+  interruption anywhere before that runs the reset again at the next boot. While a reset is
+  staged, mica-deploy refuses everything that would change what it keeps. A runkit that says
+  only `{"factoryReset": true}` erases DATA in place and keeps `meta/` (6.5); micad then stages
+  the request in `meta/` itself. It is refused, with a `code`, when the booted runkit does not
   carry it out (`factory_reset_unsupported`: it writes no `/run/mica/runkit.json`), on an
   unclaimed device (`not_claimed`), while an update is installing, holds the transaction lock or
   waits for its reboot (`update_in_progress`), while a deployment or set is on trial
@@ -360,8 +375,9 @@ absence is reported with its reason rather than as a healthy reading:
   each one doubles a wait from 5 s to 300 s (`login_throttled`). `micad factory-reset` is the
   same request as root on the device: it prompts for the password with echo off, or reads it
   from `--password-file FILE` (`-` for stdin); there is no flag to skip it. The first boot
-  after a reset logs the runkit's record (`factory-reset-done.json`: requested, completed, by,
-  source and the entries it could not remove), keeps a copy on STATE so later boots do not
+  after a reset logs its record (`factory-reset-done.json`: requested, completed, by, source,
+  the entries an erase in place could not remove and, from the finish, whether DATA was made
+  again: `formatted`), keeps a copy on STATE so later boots do not
   repeat it, and discards DATA's free space in the background (`FITRIM`), skipped where the
   filesystem or the device does not discard (UBIFS, a card without TRIM). It is not a
   certified wipe. `GetFactoryReset` answers whether the runkit supports it and the last
@@ -1121,8 +1137,9 @@ A product carries MQTT when its `FEATURES` has `mqtt` and its root holds both pa
 | Where | Holds |
 | --- | --- |
 | SYSTEM (`/mnt/system`) | At most two deployments: descriptors, signatures, content-addressed objects under `kernels/` and `roots/`. At most three sets of each kind under `sets/<kind>/` (6.2) |
+| SYSTEM `factory-reset/` | A staged factory reset (3.7): `request.json` and `snapshot/`, the files of DATA's `meta/` it restores; present only from its staging to its finish |
 | ESP, or the U-Boot environment on a FIT board | The boot records that select a deployment and count trial attempts |
-| DATA `/mnt/data/meta` | Transaction state, catalog checkpoints, the firmware receipt, a staged factory reset and the record of the last (`factory-reset.json`, `factory-reset-done.json`); the only directory a factory reset keeps |
+| DATA `/mnt/data/meta` | Transaction state, catalog checkpoints, the firmware receipt and the record of the last factory reset (`factory-reset-done.json`); a factory reset restores the first three from its snapshot. A reset staged for a runkit of version 1 (`factory-reset.json`), which keeps this directory |
 | DATA `/mica/updates` | Downloads and staged objects; an acquisition never writes SYSTEM, except on a `ubi` board, where the objects kept in volumes go straight into the store (6.6) |
 | DATA project directories | Quotas set by the runkit: `mica` and `srv` project 100, `cache`, `tmp` and `var` project 101 (one eighth of DATA, 32 to 256 MiB, 2048 to 16384 inodes), `containers` project 102 |
 
@@ -1357,7 +1374,15 @@ when the update policy (`policy` of `updates.json` over the image's `update.poli
 and nothing otherwise; it never reboots, so what it installs runs from the next boot, and it
 keeps none of micad's interval, maintenance window or reboot gate. `factory-reset [--reboot]`
 stages the reset micad's `FactoryReset` stages (section 3.7), without its password, for the
-root on the device. `mica-deploy help` lists the commands.
+root on the device; micad passes its requester and source (`--by console|api|cli --source
+<text>`). `factory-reset --cancel` removes a staged reset (`{"cancelled": bool}`), and
+`factory-reset --finish` finishes the one the runkit carried out at this boot (`{"finished",
+"formatted", "removed"}`, or `{"finished": false}`); every other locked command finishes it
+first. While a reset is staged, `update`, `check`, `fetch`, `import`, `install`, the set
+commands, `rollback`, `reject` and a recording `firmware-readback` are refused, and `status`
+names it in `factoryReset` (`state`: `staged`, `formatted` once the runkit made DATA again,
+`degraded` when it erased it in place; `deployment`, `requested`). `mica-deploy help` lists the
+commands.
 Installation is a durable file transaction, proven by a fault suite that interrupts it before
 and after every observed IO. `fetch` takes the objects smallest first, so a power cut is most
 likely to cost the last and largest; on a `ubi` board it costs exactly the object in flight
@@ -1406,6 +1431,16 @@ kernel, its initramfs and the keys in it together. Such a board has no verified 
 `storage`, in the `board` section, is `gpt` (the default, and never written), the block layout
 above, or `ubi`, raw NAND (6.6).
 
+`dataFormat`, only on a `gpt` board, is how a factory reset makes DATA again (3.7): `features`
+(`mke2fs -O`, which must include `project` and `quota` while quotas are on), `bytesPerInode`
+(`mke2fs -i`, a power of two from 4 KiB to 1 MiB) and `secureErase` (`true` discards the whole
+partition with `BLKSECDISCARD` first; a device that cannot is formatted all the same, and it is
+still no certified wipe). Absent, it is the format the image's DATA is made with:
+`project,quota,^orphan_file,^metadata_csum_seed` and an inode per 16 KiB, or
+`^orphan_file,^metadata_csum_seed` with the default inode ratio when the board turns quotas
+off. The uefi-x64 case of `cases.json` `boardPolicies` states the default, so the assembly and
+the device read one format.
+
 ### 6.5 mica-runkit and lifecycle-sys
 
 `mica-runkit` is one static executable selected by the name it runs as:
@@ -1415,13 +1450,23 @@ above, or `ubi`, raw NAND (6.6).
   signed dm-verity mappings, composes the core components (below), mounts DATA (with `prjquota` and the project directories unless the
   board turns quotas off), carries out a staged factory reset, seeds the persistent machine identity, binds modules and firmware, and
   hands over to the root's init. No network and no shell exist at this stage.
-  The factory reset removes everything on DATA but `meta/`, without following symlinks or
-  crossing mounts, feeding the watchdog as it goes, and recreates the factory layout
-  (`state`, `cache`, `tmp`, `var`, `mica`, `srv`) before the project directories. The request
-  stays until the erase is done, so an interrupted one starts again at the next boot; an entry it
-  cannot remove is counted in its record and the boot goes on, and an unreadable request is set
-  aside as `factory-reset.json.invalid` without erasing. The runkit writes
-  `/run/mica/runkit.json` (`{"factoryReset": true}`) to say it carries the reset out.
+  A factory reset staged on SYSTEM (3.7) is carried out at a boot of the deployment it names;
+  one for another deployment, or one that cannot be read, waits and resets nothing. Before DATA
+  is mounted the runkit makes it again: on a `gpt` board, once the partition is held to the
+  authenticated disk, with the verified root's own `mke2fs`, run under the root's dynamic loader
+  with the root's libraries and every link resolved inside the root, within 600 s; on a `ubi`
+  board by emptying the `data` volume (6.6). After the mount it restores the snapshot and writes
+  `/run/mica/factory-reset.json` (`{v, requested, formatted, unremoved}`) for the root to finish
+  the reset; a DATA it could not make again is erased in place first, as below. A request of
+  version 1 in `meta/` is erased in place: everything on DATA but `meta/` goes, without
+  following symlinks or crossing mounts, feeding the watchdog as it goes, and the factory layout
+  (`state`, `cache`, `tmp`, `var`, `mica`, `srv`) is recreated before the project directories.
+  That request stays until the erase is done, so an interrupted one starts again at the next
+  boot; an entry it cannot remove is counted in its record and the boot goes on, and an
+  unreadable request is set aside as `factory-reset.json.invalid` without erasing. The runkit
+  writes `/run/mica/runkit.json` (`{"factoryReset": true, "factoryResetVersion": 2}`) to say it
+  carries the reset out, and of which version; a reader that knows only `factoryReset` sees it
+  as before.
 - **`shutdown`**, PID 1 of a memory-only exit ramdisk that systemd execs at the end of its
   shutdown: releases loops and device-mapper mappings in dependency order within a bounded budget,
   and releases storage only once nothing is mounted, mapped or looped and no page is left to
@@ -1463,7 +1508,7 @@ the component's `requires` (6.2), held only on a root that carries that package.
 
 `crates/lifecycle-sys` is the only crate allowed `unsafe`: typed, bounded wrappers for the
 watchdog, loop devices, device-mapper, ext4 project ids and quotas (`FS_IOC_FSSETXATTR`,
-`quotactl_fd`), the clock's synchronized bit and `FITRIM`. The boot/shutdown gate proves every structure
+`quotactl_fd`), the clock's synchronized bit, `FITRIM` and `BLKSECDISCARD`. The boot/shutdown gate proves every structure
 and request number against the kernel headers for x86-64 and aarch64
 (`scripts/gate/boot-shutdown/uapi.c`).
 
@@ -1549,6 +1594,13 @@ so `storeReserve` covers what the store has not yet written: the next deployment
 and `reserves.system`. Without `storeReserve`, DATA keeps the size the image gives it.
 `mica-deploy status` on a `ubi` board reports `ubi`: `lebBytes`, `availableLebs`, `dataLebs`,
 `systemReserveLebs` and, when the policy carries it, `storeReserveLebs`.
+
+**DATA at a factory reset.** Before the growth, a boot that carries out a factory reset (3.7)
+empties `data` with a volume update of no bytes, which unmaps every LEB and keeps the volume's
+size; UBIFS formats the empty volume at the mount, and the growth after it finds an empty volume
+with nothing left to add. An update a power cut interrupts leaves its marker, and the next boot
+empties the volume again. A volume that is absent or static is not emptied, and DATA is erased
+in place once mounted.
 
 **Records.** The format is the FIT one, unchanged: a copy is 65536 bytes, the CRC-32 of bytes 5
 onward in bytes 0 to 3, a flag in byte 4, then `mica_entries=v1|...` and zeros, and the active

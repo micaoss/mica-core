@@ -395,10 +395,13 @@ async fn serve() -> anyhow::Result<()> {
             std::path::Path::new("/"),
             std::path::Path::new(device_code::ISSUE_PATH),
         );
-        // The first boot after a factory reset records it once and discards
-        // the space the erase freed, in the background: the boot does not
-        // wait for it.
+        // The first boot after a factory reset finishes it on SYSTEM, records
+        // it once and discards the space the erase freed, in the background:
+        // the boot does not wait for the discard.
         let factory_reset = Arc::new(factory_reset::FactoryReset::production());
+        if let Err(error) = factory_reset.finish() {
+            tracing::warn!(error = %format!("{error:#}"), "the factory reset could not be finished");
+        }
         match factory_reset.first_boot() {
             Ok(Some(_)) => {
                 let reset = Arc::clone(&factory_reset);

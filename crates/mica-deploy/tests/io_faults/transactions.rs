@@ -29,7 +29,14 @@ pub(super) fn transactions_survive_each_boundary() {
     let evidence = PathBuf::from(std::env::var("MICA_TEST_FAULT_EVIDENCE").unwrap());
     let mut summaries = Vec::new();
     for kind in KINDS {
-        for operation in ["install", "confirm", "gc", "import"] {
+        for operation in [
+            "install",
+            "confirm",
+            "gc",
+            "import",
+            "reset-stage",
+            "reset-finish",
+        ] {
             // Only a `ubi` board writes an import straight into its store.
             if operation == "import" && kind != Kind::Ubi {
                 continue;
@@ -64,6 +71,7 @@ pub(super) fn transactions_survive_each_boundary() {
                 String::from_utf8_lossy(&result.stdout)
             );
             validate(baseline.path(), kind);
+            validate_reset(baseline.path(), kind, operation);
             let trace = fs::read_to_string(baseline.path().join("trace")).unwrap();
             assert!(
                 trace.contains("fsync"),
@@ -112,6 +120,7 @@ pub(super) fn transactions_survive_each_boundary() {
                         if operation == "import" {
                             validate_import(case.path());
                         }
+                        validate_reset(case.path(), kind, operation);
                     });
                     if let Err(error) = check {
                         eprintln!("failed fixture retained: {}", case.keep().display());
@@ -441,4 +450,80 @@ pub(super) fn ubi_releasing_the_fallback_keeps_the_running_deployment() {
             .release_fallback(&receipt, &[public], &candidate)
             .is_err()
     );
+}
+
+#[test]
+pub(super) fn a_factory_reset_is_staged_only_over_a_confirmed_running_deployment() {
+    for kind in KINDS {
+        // The candidate runs on trial: nothing is staged.
+        let root = TempDir::new().unwrap();
+        seed(root.path(), kind, "confirm");
+        let trial_store = store(root.path(), kind);
+        let trial: BootReceipt =
+            serde_json::from_slice(&fs::read(root.path().join("candidate-receipt.json")).unwrap())
+                .unwrap();
+        let error = trial_store.prepare_factory_reset(&trial).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("confirm the running deployment"),
+            "{kind:?}"
+        );
+        // The confirmed one runs with the candidate pending: the candidate is
+        // rejected, so the reset boots the running one, and the snapshot is
+        // on SYSTEM before the request.
+        let root = TempDir::new().unwrap();
+        seed(root.path(), kind, "reset-stage");
+        run_operation(root.path(), kind, "reset-stage");
+        let store = store(root.path(), kind);
+        let state = store.effective_state().unwrap();
+        assert!(state.candidate.is_none(), "{kind:?}");
+        let candidate: BootReceipt =
+            serde_json::from_slice(&fs::read(root.path().join("candidate-receipt.json")).unwrap())
+                .unwrap();
+        assert!(state.failed.contains(&candidate.deployment_id));
+        validate(root.path(), kind);
+        validate_reset(root.path(), kind, "reset-stage");
+        let again = mica_deploy::factory_reset::stage(
+            &store.system,
+            &store.meta,
+            &reset_request(&fs::read_to_string(root.path().join("retained-id")).unwrap()),
+        );
+        assert!(format!("{:#}", again.unwrap_err()).contains("staged already"));
+        // Cancelling removes the request first, then the rest.
+        assert!(mica_deploy::factory_reset::unstage(&store.system).unwrap());
+        assert!(!store.system.join("factory-reset").exists());
+        assert!(!mica_deploy::factory_reset::unstage(&store.system).unwrap());
+    }
+}
+
+#[test]
+pub(super) fn a_finished_factory_reset_leaves_the_running_deployment_alone() {
+    for kind in KINDS {
+        let root = TempDir::new().unwrap();
+        seed(root.path(), kind, "reset-finish");
+        let store = store(root.path(), kind);
+        let retired = fs::read_to_string(root.path().join("retained-id")).unwrap();
+        let fallback = store.effective_state().unwrap().fallback.unwrap();
+        assert_ne!(fallback, retired);
+        // A set the state no longer names goes with the reset.
+        let sets = store.system.join("sets/core");
+        let stale = "e".repeat(64);
+        fs::write(sets.join(format!("{stale}.json")), b"unnamed").unwrap();
+        run_operation(root.path(), kind, "reset-finish");
+        validate(root.path(), kind);
+        validate_reset(root.path(), kind, "reset-finish");
+        assert!(
+            !store
+                .system
+                .join(format!("deployments/{fallback}.json"))
+                .exists(),
+            "{kind:?}"
+        );
+        assert!(!sets.join(format!("{stale}.json")).exists());
+        let state: Value =
+            serde_json::from_slice(&fs::read(sets.join("state.json")).unwrap()).unwrap();
+        assert_eq!(state.as_object().unwrap().len(), 1, "{state}");
+        // Run again, it does nothing more.
+        run_operation(root.path(), kind, "reset-finish");
+        validate_reset(root.path(), kind, "reset-finish");
+    }
 }

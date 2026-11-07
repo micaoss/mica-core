@@ -182,6 +182,76 @@ impl Reserves {
     }
 }
 
+/// How a factory reset formats a `gpt` board's DATA (`docs/mica-core.md`
+/// 3.7): the ext4 features and bytes per inode the image's DATA was made
+/// with, and whether the device erases it securely first. Absent, the
+/// board's DATA is formatted as [`DataFormat::default_for`] says.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DataFormat {
+    /// `mke2fs -O`: comma-separated feature names, each optionally `^`.
+    pub features: String,
+    /// `mke2fs -i`; absent, mke2fs chooses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_per_inode: Option<u64>,
+    /// Erase the partition with `BLKSECDISCARD` before formatting; only
+    /// `true` is written.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secure_erase: bool,
+}
+
+/// The ext4 features every factory DATA carries, as mica-build makes it.
+const DATA_FEATURES: &str = "^orphan_file,^metadata_csum_seed";
+
+impl DataFormat {
+    /// What the image's DATA is made with: with project quotas, the
+    /// `project` and `quota` features and an inode per 16 KiB.
+    #[must_use]
+    pub fn default_for(quotas: bool) -> Self {
+        if quotas {
+            Self {
+                features: format!("project,quota,{DATA_FEATURES}"),
+                bytes_per_inode: Some(16384),
+                secure_erase: false,
+            }
+        } else {
+            Self {
+                features: DATA_FEATURES.to_owned(),
+                bytes_per_inode: None,
+                secure_erase: false,
+            }
+        }
+    }
+
+    fn validate(&self, quotas: bool) -> Result<()> {
+        ensure!(
+            !self.features.is_empty()
+                && self.features.len() <= 128
+                && self.features.split(',').all(|feature| {
+                    let name = feature.strip_prefix('^').unwrap_or(feature);
+                    !name.is_empty()
+                        && name
+                            .bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                }),
+            "invalid DATA format features"
+        );
+        ensure!(
+            !quotas
+                || ["project", "quota"]
+                    .iter()
+                    .all(|needed| self.features.split(',').any(|feature| feature == *needed)),
+            "DATA quotas without the project and quota features"
+        );
+        ensure!(
+            self.bytes_per_inode
+                .is_none_or(|bytes| bytes.is_power_of_two() && (4096..=1_048_576).contains(&bytes)),
+            "invalid DATA bytes per inode"
+        );
+        Ok(())
+    }
+}
+
 /// The `board` section of the signed boot policy.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -213,6 +283,9 @@ pub struct BoardFacts {
     /// carry limits. On unless the board turns it off; only `false` is written.
     #[serde(default = "enabled", skip_serializing_if = "is_enabled")]
     pub data_quotas: bool,
+    /// Only on a `gpt` board: how a factory reset formats DATA.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_format: Option<DataFormat>,
     /// `fit` unless the board's loader checks only hashes; only `none` is
     /// written.
     #[serde(default, skip_serializing_if = "BootTrust::is_fit")]
@@ -229,6 +302,14 @@ fn is_enabled(value: &bool) -> bool {
 }
 
 impl BoardFacts {
+    /// How a factory reset formats this `gpt` board's DATA.
+    #[must_use]
+    pub fn data_format(&self) -> DataFormat {
+        self.data_format
+            .clone()
+            .unwrap_or_else(|| DataFormat::default_for(self.data_quotas))
+    }
+
     /// Hold the section to itself and to the architecture beside it.
     ///
     /// # Errors
@@ -276,6 +357,9 @@ impl BoardFacts {
     /// A `gpt` board's partitions, records and loader.
     fn validate_gpt(&self) -> Result<()> {
         ensure!(self.ubi.is_none(), "a GPT board carries no UBI device");
+        if let Some(format) = &self.data_format {
+            format.validate(self.data_quotas)?;
+        }
         let p = self
             .partitions
             .context("GPT partitions absent from the boot policy")?;
@@ -345,6 +429,10 @@ impl BoardFacts {
             );
         }
         ensure!(!self.data_quotas, "UBIFS has no project quotas");
+        ensure!(
+            self.data_format.is_none(),
+            "a UBI board's DATA is not formatted with mke2fs"
+        );
         match &self.firmware {
             Target::MtdLoader { partition, .. } => {
                 ensure!(*partition != ubi.mtd, "the loader shares the UBI partition");

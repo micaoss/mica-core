@@ -1,10 +1,12 @@
 //! The factory reset, micad's half: the checks before it, the request it
-//! stages for the runkit, and the record and the discard on the first boot
-//! after it.
+//! stages for the runkit, and the finish, the record and the discard on the
+//! first boot after it.
 //!
-//! The erase itself is the runkit's (`mica_deploy::factory_reset`): it runs
-//! at the next boot, before anything of the root, and keeps DATA's `meta/`.
-//! The software stays at its version; everything configured goes.
+//! The reset itself is the runkit's (`mica_deploy::factory_reset`): it runs
+//! at the next boot, before anything of the root. A runkit of version 1
+//! erases DATA in place and keeps its `meta/`; one of version 2 makes DATA
+//! again, mica-deploy staging the request on SYSTEM and finishing the reset
+//! there. The software stays at its version; everything configured goes.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -46,6 +48,10 @@ pub struct FactoryReset {
     state: PathBuf,
     /// What the booted runkit says it does (`mica_deploy::factory_reset::CAPABILITIES`).
     capabilities: PathBuf,
+    /// mica-deploy, which stages and finishes a reset of version 2.
+    deploy: PathBuf,
+    /// What the runkit did at this boot (`mica_deploy::factory_reset::PROGRESS`).
+    progress: PathBuf,
     backoff: Mutex<Backoff>,
 }
 
@@ -62,8 +68,19 @@ impl FactoryReset {
             data,
             state,
             capabilities,
+            deploy: PathBuf::from("/usr/bin/mica-deploy"),
+            progress: PathBuf::from(erase::PROGRESS),
             backoff: Mutex::default(),
         }
+    }
+
+    /// Run `deploy` as mica-deploy, and read the runkit's account of this
+    /// boot at `progress`.
+    #[must_use]
+    pub fn with_deploy(mut self, deploy: PathBuf, progress: PathBuf) -> Self {
+        self.deploy = deploy;
+        self.progress = progress;
+        self
     }
 
     /// The device's: DATA at `/mnt/data` (or `MICA_DATA_ROOT`), STATE under it.
@@ -80,10 +97,51 @@ impl FactoryReset {
     /// Whether the booted runkit carries out a staged reset.
     #[must_use]
     pub fn supported(&self) -> bool {
-        mica_fs::read_bounded(&self.capabilities, 4096)
+        self.version().is_some()
+    }
+
+    /// The version of the reset the booted runkit carries out: 1 erases DATA
+    /// in place, 2 makes it again and returns the system to the running
+    /// deployment.
+    fn version(&self) -> Option<u64> {
+        let value = mica_fs::read_bounded(&self.capabilities, 4096)
             .ok()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .is_some_and(|value| value["factoryReset"] == json!(true))
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())?;
+        (value["factoryReset"] == json!(true))
+            .then(|| value["factoryResetVersion"].as_u64().unwrap_or(1))
+    }
+
+    /// Run mica-deploy with `args`, which must succeed.
+    fn deploy(&self, args: &[&str]) -> Result<String> {
+        let output = std::process::Command::new(&self.deploy)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .with_context(|| format!("run {}", self.deploy.display()))?;
+        anyhow::ensure!(
+            output.status.success(),
+            "mica-deploy {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    }
+
+    /// Finish, on the first start after the runkit carried it out, a reset of
+    /// version 2: mica-deploy leaves the running deployment and its core set
+    /// alone on SYSTEM and writes the record [`Self::first_boot`] reads. The
+    /// boot carries nothing else of the reset.
+    ///
+    /// # Errors
+    ///
+    /// mica-deploy fails; the next command it runs finishes the reset.
+    pub fn finish(&self) -> Result<()> {
+        if self.progress.symlink_metadata().is_err() {
+            return Ok(());
+        }
+        let done = self.deploy(&["factory-reset", "--finish"])?;
+        tracing::info!(done, "factory reset finished on SYSTEM");
+        Ok(())
     }
 
     /// The refusal while micad's backoff runs.
@@ -141,6 +199,15 @@ impl FactoryReset {
     ///
     /// The request cannot be written.
     pub fn stage(&self, by: Requester, source: &str, now: u64) -> Result<()> {
+        if self.version().is_some_and(|version| version >= 2) {
+            let by = match by {
+                Requester::Console => "console",
+                Requester::Api => "api",
+                Requester::Cli => "cli",
+            };
+            self.deploy(&["factory-reset", "--by", by, "--source", source])?;
+            return Ok(());
+        }
         erase::request(
             &self.meta(),
             &Request {
@@ -148,6 +215,7 @@ impl FactoryReset {
                 requested: now,
                 by,
                 source: source.to_string(),
+                deployment: None,
             },
         )
     }

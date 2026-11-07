@@ -81,3 +81,19 @@ pub fn grow_data(ubi: &dyn UbiDevice, store_reserve: u64) -> Result<DataGrowth> 
         to,
     })
 }
+
+/// Empty the `data` volume for a factory reset, before the kernel mounts it:
+/// a volume update of no bytes unmaps every LEB, and UBIFS formats the empty
+/// volume at the mount. The volume keeps its size. An update the kernel
+/// interrupts leaves its marker, and the volume is emptied again the next
+/// time; nothing else is touched.
+pub fn wipe_data(ubi: &dyn UbiDevice) -> Result<u64> {
+    let data = find(ubi, DATA)?.context("UBI volume data is absent")?;
+    ensure!(
+        data.kind == VolumeKind::Dynamic,
+        "UBI volume data is not a dynamic volume"
+    );
+    let volume = ubi.open(data.id, true)?;
+    ubi.begin_update(&volume, 0)?;
+    Ok(data.reserved_lebs)
+}

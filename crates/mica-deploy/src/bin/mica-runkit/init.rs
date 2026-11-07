@@ -110,7 +110,7 @@ impl BootAttempt {
             .execute(
                 &Operation::Retire {
                     id: self.id.clone(),
-                    board: self.board.clone(),
+                    board: Box::new(self.board.clone()),
                     system: String::new(),
                     system_device: String::new(),
                     boot_device: String::new(),
@@ -148,7 +148,7 @@ impl BootAttempt {
         .execute(
             &Operation::Retire {
                 id: self.id.clone(),
-                board: self.board.clone(),
+                board: Box::new(self.board.clone()),
                 system: system_root,
                 system_device: self.system_device.clone(),
                 boot_device,

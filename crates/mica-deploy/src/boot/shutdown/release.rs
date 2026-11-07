@@ -23,7 +23,7 @@ pub enum Operation {
         /// The board section of the signed boot policy startup PID1 read:
         /// the backend, the partitions and the record geometry, carried rather
         /// than re-derived from a name.
-        board: crate::board::BoardFacts,
+        board: Box<crate::board::BoardFacts>,
         system: String,
         system_device: String,
         boot_device: String,

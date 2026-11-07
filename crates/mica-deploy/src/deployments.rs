@@ -11,6 +11,7 @@ use std::{
 mod install;
 mod io;
 mod lifecycle;
+mod reset;
 mod sets;
 mod staged;
 pub use install::*;

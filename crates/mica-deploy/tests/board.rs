@@ -605,3 +605,94 @@ fn a_ubi_board_section_is_refused_by_name() {
     let error = format!("{:#}", read(&s, "arm64").expect_err("no partitions"));
     assert!(error.contains("GPT partitions absent"), "{error}");
 }
+
+/// A `gpt` board's DATA is formatted as the image's DATA was made: the core's
+/// default is the assembly's (mica-build `roles/ext4-common.ts`), which the
+/// uefi-x64 case states, and secure erase is off unless the board turns it on.
+#[test]
+fn data_format_defaults_to_how_the_image_makes_data() {
+    use mica_deploy::board::DataFormat;
+    let facts = read(&section("uefi-x64"), "amd64").unwrap();
+    assert_eq!(facts.data_format, Some(DataFormat::default_for(true)));
+    let cx3576 = read(&section("cx3576"), "arm64").unwrap();
+    assert!(cx3576.data_format.is_none());
+    assert_eq!(cx3576.data_format(), DataFormat::default_for(true));
+    assert!(!cx3576.data_format().secure_erase);
+
+    let mut s = section("cx3576");
+    s["dataQuotas"] = json!(false);
+    let plain = read(&s, "arm64").unwrap().data_format();
+    assert_eq!(plain, DataFormat::default_for(false));
+    assert_eq!(plain.features, "^orphan_file,^metadata_csum_seed");
+    assert_eq!(plain.bytes_per_inode, None);
+
+    let mut s = section("uefi-x64");
+    s["dataFormat"]["secureErase"] = json!(true);
+    let facts = read(&s, "amd64").unwrap();
+    assert!(facts.data_format().secure_erase);
+    assert_eq!(
+        serde_json::to_value(&facts).unwrap(),
+        s,
+        "only true is written"
+    );
+}
+
+#[test]
+fn a_bad_data_format_is_refused_by_name() {
+    let refusals: Vec<(&str, Value, &str)> = vec![
+        (
+            "/dataFormat/features",
+            json!(""),
+            "invalid DATA format features",
+        ),
+        (
+            "/dataFormat/features",
+            json!("project,,quota"),
+            "invalid DATA format features",
+        ),
+        (
+            "/dataFormat/features",
+            json!("project quota"),
+            "invalid DATA format features",
+        ),
+        (
+            "/dataFormat/features",
+            json!("-q,project"),
+            "invalid DATA format features",
+        ),
+        (
+            "/dataFormat/features",
+            json!("^orphan_file"),
+            "DATA quotas without the project and quota features",
+        ),
+        (
+            "/dataFormat/bytesPerInode",
+            json!(1024),
+            "invalid DATA bytes per inode",
+        ),
+        (
+            "/dataFormat/bytesPerInode",
+            json!(20000),
+            "invalid DATA bytes per inode",
+        ),
+        (
+            "/dataFormat/bytesPerInode",
+            json!(2_097_152),
+            "invalid DATA bytes per inode",
+        ),
+        ("/dataFormat/inodes", json!(1), "unknown field"),
+        ("/dataFormat/secureErase", json!("yes"), "invalid type"),
+    ];
+    for (pointer, value, expected) in refusals {
+        let mut s = section("uefi-x64");
+        let (parent, field) = pointer.rsplit_once('/').unwrap();
+        s.pointer_mut(parent).unwrap()[field] = value.clone();
+        let error = format!("{:#}", read(&s, "amd64").unwrap_err());
+        assert!(error.contains(expected), "{pointer} = {value}: {error}");
+    }
+
+    let mut s = section("qemu-armhf");
+    s["dataFormat"] = json!({"features": "^orphan_file"});
+    let error = format!("{:#}", read(&s, "armhf").unwrap_err());
+    assert!(error.contains("not formatted with mke2fs"), "{error}");
+}

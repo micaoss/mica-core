@@ -189,11 +189,17 @@ impl MicadService {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());
-        reset.stage(by, source, now).map_err(|error| {
-            ResetFault::Fdo(fdo::Error::Failed(format!(
-                "stage the factory reset: {error:#}"
-            )))
-        })?;
+        let staging = Arc::clone(&reset);
+        let from = source.to_owned();
+        tokio::task::spawn_blocking(move || staging.stage(by, &from, now))
+            .await
+            .map_err(|error| anyhow::anyhow!("{error}"))
+            .and_then(|staged| staged)
+            .map_err(|error| {
+                ResetFault::Fdo(fdo::Error::Failed(format!(
+                    "stage the factory reset: {error:#}"
+                )))
+            })?;
         tracing::warn!(
             sender,
             ?by,

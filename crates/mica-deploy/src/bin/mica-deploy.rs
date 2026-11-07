@@ -42,8 +42,10 @@ Updating by hand, with or without micad:
   rollback [--reboot]
                   return to the retained previous system
   factory-reset [--reboot]
-                  erase DATA at the next boot, all but its meta/; the
-                  software stays at its version
+                  return to the running system at the next boot: DATA is
+                  made again, and every other system and pending set goes
+  factory-reset --cancel
+                  cancel a staged factory reset
   import <archive>
                   stage an offline update archive
   status          the boot, the deployments and the sets
@@ -52,6 +54,7 @@ Updating by hand, with or without micad:
 
 The steps, as micad runs them:
   probe | discard | gc | confirm | booted | fail-boot | reject <id>
+  factory-reset --by <console|api|cli> --source <text> | --finish
   check [--source <url>]
   fetch [--source <url>]
   set-check --kind <kind> [--source <url>] [--channel <channel>] [--deployment <descriptor>]
@@ -92,10 +95,9 @@ enum Action {
         auto: bool,
         reboot: bool,
     },
-    /// Stage the erase of DATA for the next boot.
-    FactoryReset {
-        reboot: bool,
-    },
+    /// Stage a factory reset for the next boot, cancel it, or finish one the
+    /// runkit carried out at this boot.
+    FactoryReset(ResetStep),
     Status,
     Probe,
     Discard,
@@ -157,6 +159,18 @@ enum Action {
 struct Words {
     options: Vec<(String, Option<String>)>,
     positional: std::collections::VecDeque<String>,
+}
+
+/// What `factory-reset` does.
+#[derive(Debug)]
+enum ResetStep {
+    Stage {
+        reboot: bool,
+        by: factory_reset::Requester,
+        source: String,
+    },
+    Cancel,
+    Finish,
 }
 
 impl Words {
@@ -274,7 +288,7 @@ impl Cli {
             ensure!(max_bytes.is_none(), "--max-bytes is given twice");
             max_bytes = Some(value.parse().context("invalid --max-bytes")?);
         };
-        let mut words = Words::read(args, &["record", "reboot", "auto"])?;
+        let mut words = Words::read(args, &["record", "reboot", "auto", "cancel", "finish"])?;
         if let Some(value) = words.option("max-bytes") {
             ensure!(max_bytes.is_none(), "--max-bytes is given twice");
             max_bytes = Some(value.parse().context("invalid --max-bytes")?);
@@ -303,9 +317,39 @@ impl Cli {
                     reboot,
                 }
             }
-            "factory-reset" => Action::FactoryReset {
-                reboot: words.flag("reboot"),
-            },
+            "factory-reset" => {
+                let (cancel, finish, reboot) = (
+                    words.flag("cancel"),
+                    words.flag("finish"),
+                    words.flag("reboot"),
+                );
+                let (by, source) = (words.option("by"), words.option("source"));
+                if cancel || finish {
+                    ensure!(
+                        !(cancel && finish) && !reboot && by.is_none() && source.is_none(),
+                        "--cancel and --finish take nothing else"
+                    );
+                    Action::FactoryReset(if cancel {
+                        ResetStep::Cancel
+                    } else {
+                        ResetStep::Finish
+                    })
+                } else {
+                    let by = match by.as_deref() {
+                        None => factory_reset::Requester::Cli,
+                        Some("console") => factory_reset::Requester::Console,
+                        Some("api") => factory_reset::Requester::Api,
+                        Some("cli") => factory_reset::Requester::Cli,
+                        Some(other) => anyhow::bail!("--by {other}: console, api or cli"),
+                    };
+                    let source = source.unwrap_or_else(|| "mica-deploy factory-reset".to_owned());
+                    ensure!(
+                        source.len() <= 256 && !source.chars().any(char::is_control),
+                        "--source is at most 256 printable characters"
+                    );
+                    Action::FactoryReset(ResetStep::Stage { reboot, by, source })
+                }
+            }
             "status" => Action::Status,
             "probe" => Action::Probe,
             "discard" => Action::Discard,
@@ -639,6 +683,19 @@ fn execute() -> Result<()> {
             core_boot()?,
         )?;
         let mut status = json!({"boot":receipt,"state":store.effective_state()?,"deployments":store.describe(&keys)?,"sets":sets});
+        if let Some(request) = factory_reset::staged(&store.system)? {
+            let progress = factory_reset::progress(Path::new(factory_reset::PROGRESS))?
+                .filter(|progress| progress.requested == request.requested);
+            status["factoryReset"] = json!({
+                "state": match progress {
+                    None => "staged",
+                    Some(progress) if progress.formatted => "formatted",
+                    Some(_) => "degraded",
+                },
+                "deployment": request.deployment,
+                "requested": request.requested,
+            });
+        }
         if let BootBackend::Ubi { ubi } = &store.boot {
             status["ubi"] = mica_deploy::ubi::space(
                 ubi.as_ref(),
@@ -654,6 +711,37 @@ fn execute() -> Result<()> {
         "running content is not authenticated"
     );
     let _lock = store.lock()?;
+    // The first command of the root after the runkit made DATA again
+    // finishes the reset on SYSTEM; until then nothing that would change what
+    // the reset keeps runs.
+    let finished = finish_factory_reset(&store, backend, &receipt, &keys)?;
+    if let Action::FactoryReset(ResetStep::Finish) = cli.command {
+        println!(
+            "{}",
+            finished.unwrap_or_else(|| json!({ "finished": false }))
+        );
+        return Ok(());
+    }
+    if factory_reset::staged(&store.system)?.is_some()
+        && matches!(
+            cli.command,
+            Action::Update { .. }
+                | Action::Check { .. }
+                | Action::Fetch { .. }
+                | Action::Import { .. }
+                | Action::Install { .. }
+                | Action::SetCheck { .. }
+                | Action::SetFetch { .. }
+                | Action::SetInstall { .. }
+                | Action::Rollback { .. }
+                | Action::Reject { .. }
+                | Action::FirmwareReadback { record: true, .. }
+        )
+    {
+        anyhow::bail!(
+            "a factory reset is staged: reboot into it, or cancel it with mica-deploy factory-reset --cancel"
+        );
+    }
     // On a `ubi` board a fetch that cannot fit the objects it writes into the
     // store retires the fallback first, as installing would.
     let release = |incoming: &mica_deploy::components::Deployment| {
@@ -678,27 +766,58 @@ fn execute() -> Result<()> {
         );
         return Ok(());
     }
-    if let Action::FactoryReset { reboot } = cli.command {
+    if let Action::FactoryReset(ResetStep::Stage { reboot, by, source }) = cli.command {
         let runkit = read_bounded(Path::new(factory_reset::CAPABILITIES), 4096)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-        ensure!(
-            runkit.is_some_and(|value| value["factoryReset"] == json!(true)),
-            "the booted runkit does not carry out a factory reset"
-        );
+        let version = match runkit {
+            Some(value) if value["factoryReset"] == json!(true) => {
+                value["factoryResetVersion"].as_u64().unwrap_or(1)
+            }
+            _ => anyhow::bail!("the booted runkit does not carry out a factory reset"),
+        };
         let requested = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());
-        factory_reset::request(
-            Path::new("/mnt/data/meta"),
-            &factory_reset::Request {
-                v: 1,
-                requested,
-                by: factory_reset::Requester::Cli,
-                source: "mica-deploy factory-reset".to_owned(),
-            },
-        )?;
-        return finish("factory reset staged: DATA is erased", reboot);
+        if version < 2 {
+            factory_reset::request(
+                &store.meta,
+                &factory_reset::Request {
+                    v: 1,
+                    requested,
+                    by,
+                    source,
+                    deployment: None,
+                },
+            )?;
+            return finish("factory reset staged: DATA is erased", reboot);
+        }
+        writable(backend, true, || {
+            store.prepare_factory_reset(&receipt)?;
+            factory_reset::stage(
+                &store.system,
+                &store.meta,
+                &factory_reset::Request {
+                    v: 2,
+                    requested,
+                    by,
+                    source,
+                    deployment: Some(receipt.deployment_id.clone()),
+                },
+            )
+        })?;
+        return finish(
+            &format!(
+                "factory reset staged: DATA is made again and the device returns to deployment {}",
+                receipt.deployment_id
+            ),
+            reboot,
+        );
+    }
+    if let Action::FactoryReset(ResetStep::Cancel) = cli.command {
+        let cancelled = writable(backend, true, || factory_reset::unstage(&store.system))?;
+        println!("{}", json!({ "cancelled": cancelled }));
+        return Ok(());
     }
     if let Action::Update {
         source,
@@ -1040,7 +1159,7 @@ fn execute() -> Result<()> {
         Action::Help
         | Action::Version
         | Action::Update { .. }
-        | Action::FactoryReset { .. }
+        | Action::FactoryReset(_)
         | Action::Status
         | Action::Probe
         | Action::Discard
@@ -1099,6 +1218,61 @@ fn writable<T>(backend: BootKind, system: bool, change: impl FnOnce() -> Result<
     esp_sync?;
     system_sync?;
     result
+}
+
+/// Finish the factory reset the runkit carried out at this boot, if there is
+/// one to finish (`docs/mica-core.md` 3.7): the store keeps the running
+/// deployment and its core set alone, the record goes to DATA, and the
+/// request on SYSTEM is removed last. The caller holds the transaction lock.
+fn finish_factory_reset(
+    store: &DeploymentStore,
+    backend: BootKind,
+    receipt: &BootReceipt,
+    keys: &[[u8; 32]],
+) -> Result<Option<serde_json::Value>> {
+    let Some(request) = factory_reset::staged(&store.system)? else {
+        // A finish or a staging interrupted once the request was gone leaves
+        // the rest of the reset's directory.
+        if store
+            .system
+            .join(factory_reset::SYSTEM_DIR)
+            .symlink_metadata()
+            .is_ok()
+        {
+            writable(backend, true, || factory_reset::unstage(&store.system))?;
+        }
+        return Ok(None);
+    };
+    let Some(progress) = factory_reset::progress(Path::new(factory_reset::PROGRESS))? else {
+        return Ok(None);
+    };
+    ensure!(
+        request.requested == progress.requested
+            && request.deployment.as_deref() == Some(receipt.deployment_id.as_str()),
+        "the factory reset carried out is not the one staged"
+    );
+    let removed = writable(backend, true, || store.finish_factory_reset(receipt, keys))?;
+    let completed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    factory_reset::record(
+        &store.meta,
+        &factory_reset::Done {
+            v: 2,
+            requested: request.requested,
+            by: request.by,
+            source: request.source,
+            completed,
+            unremoved: progress.unremoved,
+            formatted: Some(progress.formatted),
+        },
+    )?;
+    writable(backend, true, || factory_reset::unstage(&store.system))?;
+    Ok(Some(json!({
+        "finished": true,
+        "formatted": progress.formatted,
+        "removed": removed,
+    })))
 }
 
 /// Say what an update installed, which runs from the next boot, and reboot
@@ -1207,7 +1381,9 @@ fn require_workspace(storage: Storage) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Cli, SetKind, mount_device, ubifs_mount, version_line};
+    use super::{
+        Action, Cli, ResetStep, SetKind, factory_reset, mount_device, ubifs_mount, version_line,
+    };
     use std::path::Path;
 
     fn parse(line: &str) -> anyhow::Result<Cli> {
@@ -1319,11 +1495,31 @@ mod tests {
         ));
         assert!(matches!(
             parse("factory-reset").unwrap().command,
-            Action::FactoryReset { reboot: false }
+            Action::FactoryReset(ResetStep::Stage {
+                reboot: false,
+                by: factory_reset::Requester::Cli,
+                ..
+            })
         ));
         assert!(matches!(
             parse("factory-reset --reboot").unwrap().command,
-            Action::FactoryReset { reboot: true }
+            Action::FactoryReset(ResetStep::Stage { reboot: true, .. })
+        ));
+        assert!(matches!(
+            parse("factory-reset --by console --source 10.0.0.2").unwrap().command,
+            Action::FactoryReset(ResetStep::Stage {
+                by: factory_reset::Requester::Console,
+                source,
+                ..
+            }) if source == "10.0.0.2"
+        ));
+        assert!(matches!(
+            parse("factory-reset --cancel").unwrap().command,
+            Action::FactoryReset(ResetStep::Cancel)
+        ));
+        assert!(matches!(
+            parse("factory-reset --finish").unwrap().command,
+            Action::FactoryReset(ResetStep::Finish)
         ));
         let cli = parse("update --reboot --source https://u/ --channel lts --max-bytes 9").unwrap();
         assert_eq!(cli.max_bytes, Some(9));
@@ -1386,7 +1582,10 @@ mod tests {
             "update --auto --archive a",
             "update --auto=yes",
             "factory-reset now",
-            "factory-reset --source s",
+            "factory-reset --by robot --source s",
+            "factory-reset --cancel --finish",
+            "factory-reset --cancel --reboot",
+            "factory-reset --finish --by cli",
             "status --reboot",
             "help me",
         ] {

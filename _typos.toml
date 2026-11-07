@@ -25,6 +25,9 @@ BA = "BA"
 inh = "inh"
 # UPnP, which the checker splits into `U`, `Pn` and `P`.
 Pn = "Pn"
+# e2fsprogs' `mke2fs`, split at the digit, and its `MKE2FS_CONFIG`.
+mke = "mke"
+MKE = "MKE"
 
 [default.extend-identifiers]
 # O_WRONLY.

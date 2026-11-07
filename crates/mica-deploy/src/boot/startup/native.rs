@@ -17,6 +17,7 @@ use std::{
     process::Command,
 };
 
+pub mod format;
 pub mod gpt;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,6 +58,19 @@ pub enum Operation {
     UbiGrowData {
         mtd: String,
         reserve: u64,
+    },
+    /// Empty the `data` volume of the UBI device on MTD partition `mtd` for a
+    /// factory reset (`ubi::wipe_data`), and print what was done.
+    UbiWipeData {
+        mtd: String,
+    },
+    /// Format the block device `device` as a `gpt` board's DATA for a factory
+    /// reset with the `mke2fs` of the verified root at `/newroot`
+    /// (`format::format_data`), and print what was done.
+    FormatData {
+        device: String,
+        arch: String,
+        format: crate::board::DataFormat,
     },
     Verity {
         device: String,
@@ -202,6 +216,18 @@ fn perform(operation: Operation) -> Result<()> {
                 }
             );
         }
+        Operation::UbiWipeData { mtd } => {
+            let ubi = crate::ubi::SysUbi::attached(&mtd)?;
+            println!("emptied at {} LEBs", crate::ubi::wipe_data(&ubi)?);
+        }
+        Operation::FormatData {
+            device,
+            arch,
+            format: data_format,
+        } => println!(
+            "{}",
+            format::format_data(Path::new("/newroot"), &arch, &device, &data_format)?
+        ),
         Operation::Verity {
             device,
             name,

@@ -225,6 +225,11 @@ impl Supervisor {
         Ok(())
     }
     pub fn run_startup(&mut self, command: Command) -> Result<String> {
+        self.run_startup_within(command, 30000)
+    }
+    /// [`Self::run_startup`] for a startup operation that may take up to
+    /// `limit_ms`, such as formatting DATA; the watchdog is fed meanwhile.
+    pub fn run_startup_within(&mut self, command: Command, limit_ms: u64) -> Result<String> {
         let program = command
             .get_program()
             .to_str()
@@ -240,7 +245,7 @@ impl Supervisor {
         let deadline = if let Some(budget) = self.budget {
             budget.operation_deadline(self.now_ms())?
         } else {
-            self.now_ms().saturating_add(30000)
+            self.now_ms().saturating_add(limit_ms)
         };
         let output = self.run(command, deadline, 16384)?;
         Ok(String::from_utf8(output)?.trim().into())
