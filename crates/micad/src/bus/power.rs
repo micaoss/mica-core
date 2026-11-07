@@ -131,6 +131,45 @@ impl MicadService {
         }
     }
 
+    /// Hold `password` to the administrator's, for the change `what` that
+    /// `sender` asks for from `source`: refused while the backoff runs, a
+    /// wrong one counted in it.
+    pub(super) async fn admin_password(
+        &self,
+        sender: &str,
+        source: &str,
+        what: &str,
+        password: String,
+    ) -> Result<(), Refusal> {
+        if let Some(refusal) = self.password_backoff.throttled() {
+            return Err(refusal);
+        }
+        let hash = self
+            .inner
+            .read()
+            .await
+            .settings
+            .access
+            .web_admin
+            .as_ref()
+            .map(|admin| admin.password_hash.clone())
+            .unwrap_or_default();
+        let matches =
+            tokio::task::spawn_blocking(move || micad_settings::verify_password(&hash, &password))
+                .await
+                .unwrap_or(false);
+        if !matches {
+            self.password_backoff.failed();
+            tracing::warn!(sender, source, what, "refused: wrong password");
+            return Err(Refusal::new(
+                "password_incorrect",
+                "the password is not the administrator's",
+            ));
+        }
+        self.password_backoff.succeeded();
+        Ok(())
+    }
+
     /// Stage a factory reset for `by` (`console`, `api` or `cli`) from
     /// `source`, once `password` is the administrator's, and reboot into it
     /// a few seconds later, so the answer reaches the caller first.
@@ -159,33 +198,8 @@ impl MicadService {
                 "no factory reset".into(),
             )));
         };
-        if let Some(refusal) = reset.throttled() {
-            return Err(refusal.into());
-        }
-        let hash = self
-            .inner
-            .read()
-            .await
-            .settings
-            .access
-            .web_admin
-            .as_ref()
-            .map(|admin| admin.password_hash.clone())
-            .unwrap_or_default();
-        let matches =
-            tokio::task::spawn_blocking(move || micad_settings::verify_password(&hash, &password))
-                .await
-                .unwrap_or(false);
-        if !matches {
-            reset.failed();
-            tracing::warn!(sender, source, "factory reset refused: wrong password");
-            return Err(Refusal::new(
-                "password_incorrect",
-                "the password is not the administrator's",
-            )
-            .into());
-        }
-        reset.succeeded();
+        self.admin_password(sender, source, "factory reset", password)
+            .await?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());

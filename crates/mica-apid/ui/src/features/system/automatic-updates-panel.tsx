@@ -384,5 +384,6 @@ const DEFERRAL_REASONS = [
   'deployment-status-unknown',
   'superseded',
   'unknown',
+  'waits-for-extension',
   'workspace-unready',
 ] as const

@@ -378,8 +378,23 @@ pub(super) fn native_acquisition_json_selects_and_stages_only_a_deployment_descr
             deployment_id: id.to_string(),
             version: "1.0".into(),
             set_kind: None,
+            waits_for_extension: Vec::new(),
         })
     );
+    let waiting = ClientOutput {
+        code: Some(0),
+        signal: None,
+        stderr: String::new(),
+        stdout: json!({
+            "revision":1,"selected":{"deploymentId":id,"deployment":{"version":"1.0"}},
+            "waitsForExtension":[{"name":"rtl8125","kernel":"b".repeat(64)}]
+        })
+        .to_string(),
+    };
+    let CheckOutcome::Selected(selected) = parse_check(&waiting).unwrap() else {
+        panic!("a waiting selection is a selection");
+    };
+    assert_eq!(selected.waits_for_extension, ["rtl8125"]);
     let none = ClientOutput {
         code: Some(0),
         signal: None,

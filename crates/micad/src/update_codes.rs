@@ -125,12 +125,15 @@ pub const DEFER_SUPERSEDED: &str = "superseded";
 /// `InstallUpdate` refused: the window, the path rule or the storage
 /// reservation.
 pub const DEFER_INSTALL_REFUSED: &str = "install-refused";
+/// The new system's kernel has no build of a driver extension the running
+/// kernel runs: an owner uploads one, or updates without it.
+pub const DEFER_WAITS_FOR_EXTENSION: &str = "waits-for-extension";
 /// The safe-to-reboot gate is closed. Automation defers rather than arming the
 /// override; there is no method on its route trait that could arm one.
 pub const DEFER_REBOOT_GATE_CLOSED: &str = "reboot-gate-closed";
 
 /// The deferral vocabulary, the whole set.
-pub const DEFERRALS: [&str; 13] = [
+pub const DEFERRALS: [&str; 14] = [
     DEFER_CHECK_REFUSED,
     DEFER_NO_NEWER_RELEASE,
     DEFER_FETCH_REFUSED,
@@ -143,6 +146,7 @@ pub const DEFERRALS: [&str; 13] = [
     DEFER_RECHECK_REFUSED,
     DEFER_SUPERSEDED,
     DEFER_INSTALL_REFUSED,
+    DEFER_WAITS_FOR_EXTENSION,
     DEFER_REBOOT_GATE_CLOSED,
 ];
 

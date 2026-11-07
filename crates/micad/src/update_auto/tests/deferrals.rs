@@ -171,6 +171,29 @@ pub(super) async fn every_deferral_reason_the_driver_can_mint_is_reachable() {
         "a superseded descriptor is left where a human can still install it"
     );
 
+    // The new kernel has no build of a driver extension the running one
+    // runs: nothing is installed.
+    let mut scene = Scene::auto(&open_window(), "window");
+    FakeDaemon::set(&scene.daemon.staged, Some(BUNDLE.to_string()));
+    scene.daemon.will_check(Ok(Settled::Done(Available {
+        waits_for_extension: vec!["rtl8125".to_string()],
+        ..the_candidate()
+    })));
+    scene.tick().await;
+    record(
+        &scene,
+        update_codes::DEFER_WAITS_FOR_EXTENSION,
+        "no build of rtl8125",
+    );
+    assert!(
+        !scene
+            .daemon
+            .calls()
+            .iter()
+            .any(|call| matches!(call, Call::Install(_))),
+        "an update waiting for an extension is not installed"
+    );
+
     // 16. The install route's own refusal, verbatim.
     let mut scene = Scene::auto(&open_window(), "window");
     FakeDaemon::set(&scene.daemon.staged, Some(BUNDLE.to_string()));

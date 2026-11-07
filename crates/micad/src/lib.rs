@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 
+mod admin_password;
 pub mod app_cli;
 mod apply_queue;
 mod apps;
@@ -27,6 +28,7 @@ mod deployment;
 pub mod device_code;
 mod diagnostics;
 mod docker;
+mod drivers;
 mod factory_reset;
 pub mod factory_reset_cli;
 mod fswrite;
@@ -413,6 +415,7 @@ async fn serve() -> anyhow::Result<()> {
             }
         }
         service = service.with_factory_reset(factory_reset);
+        service = service.with_drivers(Arc::new(drivers::Drivers::production()));
         // The adapter and the pairing agent. The agent's state is shared with
         // the `org.bluez.Agent1` object registered below: it blocks on a
         // decision the console makes through the bus.

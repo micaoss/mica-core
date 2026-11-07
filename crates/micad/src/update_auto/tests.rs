@@ -264,6 +264,7 @@ fn candidate(name: &str, version: &str) -> Available {
             .to_string(),
         version: version.to_string(),
         set_kind: None,
+        waits_for_extension: Vec::new(),
     }
 }
 

@@ -15,6 +15,9 @@ pub struct Available {
     pub version: String,
     /// The kind of set the candidate is; none for a system deployment.
     pub set_kind: Option<&'static str>,
+    /// The driver extensions the running kernel runs that the candidate's
+    /// kernel has no build of (`waitsForExtension`): its install waits.
+    pub waits_for_extension: Vec<String>,
 }
 
 /// What a finished `check` said.
@@ -54,10 +57,19 @@ pub fn parse_check(output: &ClientOutput) -> Result<CheckOutcome, CodedReason> {
         if !crate::deployment::valid_id(id) || version.is_empty() {
             return None;
         }
+        let waits = match value.get("waitsForExtension") {
+            None => Vec::new(),
+            Some(waits) => waits
+                .as_array()?
+                .iter()
+                .map(|wait| Some(wait.get("name")?.as_str()?.chars().take(64).collect()))
+                .collect::<Option<Vec<String>>>()?,
+        };
         Some(Available {
             deployment_id: id.to_string(),
             version: version.into(),
             set_kind: None,
+            waits_for_extension: waits,
         })
     })();
     parsed.map(CheckOutcome::Selected).ok_or_else(|| {
@@ -87,6 +99,7 @@ pub fn parse_set_check(
             deployment_id: id.to_string(),
             version: version.into(),
             set_kind: Some(kind),
+            waits_for_extension: Vec::new(),
         })
     })();
     parsed.map(CheckOutcome::Selected).ok_or_else(|| {

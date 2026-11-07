@@ -23,7 +23,8 @@ pub struct TaskRecord {
     pub id: String,
     pub operation: String,
     /// `network.apply` when the apply reaches the network, `app.apply` for
-    /// an app flow, else `settings.apply`.
+    /// an app flow, `drivers.apply` for an owner certificate or driver
+    /// extension change, else `settings.apply`.
     pub kind: String,
     pub dot_path: String,
     pub source: String,

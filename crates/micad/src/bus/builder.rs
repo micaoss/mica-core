@@ -212,6 +212,14 @@ impl MicadService {
         self
     }
 
+    /// Attach the owner certificates and driver extensions
+    /// (`GetOwnerCerts`, `GetExtensions` and their changes).
+    #[must_use]
+    pub fn with_drivers(mut self, drivers: Arc<crate::drivers::Drivers>) -> Self {
+        self.drivers = Some(drivers);
+        self
+    }
+
     /// Attach the log reader (`GetLog`).
     #[must_use]
     pub fn with_logs(mut self, logs: Arc<dyn crate::logs::LogReader>) -> Self {

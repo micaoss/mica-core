@@ -32,6 +32,7 @@ use crate::update_policy::PolicyStore;
 mod apply;
 mod apps;
 mod builder;
+mod drivers;
 mod errors;
 mod interface;
 mod issue;
@@ -174,6 +175,12 @@ pub struct MicadService {
     /// The factory reset (`FactoryReset`); `None` is a daemon that cannot
     /// stage one, on the same rule.
     factory_reset: Option<Arc<crate::factory_reset::FactoryReset>>,
+    /// The backoff on wrong administrator passwords, for every change that
+    /// asks for the password again.
+    password_backoff: Arc<crate::admin_password::PasswordBackoff>,
+    /// The owner certificates and driver extensions (`GetOwnerCerts`,
+    /// `GetExtensions` and their changes); `None` changes none.
+    drivers: Option<Arc<crate::drivers::Drivers>>,
     /// Read-only container observation: what the engine says is there.
     ///
     /// Read-only in the strong sense -- the adapter runs `podman images` and
@@ -359,6 +366,8 @@ impl MicadService {
             telemetry: Arc::new(UnavailableTelemetry),
             device_root: None,
             factory_reset: None,
+            password_backoff: Arc::default(),
+            drivers: None,
             failure_evidence: Arc::new(UnavailableFailureEvidence),
             logs: Arc::new(crate::logs::NoLogs),
             user_units: Arc::new(crate::user_units::UserUnits::unavailable()),

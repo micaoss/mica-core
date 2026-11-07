@@ -989,6 +989,152 @@ impl MicadService {
         Ok(status.to_string())
     }
 
+    /// JSON: the enrolled owner certificates, each with its `state`
+    /// (`loaded`, `rejected`, `pending-next-boot`, `pending-confirmation` or
+    /// `removed-next-boot`), as `mica-deploy owner-certs` answers.
+    pub(super) async fn get_owner_certs(&self) -> Result<String, DriversFault> {
+        self.owner_certs_json().await
+    }
+
+    /// Enrol the PEM or DER `certificate` from the next boot; answers the
+    /// task's id. `password` must be the administrator's, as for
+    /// `FactoryReset`, and `by` and `source` are recorded; refused with
+    /// `DriversRefused`, whose description is JSON `{code, message}`.
+    pub(super) async fn add_owner_cert(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        certificate: Vec<u8>,
+        password: String,
+        by: &str,
+        source: &str,
+    ) -> Result<String, DriversFault> {
+        self.add_owner_cert_now(
+            &emitter,
+            sender_of(&header),
+            certificate,
+            password,
+            by,
+            source,
+        )
+        .await
+    }
+
+    /// Remove the enrolled certificate `sha256` from the next boot, as
+    /// `AddOwnerCert` asks; answers the task's id.
+    pub(super) async fn remove_owner_cert(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        sha256: &str,
+        password: String,
+        by: &str,
+        source: &str,
+    ) -> Result<String, DriversFault> {
+        self.remove_owner_cert_now(&emitter, sender_of(&header), sha256, password, by, source)
+            .await
+    }
+
+    /// JSON: the driver extensions, `mica-deploy status`'s `extensions`
+    /// (`installed`, `pending`, `pair`, `attemptsLeft`,
+    /// `pendingVerification`, `waitsForExtension`, `boot`, `trust`) and the
+    /// running `kernel`.
+    pub(super) async fn get_extensions(&self) -> Result<String, DriversFault> {
+        self.extensions_json().await
+    }
+
+    /// Take the owner's build in the `MICAUPD1` archive at `archive`, a file
+    /// directly in the update uploads: installed on trial from the next
+    /// boot, or staged for the system update to its kernel. Asked as
+    /// `AddOwnerCert` asks; answers the task's id.
+    pub(super) async fn install_extension(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        archive: &str,
+        password: String,
+        by: &str,
+        source: &str,
+    ) -> Result<String, DriversFault> {
+        self.install_extension_now(
+            &emitter,
+            sender_of(&header),
+            &[archive],
+            password,
+            by,
+            source,
+        )
+        .await
+    }
+
+    /// Install the owner's build of the three files `descriptor`
+    /// (`ext.json`), `image` and `signature`, each directly in the update
+    /// uploads, on trial from the next boot. Asked as `AddOwnerCert` asks;
+    /// answers the task's id.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn install_extension_files(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        descriptor: &str,
+        image: &str,
+        signature: &str,
+        password: String,
+        by: &str,
+        source: &str,
+    ) -> Result<String, DriversFault> {
+        self.install_extension_now(
+            &emitter,
+            sender_of(&header),
+            &[descriptor, image, signature],
+            password,
+            by,
+            source,
+        )
+        .await
+    }
+
+    /// Stop installing the extension `name`, on trial from the next boot.
+    /// Asked as `AddOwnerCert` asks; answers the task's id.
+    pub(super) async fn remove_extension(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        name: &str,
+        password: String,
+        by: &str,
+        source: &str,
+    ) -> Result<String, DriversFault> {
+        self.remove_extension_now(&emitter, sender_of(&header), name, password, by, source)
+            .await
+    }
+
+    /// Let the system update to the kernel `kernel` run without the
+    /// extension `name`, which it waits for otherwise. Asked as
+    /// `AddOwnerCert` asks; answers the task's id.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn drop_extension(
+        &self,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+        #[zbus(header)] header: Header<'_>,
+        name: &str,
+        kernel: &str,
+        password: String,
+        by: &str,
+        source: &str,
+    ) -> Result<String, DriversFault> {
+        self.drop_extension_now(
+            &emitter,
+            sender_of(&header),
+            name,
+            kernel,
+            password,
+            by,
+            source,
+        )
+        .await
+    }
+
     /// Power the appliance off through systemd.
     ///
     /// The request is logged and recorded in the live-state tree before the

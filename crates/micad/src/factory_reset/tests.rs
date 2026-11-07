@@ -26,20 +26,6 @@ fn only_a_runkit_that_says_so_supports_the_reset() {
 }
 
 #[test]
-fn wrong_passwords_back_off_and_a_right_one_clears_it() {
-    let (_dir, reset) = device();
-    for _ in 0..FREE_FAILURES {
-        reset.failed();
-        assert_eq!(reset.throttled(), None);
-    }
-    reset.failed();
-    let refusal = reset.throttled().expect("backed off");
-    assert_eq!(refusal.code, "login_throttled");
-    reset.succeeded();
-    assert_eq!(reset.throttled(), None);
-}
-
-#[test]
 fn a_staged_reset_is_the_runkit_s_request() {
     let (dir, reset) = device();
     reset.stage(Requester::Cli, "uid 0", 1_700_000_000).unwrap();

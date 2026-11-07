@@ -1747,6 +1747,7 @@ export const en = {
           superseded: 'the staged bundle is no longer the release the source names',
           unknown: 'the device met a refusal it has no name for; the reason is in its logs',
           'workspace-unready': 'the update workspace is not ready',
+          'waits-for-extension': 'the new system\'s kernel has no build of a driver extension this device runs; upload one, or update without it, on the Drivers page',
         },
         documentError: 'The update configuration on this device could not be read: {{reason}}. Nothing can be changed here until it is repaired or the configuration is reset.',
       },

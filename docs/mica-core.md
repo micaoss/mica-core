@@ -270,6 +270,7 @@ directions, because `SettingsChanged` carries setting values.
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so two claims cannot both land), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
+| Owner certificates and driver extensions | `GetOwnerCerts`, `AddOwnerCert`, `RemoveOwnerCert`, `GetExtensions`, `InstallExtension`, `InstallExtensionFiles`, `RemoveExtension`, `DropExtension` (section 3.7) |
 | Apps | `GetApps`, `GetApp`, `InstallApp`, `RollbackApp`, `RemoveApp`, `CheckAppUpdate`, `UpdateApp`, `StartApp`, `StopApp`, `RestartApp`, `GetAppLog` (section 3.11) |
 | Containers and Bluetooth | `CheckContainerProject`, `CheckContainerProjectIn`, `StartContainer`, `StopContainer`, `RestartContainer`, `SetBluetoothDiscovery` (no API route serves it), `OpenBluetoothPairWindow`, `CloseBluetoothPairWindow`, `PairBluetoothDevice`, `ConfirmBluetoothPairing` (an accepted pairing is declared untrusted), `SetBluetoothDeviceFlag` (a declared device's `trusted` or `blocked`), `RemoveBluetoothDevice` |
 
@@ -383,6 +384,22 @@ absence is reported with its reason rather than as a healthy reading:
   filesystem or the device does not discard (UBIFS, a card without TRIM). It is not a
   certified wipe. `GetFactoryReset` answers whether the runkit supports it and the last
   completed reset; `GetStorageStatus` names it in `lifecycle.factoryReset`.
+- **Owner certificates and driver extensions** (6.3, 6.5). `GetOwnerCerts` answers
+  `mica-deploy owner-certs`, `GetExtensions` the `extensions` of `mica-deploy status` with the
+  running `kernel`. Each change asks for the administrator password again, in the factory
+  reset's backoff (one counter for both), and is refused on an unclaimed device
+  (`not_claimed`); a refusal is `com.mica.micad1.Error.DriversRefused`, its description the JSON
+  `{code, message}`. An admitted change answers a task id and runs as a task of kind
+  `drivers.apply`, whose transitions are `TaskChanged` signals; it applies from the next boot.
+  `AddOwnerCert` (the PEM or DER bytes) runs `owner-cert-add`, with `--clock-synced` while the
+  device believes its clock, and `RemoveOwnerCert` runs `owner-cert-remove`, both with the
+  requester and its source. `InstallExtension` takes a `MICAUPD1` archive (`extension-import`),
+  `InstallExtensionFiles` the three files of a build (`extension-install`), each a file directly
+  in the update uploads, which goes once read; `RemoveExtension` runs `extension-remove` and
+  `DropExtension` `extension-drop`. The task's message is mica-deploy's refusal, or the warning
+  of a certificate whose validity period was not checked. An automatic update whose kernel
+  waits for an extension is deferred (`waits-for-extension`) until the owner uploads a build or
+  drops it.
 - **Service registry.** Other `com.mica.*` names are recorded as they appear and vanish; the name
   rule is `crates/mica-busname`, the rule of `mica-pkgs:docs/mica-pkgs.md` section 3.5.
 

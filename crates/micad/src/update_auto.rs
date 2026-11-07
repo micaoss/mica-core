@@ -378,6 +378,22 @@ impl AutoDriver {
             }
         };
         let version = match named {
+            // The metadata still names it, and its kernel waits for a driver
+            // extension: the owner decides, with a build or without it.
+            Some(candidate)
+                if Some(candidate.deployment_id.as_str()) == descriptor_id(descriptor)
+                    && !candidate.waits_for_extension.is_empty() =>
+            {
+                self.defer(
+                    update_codes::DEFER_WAITS_FOR_EXTENSION,
+                    &format!(
+                        "the new kernel has no build of {}; upload one or update without it",
+                        candidate.waits_for_extension.join(", ")
+                    ),
+                )
+                .await;
+                return;
+            }
             // The metadata still names it: this is the version to install.
             Some(candidate)
                 if Some(candidate.deployment_id.as_str()) == descriptor_id(descriptor) =>

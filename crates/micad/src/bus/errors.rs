@@ -245,3 +245,58 @@ impl zbus::DBusError for ResetFault {
         }
     }
 }
+
+/// D-Bus error name for a refused owner certificate or driver extension
+/// change; the description is JSON, `{"code", "message"}`, `code` being the
+/// API's: `not_claimed`, `password_incorrect` or `login_throttled`.
+pub const DRIVERS_REFUSED_ERROR: &str = "com.mica.micad1.Error.DriversRefused";
+
+/// Reply error of the owner certificate and driver extension changes.
+#[derive(Debug)]
+pub(super) enum DriversFault {
+    /// [`DRIVERS_REFUSED_ERROR`].
+    Refused(String),
+    /// Everything else, under its standard fdo name.
+    Fdo(fdo::Error),
+}
+
+impl From<crate::factory_reset::Refusal> for DriversFault {
+    fn from(refusal: crate::factory_reset::Refusal) -> Self {
+        Self::Refused(
+            serde_json::json!({ "code": refusal.code, "message": refusal.message }).to_string(),
+        )
+    }
+}
+
+impl From<fdo::Error> for DriversFault {
+    fn from(error: fdo::Error) -> Self {
+        Self::Fdo(error)
+    }
+}
+
+impl zbus::DBusError for DriversFault {
+    fn name(&self) -> zbus::names::ErrorName<'_> {
+        match self {
+            Self::Refused(_) => {
+                zbus::names::ErrorName::from_static_str_unchecked(DRIVERS_REFUSED_ERROR)
+            }
+            Self::Fdo(err) => err.name(),
+        }
+    }
+
+    fn description(&self) -> Option<&str> {
+        match self {
+            Self::Refused(message) => Some(message),
+            Self::Fdo(err) => err.description(),
+        }
+    }
+
+    fn create_reply(&self, call: &Header<'_>) -> zbus::Result<zbus::message::Message> {
+        match self {
+            Self::Refused(message) => {
+                zbus::message::Message::error(call, self.name()).build(message)
+            }
+            Self::Fdo(err) => err.create_reply(call),
+        }
+    }
+}

@@ -104,7 +104,7 @@ pub(super) async fn a_wrong_password_stages_nothing_and_repeated_ones_back_off()
     assert!(!staged(&dir));
     assert!(calls.lock().unwrap().is_empty());
     // The wait over.
-    service.factory_reset.as_ref().unwrap().succeeded();
+    service.password_backoff.succeeded();
 
     service
         .request_factory_reset(":1.5", PASSWORD.into(), "api", "192.0.2.9")

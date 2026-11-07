@@ -489,6 +489,99 @@ aside, else null) and `last` (the last completed reset, or null).
 <arg type="s" direction="out"/>
 </method>
 <!--
+JSON: the enrolled owner certificates, each with its `state`
+(`loaded`, `rejected`, `pending-next-boot`, `pending-confirmation` or
+`removed-next-boot`), as `mica-deploy owner-certs` answers.
+-->
+<method name="GetOwnerCerts">
+<arg type="s" direction="out"/>
+</method>
+<!--
+Enrol the PEM or DER `certificate` from the next boot; answers the
+task's id. `password` must be the administrator's, as for
+`FactoryReset`, and `by` and `source` are recorded; refused with
+`DriversRefused`, whose description is JSON `{code, message}`.
+-->
+<method name="AddOwnerCert">
+<arg name="certificate" type="ay" direction="in"/>
+<arg name="password" type="s" direction="in"/>
+<arg name="by" type="s" direction="in"/>
+<arg name="source" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Remove the enrolled certificate `sha256` from the next boot, as
+`AddOwnerCert` asks; answers the task's id.
+-->
+<method name="RemoveOwnerCert">
+<arg name="sha256" type="s" direction="in"/>
+<arg name="password" type="s" direction="in"/>
+<arg name="by" type="s" direction="in"/>
+<arg name="source" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+JSON: the driver extensions, `mica-deploy status`'s `extensions`
+(`installed`, `pending`, `pair`, `attemptsLeft`,
+`pendingVerification`, `waitsForExtension`, `boot`, `trust`) and the
+running `kernel`.
+-->
+<method name="GetExtensions">
+<arg type="s" direction="out"/>
+</method>
+<!--
+Take the owner's build in the `MICAUPD1` archive at `archive`, a file
+directly in the update uploads: installed on trial from the next
+boot, or staged for the system update to its kernel. Asked as
+`AddOwnerCert` asks; answers the task's id.
+-->
+<method name="InstallExtension">
+<arg name="archive" type="s" direction="in"/>
+<arg name="password" type="s" direction="in"/>
+<arg name="by" type="s" direction="in"/>
+<arg name="source" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Install the owner's build of the three files `descriptor`
+(`ext.json`), `image` and `signature`, each directly in the update
+uploads, on trial from the next boot. Asked as `AddOwnerCert` asks;
+answers the task's id.
+-->
+<method name="InstallExtensionFiles">
+<arg name="descriptor" type="s" direction="in"/>
+<arg name="image" type="s" direction="in"/>
+<arg name="signature" type="s" direction="in"/>
+<arg name="password" type="s" direction="in"/>
+<arg name="by" type="s" direction="in"/>
+<arg name="source" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Stop installing the extension `name`, on trial from the next boot.
+Asked as `AddOwnerCert` asks; answers the task's id.
+-->
+<method name="RemoveExtension">
+<arg name="name" type="s" direction="in"/>
+<arg name="password" type="s" direction="in"/>
+<arg name="by" type="s" direction="in"/>
+<arg name="source" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
+Let the system update to the kernel `kernel` run without the
+extension `name`, which it waits for otherwise. Asked as
+`AddOwnerCert` asks; answers the task's id.
+-->
+<method name="DropExtension">
+<arg name="name" type="s" direction="in"/>
+<arg name="kernel" type="s" direction="in"/>
+<arg name="password" type="s" direction="in"/>
+<arg name="by" type="s" direction="in"/>
+<arg name="source" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
 Power the appliance off through systemd.
 The request is logged and recorded in the live-state tree before the
 call is made.

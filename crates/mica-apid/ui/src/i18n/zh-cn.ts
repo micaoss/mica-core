@@ -1462,6 +1462,7 @@ export const zhCN: Translation = {
           superseded: '已暂存的升级包不再是更新源当前指定的版本',
           unknown: '设备遇到了一个它无法命名的拒绝原因，具体原因见设备日志',
           'workspace-unready': '更新工作区尚未就绪',
+          'waits-for-extension': '新系统的内核缺少本设备正在使用的驱动扩展的构建；请在“驱动”页面上传构建，或选择不带该扩展更新',
         },
         documentError: '无法读取本设备的更新配置：{{reason}}。在修复或重置配置之前，这里无法更改任何设置。',
       },

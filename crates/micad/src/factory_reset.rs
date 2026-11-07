@@ -9,8 +9,6 @@
 //! there. The software stays at its version; everything configured goes.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use mica_deploy::factory_reset::{self as erase, Done, Request, Requester};
@@ -19,10 +17,6 @@ use serde_json::{Value, json};
 /// Where micad keeps the last reset it has recorded, relative to STATE. It
 /// goes with STATE at the reset, so the first boot after one finds it absent.
 const RECORD: &str = "mica/factory-reset.json";
-/// Wrong passwords tolerated before micad's own backoff starts.
-const FREE_FAILURES: u32 = 3;
-/// The longest backoff.
-const MAX_BACKOFF: Duration = Duration::from_secs(300);
 
 /// Why a factory reset was refused; `code` is the API's.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +34,7 @@ impl Refusal {
     }
 }
 
-/// The factory reset's paths and micad's backoff on wrong passwords.
+/// The factory reset's paths.
 pub struct FactoryReset {
     /// The DATA root: `meta/` holds the request and the runkit's record.
     data: PathBuf,
@@ -52,13 +46,6 @@ pub struct FactoryReset {
     deploy: PathBuf,
     /// What the runkit did at this boot (`mica_deploy::factory_reset::PROGRESS`).
     progress: PathBuf,
-    backoff: Mutex<Backoff>,
-}
-
-#[derive(Default)]
-struct Backoff {
-    failures: u32,
-    until: Option<Instant>,
 }
 
 impl FactoryReset {
@@ -70,7 +57,6 @@ impl FactoryReset {
             capabilities,
             deploy: PathBuf::from("/usr/bin/mica-deploy"),
             progress: PathBuf::from(erase::PROGRESS),
-            backoff: Mutex::default(),
         }
     }
 
@@ -142,46 +128,6 @@ impl FactoryReset {
         let done = self.deploy(&["factory-reset", "--finish"])?;
         tracing::info!(done, "factory reset finished on SYSTEM");
         Ok(())
-    }
-
-    /// The refusal while micad's backoff runs.
-    pub fn throttled(&self) -> Option<Refusal> {
-        let backoff = self
-            .backoff
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let left = backoff.until?.checked_duration_since(Instant::now())?;
-        Some(Refusal::new(
-            "login_throttled",
-            format!(
-                "too many wrong passwords; try again in {} s",
-                left.as_secs().max(1)
-            ),
-        ))
-    }
-
-    /// Count a wrong password: after [`FREE_FAILURES`] each one doubles the
-    /// wait, from 5 s up to [`MAX_BACKOFF`].
-    pub fn failed(&self) {
-        let mut backoff = self
-            .backoff
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        backoff.failures = backoff.failures.saturating_add(1);
-        if let Some(over) = backoff.failures.checked_sub(FREE_FAILURES + 1) {
-            let wait = Duration::from_secs(5)
-                .saturating_mul(1 << over.min(10))
-                .min(MAX_BACKOFF);
-            backoff.until = Some(Instant::now() + wait);
-        }
-    }
-
-    /// A right password clears the backoff.
-    pub fn succeeded(&self) {
-        *self
-            .backoff
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Backoff::default();
     }
 
     /// Whether an update transaction holds DATA's lock right now.
