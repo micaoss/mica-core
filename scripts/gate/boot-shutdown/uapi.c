@@ -74,6 +74,7 @@ _Static_assert(sizeof(struct fstrim_range) == 24, "fstrim range size");
 _Static_assert(_Alignof(struct fstrim_range) == 8, "fstrim range alignment");
 _Static_assert(offsetof(struct fstrim_range, len) == 8, "fstrim range length");
 _Static_assert(FITRIM == 0xc0185879, "trim request");
+_Static_assert(BLKSECDISCARD == 0x127d, "secure discard request");
 _Static_assert(FS_XFLAG_PROJINHERIT == 0x200, "project inherit flag");
 _Static_assert(sizeof(struct if_dqblk) == 72, "dqblk size");
 _Static_assert(_Alignof(struct if_dqblk) == 8, "dqblk alignment");
