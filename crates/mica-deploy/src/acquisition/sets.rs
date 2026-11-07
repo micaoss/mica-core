@@ -184,8 +184,9 @@ impl Acquisition<'_> {
         self.set_validate(&selected.set)?;
         self.prepare()?;
         let missing = self.set_missing(&selected.set)?;
-        self.reserve_missing(&missing)?;
-        self.fetch_objects(missing, &selected.objects, &mut None)?;
+        let volumes = self.volumes(self.store.set_objects(&selected.set));
+        self.room(&missing, &volumes, None)?;
+        self.fetch_objects(missing, &selected.objects, &mut None, &volumes)?;
         self.set_ready(selected.envelope.as_bytes(), selected.set)
     }
 
@@ -220,7 +221,9 @@ impl Acquisition<'_> {
         }
         self.prepare()?;
         let missing = self.set_missing(&set)?;
-        self.import_objects(input, required, &missing, false)?;
+        let volumes = self.volumes(self.store.set_objects(&set));
+        self.room(&missing, &volumes, None)?;
+        self.import_objects(input, required, &missing, false, &volumes)?;
         self.set_ready(&envelope, set).map(Imported::Set)
     }
 }

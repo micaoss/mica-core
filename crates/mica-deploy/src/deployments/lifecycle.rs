@@ -180,6 +180,11 @@ impl DeploymentStore {
             roots.insert(d.rootfs.id);
             kernels.insert(d.kernel.id);
         }
+        // A staged descriptor's objects may already be in the store: on a
+        // `ubi` board a fetch writes them there.
+        let staged = self.staged(keys);
+        roots.extend(staged.roots);
+        kernels.extend(staged.kernels);
         if let Some(deployment) = incoming {
             ensure!(
                 target.as_ref() == Some(&(deployment.board.clone(), deployment.arch.clone())),

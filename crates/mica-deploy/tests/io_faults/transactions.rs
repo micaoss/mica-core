@@ -29,7 +29,11 @@ pub(super) fn transactions_survive_each_boundary() {
     let evidence = PathBuf::from(std::env::var("MICA_TEST_FAULT_EVIDENCE").unwrap());
     let mut summaries = Vec::new();
     for kind in KINDS {
-        for operation in ["install", "confirm", "gc"] {
+        for operation in ["install", "confirm", "gc", "import"] {
+            // Only a `ubi` board writes an import straight into its store.
+            if operation == "import" && kind != Kind::Ubi {
+                continue;
+            }
             let invoke = |root: &Path, at: usize, phase: &str, enospc: bool| {
                 let mut cmd = Command::new(std::env::current_exe().unwrap());
                 cmd.args([
@@ -105,6 +109,9 @@ pub(super) fn transactions_survive_each_boundary() {
                             restarted.confirm(&receipt).unwrap();
                         }
                         validate(case.path(), kind);
+                        if operation == "import" {
+                            validate_import(case.path());
+                        }
                     });
                     if let Err(error) = check {
                         eprintln!("failed fixture retained: {}", case.keep().display());
@@ -378,4 +385,60 @@ pub(super) fn ubi_installation_keeps_the_reserve_in_free_erase_blocks() {
         )
     );
     validate(root.path(), Kind::Ubi);
+}
+
+/// A fetch on UBI that must make room retires the fallback as installing
+/// would: its descriptor and its volumes go, the confirmed running deployment
+/// and its objects stay.
+#[test]
+pub(super) fn ubi_releasing_the_fallback_keeps_the_running_deployment() {
+    let root = TempDir::new().unwrap();
+    seed(root.path(), Kind::Ubi, "install");
+    let store = store(root.path(), Kind::Ubi);
+    let public: [u8; 32] = fs::read(root.path().join("public"))
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let receipt: BootReceipt =
+        serde_json::from_slice(&fs::read(root.path().join("current-receipt.json")).unwrap())
+            .unwrap();
+    let candidate = authenticate_deployment(
+        &fs::read(root.path().join("candidate.json")).unwrap(),
+        &[public],
+    )
+    .unwrap();
+    let retired = fs::read_to_string(root.path().join("retired-id")).unwrap();
+    let retained = fs::read_to_string(root.path().join("retained-id")).unwrap();
+    let device = ubi::DirUbi::open_at(&root.path().join("store/ubi"));
+    let free = mica_deploy::ubi::UbiDevice::available_lebs(&device).unwrap();
+    store
+        .release_fallback(&receipt, &[public], &candidate)
+        .unwrap();
+    let entries = store.entries().unwrap();
+    assert_eq!(
+        entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+        [retained.as_str()]
+    );
+    let state = store.effective_state().unwrap();
+    assert_eq!(
+        (state.current.as_deref(), state.fallback),
+        (Some(retained.as_str()), None)
+    );
+    assert!(
+        !store
+            .system
+            .join(format!("deployments/{retired}.json"))
+            .exists()
+    );
+    assert!(mica_deploy::ubi::UbiDevice::available_lebs(&device).unwrap() > free);
+    validate(root.path(), Kind::Ubi);
+    // Nothing is released while a deployment is on trial.
+    let root = TempDir::new().unwrap();
+    seed(root.path(), Kind::Ubi, "confirm");
+    let on_trial = super::store(root.path(), Kind::Ubi);
+    assert!(
+        on_trial
+            .release_fallback(&receipt, &[public], &candidate)
+            .is_err()
+    );
 }

@@ -131,12 +131,15 @@ fn objects_are_published_through_a_pending_volume() {
     publish_object(&device, &source, "r-1", &signed).unwrap();
     assert_eq!(find(&device, "r-1").unwrap().unwrap().id, volume.id);
 
-    // A source that is not the signed object is never renamed into place.
+    // A source that is not the signed object is never renamed into place,
+    // and its pending volume keeps no erase blocks.
     fs::write(&source, vec![8_u8; payload.len()]).unwrap();
+    let available = device.available_lebs().unwrap();
     let error = publish_object(&device, &source, "r-2", &signed).unwrap_err();
     assert!(error.to_string().contains("digest mismatch"), "{error:#}");
     assert!(find(&device, "r-2").unwrap().is_none());
-    assert!(find(&device, "p.r-2").unwrap().is_some());
+    assert!(find(&device, "p.r-2").unwrap().is_none());
+    assert_eq!(device.available_lebs().unwrap(), available);
 }
 
 /// A held object is reused only when it is static, sound, of the signed

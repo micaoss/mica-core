@@ -124,7 +124,9 @@ pub(super) fn a_core_set_is_checked_fetched_installed_and_composed() {
     }))
     .unwrap();
     // The first object is probed for a transfer index, which this origin does
-    // not publish; every object after that is asked for whole.
+    // not publish; every object after that is asked for whole, smallest first.
+    let mut fetched = listed.clone();
+    fetched.sort_by_key(|(sha, bytes)| (*bytes, sha.clone()));
     let by_sha = |wanted: &str| -> Vec<u8> {
         if wanted == sha(&image) {
             image.clone()
@@ -139,8 +141,8 @@ pub(super) fn a_core_set_is_checked_fetched_installed_and_composed() {
             (ok(release.as_bytes()), NO_HOLD),
             (ok(envelope.as_bytes()), NO_HOLD),
             (delta::http(404, b""), NO_HOLD),
-            (ok(&by_sha(&listed[0].0)), NO_HOLD),
-            (ok(&by_sha(&listed[1].0)), NO_HOLD),
+            (ok(&by_sha(&fetched[0].0)), NO_HOLD),
+            (ok(&by_sha(&fetched[1].0)), NO_HOLD),
         ],
     );
     let (dir, store) = fixture();
@@ -163,7 +165,7 @@ pub(super) fn a_core_set_is_checked_fetched_installed_and_composed() {
     assert!(
         requests[4].starts_with(&format!(
             "GET /mica/core.general/20261010-0000/amd64/objects/{} ",
-            listed[0].0
+            fetched[0].0
         )),
         "{}",
         requests[4]
@@ -472,8 +474,10 @@ pub(super) fn a_system_update_fetches_the_image_set_it_takes() {
         (sha(&image), image.clone()),
         (sha(&signature), signature.clone()),
     ];
-    set_objects.sort();
-    // Each batch of objects probes the origin for a transfer index first.
+    set_objects.sort_by_key(|(sha, bytes)| (bytes.len(), sha.clone()));
+    // Each batch of objects probes the origin for a transfer index first: the
+    // set's envelope, then the deployment's objects, then the set's, each
+    // batch smallest first.
     let server = serve(
         listener,
         vec![
@@ -481,9 +485,9 @@ pub(super) fn a_system_update_fetches_the_image_set_it_takes() {
             (ok(release.as_bytes()), NO_HOLD),
             (ok(descriptor.as_bytes()), NO_HOLD),
             (delta::http(404, b""), NO_HOLD),
-            (ok(&[42_u8; 12288]), NO_HOLD),
-            (delta::http(404, b""), NO_HOLD),
             (ok(carried.as_bytes()), NO_HOLD),
+            (delta::http(404, b""), NO_HOLD),
+            (ok(&[42_u8; 12288]), NO_HOLD),
             (delta::http(404, b""), NO_HOLD),
             (ok(&set_objects[0].1), NO_HOLD),
             (ok(&set_objects[1].1), NO_HOLD),

@@ -17,6 +17,9 @@ mod delta;
 mod online;
 mod sets;
 mod transfer;
+mod ubi;
+#[path = "../support/ubi.rs"]
+mod ubi_device;
 use online::*;
 
 /// The deployment archive, for the modules that import one.
@@ -101,6 +104,7 @@ fn offline_archive_authenticates_before_staging_and_never_publishes_partial_desc
         arch: "amd64",
         product: "uefi-x64-dev",
         max_bytes: Some(1024 * 1024),
+        release: None,
     };
     let ready = acq.import(&mut Cursor::new(&archive)).unwrap();
     assert!(ready.path.is_file());
@@ -131,6 +135,7 @@ fn only_the_micaupd1_magic_is_an_archive() {
         arch: "amd64",
         product: "uefi-x64-dev",
         max_bytes: Some(1024 * 1024),
+        release: None,
     };
     for magic in [&b"MICAUPD2"[..], b"micaupd1", b"MICAUP01"] {
         let mut old = archive.clone();
@@ -163,6 +168,7 @@ fn interrupted_corrupt_oversized_and_foreign_archives_cannot_become_ready() {
             arch: "amd64",
             product: "uefi-x64-dev",
             max_bytes: Some(if case == "budget" { 100 } else { 1024 * 1024 }),
+            release: None,
         };
         let mut input = archive.clone();
         if case == "truncated" {
@@ -210,6 +216,7 @@ fn one_existing_destination_does_not_hide_other_destinations_for_the_same_digest
         arch: "amd64",
         product: "uefi-x64-dev",
         max_bytes: Some(1024 * 1024),
+        release: None,
     };
     acq.import(&mut Cursor::new(archive)).unwrap();
     assert!(acq.objects().join(sha).is_file());
@@ -228,6 +235,7 @@ fn discard_is_bounded_to_acquisition_files_and_checks_all_paths_before_removing_
         arch: "amd64",
         product: "uefi-x64-dev",
         max_bytes: Some(1024 * 1024),
+        release: None,
     };
     let ready = acq.import(&mut Cursor::new(&archive)).unwrap();
     fs::write(store.meta.join("preserved"), b"metadata").unwrap();
@@ -258,10 +266,12 @@ fn only_the_commands_that_write_need_a_workspace_budget() {
         arch: "amd64",
         product: "uefi-x64-dev",
         max_bytes: Some(1024 * 1024),
+        release: None,
     };
     budgeted.import(&mut Cursor::new(&archive)).unwrap();
     let unbudgeted = Acquisition {
         max_bytes: None,
+        release: None,
         ..budgeted
     };
     for error in [

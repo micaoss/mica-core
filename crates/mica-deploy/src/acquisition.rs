@@ -18,6 +18,7 @@ use std::{
 };
 
 mod sets;
+mod store;
 mod transfer;
 pub use sets::*;
 use transfer::*;
@@ -42,9 +43,17 @@ pub struct Acquisition<'a> {
     pub arch: &'a str,
     pub product: &'a str,
     /// The caller's budget for the workspace; every command that writes to it
-    /// needs one, and discarding does not.
+    /// needs one, and discarding does not. On a `ubi` board it also counts the
+    /// objects written straight into the store.
     pub max_bytes: Option<u64>,
+    /// On a `ubi` board, how a fetch retires the fallback when the objects it
+    /// writes into the store would not fit otherwise ([`DeploymentStore::release_fallback`],
+    /// with SYSTEM writable); without it such a fetch is refused.
+    pub release: Option<&'a Release<'a>>,
 }
+
+/// How a fetch retires the fallback for the deployment it brings.
+pub type Release<'a> = dyn Fn(&Deployment) -> Result<()> + 'a;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadyDeployment {
@@ -132,7 +141,9 @@ impl Acquisition<'_> {
             fs::remove_file(path)?;
             sync_dir(path.parent().context("missing workspace parent")?)?;
         }
-        Ok(files.len())
+        // With the staged descriptors gone, what a fetch wrote into the store
+        // for them is held by nothing.
+        Ok(files.len() + self.store.release_volumes(self.keys)?)
     }
 
     pub fn probe(&self) -> Result<serde_json::Value> {
@@ -330,6 +341,28 @@ impl Acquisition<'_> {
     /// bandwidth. Any failure here is an ordinary `Err` and the caller falls
     /// back to fetching the whole object.
     fn delta(&self, object: &SourceObject, partial: &Path, seeds: &chunks::SeedMap) -> Result<()> {
+        // Assembled beside the partial, never into it: a partial is a resumable
+        // transfer, and truncating one to try a delta would throw away bytes
+        // that are already here if the delta then failed.
+        let assembly = self
+            .root
+            .join(format!("downloads/{}.assembly", object.sha256));
+        let mut output = File::create(&assembly)?;
+        self.assemble(object, seeds, &mut output)?;
+        output.sync_all()?;
+        fs::rename(&assembly, partial)?;
+        Ok(())
+    }
+
+    /// Write `object` into `output` from its index: each chunk from a seed
+    /// that holds it, else from the origin's chunk store, checked against the
+    /// index either way.
+    fn assemble(
+        &self,
+        object: &SourceObject,
+        seeds: &chunks::SeedMap,
+        output: &mut dyn Write,
+    ) -> Result<()> {
         let artifact = Artifact {
             sha256: object.sha256.clone(),
             bytes: object.bytes,
@@ -347,13 +380,6 @@ impl Acquisition<'_> {
         let index = chunks::parse_index(&read_bounded(&index_path, limit)?, &artifact)?;
         fs::remove_file(&index_path)?;
         let chunk_path = self.root.join(format!("downloads/{}.chunk", object.sha256));
-        // Assembled beside the partial, never into it: a partial is a resumable
-        // transfer, and truncating one to try a delta would throw away bytes
-        // that are already here if the delta then failed.
-        let assembly = self
-            .root
-            .join(format!("downloads/{}.assembly", object.sha256));
-        let mut output = File::create(&assembly)?;
         for (sha, length) in index.0 {
             let bytes = match seeds.get(&sha) {
                 Some((path, offset, held)) if *held == length => {
@@ -374,38 +400,60 @@ impl Acquisition<'_> {
             };
             output.write_all(&bytes)?;
         }
-        output.sync_all()?;
         let _ = fs::remove_file(&chunk_path);
-        fs::rename(&assembly, partial)?;
         Ok(())
     }
 
+    /// What a failed delta of the object `sha` leaves in the workspace.
+    fn drop_delta(&self, sha: &str) {
+        for leftover in ["assembly", "index", "chunk"] {
+            let _ = fs::remove_file(self.root.join(format!("downloads/{sha}.{leftover}")));
+        }
+    }
+
     pub fn fetch(&self, selected: SelectedRelease) -> Result<ReadyDeployment> {
-        self.validate(&selected.deployment)?;
+        let deployment = &selected.deployment;
+        self.validate(deployment)?;
         self.prepare()?;
-        let missing = self.missing(&selected.deployment)?;
-        self.reserve_missing(&missing)?;
         // The seeds are cut once for the whole fetch, the set's objects
         // included: re-reading them per call would multiply the slowest step.
         let mut seeds = None;
-        self.fetch_objects(missing, &selected.objects, &mut seeds)?;
+        let none = BTreeMap::new();
         // The image's set, when installing the deployment would take it: its
-        // envelope first, then the components it names.
-        if let Some(image) =
-            self.store
-                .newer_image_set(&selected.deployment, self.keys, self.arch)?
+        // envelope first, which names the components fetched with the
+        // deployment's objects.
+        let set = match self
+            .store
+            .newer_image_set(deployment, self.keys, self.arch)?
         {
-            let envelope = BTreeMap::from([(image.sha256.clone(), image.bytes)]);
-            let missing = self.absent(envelope)?;
-            self.reserve_missing(&missing)?;
-            self.fetch_objects(missing, &selected.objects, &mut seeds)?;
-            let (set, _) = self
-                .store
-                .image_set(image, &self.objects(), self.keys, self.arch)?;
-            let missing = self.set_missing(&set)?;
-            self.reserve_missing(&missing)?;
-            self.fetch_objects(missing, &selected.objects, &mut seeds)?;
+            Some(image) => {
+                let envelope = BTreeMap::from([(image.sha256.clone(), image.bytes)]);
+                let missing = self.absent(envelope)?;
+                self.reserve_missing(&missing)?;
+                self.fetch_objects(missing, &selected.objects, &mut seeds, &none)?;
+                Some(
+                    self.store
+                        .image_set(image, &self.objects(), self.keys, self.arch)?
+                        .0,
+                )
+            }
+            None => None,
+        };
+        let mut places = self.store.object_paths(deployment);
+        if let Some(set) = &set {
+            places.extend(self.store.set_objects(set));
         }
+        let volumes = self.volumes(places);
+        let missing = self.missing(deployment)?;
+        let set_missing = match &set {
+            Some(set) => self.set_missing(set)?,
+            None => BTreeMap::new(),
+        };
+        let mut all = missing.clone();
+        all.extend(set_missing.clone());
+        self.room(&all, &volumes, Some(deployment))?;
+        self.fetch_objects(missing, &selected.objects, &mut seeds, &volumes)?;
+        self.fetch_objects(set_missing, &selected.objects, &mut seeds, &volumes)?;
         self.ready(selected.envelope.as_bytes(), selected.deployment)
     }
 
@@ -428,8 +476,9 @@ impl Acquisition<'_> {
     }
 
     /// Fetch every object of `missing` from where `objects` says it is, by
-    /// delta where the origin and this device allow, and promote each into the
-    /// verified store.
+    /// delta where the origin and this device allow, smallest first, and
+    /// promote each into the verified store, or write it straight into its
+    /// volume when `volumes` names one.
     /// `seeds` is the caller's cut, made on first need and reused by every
     /// later call of the same fetch.
     fn fetch_objects(
@@ -437,17 +486,25 @@ impl Acquisition<'_> {
         missing: BTreeMap<String, u64>,
         objects: &[SourceObject],
         seeds: &mut Option<chunks::SeedMap>,
+        volumes: &BTreeMap<String, Vec<String>>,
     ) -> Result<()> {
         // One probe per fetch, not one per object: an origin that did not serve
         // the first index is not expected to serve the next, and being wrong
         // about that costs exactly what this repository did before deltas --
         // the whole object.
         let mut origin_has_indexes = true;
+        let mut missing: Vec<_> = missing.into_iter().collect();
+        // The largest object last: a power cut loses the object in flight.
+        missing.sort_by(|a, b| (a.1, &a.0).cmp(&(b.1, &b.0)));
         for (sha, bytes) in missing {
             let object = objects
                 .iter()
                 .find(|object| object.sha256 == sha && object.bytes == bytes)
                 .context("missing acquisition URL")?;
+            if let Some(names) = volumes.get(&sha) {
+                self.fetch_into(object, names, seeds, &mut origin_has_indexes)?;
+                continue;
+            }
             let partial = self.root.join(format!("downloads/{sha}.partial"));
             let held = if partial.try_exists()? {
                 partial.metadata()?.len()
@@ -463,13 +520,7 @@ impl Acquisition<'_> {
                 };
                 if self.delta(object, &partial, cut).is_err() {
                     origin_has_indexes = false;
-                    for leftover in [
-                        self.root.join(format!("downloads/{sha}.assembly")),
-                        self.root.join(format!("downloads/{sha}.index")),
-                        self.root.join(format!("downloads/{sha}.chunk")),
-                    ] {
-                        let _ = fs::remove_file(leftover);
-                    }
+                    self.drop_delta(&sha);
                 }
             }
             if !partial.try_exists()? || partial.metadata()?.len() < bytes {
@@ -539,7 +590,11 @@ impl Acquisition<'_> {
                 );
             }
         }
-        let extras = self.import_objects(input, required, &missing, image.is_some())?;
+        // The image's components stay staged: which volume each goes to is
+        // known only once its set's envelope, in the same archive, is read.
+        let volumes = self.volumes(self.store.object_paths(&deployment));
+        self.room(&missing, &volumes, Some(&deployment))?;
+        let extras = self.import_objects(input, required, &missing, image.is_some(), &volumes)?;
         if let Some(image) = &image {
             let named = match self
                 .store
@@ -579,7 +634,9 @@ impl Acquisition<'_> {
 
     /// The object section of an archive: a count, then each object's digest,
     /// size and bytes. Every object must be one `required` names, once; the
-    /// ones in `missing` are written and promoted, the rest only checked.
+    /// ones in `missing` are written and promoted, or written straight into
+    /// the volume `volumes` names, the rest only checked. The caller has made
+    /// [`Self::room`] for `missing`.
     /// With `extras`, an object `required` does not name is taken too, once
     /// and within the budget, and returned for the caller to hold to what
     /// names it.
@@ -589,6 +646,7 @@ impl Acquisition<'_> {
         mut required: BTreeMap<String, u64>,
         missing: &BTreeMap<String, u64>,
         extras: bool,
+        volumes: &BTreeMap<String, Vec<String>>,
     ) -> Result<BTreeMap<String, u64>> {
         let mut count = [0; 4];
         input.read_exact(&mut count)?;
@@ -597,7 +655,6 @@ impl Acquisition<'_> {
             count <= required.len() || (extras && count <= catalog::MAX_ENTRIES),
             "archive carries more objects than its descriptor names"
         );
-        self.reserve_missing(missing)?;
         let mut taken = BTreeMap::new();
         let mut seen = std::collections::BTreeSet::new();
         for _ in 0..count {
@@ -636,6 +693,14 @@ impl Acquisition<'_> {
             } else {
                 missing.contains_key(&sha)
             };
+            let artifact = Artifact {
+                sha256: sha.clone(),
+                bytes: size,
+            };
+            if write && let Some(names) = volumes.get(&sha) {
+                self.import_into(input, names, &artifact)?;
+                continue;
+            }
             let partial = self.root.join(format!("downloads/{sha}.partial"));
             let mut output = if write {
                 if partial.symlink_metadata().is_ok() {
@@ -654,32 +719,15 @@ impl Acquisition<'_> {
             } else {
                 None
             };
-            let mut remaining = size;
-            let mut buffer = [0; 65536];
-            let mut hash = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
-            while remaining > 0 {
-                let count = remaining.min(buffer.len() as u64) as usize;
-                input.read_exact(&mut buffer[..count])?;
-                hash.update(&buffer[..count]);
-                if let Some(output) = &mut output {
-                    output.write_all(&buffer[..count])?;
-                }
-                remaining -= count as u64;
-            }
-            ensure!(
-                hex::encode(hash.finish()) == sha,
-                "archive object digest mismatch"
-            );
+            store::copy_checked(
+                input,
+                &artifact,
+                output.as_mut().map(|output| output as &mut dyn Write),
+            )?;
             if let Some(output) = output {
                 output.sync_all()?;
                 drop(output);
-                self.promote(
-                    &partial,
-                    &Artifact {
-                        sha256: sha,
-                        bytes: size,
-                    },
-                )?;
+                self.promote(&partial, &artifact)?;
             }
         }
         ensure!(input.read(&mut [0; 1])? == 0, "trailing archive bytes");

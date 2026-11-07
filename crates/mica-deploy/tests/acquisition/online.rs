@@ -37,6 +37,7 @@ pub(super) fn online_catalog_and_resumed_objects_converge_on_the_offline_ready_f
         arch: "amd64",
         product: "uefi-x64-dev",
         max_bytes: Some(2 * 1024 * 1024),
+        release: None,
     };
     fs::create_dir_all(acq.root.join("downloads")).unwrap();
     fs::write(
@@ -226,6 +227,7 @@ pub(super) fn acquisition<'a>(
         arch: "amd64",
         product: "uefi-x64-dev",
         max_bytes: Some(2 * 1024 * 1024),
+        release: None,
     }
 }
 

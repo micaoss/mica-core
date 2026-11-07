@@ -615,7 +615,8 @@ fn execute() -> Result<()> {
     };
     let store = DeploymentStore::new("/mnt/system".into(), boot, "/mnt/data/meta".into())
         .with_reserves(policy.board.reserves)
-        .with_boot_trust(policy.board.boot_trust);
+        .with_boot_trust(policy.board.boot_trust)
+        .with_staged("/mica/updates/verified".into());
     if matches!(cli.command, Action::Booted) {
         ensure!(
             receipt.content_verified,
@@ -653,6 +654,13 @@ fn execute() -> Result<()> {
         "running content is not authenticated"
     );
     let _lock = store.lock()?;
+    // On a `ubi` board a fetch that cannot fit the objects it writes into the
+    // store retires the fallback first, as installing would.
+    let release = |incoming: &mica_deploy::components::Deployment| {
+        writable(backend, true, || {
+            store.release_fallback(&receipt, &keys, incoming)
+        })
+    };
     if let Action::FirmwareReadback { manifest, record } = &cli.command {
         let envelope = read_bounded(manifest, 6500)?;
         let firmware = mica_deploy::firmware::authenticate_firmware(&envelope, &keys)?;
@@ -720,6 +728,7 @@ fn execute() -> Result<()> {
                 arch: &policy.identity.arch,
                 product: &product,
                 max_bytes: Some(cli.max_bytes.unwrap_or(defaults.max_bytes)),
+                release: Some(&release),
             };
             match acquisition.import_any(&mut std::fs::File::open(archive)?)? {
                 Imported::Set(set) => {
@@ -772,6 +781,7 @@ fn execute() -> Result<()> {
             arch: &policy.identity.arch,
             product: &product,
             max_bytes: Some(cli.max_bytes.unwrap_or(defaults.max_bytes)),
+            release: Some(&release),
         };
         acquisition.probe()?;
         let running = running_deployment(&keys)?;
@@ -888,6 +898,7 @@ fn execute() -> Result<()> {
             arch: &policy.identity.arch,
             product: &product,
             max_bytes,
+            release: Some(&release),
         };
         let source = |given| or_device(given, |device| device.source.clone().context(NO_SOURCE));
         let channel = |given, kind: SetKind| {

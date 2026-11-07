@@ -12,6 +12,7 @@ mod install;
 mod io;
 mod lifecycle;
 mod sets;
+mod staged;
 pub use install::*;
 pub use io::*;
 pub use mica_fs::{read_bounded, sync_dir};
@@ -124,6 +125,9 @@ pub struct DeploymentStore {
     pub reserves: crate::board::Reserves,
     /// What the board's loader proves of a FIT: whether a FIT boot is verified.
     pub boot_trust: crate::board::BootTrust,
+    /// The workspace's `verified/`, whose staged descriptors' objects
+    /// collection keeps.
+    pub staged: Option<PathBuf>,
 }
 
 /// The device a deployment must name: the board and architecture of the signed
@@ -145,6 +149,7 @@ impl DeploymentStore {
             meta,
             reserves: crate::board::Reserves::default(),
             boot_trust: crate::board::BootTrust::default(),
+            staged: None,
         }
     }
 

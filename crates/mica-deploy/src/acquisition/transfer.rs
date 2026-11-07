@@ -43,10 +43,28 @@ pub(super) fn download(url: &str, path: &Path, limit: u64, resume: bool) -> Resu
         0
     };
     ensure!(offset <= limit, "transfer exceeded byte bound");
+    redirected(url, |url, started| {
+        transfer_once(url, path, offset, limit, started, None)
+    })
+}
+
+/// As [`download`], into `sink` rather than a file, never resumed: the bytes
+/// go straight to where they are kept.
+pub(super) fn download_into(url: &str, sink: &mut dyn Write, limit: u64) -> Result<()> {
+    redirected(url, |url, started| {
+        transfer_once(url, Path::new(""), 0, limit, started, Some(&mut *sink))
+    })
+}
+
+/// Run `once` from `url`, following each redirect it names.
+fn redirected(
+    url: &str,
+    mut once: impl FnMut(&url::Url, Instant) -> Result<Option<String>>,
+) -> Result<()> {
     let started = Instant::now();
     let mut url = url::Url::parse(url)?;
     for _ in 0..=MAX_REDIRECTS {
-        match transfer_once(&url, path, offset, limit, started)? {
+        match once(&url, started)? {
             None => return Ok(()),
             Some(location) => {
                 url = url
@@ -58,14 +76,15 @@ pub(super) fn download(url: &str, path: &Path, limit: u64, resume: bool) -> Resu
     anyhow::bail!("component transfer redirected more than {MAX_REDIRECTS} times")
 }
 
-/// One request to `url`: `None` once the body is in `path`, or the location a
-/// redirect names.
+/// One request to `url`: `None` once the body is in `path` (or `sink`), or the
+/// location a redirect names.
 pub(super) fn transfer_once(
     url: &url::Url,
     path: &Path,
     offset: u64,
     limit: u64,
     started: Instant,
+    sink: Option<&mut dyn Write>,
 ) -> Result<Option<String>> {
     ensure!(
         ["http", "https"].contains(&url.scheme())
@@ -114,9 +133,9 @@ pub(super) fn transfer_once(
             url::Host::Ipv6(ip) => ServerName::from(std::net::IpAddr::V6(ip)),
         };
         let connection = rustls::ClientConnection::new(tls_config()?, name)?;
-        transfer.run(rustls::StreamOwned::new(connection, socket))
+        transfer.run(rustls::StreamOwned::new(connection, socket), sink)
     } else {
-        transfer.run(socket)
+        transfer.run(socket, sink)
     }
 }
 
@@ -192,7 +211,13 @@ pub(super) struct Transfer<'a> {
 }
 
 impl Transfer<'_> {
-    pub(super) fn run(&self, mut stream: impl Read + Write) -> Result<Option<String>> {
+    /// The body goes to `sink` when one is given, else to `path`, which is
+    /// opened only once the status is known.
+    pub(super) fn run(
+        &self,
+        mut stream: impl Read + Write,
+        sink: Option<&mut dyn Write>,
+    ) -> Result<Option<String>> {
         stream.write_all(self.request.as_bytes())?;
         stream.flush()?;
         let mut reader = BufReader::new(stream);
@@ -250,10 +275,17 @@ impl Transfer<'_> {
                 "transfer exceeded byte bound"
             );
         }
-        let mut output = if self.offset > 0 {
-            OpenOptions::new().append(true).open(self.path)?
-        } else {
-            File::create(self.path)?
+        let mut file;
+        let output: &mut dyn Write = match sink {
+            Some(sink) => sink,
+            None => {
+                file = if self.offset > 0 {
+                    OpenOptions::new().append(true).open(self.path)?
+                } else {
+                    File::create(self.path)?
+                };
+                &mut file
+            }
         };
         let mut body: Box<dyn Read + '_> = if chunked {
             Box::new(Chunked {

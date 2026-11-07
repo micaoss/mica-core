@@ -162,6 +162,23 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
         ] {
             *d.pointer_mut(path).unwrap() = artifact.clone();
         }
+        // An import writes into volumes only what no file of SYSTEM shares,
+        // so the candidate's signatures differ from its images there.
+        if generation == 3 && operation == "import" {
+            let signature = vec![7_u8; 512];
+            for path in ["/kernel/support/signature", "/rootfs/content/signature"] {
+                *d.pointer_mut(path).unwrap() =
+                    json!({"bytes": signature.len(), "sha256": hash(&signature)});
+            }
+            write(&root.join("objects").join(hash(&signature)), &signature);
+            let mut archive = Vec::new();
+            for object in [&payload, &signature] {
+                archive.extend(hash(object).as_bytes());
+                archive.extend((object.len() as u64).to_be_bytes());
+                archive.extend(object.as_slice());
+            }
+            write(&root.join("candidate-objects"), &archive);
+        }
         d["generation"] = json!(generation);
         d["kernel"]["id"] = json!(component_id(&d["kernel"]).unwrap());
         d["rootfs"]["id"] = json!(component_id(&d["rootfs"]).unwrap());
@@ -297,7 +314,16 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
         &root.join("current-receipt.json"),
         &serde_json::to_vec(&receipt(&deployments[1], kind)).unwrap(),
     );
-    if !["install", "reuse"].contains(&operation) {
+    if operation == "import" {
+        let envelope = &envelopes[2];
+        let mut archive = b"MICAUPD1".to_vec();
+        archive.extend((envelope.len() as u32).to_be_bytes());
+        archive.extend(envelope);
+        archive.extend(2_u32.to_be_bytes());
+        archive.extend(fs::read(root.join("candidate-objects")).unwrap());
+        write(&root.join("candidate.archive"), &archive);
+    }
+    if !["install", "reuse", "import"].contains(&operation) {
         store
             .install(
                 &envelopes[2],
@@ -315,7 +341,7 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
             )
             .unwrap();
     }
-    if !["install", "reuse"].contains(&operation) {
+    if !["install", "reuse", "import"].contains(&operation) {
         if store.boot.is_fit() {
             let mut environment = store.boot.records().unwrap();
             environment.records[0].tries_left = Some(2);
@@ -412,8 +438,47 @@ fn run_operation(root: &Path, kind: Kind, operation: &str) {
         "gc" => {
             store.collect(&receipt, &[public]).unwrap();
         }
+        "import" => {
+            let workspace = root.join("store/updates");
+            let store = store.with_staged(workspace.join("verified"));
+            let keys = [public];
+            mica_deploy::acquisition::Acquisition {
+                root: workspace,
+                store: &store,
+                keys: &keys,
+                board: "cx3576",
+                arch: "arm64",
+                product: "uefi-x64-dev",
+                max_bytes: Some(1 << 26),
+                release: None,
+            }
+            .import_any(&mut fs::File::open(root.join("candidate.archive")).unwrap())
+            .unwrap();
+        }
         _ => panic!("unknown operation"),
     }
+}
+/// After an import on UBI, run again past any interruption: the candidate's
+/// objects are whole in their volumes, staged for installation, and nothing
+/// pending is left.
+fn validate_import(root: &Path) {
+    let store = store(root, Kind::Ubi);
+    let public: [u8; 32] = fs::read(root.join("public")).unwrap().try_into().unwrap();
+    let candidate =
+        authenticate_deployment(&fs::read(root.join("candidate.json")).unwrap(), &[public])
+            .unwrap();
+    let device = ubi::DirUbi::open_at(&root.join("store/ubi"));
+    for (place, artifact) in store.object_paths(&candidate) {
+        if let mica_deploy::deployments::Place::Volume(name) = place {
+            mica_deploy::ubi::verify_object(&device, &name, artifact).unwrap();
+        }
+    }
+    assert!(device.names().iter().all(|name| !name.starts_with("p.")));
+    let id = component_id(&serde_json::to_value(&candidate).unwrap()).unwrap();
+    assert!(
+        root.join(format!("store/updates/verified/{id}.json"))
+            .is_file()
+    );
 }
 fn validate(root: &Path, kind: Kind) {
     let store = store(root, kind);

@@ -156,6 +156,7 @@ fn product_cases() {
             arch: "amd64",
             product: case["device"].as_str().unwrap(),
             max_bytes: Some(1024 * 1024),
+            release: None,
         };
         let result = acq.import(&mut Cursor::new(archive(&envelope, &OBJECTS)));
         assert_eq!(
@@ -186,6 +187,7 @@ fn archive_cases() {
             arch: "amd64",
             product: "uefi-x64-dev",
             max_bytes: Some(1024 * 1024),
+            release: None,
         };
         fs::create_dir_all(acq.objects()).unwrap();
         for pointer in strings(&case["present"]) {

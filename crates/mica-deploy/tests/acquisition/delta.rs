@@ -54,6 +54,7 @@ pub(super) fn delta_acquisition<'a>(
         arch: "amd64",
         product: "uefi-x64-dev",
         max_bytes: Some(2 * 1024 * 1024),
+        release: None,
     }
 }
 

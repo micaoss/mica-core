@@ -97,6 +97,7 @@ pub(super) fn the_download_workspace_keeps_the_data_reserve() {
                 arch: "amd64",
                 product: "uefi-x64-dev",
                 max_bytes: Some(2 * 1024 * 1024),
+                release: None,
             };
             // A probe asks for one page beside the reserve.
             let target = if insufficient {

@@ -403,8 +403,13 @@ impl DeploymentStore {
             .collect()
     }
 
-    /// The components the held sets of `kind` name.
-    fn held_components(&self, kind: SetKind, keys: &[[u8; 32]]) -> Result<BTreeSet<String>> {
+    /// The components the held sets of `kind` name, and those of the sets
+    /// staged in the workspace.
+    pub(super) fn held_components(
+        &self,
+        kind: SetKind,
+        keys: &[[u8; 32]],
+    ) -> Result<BTreeSet<String>> {
         let state = set_state::read_state(&self.system, kind)?;
         let mut kept = BTreeSet::new();
         for id in &named_sets(&state) {
@@ -415,6 +420,7 @@ impl DeploymentStore {
             let set = update_set::authenticate(&envelope, keys)?;
             kept.extend(set.components.into_iter().map(|core| core.id));
         }
+        kept.extend(self.staged(keys).components);
         Ok(kept)
     }
 

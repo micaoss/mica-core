@@ -168,6 +168,24 @@ pub fn publish_object(
     name: &str,
     artifact: &crate::components::Artifact,
 ) -> Result<()> {
+    publish_from(ubi, name, artifact, &mut |output| {
+        let mut input = File::open(source)?.take(artifact.bytes + 1);
+        let copied = std::io::copy(&mut input, output)?;
+        ensure!(copied == artifact.bytes, "object source length mismatch");
+        Ok(())
+    })
+}
+
+/// As [`publish_object`], with the volume update filled by `fill` rather than
+/// copied from a file: an object written as it arrives. `p.<name>` counts for
+/// nothing until it is read back; when `fill` or the read-back fails it is
+/// removed, so a failed write keeps no erase blocks.
+pub fn publish_from(
+    ubi: &dyn UbiDevice,
+    name: &str,
+    artifact: &crate::components::Artifact,
+    fill: &mut dyn FnMut(&mut File) -> Result<()>,
+) -> Result<()> {
     if find(ubi, name)?.is_some() {
         return verify_object(ubi, name, artifact);
     }
@@ -176,16 +194,20 @@ pub fn publish_object(
         ubi.remove(stale.id)?;
     }
     let id = ubi.create(&pending, artifact.bytes, VolumeKind::Static)?;
-    let mut input = File::open(source)?.take(artifact.bytes + 1);
-    let mut output = ubi.open(id, true)?;
-    ubi.begin_update(&output, artifact.bytes)?;
-    let copied = std::io::copy(&mut input, &mut output)?;
-    ensure!(copied == artifact.bytes, "object source length mismatch");
-    output.flush()?;
-    output.sync_all()?;
-    drop(output);
-    let written = find(ubi, &pending)?.context("pending UBI object vanished")?;
-    verify_volume(ubi, &written, artifact)?;
+    let written = (|| -> Result<()> {
+        let mut output = ubi.open(id, true)?;
+        ubi.begin_update(&output, artifact.bytes)?;
+        fill(&mut output)?;
+        output.flush()?;
+        output.sync_all()?;
+        drop(output);
+        let written = find(ubi, &pending)?.context("pending UBI object vanished")?;
+        verify_volume(ubi, &written, artifact)
+    })();
+    if let Err(error) = written {
+        let _ = ubi.remove(id);
+        return Err(error);
+    }
     ubi.rename(&[(id, name)])
 }
 

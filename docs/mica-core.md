@@ -1123,7 +1123,7 @@ A product carries MQTT when its `FEATURES` has `mqtt` and its root holds both pa
 | SYSTEM (`/mnt/system`) | At most two deployments: descriptors, signatures, content-addressed objects under `kernels/` and `roots/`. At most three sets of each kind under `sets/<kind>/` (6.2) |
 | ESP, or the U-Boot environment on a FIT board | The boot records that select a deployment and count trial attempts |
 | DATA `/mnt/data/meta` | Transaction state, catalog checkpoints, the firmware receipt, a staged factory reset and the record of the last (`factory-reset.json`, `factory-reset-done.json`); the only directory a factory reset keeps |
-| DATA `/mica/updates` | Downloads and staged objects; an acquisition never writes SYSTEM |
+| DATA `/mica/updates` | Downloads and staged objects; an acquisition never writes SYSTEM, except on a `ubi` board, where the objects kept in volumes go straight into the store (6.6) |
 | DATA project directories | Quotas set by the runkit: `mica` and `srv` project 100, `cache`, `tmp` and `var` project 101 (one eighth of DATA, 32 to 256 MiB, 2048 to 16384 inodes), `containers` project 102 |
 
 SYSTEM and the boot partition are mounted read-only and made writable only inside an operation,
@@ -1339,7 +1339,9 @@ keeps none of micad's interval, maintenance window or reboot gate. `factory-rese
 stages the reset micad's `FactoryReset` stages (section 3.7), without its password, for the
 root on the device. `mica-deploy help` lists the commands.
 Installation is a durable file transaction, proven by a fault suite that interrupts it before
-and after every observed IO.
+and after every observed IO. `fetch` takes the objects smallest first, so a power cut is most
+likely to cost the last and largest; on a `ubi` board it costs exactly the object in flight
+(6.6), and `--max-bytes` counts the objects written into the store with the workspace.
 
 **Delta transfer.** `fetch` first assembles a missing object from chunks the device already holds
 (the objects of its deployments, the components of every core set its state names that
@@ -1496,6 +1498,23 @@ and every `k-`, `s-`, `r-` or `c-` volume no retained deployment or set names. N
 touched. An object costs its size rounded up to whole LEBs; installation keeps `reserves.system`
 free in the UBI device's available LEBs, and a download keeps `reserves.data` on DATA. Delta
 transfer reads its seeds from the object volumes' character devices.
+
+**Acquisition into the store.** `fetch`, `set-fetch` and `import` write each object the store
+keeps in a static volume (`r-`, `s-`, `k-`, `c-`) straight into it, the same way, as it arrives:
+a whole download, a delta assembled chunk by chunk, or the archive's bytes, through `p.<name>`,
+read back against the signed digest before the rename. DATA holds only the descriptors, the
+small objects SYSTEM keeps as files (signatures, a set's envelope, the components an archive
+carries beside its deployment) and at most one chunk. A `p.<name>` that fails is removed with
+its erase blocks; one a power cut leaves marked mid-update is removed by the next write, so a
+power cut loses only the object in flight, and the objects already renamed are reused. Before
+writing, an acquisition holds the objects to installation's rule (the UBI device keeps
+`reserves.system` free after them); a `fetch` or deployment `import` that does not fit first
+retires the fallback and collects what only it held, as installing would (SYSTEM writable for
+that step), and is refused if it still does not fit. The running deployment is never touched;
+an explicit `rollback` is lost from that fetch rather than from the installation. Collection
+and `gc` keep the objects of the descriptors staged in `verified/`, and the sets' collection
+keeps their components; `discard` removes the staged descriptors, then every object volume
+nothing holds.
 
 **DATA growth.** UBIFS fixes its largest size when it formats a volume, and it formats an empty
 one at its first mount, so DATA is sized once, before that mount. When the policy carries
