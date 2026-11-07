@@ -30,7 +30,10 @@ pub fn table(major: u32, minor: u32, description: &str, image: &VerityImage) -> 
             && g.hash_block_size == 4096
             && g.data_blocks > 0
             && g.data_blocks.checked_mul(4096) == Some(g.hash_offset)
-            && g.hash_offset < image.image.bytes
+            // One data block has a zero-level tree: its digest is the root
+            // and the image ends where the tree would start.
+            && (g.hash_offset < image.image.bytes
+                || (g.data_blocks == 1 && g.hash_offset == image.image.bytes))
             && g.hash_offset.is_multiple_of(4096)
             && digest(&g.salt)
             && digest(&image.root_hash),
@@ -205,4 +208,49 @@ pub fn open(loop_device: &str, name: &str, signature: &Path, image: &VerityImage
             .context("rollback of newly created verity mapping failed")?;
     }
     finalized
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::{Artifact, VerityGeometry};
+
+    fn image(data_blocks: u64, bytes: u64) -> VerityImage {
+        let digest = "a".repeat(64);
+        VerityImage {
+            image: Artifact {
+                bytes,
+                sha256: digest.clone(),
+            },
+            root_hash: digest.clone(),
+            signature: Artifact {
+                bytes: 1,
+                sha256: digest.clone(),
+            },
+            verity: VerityGeometry {
+                version: 1,
+                algorithm: "sha256".into(),
+                data_block_size: 4096,
+                hash_block_size: 4096,
+                data_blocks,
+                hash_offset: data_blocks * 4096,
+                salt: digest,
+            },
+        }
+    }
+
+    #[test]
+    fn a_one_block_image_maps_with_a_zero_level_tree() {
+        let target = table(7, 0, "mica-ext", &image(1, 4096)).unwrap();
+        assert_eq!(target.length, 8);
+        assert!(
+            target
+                .parameters
+                .starts_with("1 7:0 7:0 4096 4096 1 1 sha256 ")
+        );
+        assert!(table(7, 0, "mica-ext", &image(2, 8192 + 4096)).is_ok());
+        // Only one data block may go without a tree.
+        assert!(table(7, 0, "mica-ext", &image(2, 8192)).is_err());
+        assert!(table(7, 0, "mica-ext", &image(1, 0)).is_err());
+    }
 }
