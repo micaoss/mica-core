@@ -607,19 +607,31 @@ fn a_ubi_board_section_is_refused_by_name() {
 }
 
 /// A `gpt` board's DATA is formatted as the image's DATA was made: the core's
-/// default is the assembly's (mica-build `roles/ext4-common.ts`), which the
-/// uefi-x64 case states, and secure erase is off unless the board turns it on.
+/// default is the assembly's (mica-build `roles/ext4-common.ts`), which every
+/// `gpt` case states, and secure erase is off unless the board turns it on.
 #[test]
 fn data_format_defaults_to_how_the_image_makes_data() {
     use mica_deploy::board::DataFormat;
-    let facts = read(&section("uefi-x64"), "amd64").unwrap();
-    assert_eq!(facts.data_format, Some(DataFormat::default_for(true)));
-    let cx3576 = read(&section("cx3576"), "arm64").unwrap();
+    for (board, arch) in [
+        ("uefi-x64", "amd64"),
+        ("uefi-arm64", "arm64"),
+        ("cx3576", "arm64"),
+        ("s905x5m", "arm64"),
+    ] {
+        let facts = read(&section(board), arch).unwrap();
+        assert_eq!(
+            facts.data_format,
+            Some(DataFormat::default_for(true)),
+            "{board}"
+        );
+    }
+    let mut s = section("cx3576");
+    s.as_object_mut().unwrap().remove("dataFormat");
+    let cx3576 = read(&s, "arm64").unwrap();
     assert!(cx3576.data_format.is_none());
     assert_eq!(cx3576.data_format(), DataFormat::default_for(true));
     assert!(!cx3576.data_format().secure_erase);
 
-    let mut s = section("cx3576");
     s["dataQuotas"] = json!(false);
     let plain = read(&s, "arm64").unwrap().data_format();
     assert_eq!(plain, DataFormat::default_for(false));

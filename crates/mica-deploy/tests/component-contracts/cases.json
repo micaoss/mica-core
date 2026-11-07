@@ -71,6 +71,10 @@
       "arch": "arm64",
       "board": {
         "boot": "uboot-fit",
+        "dataFormat": {
+          "bytesPerInode": 16384,
+          "features": "project,quota,^orphan_file,^metadata_csum_seed"
+        },
         "firmware": {
           "diskOffset": 32768,
           "format": "disk-range",
@@ -119,6 +123,10 @@
       "arch": "arm64",
       "board": {
         "boot": "uboot-fit",
+        "dataFormat": {
+          "bytesPerInode": 16384,
+          "features": "project,quota,^orphan_file,^metadata_csum_seed"
+        },
         "firmware": {
           "area": "boot0",
           "format": "emmc-boot",
@@ -169,6 +177,10 @@
       "arch": "arm64",
       "board": {
         "boot": "uefi",
+        "dataFormat": {
+          "bytesPerInode": 16384,
+          "features": "project,quota,^orphan_file,^metadata_csum_seed"
+        },
         "firmware": {
           "format": "efi",
           "partition": 1,

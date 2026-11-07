@@ -1438,8 +1438,9 @@ partition with `BLKSECDISCARD` first; a device that cannot is formatted all the 
 still no certified wipe). Absent, it is the format the image's DATA is made with:
 `project,quota,^orphan_file,^metadata_csum_seed` and an inode per 16 KiB, or
 `^orphan_file,^metadata_csum_seed` with the default inode ratio when the board turns quotas
-off. The uefi-x64 case of `cases.json` `boardPolicies` states the default, so the assembly and
-the device read one format.
+off. Every `gpt` case of `cases.json` `boardPolicies` (cx3576, s905x5m, uefi-arm64, uefi-x64)
+states the default, as mica-build writes it on every `gpt` board, so the assembly and the device
+read one format.
 
 ### 6.5 mica-runkit and lifecycle-sys
 
