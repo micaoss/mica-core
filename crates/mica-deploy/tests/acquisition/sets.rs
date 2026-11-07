@@ -623,6 +623,10 @@ fn an_extension_archive_stages_the_build_for_its_kernel() {
         mica_deploy::acquisition::staged_extensions(&acq.root, &kernel).unwrap(),
         [descriptor.as_bytes().to_vec()]
     );
+    assert_eq!(
+        mica_deploy::acquisition::staged_extension_names(&acq.root, &kernel).unwrap(),
+        std::collections::BTreeSet::from(["rtl8125".to_owned()])
+    );
     assert!(
         mica_deploy::acquisition::staged_extensions(&acq.root, &"b".repeat(64))
             .unwrap()

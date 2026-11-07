@@ -5,7 +5,7 @@
 //! objects by digest, for `mica-deploy extension-install` or a system
 //! update's `--extension`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::Path;
 
@@ -72,6 +72,20 @@ pub fn staged_extensions(root: &Path, kernel: &str) -> Result<Vec<Vec<u8>>> {
     }
     staged.sort();
     Ok(staged)
+}
+
+/// The names of the extensions [`staged_extensions`] answers for `kernel`:
+/// a system with that kernel does not wait for them.
+///
+/// # Errors
+///
+/// The workspace cannot be read.
+pub fn staged_extension_names(root: &Path, kernel: &str) -> Result<BTreeSet<String>> {
+    Ok(staged_extensions(root, kernel)?
+        .iter()
+        .filter_map(|bytes| driver_ext::parse_descriptor(bytes).ok())
+        .map(|extension| extension.descriptor.name)
+        .collect())
 }
 
 impl Acquisition<'_> {

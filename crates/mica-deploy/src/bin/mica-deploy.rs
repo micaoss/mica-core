@@ -840,7 +840,7 @@ fn execute() -> Result<()> {
                     .iter()
                     .any(|e| e.id == selected.deployment_id) =>
             {
-                store.waits_for_extension(&receipt.kernel_id, &selected.kernel_id)?
+                waits_for_extension(&store, &receipt.kernel_id, &selected.kernel_id)?
             }
             _ => Vec::new(),
         };
@@ -1257,7 +1257,7 @@ fn execute() -> Result<()> {
                 }),
             )?;
             selected.map_or(Ok(Vec::new()), |selected| {
-                store.waits_for_extension(&receipt.kernel_id, &selected.deployment.kernel.id)
+                waits_for_extension(&store, &receipt.kernel_id, &selected.deployment.kernel.id)
             })
         };
         let channel = |given, kind: SetKind| {
@@ -1546,6 +1546,22 @@ fn record_selected_system(store: &DeploymentStore, selected: Option<SelectedSyst
         None if path.symlink_metadata().is_ok() => Ok(std::fs::remove_file(&path)?),
         None => Ok(()),
     }
+}
+
+/// What a system with `kernel` waits for: the extensions the `running`
+/// kernel runs with no build for `kernel`, installed or staged by an archive.
+fn waits_for_extension(
+    store: &DeploymentStore,
+    running: &str,
+    kernel: &str,
+) -> Result<Vec<mica_deploy::deployments::Wait>> {
+    let staged =
+        mica_deploy::acquisition::staged_extension_names(Path::new("/mica/updates"), kernel)?;
+    Ok(store
+        .waits_for_extension(running, kernel)?
+        .into_iter()
+        .filter(|wait| !staged.contains(&wait.name))
+        .collect())
 }
 
 /// The system the last check selected, if any reads.

@@ -1417,7 +1417,7 @@ in the install's `--objects`, and `--drop-extension <name>` (repeatable) lets th
 without one. Either makes a change paired with the new deployment, named before its entry
 exists, as a paired set is. The running kernel's builds stay for a rollback, and go with their
 kernel. `check` and `fetch` report `waitsForExtension` (`[{name, kernel}]`) for the system they
-select.
+select: the extensions with no build for its kernel, installed or staged by an archive.
 
 The extension commands and `gc` then collect the builds neither `builds` nor `pending` names and
 this boot did not map, stop installing confirmed builds for kernels no retained deployment runs,
