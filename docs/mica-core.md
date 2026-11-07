@@ -1575,7 +1575,7 @@ make package-gate          # the package rules over both pools
 | --- | --- |
 | `make lint` | The shell rule above |
 | `make apid-ui-build-contract-test` | The console builds as production assets; its lint, types and tests |
-| `make rust-gate` | Each producer's upstream version is its binaries' crate version and `mica-inputs` names their cargo closure; `rust-version` is the locked rustc; fmt, clippy, nextest, doctests, cargo-deny, cargo-shear, typos; the committed OpenAPI document is what `mica-apid --openapi` prints |
+| `make rust-gate` | Each producer's upstream version is its binaries' crate version (or that crate is fixed at 0.0.0) and `mica-inputs` names their cargo closure; `rust-version` is the locked rustc; fmt, clippy, nextest, doctests, cargo-deny, cargo-shear, typos; the committed OpenAPI document is what `mica-apid --openapi` prints |
 | `make boot-shutdown-test` | The boot and shutdown suites and the UAPI proof (`--arm-abi` adds aarch64) |
 | `make file-transaction-faults` | mica-deploy's transactions interrupted at every IO |
 | `make dbus-policy-test` | The micad bus policy against a real bus (root, host `dbus-daemon`) |
@@ -1609,9 +1609,15 @@ names a commit.
 
 A Debian package's version is `<major>.<minor>.<patch>-<revision>` and a core component's
 `<major>.<minor>.<patch>`; the upstream part is the crate version of its binaries, and the whole
-version is printed by `--version`. A source change bumps the upstream part and resets the
-revision to 1; a packaging-only change bumps the revision. Because the workspace manifest and lock
-are every producer's input, a crate version bump moves every producer. `mica-tools pool guard` compares each archive with the newest release: at a released
+version is printed by `--version`. The `mica-deploy` crate is the exception: it is fixed at
+0.0.0, because rustc folds a crate's version into its symbol hashes, so a version bump alone
+would move the bytes of the static `mica-runkit` built from it, and with them every product's
+kernel object. Its producers' versions (`deploy`, `lifecycle`) are their control files' alone,
+and `mica-deploy --version` prints the upstream part of the package version the build compiles
+in (`MICA_PACKAGE_VERSION`). The runkit's bytes move only with its source, the crates and lock
+entries it is built from, or the toolchain. A source change bumps the upstream part and resets
+the revision to 1; a packaging-only change bumps the revision. Because the workspace manifest and
+lock are every producer's input, a version bump moves every producer's version. `mica-tools pool guard` compares each archive with the newest release: at a released
 version the inputs and bytes must be identical, a higher version is new, a lower one is refused.
 A locally cross-built arm64 archive differs from the native one a release carries, so the arm64
 half is the CI's to judge.

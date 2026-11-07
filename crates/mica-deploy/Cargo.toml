@@ -1,6 +1,9 @@
 [package]
 name = "mica-deploy"
-version = "0.0.4"
+# Fixed: the package version is the producers' (pkgs/deploy, pkgs/lifecycle),
+# and a crate version would move the static mica-runkit's bytes with every
+# release (docs/mica-core.md 7.3).
+version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

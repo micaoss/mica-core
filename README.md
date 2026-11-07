@@ -61,7 +61,8 @@ On the GitHub release, never replaced (format: `mica-build-tools:docs/spec/relea
 | `mica-core.lock` | `mica-lock v1`: the `release` row, a `pool` row per architecture, a `package` row per package and architecture, and two `item` rows per component and architecture: `item core.img` (the image's sha256) and `item core.json` (the record's) |
 | `SHA256SUMS` | The sha256 of `mica-core.lock` |
 
-A component's version is its binaries' crate version, `<major>.<minor>.<patch>`; a package's adds a
+A component's version is its binaries' crate version, `<major>.<minor>.<patch>` (mica-deploy's
+crate is fixed at 0.0.0 and its packages carry their control files' version); a package's adds a
 Debian revision, `<major>.<minor>.<patch>-<revision>`. Either is bumped with any change to what
 builds it; one at a released version never changes.
 

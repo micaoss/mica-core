@@ -228,6 +228,25 @@ impl Words {
     }
 }
 
+/// What `--version` prints: `mica-deploy <upstream>`, the upstream part of the
+/// package's declared version, compiled in as `MICA_PACKAGE_VERSION` by
+/// `scripts/build/build-deb.sh`, or `unknown` without one. Not the crate's
+/// version, which stays 0.0.0 (docs/mica-core.md 7.3).
+fn version_line(embedded: Option<&str>) -> String {
+    let version = embedded.map(str::trim).unwrap_or_default();
+    let upstream = version
+        .rsplit_once('-')
+        .map_or(version, |(upstream, _)| upstream);
+    format!(
+        "mica-deploy {}",
+        if upstream.is_empty() {
+            "unknown"
+        } else {
+            upstream
+        }
+    )
+}
+
 impl Cli {
     fn parse(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut args = args.into_iter();
@@ -570,7 +589,7 @@ fn execute() -> Result<()> {
         return Ok(());
     }
     if matches!(cli.command, Action::Version) {
-        println!("mica-deploy {}", env!("CARGO_PKG_VERSION"));
+        println!("{}", version_line(option_env!("MICA_PACKAGE_VERSION")));
         return Ok(());
     }
     let receipt = receipt().context("authenticated boot receipt is unavailable")?;
@@ -1172,7 +1191,7 @@ fn require_workspace(storage: Storage) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Cli, SetKind, mount_device, ubifs_mount};
+    use super::{Action, Cli, SetKind, mount_device, ubifs_mount, version_line};
     use std::path::Path;
 
     fn parse(line: &str) -> anyhow::Result<Cli> {
@@ -1254,6 +1273,10 @@ mod tests {
                 "{line}"
             );
         }
+        assert_eq!(version_line(Some("0.0.4-1")), "mica-deploy 0.0.4");
+        assert_eq!(version_line(Some("0.0.4")), "mica-deploy 0.0.4");
+        assert_eq!(version_line(Some("")), "mica-deploy unknown");
+        assert_eq!(version_line(None), "mica-deploy unknown");
         assert!(matches!(
             parse("update").unwrap().command,
             Action::Update {

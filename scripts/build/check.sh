@@ -11,7 +11,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # NAME EVERY CRATE THEY ARE BUILT FROM. pkgs/<producer>/control/*.control declare
 # Version: <major>.<minor>.<patch>-<revision> and pkgs/<producer>/core/*.json
 # <major>.<minor>.<patch>; the part before the revision must be the version of
-# the crate of every binary the producer ships (its prepare.sh --bins). Every
+# the crate of every binary the producer ships (its prepare.sh --bins), or that
+# crate is fixed at 0.0.0 (mica-deploy: its static mica-runkit keeps its bytes
+# across releases) and its binaries print the package version. Every
 # workspace crate in the cargo closure of those binaries (normal and build
 # dependencies) must be a `path` line of pkgs/<producer>/mica-inputs, so a
 # change to any of them changes the producer's inputs hash.
@@ -27,8 +29,8 @@ for inputs in pkgs/*/mica-inputs; do
     }
     for bin in ${bins}; do
         crate="$(jq -r --arg b "${bin}" '.packages[] | select(any(.targets[]; .name == $b and (.kind | index("bin")))) | "\(.name) \(.version)"' <<<"${metadata}")"
-        [ "${crate#* }" = "${declared%-*}" ] || {
-            echo "error: ${dir} declares ${declared}, but ${bin} is built from ${crate:-no crate}; a producer's upstream version is its binaries' crate version" >&2
+        [ "${crate#* }" = "${declared%-*}" ] || [ "${crate#* }" = 0.0.0 ] || {
+            echo "error: ${dir} declares ${declared}, but ${bin} is built from ${crate:-no crate}; a producer's upstream version is its binaries' crate version, or that crate is fixed at 0.0.0" >&2
             exit 1
         }
     done
