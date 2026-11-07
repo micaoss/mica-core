@@ -129,6 +129,54 @@ trait Micad {
     fn power_off(&self) -> zbus::Result<()>;
     fn factory_reset(&self, password: &str, by: &str, source: &str) -> zbus::Result<()>;
     fn get_factory_reset(&self) -> zbus::Result<String>;
+    fn get_owner_certs(&self) -> zbus::Result<String>;
+    fn add_owner_cert(
+        &self,
+        certificate: &[u8],
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> zbus::Result<String>;
+    fn remove_owner_cert(
+        &self,
+        sha256: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> zbus::Result<String>;
+    fn get_extensions(&self) -> zbus::Result<String>;
+    fn install_extension(
+        &self,
+        archive: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> zbus::Result<String>;
+    #[allow(clippy::too_many_arguments)]
+    fn install_extension_files(
+        &self,
+        descriptor: &str,
+        image: &str,
+        signature: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> zbus::Result<String>;
+    fn remove_extension(
+        &self,
+        name: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> zbus::Result<String>;
+    fn drop_extension(
+        &self,
+        name: &str,
+        kernel: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> zbus::Result<String>;
     fn get_update_state(&self) -> zbus::Result<String>;
     fn check_update(&self) -> zbus::Result<()>;
     fn fetch_update(&self) -> zbus::Result<()>;
@@ -485,6 +533,109 @@ impl SettingsApi for BusSettings {
     async fn power_off(&self) -> anyhow::Result<()> {
         let proxy = self.proxy().await?;
         self.call("PowerOff", proxy.power_off()).await
+    }
+
+    async fn get_owner_certs(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetOwnerCerts", proxy.get_owner_certs()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    async fn add_owner_cert(
+        &self,
+        certificate: &[u8],
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "AddOwnerCert",
+            proxy.add_owner_cert(certificate, password, by, source),
+        )
+        .await
+    }
+
+    async fn remove_owner_cert(
+        &self,
+        sha256: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "RemoveOwnerCert",
+            proxy.remove_owner_cert(sha256, password, by, source),
+        )
+        .await
+    }
+
+    async fn get_extensions(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self.call("GetExtensions", proxy.get_extensions()).await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    async fn install_extension(
+        &self,
+        archive: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "InstallExtension",
+            proxy.install_extension(archive, password, by, source),
+        )
+        .await
+    }
+
+    async fn install_extension_files(
+        &self,
+        [descriptor, image, signature]: [&str; 3],
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "InstallExtensionFiles",
+            proxy.install_extension_files(descriptor, image, signature, password, by, source),
+        )
+        .await
+    }
+
+    async fn remove_extension(
+        &self,
+        name: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "RemoveExtension",
+            proxy.remove_extension(name, password, by, source),
+        )
+        .await
+    }
+
+    async fn drop_extension(
+        &self,
+        name: &str,
+        kernel: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let proxy = self.proxy().await?;
+        self.call(
+            "DropExtension",
+            proxy.drop_extension(name, kernel, password, by, source),
+        )
+        .await
     }
 
     async fn set_transient_root_password(&self, password: &str) -> anyhow::Result<String> {

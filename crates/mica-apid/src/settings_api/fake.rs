@@ -53,6 +53,12 @@ pub struct FakeSettings {
     pub(super) factory_reset: std::sync::Mutex<Value>,
     /// Factory resets staged, as `<by> <source>`.
     pub(super) factory_resets: std::sync::Mutex<Vec<String>>,
+    /// What `get_owner_certs` and `get_extensions` answer.
+    pub(super) owner_certs: std::sync::Mutex<Value>,
+    pub(super) extensions: std::sync::Mutex<Value>,
+    /// The owner certificate and driver extension changes admitted, as
+    /// `<method> <arguments> <by> <source>`.
+    pub(super) driver_changes: std::sync::Mutex<Vec<String>>,
     /// What `get_observed_network` answers; the shape micad's `observed_json`
     /// serves.
     pub(super) observed_network: std::sync::Mutex<Value>,
@@ -147,6 +153,12 @@ impl FakeSettings {
                 serde_json::json!({ "supported": true, "refusal": null, "last": null }),
             ),
             factory_resets: std::sync::Mutex::new(Vec::new()),
+            owner_certs: std::sync::Mutex::new(serde_json::json!([])),
+            extensions: std::sync::Mutex::new(serde_json::json!({
+                "installed": {}, "pending": null, "pair": null,
+                "pendingVerification": [], "waitsForExtension": [], "kernel": "k",
+            })),
+            driver_changes: std::sync::Mutex::new(Vec::new()),
             telemetry: std::sync::Mutex::new(serde_json::json!({
                 "thermal": { "available": false, "detail": "fake" },
                 "watchdog": { "available": false, "detail": "fake" },
@@ -272,6 +284,40 @@ impl FakeSettings {
     }
 
     /// Factory resets staged, as `<by> <source>`.
+    pub fn driver_changes(&self) -> Vec<String> {
+        self.driver_changes.lock().unwrap().clone()
+    }
+
+    /// Admit a driver change as micad does: the administrator's password,
+    /// recorded as `change by source`, answering a task id.
+    fn driver_change(
+        &self,
+        change: String,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let hash = self.tree.lock().unwrap()["access"]["webAdmin"]["password_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        if !micad_settings::verify_password(&hash, password) {
+            return Err(bus_error(
+                "com.mica.micad1.Error.DriversRefused",
+                &serde_json::json!({
+                    "code": "password_incorrect",
+                    "message": "the password is not the administrator's",
+                })
+                .to_string(),
+            ));
+        }
+        self.driver_changes
+            .lock()
+            .unwrap()
+            .push(format!("{change} {by} {source}"));
+        Ok(self.completed_task("drivers", "drivers"))
+    }
+
     pub fn factory_resets(&self) -> Vec<String> {
         self.factory_resets.lock().unwrap().clone()
     }
@@ -734,6 +780,83 @@ impl SettingsApi for FakeSettings {
 
     async fn get_factory_reset(&self) -> anyhow::Result<Value> {
         Ok(self.factory_reset.lock().unwrap().clone())
+    }
+
+    async fn get_owner_certs(&self) -> anyhow::Result<Value> {
+        Ok(self.owner_certs.lock().unwrap().clone())
+    }
+
+    async fn add_owner_cert(
+        &self,
+        certificate: &[u8],
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let change = format!("add {}", String::from_utf8_lossy(certificate));
+        self.driver_change(change, password, by, source)
+    }
+
+    async fn remove_owner_cert(
+        &self,
+        sha256: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        self.driver_change(format!("remove {sha256}"), password, by, source)
+    }
+
+    async fn get_extensions(&self) -> anyhow::Result<Value> {
+        Ok(self.extensions.lock().unwrap().clone())
+    }
+
+    async fn install_extension(
+        &self,
+        archive: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let read = std::fs::read(archive).unwrap_or_default();
+        let change = format!("install {}", String::from_utf8_lossy(&read));
+        self.driver_change(change, password, by, source)
+    }
+
+    async fn install_extension_files(
+        &self,
+        files: [&str; 3],
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        let read: Vec<String> = files
+            .iter()
+            .map(|file| String::from_utf8_lossy(&std::fs::read(file).unwrap_or_default()).into())
+            .collect();
+        let change = format!("install-files {}", read.join(","));
+        self.driver_change(change, password, by, source)
+    }
+
+    async fn remove_extension(
+        &self,
+        name: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        self.driver_change(format!("remove-extension {name}"), password, by, source)
+    }
+
+    async fn drop_extension(
+        &self,
+        name: &str,
+        kernel: &str,
+        password: &str,
+        by: &str,
+        source: &str,
+    ) -> anyhow::Result<String> {
+        self.driver_change(format!("drop {name} {kernel}"), password, by, source)
     }
 
     async fn power_off(&self) -> anyhow::Result<()> {

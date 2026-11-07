@@ -1103,6 +1103,21 @@ audit ring records staged, refused and wrong-password attempts. A request for th
 `full-factory` tier of `/api/v1/reset` is 422 naming this route. The console's system page shows
 what is erased and kept, the last reset, and a password dialog.
 
+**Owner certificates and driver extensions** (sections 3.7, 6.3 and 6.5). `GET
+/api/v1/system/owner-certs` and `GET /api/v1/system/extensions` answer micad's
+`GetOwnerCerts` and `GetExtensions`. Every change asks for the administrator password as the
+factory reset does (403 `password_incorrect` at `password`, 429 `login_throttled`, 409
+`not_claimed`) and answers 202 with the `drivers.apply` task's id: `POST
+/api/v1/system/owner-certs` `{password, certificate}` (the PEM or DER file in base64, at most
+64 KiB), `DELETE /api/v1/system/owner-certs/{sha256}` `{password}`, `POST
+/api/v1/system/extensions` as `multipart/form-data` with `password` and either `archive` (the
+build's `MICAUPD1` archive) or `descriptor`, `image` and `signature` (at most 256 MiB together,
+written to the update uploads, which micad removes once read and apid removes on a refusal),
+`DELETE /api/v1/system/extensions/{name}` `{password}` and `POST
+/api/v1/system/extensions/{name}/drop` `{password, kernel}`. The audit ring records each as
+`owner-cert-add`, `owner-cert-remove`, `driver-extension-install`, `driver-extension-remove` or
+`driver-extension-drop`: requested, refused, throttled or wrong-password.
+
 **The local socket.** apid also serves the API on `/run/mica/apid.sock`, whenever it runs, for
 the device itself. A caller there carries no credential: the kernel's peer credentials
 name its uid, and only root may call the API, all of it, which is how a command line on the device

@@ -140,6 +140,83 @@ pub trait SettingsApi: Send + Sync {
     async fn get_factory_reset(&self) -> anyhow::Result<Value> {
         anyhow::bail!("this build stages no factory reset")
     }
+    /// The enrolled owner certificates (`GetOwnerCerts`). Unavailable by
+    /// default.
+    async fn get_owner_certs(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no owner certificates")
+    }
+    /// Enrol the PEM or DER `certificate` from the next boot for `by` from
+    /// `source`, once micad has checked `password` (`AddOwnerCert`); answers
+    /// the task's id. Unavailable by default.
+    async fn add_owner_cert(
+        &self,
+        _certificate: &[u8],
+        _password: &str,
+        _by: &str,
+        _source: &str,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!("this build changes no owner certificates")
+    }
+    /// Remove the enrolled certificate `sha256` from the next boot
+    /// (`RemoveOwnerCert`), asked as [`Self::add_owner_cert`] asks.
+    async fn remove_owner_cert(
+        &self,
+        _sha256: &str,
+        _password: &str,
+        _by: &str,
+        _source: &str,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!("this build changes no owner certificates")
+    }
+    /// The driver extensions (`GetExtensions`). Unavailable by default.
+    async fn get_extensions(&self) -> anyhow::Result<Value> {
+        anyhow::bail!("this build reads no driver extensions")
+    }
+    /// Take the owner's build in the archive at `archive`
+    /// (`InstallExtension`), asked as [`Self::add_owner_cert`] asks.
+    async fn install_extension(
+        &self,
+        _archive: &str,
+        _password: &str,
+        _by: &str,
+        _source: &str,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!("this build changes no driver extensions")
+    }
+    /// Install the owner's build of three files (`InstallExtensionFiles`),
+    /// asked as [`Self::add_owner_cert`] asks.
+    async fn install_extension_files(
+        &self,
+        _files: [&str; 3],
+        _password: &str,
+        _by: &str,
+        _source: &str,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!("this build changes no driver extensions")
+    }
+    /// Stop installing the extension `name` (`RemoveExtension`), asked as
+    /// [`Self::add_owner_cert`] asks.
+    async fn remove_extension(
+        &self,
+        _name: &str,
+        _password: &str,
+        _by: &str,
+        _source: &str,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!("this build changes no driver extensions")
+    }
+    /// Let the system update to `kernel` run without the extension `name`
+    /// (`DropExtension`), asked as [`Self::add_owner_cert`] asks.
+    async fn drop_extension(
+        &self,
+        _name: &str,
+        _kernel: &str,
+        _password: &str,
+        _by: &str,
+        _source: &str,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!("this build changes no driver extensions")
+    }
     /// This device's code and its source, or why it has none
     /// (`GetDeviceCode`). Unavailable by default.
     async fn get_device_code(&self) -> anyhow::Result<Value> {

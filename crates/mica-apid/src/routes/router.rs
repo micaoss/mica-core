@@ -208,6 +208,23 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
             V1_FACTORY_RESET_PATH,
             get(api_v1_factory_reset_status).post(api_v1_factory_reset),
         )
+        .route(
+            V1_OWNER_CERTS_PATH,
+            get(api_v1_owner_certs).post(api_v1_owner_cert_add),
+        )
+        .route(V1_OWNER_CERT_ROUTE, delete(api_v1_owner_cert_remove))
+        // The multipart extractor holds a body to its own limit, which a
+        // build's image is above.
+        .route(
+            V1_EXTENSIONS_PATH,
+            get(api_v1_extensions).post(api_v1_extension_install).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    usize::try_from(MAX_EXTENSION_UPLOAD_BYTES).unwrap_or(usize::MAX),
+                ),
+            ),
+        )
+        .route(V1_EXTENSION_ROUTE, delete(api_v1_extension_remove))
+        .route(V1_EXTENSION_DROP_ROUTE, post(api_v1_extension_drop))
         // POST only, and with no credential extractor: the authority is
         // physical presence, and an authenticated session is refused rather
         // than admitted.

@@ -11,6 +11,7 @@ mod claim;
 mod credential_rotation;
 mod diagnostics;
 mod dns;
+mod drivers;
 mod power_bus;
 mod provisioning_api;
 mod reset;

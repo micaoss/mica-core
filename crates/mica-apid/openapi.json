@@ -6676,6 +6676,468 @@
         }
       }
     },
+    "/api/v1/system/extensions": {
+      "get": {
+        "tags": [
+          "observation"
+        ],
+        "summary": "The driver extensions: `installed` (the confirmed builds, by kernel and\nname), `pending` (a change on trial and its `attemptsLeft`), `pair` (one\npaired with a system update), `pendingVerification` (builds the kernel\nchecks at the next boot that maps them), `waitsForExtension` (what the\nselected system update waits for, `[{name, kernel}]`), `boot` (what this\nboot mapped and refused), `trust` and the running `kernel`.",
+        "operationId": "api_v1_extensions",
+        "responses": {
+          "200": {
+            "description": "The driver extensions",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "mica-deploy failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Install an owner's driver extension build from the next boot, on trial:\n`multipart/form-data` with `password` and either `archive` (the build's\n`MICAUPD1` archive) or `descriptor`, `image` and `signature` (its\n`ext.json`, `ext.img` and `ext.roothash.p7s`). A build for the kernel of\nthe system update a check selected stays staged for that update. The\npassword is asked as for an owner certificate.",
+        "operationId": "api_v1_extension_install",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The build was taken and its install queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The upload was interrupted or is not multipart (`extension_upload_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The password is not the administrator's (`password_incorrect`), or a browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device is not claimed (`not_claimed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The files are above 256 MiB together (`extension_too_large`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The password is empty, or the fields are not `archive` or `descriptor`, `image` and `signature` (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords; retry shortly (`login_throttled`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "The upload could not be written (`extension_storage_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/extensions/{name}": {
+      "delete": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Stop installing a driver extension, on trial from the next boot. The\npassword is asked as for an owner certificate.",
+        "operationId": "api_v1_extension_remove",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriverPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The removal was queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The password is not the administrator's (`password_incorrect`), or a browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device is not claimed (`not_claimed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, the password is empty, or the path names no extension (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords; retry shortly (`login_throttled`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/extensions/{name}/drop": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Let the system update to a new kernel run without a driver extension it\nwaits for (`waitsForExtension`): its install leaves the extension out. The\npassword is asked as for an owner certificate.",
+        "operationId": "api_v1_extension_drop",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "The extension",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionDrop"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The decision was queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The password is not the administrator's (`password_incorrect`), or a browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device is not claimed (`not_claimed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, the password is empty, or the path or the kernel names nothing (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords; retry shortly (`login_throttled`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/system/factory-reset": {
       "get": {
         "tags": [
@@ -7001,6 +7463,316 @@
           },
           "500": {
             "description": "micad failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/owner-certs": {
+      "get": {
+        "tags": [
+          "observation"
+        ],
+        "summary": "The enrolled owner certificates, each with its `sha256`, `state`\n(`loaded`, `rejected` with its `reason`, `pending-next-boot`,\n`pending-confirmation` or `removed-next-boot`) and, while it reads,\n`subject`, `issuer`, `notBefore`, `notAfter` and `key`.",
+        "operationId": "api_v1_owner_certs",
+        "responses": {
+          "200": {
+            "description": "The enrolled certificates",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "mica-deploy failed (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Enrol an owner certificate from the next boot: one X.509 v3\ncertificate, PEM or DER, with an RSA key of 2048 bits or more or an ECDSA\nkey on P-256 or P-384; its validity period is held to the clock while the\ndevice believes it. **The administrator password is required**, whatever\nthe session or token, and a wrong one counts in the login backoff. The\ntask's message is the refusal, or the warning of a certificate whose\nvalidity period was not checked.",
+        "operationId": "api_v1_owner_cert_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnerCertAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The enrolment was queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The password is not the administrator's (`password_incorrect`), or a browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device is not claimed (`not_claimed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, the password is empty, or the certificate is not base64 of at most 64 KiB (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords; retry shortly (`login_throttled`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/owner-certs/{sha256}": {
+      "delete": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Remove an enrolled owner certificate from the next boot; this boot's\nkeyring keeps it. The password is asked as for an enrolment.",
+        "operationId": "api_v1_owner_cert_remove",
+        "parameters": [
+          {
+            "name": "sha256",
+            "in": "path",
+            "description": "The certificate's SHA-256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriverPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The removal was queued; the body carries the task id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The password is not the administrator's (`password_incorrect`), or a browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The device is not claimed (`not_claimed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body is not this shape, the password is empty, or the path names no SHA-256 (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords; retry shortly (`login_throttled`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12219,6 +12991,19 @@
           }
         }
       },
+      "DriverPassword": {
+        "type": "object",
+        "description": "The request body of a removal: the administrator password, checked\nwhatever the session or token.",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "ErrorDetail": {
         "type": "object",
         "description": "One rule a refused write breaks.",
@@ -12244,6 +13029,70 @@
           "params": {
             "type": "object",
             "description": "The values the rule's message names."
+          }
+        }
+      },
+      "ExtensionDrop": {
+        "type": "object",
+        "description": "`POST /api/v1/system/extensions/{name}/drop` request body.",
+        "required": [
+          "password",
+          "kernel"
+        ],
+        "properties": {
+          "kernel": {
+            "type": "string",
+            "description": "The kernel of the system update that waits for the extension, as\n`waitsForExtension` names it."
+          },
+          "password": {
+            "type": "string",
+            "description": "The administrator password, checked whatever the session or token."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExtensionUpload": {
+        "type": "object",
+        "description": "The fields of `POST /api/v1/system/extensions`: `password`, and either\n`archive` or `descriptor`, `image` and `signature`.",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "archive": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "binary",
+            "description": "The build's `MICAUPD1` archive."
+          },
+          "descriptor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "binary",
+            "description": "The build's `ext.json`."
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "binary",
+            "description": "The build's image, `ext.img`."
+          },
+          "password": {
+            "type": "string",
+            "description": "The administrator password, checked whatever the session or token."
+          },
+          "signature": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "binary",
+            "description": "The root hash signature, `ext.roothash.p7s`."
           }
         }
       },
@@ -12970,6 +13819,25 @@
             }
           }
         }
+      },
+      "OwnerCertAdd": {
+        "type": "object",
+        "description": "`POST /api/v1/system/owner-certs` request body.",
+        "required": [
+          "password",
+          "certificate"
+        ],
+        "properties": {
+          "certificate": {
+            "type": "string",
+            "description": "The certificate file, PEM or DER, in base64."
+          },
+          "password": {
+            "type": "string",
+            "description": "The administrator password, checked whatever the session or token."
+          }
+        },
+        "additionalProperties": false
       },
       "PairWindow": {
         "type": "object",

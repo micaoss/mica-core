@@ -188,6 +188,15 @@ pub(super) const RESET_PATH: &str = "reset";
 /// the administrator password.
 pub(super) const V1_FACTORY_RESET_PATH: &str = "/v1/system/factory-reset";
 
+/// The owner certificates the kernel trusts driver extensions by, and the
+/// driver extensions: every change asks for the administrator password and
+/// applies from the next boot.
+pub(super) const V1_OWNER_CERTS_PATH: &str = "/v1/system/owner-certs";
+pub(super) const V1_OWNER_CERT_ROUTE: &str = "/v1/system/owner-certs/{sha256}";
+pub(super) const V1_EXTENSIONS_PATH: &str = "/v1/system/extensions";
+pub(super) const V1_EXTENSION_ROUTE: &str = "/v1/system/extensions/{name}";
+pub(super) const V1_EXTENSION_DROP_ROUTE: &str = "/v1/system/extensions/{name}/drop";
+
 /// Credential recovery, the one operation on
 /// this surface whose authority is physical presence rather than a credential.
 ///
@@ -418,6 +427,9 @@ pub(super) const MICAD_APP_INSTALLED: &str = "com.mica.micad1.Error.AppInstalled
 /// micad's refusal of privileges the request did not accept; the message is
 /// JSON.
 pub(super) const MICAD_APP_PRIVILEGES: &str = "com.mica.micad1.Error.AppPrivileges";
+/// micad's refusal of an owner certificate or driver extension change; the
+/// message is JSON `{code, message}`.
+pub(super) const MICAD_DRIVERS_REFUSED: &str = "com.mica.micad1.Error.DriversRefused";
 pub(super) const FDO_IO_ERROR: &str = "org.freedesktop.DBus.Error.IOError";
 pub(super) const FDO_FAILED: &str = "org.freedesktop.DBus.Error.Failed";
 
