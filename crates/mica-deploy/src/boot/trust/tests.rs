@@ -223,3 +223,56 @@ fn the_running_system_installs_only_signatures_in_the_systems_form() {
     std::fs::write(&record, b"{").unwrap();
     assert!(require_system_signature(&record, &system, SUPPORT).is_err());
 }
+
+/// Where a confirmation is required, a certificate confirmed at an earlier
+/// boot is offered unasked, one confirmed now is offered and remembered, and
+/// one not confirmed is held back; a removed one is forgotten.
+#[test]
+fn a_certificate_is_offered_once_confirmed_on_the_console() {
+    let listed = |names: &[&str]| -> Vec<(String, Result<Vec<u8>>)> {
+        names
+            .iter()
+            .map(|name| ((*name).to_owned(), Ok(name.as_bytes().to_vec())))
+            .collect()
+    };
+    let mut confirmed = std::collections::BTreeSet::from(["a".to_owned(), "gone".to_owned()]);
+    let mut asked = Vec::new();
+    let (offered, held) =
+        confirm_enrolment(listed(&["a", "b", "c"]), &mut confirmed, |sha256, _| {
+            asked.push(sha256.to_owned());
+            sha256 == "b"
+        });
+    assert_eq!(asked, ["b", "c"]);
+    assert_eq!(
+        offered
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+    assert_eq!(held, ["c"]);
+    assert_eq!(
+        confirmed,
+        std::collections::BTreeSet::from(["a".into(), "b".into()])
+    );
+    let (offered, held) = confirm_enrolment(
+        vec![("d".to_owned(), Err(anyhow::anyhow!("unreadable")))],
+        &mut confirmed,
+        |_, _| panic!("asked about an unreadable certificate"),
+    );
+    assert_eq!((offered.len(), held.len()), (1, 0));
+    assert!(confirmed.is_empty());
+}
+
+#[test]
+fn the_product_section_asks_nothing_unless_it_says_so() {
+    assert!(
+        !ProductPolicy::default()
+            .owner_enrolment
+            .require_physical_confirmation
+    );
+    let policy: ProductPolicy =
+        serde_json::from_str(r#"{"ownerEnrolment":{"requirePhysicalConfirmation":true}}"#).unwrap();
+    assert!(policy.owner_enrolment.require_physical_confirmation);
+    assert!(serde_json::from_str::<ProductPolicy>(r#"{"other":1}"#).is_err());
+}

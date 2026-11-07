@@ -219,7 +219,9 @@ pub(super) fn an_archive_is_imported_as_what_its_envelope_is() {
             assert_eq!(ready.channel, "general");
             assert_eq!(fs::read(acq.objects().join(sha(&image))).unwrap(), image);
         }
-        Imported::Deployment(_) => panic!("a core archive was read as a deployment"),
+        Imported::Deployment(_) | Imported::Extension(_) => {
+            panic!("a core archive was read as something else")
+        }
     }
     let value = serde_json::to_value(acq.import_any(&mut Cursor::new(&archive)).unwrap()).unwrap();
     assert_eq!(value["kind"], "set");
@@ -395,7 +397,9 @@ pub(super) fn an_update_archive_carries_the_image_set_a_system_update_takes() {
     let acq = acquisition(&dir, &store, &keys);
     match acq.import_any(&mut Cursor::new(&archive)).unwrap() {
         Imported::Deployment(_) => {}
-        Imported::Set(_) => panic!("a deployment archive was read as a set"),
+        Imported::Set(_) | Imported::Extension(_) => {
+            panic!("a deployment archive was read as something else")
+        }
     }
     for object in [carried.as_bytes(), &image, &signature] {
         assert!(acq.objects().join(sha(object)).is_file());
@@ -570,4 +574,68 @@ pub(super) fn a_held_core_component_is_a_delta_seed() {
         );
         assert_eq!(seen.len(), requests, "{name}: {seen:?}");
     }
+}
+
+/// An owner's driver extension build: `ext.json` in the descriptor slot, its
+/// image and root hash signature as the objects.
+fn extension_build(kernel: &str) -> (String, Vec<u8>, Vec<u8>) {
+    let (image, signature) = (vec![5_u8; 12288], vec![6_u8; 900]);
+    let descriptor = serde_json::to_string(&json!({
+        "arch": "amd64",
+        "content": {
+            "image": {"bytes": image.len(), "sha256": sha(&image)},
+            "rootHash": "22".repeat(32),
+            "signature": {"bytes": signature.len(), "sha256": sha(&signature)},
+            "verity": {"algorithm": "sha256", "dataBlockSize": 4096, "dataBlocks": 2,
+                "hashBlockSize": 4096, "hashOffset": 8192, "salt": "44".repeat(32),
+                "version": 1},
+        },
+        "kernel": kernel,
+        "name": "rtl8125",
+        "schema": "mica/driver-ext-descriptor/v1",
+        "version": "1.0",
+    }))
+    .unwrap();
+    (descriptor, image, signature)
+}
+
+#[test]
+fn an_extension_archive_stages_the_build_for_its_kernel() {
+    let kernel = "a".repeat(64);
+    let (descriptor, image, signature) = extension_build(&kernel);
+    let (dir, store) = fixture();
+    let keys = [[0; 32]];
+    let acq = acquisition(&dir, &store, &keys);
+    let archive = core_archive(&descriptor, &[&image, &signature]);
+    let Imported::Extension(ready) = acq.import_any(&mut Cursor::new(&archive)).unwrap() else {
+        panic!("an extension archive was read as something else");
+    };
+    assert_eq!(ready.id, sha(descriptor.as_bytes()));
+    assert_eq!(
+        (ready.name.as_str(), ready.kernel.as_str()),
+        ("rtl8125", kernel.as_str())
+    );
+    assert_eq!(fs::read(&ready.path).unwrap(), descriptor.as_bytes());
+    for object in [&image, &signature] {
+        assert_eq!(&fs::read(acq.objects().join(sha(object))).unwrap(), object);
+    }
+    assert_eq!(
+        mica_deploy::acquisition::staged_extensions(&acq.root, &kernel).unwrap(),
+        [descriptor.as_bytes().to_vec()]
+    );
+    assert!(
+        mica_deploy::acquisition::staged_extensions(&acq.root, &"b".repeat(64))
+            .unwrap()
+            .is_empty()
+    );
+    // Objects that are not the descriptor's stage nothing.
+    let (dir, store) = fixture();
+    let acq = acquisition(&dir, &store, &keys);
+    let archive = core_archive(&descriptor, &[&image, &[7_u8; 900]]);
+    assert!(acq.import_any(&mut Cursor::new(&archive)).is_err());
+    assert!(
+        mica_deploy::acquisition::staged_extensions(&acq.root, &kernel)
+            .unwrap()
+            .is_empty()
+    );
 }

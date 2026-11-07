@@ -18,7 +18,7 @@ use mica_deploy::{
     ubi::SysUbi,
     update_set::SetKind,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     path::{Path, PathBuf},
@@ -79,6 +79,15 @@ Driver extensions:
                   extension the running kernel runs
   install ... --drop-extension <name>
                   the new system's kernel runs without the extension
+
+Owner certificates, which the kernel trusts driver extensions by:
+  owner-certs     the enrolled certificates, and where each stands
+  owner-cert-add <certificate> [--clock-synced] [--by <console|api|cli>] [--source <text>]
+                  enrol a PEM or DER certificate (RSA of 2048 bits or more,
+                  ECDSA on P-256 or P-384) from the next boot; --clock-synced
+                  holds its validity period to the device's clock
+  owner-cert-remove <sha256> [--by <console|api|cli>] [--source <text>]
+                  stop trusting one from the next boot
 
 Every command but update, factory-reset, help and version answers in JSON.
 
@@ -181,6 +190,41 @@ enum Action {
         name: String,
         kernel: Option<String>,
     },
+    OwnerCerts,
+    OwnerCertAdd {
+        certificate: PathBuf,
+        /// The device's clock is known to be right: hold the validity period
+        /// to it.
+        clock_synced: bool,
+        by: factory_reset::Requester,
+        source: String,
+    },
+    OwnerCertRemove {
+        sha256: String,
+        by: factory_reset::Requester,
+        source: String,
+    },
+}
+
+/// Who asks for a recorded change (`--by`, `--source`), for `command` by
+/// default.
+fn requester(
+    by: Option<String>,
+    source: Option<String>,
+    command: &str,
+) -> Result<(factory_reset::Requester, String)> {
+    let by = match by.as_deref() {
+        None | Some("cli") => factory_reset::Requester::Cli,
+        Some("console") => factory_reset::Requester::Console,
+        Some("api") => factory_reset::Requester::Api,
+        Some(other) => anyhow::bail!("--by {other}: console, api or cli"),
+    };
+    let source = source.unwrap_or_else(|| format!("mica-deploy {command}"));
+    ensure!(
+        source.len() <= 256 && !source.chars().any(char::is_control),
+        "--source is at most 256 printable characters"
+    );
+    Ok((by, source))
 }
 
 /// An action's arguments: its options by name, then its positional
@@ -325,7 +369,17 @@ impl Cli {
             ensure!(max_bytes.is_none(), "--max-bytes is given twice");
             max_bytes = Some(value.parse().context("invalid --max-bytes")?);
         };
-        let mut words = Words::read(args, &["record", "reboot", "auto", "cancel", "finish"])?;
+        let mut words = Words::read(
+            args,
+            &[
+                "record",
+                "reboot",
+                "auto",
+                "cancel",
+                "finish",
+                "clock-synced",
+            ],
+        )?;
         if let Some(value) = words.option("max-bytes") {
             ensure!(max_bytes.is_none(), "--max-bytes is given twice");
             max_bytes = Some(value.parse().context("invalid --max-bytes")?);
@@ -372,22 +426,33 @@ impl Cli {
                         ResetStep::Finish
                     })
                 } else {
-                    let by = match by.as_deref() {
-                        None => factory_reset::Requester::Cli,
-                        Some("console") => factory_reset::Requester::Console,
-                        Some("api") => factory_reset::Requester::Api,
-                        Some("cli") => factory_reset::Requester::Cli,
-                        Some(other) => anyhow::bail!("--by {other}: console, api or cli"),
-                    };
-                    let source = source.unwrap_or_else(|| "mica-deploy factory-reset".to_owned());
-                    ensure!(
-                        source.len() <= 256 && !source.chars().any(char::is_control),
-                        "--source is at most 256 printable characters"
-                    );
+                    let (by, source) = requester(by, source, "factory-reset")?;
                     Action::FactoryReset(ResetStep::Stage { reboot, by, source })
                 }
             }
             "status" => Action::Status,
+            "owner-certs" => Action::OwnerCerts,
+            "owner-cert-add" => {
+                let certificate = words.argument("certificate")?.into();
+                let clock_synced = words.flag("clock-synced");
+                let (by, source) =
+                    requester(words.option("by"), words.option("source"), "owner-cert-add")?;
+                Action::OwnerCertAdd {
+                    certificate,
+                    clock_synced,
+                    by,
+                    source,
+                }
+            }
+            "owner-cert-remove" => {
+                let sha256 = words.argument("sha256")?;
+                let (by, source) = requester(
+                    words.option("by"),
+                    words.option("source"),
+                    "owner-cert-remove",
+                )?;
+                Action::OwnerCertRemove { sha256, by, source }
+            }
             "probe" => Action::Probe,
             "discard" => Action::Discard,
             "booted" => Action::Booted,
@@ -470,6 +535,9 @@ struct Policy {
     system_part_uuid: String,
     #[serde(default)]
     data_part_uuid: String,
+    /// What the product asks of the system; absent asks nothing.
+    #[serde(default)]
+    product: mica_deploy::boot::trust::ProductPolicy,
 }
 
 fn receipt() -> Result<BootReceipt> {
@@ -721,6 +789,10 @@ fn execute() -> Result<()> {
         println!("{}", receipt.deployment_id);
         return Ok(());
     }
+    if matches!(cli.command, Action::OwnerCerts) {
+        println!("{}", json!(owner_certs(&store, &policy)?));
+        return Ok(());
+    }
     if matches!(cli.command, Action::Status) {
         let features = features()?;
         let running = running_deployment(&keys)?;
@@ -748,7 +820,33 @@ fn execute() -> Result<()> {
             });
         }
         let extensions = mica_deploy::extensions::read_state(&store.system)?;
+        let booted =
+            mica_deploy::extensions::booted(Path::new(mica_deploy::extensions::BOOT_FILE))?;
+        // What the kernel has not checked yet: it does at the next boot that
+        // maps it.
+        let unverified: Vec<&str> = extensions
+            .ids()
+            .into_iter()
+            .filter(|id| {
+                !booted
+                    .as_ref()
+                    .is_some_and(|record| record.extensions.iter().any(|e| e.id == *id))
+            })
+            .collect();
+        let waits = match selected_system(&store)? {
+            Some(selected)
+                if !store
+                    .entries()?
+                    .iter()
+                    .any(|e| e.id == selected.deployment_id) =>
+            {
+                store.waits_for_extension(&receipt.kernel_id, &selected.kernel_id)?
+            }
+            _ => Vec::new(),
+        };
         status["extensions"] = json!({
+            "pendingVerification": unverified,
+            "waitsForExtension": waits,
             "pending": extensions.pending,
             "pair": extensions.paired(),
             // A change alone has its own trial; a pair's is its deployment's.
@@ -758,9 +856,10 @@ fn execute() -> Result<()> {
                     .map(|trial| trial.attempts_left)
             }),
             "installed": extensions.builds,
-            "boot": mica_deploy::extensions::booted(Path::new(mica_deploy::extensions::BOOT_FILE))?,
+            "boot": booted,
             "trust": mica_deploy::boot::trust::recorded(Path::new(mica_deploy::boot::trust::TRUST))?,
         });
+        status["ownerCerts"] = json!(owner_certs(&store, &policy)?);
         if let BootBackend::Ubi { ubi } = &store.boot {
             status["ubi"] = mica_deploy::ubi::space(
                 ubi.as_ref(),
@@ -800,6 +899,8 @@ fn execute() -> Result<()> {
                 | Action::SetInstall { .. }
                 | Action::ExtensionInstall { .. }
                 | Action::ExtensionRemove { .. }
+                | Action::OwnerCertAdd { .. }
+                | Action::OwnerCertRemove { .. }
                 | Action::Rollback { .. }
                 | Action::Reject { .. }
                 | Action::FirmwareReadback { record: true, .. }
@@ -937,9 +1038,16 @@ fn execute() -> Result<()> {
                     );
                 }
                 Imported::Deployment(system) => {
+                    let envelope = read_bounded(&system.path, 24576)?;
+                    let staged = mica_deploy::acquisition::staged_extensions(
+                        &acquisition.root,
+                        &mica_deploy::components::authenticate_deployment(&envelope, &keys)?
+                            .kernel
+                            .id,
+                    )?;
                     writable(backend, true, || {
-                        store.install(
-                            &read_bounded(&system.path, 24576)?,
+                        store.install_with_extensions(
+                            &envelope,
                             &keys,
                             &Target {
                                 board: &policy.identity.board,
@@ -950,9 +1058,49 @@ fn execute() -> Result<()> {
                             &system.objects,
                             &receipt,
                             None,
+                            &KernelExtensions {
+                                descriptors: staged,
+                                dropped: Vec::new(),
+                            },
                         )
                     })?;
                     return finish(&format!("installed system {}", system.version), reboot);
+                }
+                Imported::Extension(build) => {
+                    // A build for the kernel of the system a check selected
+                    // waits for that system's install, which takes it.
+                    if build.kernel != receipt.kernel_id
+                        && selected_system(&store)?
+                            .is_some_and(|selected| selected.kernel_id == build.kernel)
+                    {
+                        println!(
+                            "staged driver extension {} {} for the system update to kernel {}",
+                            build.name, build.version, build.kernel
+                        );
+                        return Ok(());
+                    }
+                    let descriptor = read_bounded(
+                        &build.path,
+                        mica_deploy::driver_ext::MAX_DESCRIPTOR_BYTES as u64,
+                    )?;
+                    let extension = mica_deploy::driver_ext::parse_descriptor(&descriptor)?;
+                    let content = &extension.descriptor.content;
+                    writable(backend, true, || {
+                        store.install_extension(
+                            &descriptor,
+                            &build.objects.join(&content.image.sha256),
+                            &build.objects.join(&content.signature.sha256),
+                            &keys,
+                            &receipt.deployment_id,
+                        )
+                    })?;
+                    return finish(
+                        &format!(
+                            "installed driver extension {} {}, on trial from the next boot",
+                            build.name, build.version
+                        ),
+                        reboot,
+                    );
                 }
             }
         }
@@ -1043,9 +1191,16 @@ fn execute() -> Result<()> {
         } else {
             None
         };
+        let envelope = read_bounded(&system.path, 24576)?;
+        let staged = mica_deploy::acquisition::staged_extensions(
+            &acquisition.root,
+            &mica_deploy::components::authenticate_deployment(&envelope, &keys)?
+                .kernel
+                .id,
+        )?;
         writable(backend, true, || {
-            store.install(
-                &read_bounded(&system.path, 24576)?,
+            store.install_with_extensions(
+                &envelope,
                 &keys,
                 &Target {
                     board: &policy.identity.board,
@@ -1056,6 +1211,10 @@ fn execute() -> Result<()> {
                 &system.objects,
                 &receipt,
                 core_set.as_deref(),
+                &KernelExtensions {
+                    descriptors: staged,
+                    dropped: Vec::new(),
+                },
             )
         })?;
         return finish(&format!("installed system {}", system.version), reboot);
@@ -1087,8 +1246,16 @@ fn execute() -> Result<()> {
             release: Some(&release),
         };
         let source = |given| or_device(given, |device| device.source.clone().context(NO_SOURCE));
-        // What the selected system's kernel would wait for.
+        // What the selected system's kernel would wait for, and the system,
+        // for `status` to answer the same until it is installed.
         let waits = |selected: Option<&mica_deploy::catalog::SelectedRelease>| {
+            record_selected_system(
+                &store,
+                selected.map(|selected| SelectedSystem {
+                    deployment_id: selected.deployment_id.clone(),
+                    kernel_id: selected.deployment.kernel.id.clone(),
+                }),
+            )?;
             selected.map_or(Ok(Vec::new()), |selected| {
                 store.waits_for_extension(&receipt.kernel_id, &selected.deployment.kernel.id)
             })
@@ -1183,6 +1350,8 @@ fn execute() -> Result<()> {
             | Action::SetInstall { .. }
             | Action::ExtensionInstall { .. }
             | Action::ExtensionRemove { .. }
+            | Action::OwnerCertAdd { .. }
+            | Action::OwnerCertRemove { .. }
     ) || (matches!(cli.command, Action::Confirm)
         && (store.sets_need_settling(&receipt.deployment_id, &booted_core)?
             || store.extensions_need_settling(
@@ -1222,33 +1391,48 @@ fn execute() -> Result<()> {
             core_set,
             extensions,
             dropped,
-        } => store
-            .install_with_extensions(
-                &read_bounded(&descriptor, 24576)?,
-                &keys,
-                &Target {
-                    board: &policy.identity.board,
-                    arch: &policy.identity.arch,
-                    product: &product()?,
-                    features: &features()?,
-                },
-                &objects,
-                &receipt,
-                core_set
-                    .map(|path| read_bounded(&path, set_state::MAX_ENVELOPE_BYTES))
-                    .transpose()?
-                    .as_deref(),
-                &KernelExtensions {
-                    descriptors: extensions
-                        .iter()
-                        .map(|path| {
-                            read_bounded(path, mica_deploy::driver_ext::MAX_DESCRIPTOR_BYTES as u64)
-                        })
-                        .collect::<std::io::Result<_>>()?,
-                    dropped,
-                },
-            )
-            .map(|value| json!(value)),
+        } => {
+            let envelope = read_bounded(&descriptor, 24576)?;
+            let mut descriptors = extensions
+                .iter()
+                .map(|path| {
+                    read_bounded(path, mica_deploy::driver_ext::MAX_DESCRIPTOR_BYTES as u64)
+                })
+                .collect::<std::io::Result<Vec<_>>>()?;
+            // The builds an archive staged for the new kernel go with it.
+            for staged in mica_deploy::acquisition::staged_extensions(
+                Path::new("/mica/updates"),
+                &mica_deploy::components::authenticate_deployment(&envelope, &keys)?
+                    .kernel
+                    .id,
+            )? {
+                if !descriptors.contains(&staged) {
+                    descriptors.push(staged);
+                }
+            }
+            store
+                .install_with_extensions(
+                    &envelope,
+                    &keys,
+                    &Target {
+                        board: &policy.identity.board,
+                        arch: &policy.identity.arch,
+                        product: &product()?,
+                        features: &features()?,
+                    },
+                    &objects,
+                    &receipt,
+                    core_set
+                        .map(|path| read_bounded(&path, set_state::MAX_ENVELOPE_BYTES))
+                        .transpose()?
+                        .as_deref(),
+                    &KernelExtensions {
+                        descriptors,
+                        dropped,
+                    },
+                )
+                .map(|value| json!(value))
+        }
         Action::Gc => {
             let removed = store.collect(&receipt, &keys)?;
             let extensions = store.collect_extensions(&booted_extensions()?, &keys)?;
@@ -1277,6 +1461,37 @@ fn execute() -> Result<()> {
             let collected = store.collect_extensions(&booted_extensions()?, &keys)?;
             Ok(json!({ "removed": removed, "removedExtensions": collected }))
         }
+        Action::OwnerCertAdd {
+            certificate,
+            clock_synced,
+            by,
+            source,
+        } => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs());
+            let sha256 = mica_deploy::owner_certs::add(
+                &store.system,
+                &read_bounded(&certificate, 65536)?,
+                clock_synced.then(|| i64::try_from(now).unwrap_or(i64::MAX)),
+                now,
+                by,
+                &source,
+            )?;
+            Ok(json!({
+                "sha256": sha256,
+                "applies": "next-boot",
+                "warning": (!clock_synced).then_some(mica_deploy::owner_certs::UNCHECKED_VALIDITY),
+            }))
+        }
+        Action::OwnerCertRemove { sha256, by, source } => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs());
+            let removed =
+                mica_deploy::owner_certs::remove(&store.system, &sha256, now, by, &source)?;
+            Ok(json!({ "removed": removed, "applies": "next-boot" }))
+        }
         Action::SetInstall { set, objects } => store
             .install_set(
                 &read_bounded(&set, set_state::MAX_ENVELOPE_BYTES)?,
@@ -1294,6 +1509,7 @@ fn execute() -> Result<()> {
         | Action::Update { .. }
         | Action::FactoryReset(_)
         | Action::Status
+        | Action::OwnerCerts
         | Action::Probe
         | Action::Discard
         | Action::Booted
@@ -1309,6 +1525,53 @@ fn execute() -> Result<()> {
         command("reboot", &[])?;
     }
     Ok(())
+}
+
+/// The system the last `check` or `fetch` selected, in DATA's `meta/`.
+const SELECTED_SYSTEM: &str = "selected-system.json";
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct SelectedSystem {
+    deployment_id: String,
+    kernel_id: String,
+}
+
+fn record_selected_system(store: &DeploymentStore, selected: Option<SelectedSystem>) -> Result<()> {
+    let path = store.meta.join(SELECTED_SYSTEM);
+    match selected {
+        Some(selected) => {
+            mica_deploy::deployments::atomic_write(&path, &serde_json::to_vec(&selected)?)
+        }
+        None if path.symlink_metadata().is_ok() => Ok(std::fs::remove_file(&path)?),
+        None => Ok(()),
+    }
+}
+
+/// The system the last check selected, if any reads.
+fn selected_system(store: &DeploymentStore) -> Result<Option<SelectedSystem>> {
+    let path = store.meta.join(SELECTED_SYSTEM);
+    if path.symlink_metadata().is_err() {
+        return Ok(None);
+    }
+    Ok(serde_json::from_slice(&read_bounded(&path, 4096)?).ok())
+}
+
+/// The enrolled owner certificates, each as it stands against this boot.
+fn owner_certs(
+    store: &DeploymentStore,
+    policy: &Policy,
+) -> Result<Vec<mica_deploy::owner_certs::Enrolled>> {
+    mica_deploy::owner_certs::list(
+        &store.system,
+        mica_deploy::boot::trust::recorded(Path::new(mica_deploy::boot::trust::TRUST))?.as_ref(),
+        policy
+            .product
+            .owner_enrolment
+            .require_physical_confirmation
+            .then(|| mica_deploy::boot::trust::confirmed(&store.meta))
+            .as_ref(),
+    )
 }
 
 /// The driver extensions this boot mapped, which a collection keeps.
@@ -1606,6 +1869,23 @@ mod tests {
             parse("extension-install /v/ext.json --objects /v/o").unwrap().command,
             Action::ExtensionInstall { descriptor, objects }
                 if descriptor == Path::new("/v/ext.json") && objects == Path::new("/v/o")
+        ));
+        assert!(matches!(
+            parse("owner-cert-add /v/ca.pem --clock-synced --by console --source 192.0.2.1")
+                .unwrap()
+                .command,
+            Action::OwnerCertAdd { certificate, clock_synced: true, by: factory_reset::Requester::Console, source }
+                if certificate == Path::new("/v/ca.pem") && source == "192.0.2.1"
+        ));
+        assert!(matches!(
+            parse("owner-cert-remove abc").unwrap().command,
+            Action::OwnerCertRemove { sha256, by: factory_reset::Requester::Cli, source }
+                if sha256 == "abc" && source == "mica-deploy owner-cert-remove"
+        ));
+        assert!(parse("owner-cert-add /v/ca.pem --by robot").is_err());
+        assert!(matches!(
+            parse("owner-certs").unwrap().command,
+            Action::OwnerCerts
         ));
         assert!(matches!(
             parse("extension-remove rtl8125").unwrap().command,

@@ -21,11 +21,12 @@ aws-lc-rs = { workspace = true }
 mica-fs = { workspace = true }
 # Its own feature set, not the workspace rustix: no default features, so the
 # static mica-runkit built from this crate alone links only what it names.
-rustix = { version = "1", default-features = false, features = ["fs", "std", "stdio", "system", "process", "mount"] }
+rustix = { version = "1", default-features = false, features = ["event", "fs", "std", "stdio", "system", "process", "mount"] }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
+x509-parser = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

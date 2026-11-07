@@ -37,6 +37,7 @@ pub struct ReadySet {
 pub enum Imported {
     Deployment(ReadyDeployment),
     Set(ReadySet),
+    Extension(ReadyExtension),
 }
 
 /// The schema an envelope's payload names, read without authenticating it:
@@ -205,6 +206,11 @@ impl Acquisition<'_> {
         );
         let mut envelope = vec![0; length as usize];
         input.read_exact(&mut envelope)?;
+        if super::extensions::is_descriptor(&envelope) {
+            return self
+                .import_extension(&envelope, input)
+                .map(Imported::Extension);
+        }
         if payload_schema(&envelope).as_deref() != Some("mica/set/v1") {
             ensure!(length <= 24576, "archive descriptor exceeds bound");
             return self

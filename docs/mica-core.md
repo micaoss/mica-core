@@ -1139,10 +1139,10 @@ A product carries MQTT when its `FEATURES` has `mqtt` and its root holds both pa
 | --- | --- |
 | SYSTEM (`/mnt/system`) | At most two deployments: descriptors, signatures, content-addressed objects under `kernels/` and `roots/`. At most three sets of each kind under `sets/<kind>/` (6.2) |
 | SYSTEM `extensions/` | Driver extensions (6.3, 6.5): `state.json`, the confirmed build of each extension per kernel component id (`builds`) and at most one change on trial (`pending`, with the deployment it is paired with, `pair`), and `objects/<extId>/` with `ext.json`, `ext.roothash.p7s` and `ext.img` (on a `ubi` board the volume `x-<extId>`, 6.6); at most 16 per kernel |
-| SYSTEM `owner-certs/` | The owner's enrolled certificates for driver extensions: `<sha256>.der`, at most 16 of at most 16 KiB |
+| SYSTEM `owner-certs/` | The owner's enrolled certificates for driver extensions: `<sha256>.der`, at most 16 of at most 16 KiB, and `audit.json`, the last 64 enrolments and removals (6.3) |
 | SYSTEM `factory-reset/` | A staged factory reset (3.7): `request.json` and `snapshot/`, the files of DATA's `meta/` it restores; present only from its staging to its finish |
 | ESP, or the U-Boot environment on a FIT board | The boot records that select a deployment and count trial attempts |
-| DATA `/mnt/data/meta` | Transaction state, catalog checkpoints, the firmware receipt and the record of the last factory reset (`factory-reset-done.json`); a factory reset restores the first three from its snapshot. A reset staged for a runkit of version 1 (`factory-reset.json`), which keeps this directory |
+| DATA `/mnt/data/meta` | Transaction state, catalog checkpoints, the firmware receipt, the record of the last factory reset (`factory-reset-done.json`) and the owner certificates confirmed on the console (`owner-confirmed.json`, 6.5); a factory reset restores the first three from its snapshot. A reset staged for a runkit of version 1 (`factory-reset.json`), which keeps this directory |
 | DATA `/mica/updates` | Downloads and staged objects; an acquisition never writes SYSTEM, except on a `ubi` board, where the objects kept in volumes go straight into the store (6.6) |
 | DATA project directories | Quotas set by the runkit: `mica` and `srv` project 100, `cache`, `tmp` and `var` project 101 (one eighth of DATA, 32 to 256 MiB, 2048 to 16384 inodes), `containers` project 102 |
 
@@ -1423,8 +1423,33 @@ The extension commands and `gc` then collect the builds neither `builds` nor `pe
 this boot did not map, stop installing confirmed builds for kernels no retained deployment runs,
 and drop a pair whose deployment is not retained; a change alone keeps its kernels, whose digest
 is its trial's id. `status` reports `extensions`: `installed` (the confirmed builds), `pending`,
-`pair`, `attemptsLeft` (of a change alone), `boot` (`/run/mica/extensions.json`) and `trust`
-(`/run/mica/trust.json`).
+`pair`, `attemptsLeft` (of a change alone), `pendingVerification` (the builds named that no
+boot has mapped yet, whose signature the kernel checks at the next boot that maps them),
+`waitsForExtension` (for the system the last `check` or `fetch` selected, recorded in DATA
+`meta/selected-system.json`, until it is installed), `boot` (`/run/mica/extensions.json`) and
+`trust` (`/run/mica/trust.json`).
+
+An owner's build comes in an archive: `MICAUPD1` with its `ext.json` where a system's signed
+envelope would be, and the image and root hash signature as the objects. `import` stages it in
+the workspace (`verified/ext-<extId>.json`, the objects by digest; `kind` `extension`).
+`update --archive` installs it as a change, unless it is for the kernel of the system the last
+check selected, when it stays staged. A system update, `install` included, takes the builds
+staged for its kernel as if each were given with `--extension`; `discard` removes them.
+
+**Owner certificates.** `owner-cert-add <certificate> [--clock-synced] [--by <console|api|cli>]
+[--source <text>]` enrols a PEM or DER certificate for the next boot (`{"sha256", "applies":
+"next-boot"}`): one X.509 v3 certificate of at most 16 KiB with an RSA key of at least 2048 bits
+or an ECDSA key on P-256 or P-384, at most 16, none twice, and with `--clock-synced`, within its
+validity period by the device's clock. `owner-cert-remove <sha256>` removes one for the next boot
+(`{"removed", "applies"}`). Each change is first recorded in SYSTEM `owner-certs/audit.json`
+(`at`, `change` `add` or `remove`, `sha256`, `subject`, `by`, `source`; the last 64). Both are
+refused while a reset is staged, and the reset's finish removes the certificates with the
+record. `owner-certs`, and `status` as `ownerCerts`, lists each enrolled certificate (`sha256`,
+`subject`, `issuer`, `notBefore`, `notAfter`, `key`) with where it stands against this boot:
+`loaded` or `rejected` (with `reason`) by the runkit, `pending-next-boot` when enrolled since,
+`pending-confirmation` where the product requires a confirmation on the console that no boot
+has had (6.5), and `removed-next-boot` for one this boot loaded that is removed since. Without
+`--clock-synced` the record carries a `warning` that the validity period was not checked.
 
 **The system's signatures.** Where the runkit sealed an owner keyring (`/run/mica/trust.json`,
 6.5), `install`, `set-install` and every update hold the root hash signature of each root, kernel
@@ -1553,10 +1578,16 @@ trusted, and holds their signatures to the system's form as well (6.3). It then 
 none at a factory reset boot) with `add_key("asymmetric")` and seals the keyring with
 `KEYCTL_RESTRICT_KEYRING`, whether or not one was added; a keyring sealed already counts, and
 one it cannot seal stops the boot. A kernel without the keyring trusts its builtin keys alone.
-Only then are extensions mapped. The order is in the types (`boot::trust`): a `BuiltinTrust`
+Where the signed boot policy's product section says `ownerEnrolment.requirePhysicalConfirmation`
+(absent, nothing is asked), a certificate is added only once it was confirmed on the device's
+console: for each one not confirmed at an earlier boot, the runkit prints its SHA-256 and subject
+there and waits up to 30 s for Enter, feeding the watchdog. A confirmed one is recorded in DATA
+`meta/owner-confirmed.json` and not asked again; one that is not stays out of the keyring
+(`unconfirmed`) and is asked again at the next boot. The keyring is sealed after this step as
+always. Only then are extensions mapped. The order is in the types (`boot::trust`): a `BuiltinTrust`
 admits the system's mappings and is spent by the seal, a process takes only one, and only the
 `Sealed` the seal answers admits an extension. The runkit records `/run/mica/trust.json`:
-`ownerKeyring` (`sealed` or `absent`) and `ownerCerts`, each with its `sha256`, `state` (`loaded` or
+`ownerKeyring` (`sealed` or `absent`) and `ownerCerts`, each with its `sha256`, `state` (`loaded`, `unconfirmed` or
 `rejected`) and `reason`.
 
 The runkit picks the builds for the booted kernel: the pending change's when it is paired with

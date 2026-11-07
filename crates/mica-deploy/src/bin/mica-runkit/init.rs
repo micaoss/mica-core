@@ -34,6 +34,9 @@ struct Config {
     system_part_uuid: String,
     #[serde(default)]
     data_part_uuid: String,
+    /// What the product asks of the system; absent asks nothing.
+    #[serde(default)]
+    product: mica_deploy::boot::trust::ProductPolicy,
 }
 
 #[derive(Debug)]

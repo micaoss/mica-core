@@ -277,6 +277,9 @@ pub enum CertState {
     Loaded,
     /// The kernel or the runkit refused it; `reason` says why.
     Rejected,
+    /// Not offered: the product requires a confirmation on the device's
+    /// console, which this boot did not have ([`confirm_enrolment`]).
+    Unconfirmed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -306,10 +309,84 @@ pub struct Trust {
     pub owner_certs: Vec<OwnerCert>,
 }
 
+/// The signed boot policy's product section, as far as the owner keyring
+/// reads it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProductPolicy {
+    #[serde(default)]
+    pub owner_enrolment: OwnerEnrolmentPolicy,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct OwnerEnrolmentPolicy {
+    /// A certificate is offered only once someone at the device confirmed
+    /// it on its console, at a boot.
+    #[serde(default)]
+    pub require_physical_confirmation: bool,
+}
+
+/// The certificates confirmed on the console, in DATA's `meta/`: the SHA-256
+/// of each, a sorted JSON array. It goes with DATA, and the certificates
+/// with it, at a factory reset.
+pub const CONFIRMED: &str = "owner-confirmed.json";
+
+/// The certificates confirmed in `meta`; a record that cannot be read
+/// confirms none, which asks again.
+#[must_use]
+pub fn confirmed(meta: &Path) -> std::collections::BTreeSet<String> {
+    mica_fs::read_bounded(&meta.join(CONFIRMED), 8192)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Replace the confirmed certificates in `meta`.
+///
+/// # Errors
+///
+/// A write that fails.
+pub fn write_confirmed(meta: &Path, confirmed: &std::collections::BTreeSet<String>) -> Result<()> {
+    crate::deployments::atomic_write(&meta.join(CONFIRMED), &serde_json::to_vec(confirmed)?)
+}
+
+/// Where a product requires a confirmation on the console: offer the
+/// enrolled certificates (`listed`) confirmed at an earlier boot, and those
+/// `ask` confirms now (given the SHA-256 and the DER), and hold the rest
+/// back, answered by SHA-256; they are asked again at the next boot.
+/// `confirmed` becomes the offered ones, so a certificate that is removed is
+/// asked again when it is enrolled again. A certificate that cannot be read
+/// is offered as it is, and refused.
+pub fn confirm_enrolment(
+    listed: Listed,
+    confirmed: &mut std::collections::BTreeSet<String>,
+    mut ask: impl FnMut(&str, &[u8]) -> bool,
+) -> (Listed, Vec<String>) {
+    let (mut offered, mut held) = (Vec::new(), Vec::new());
+    let mut kept = std::collections::BTreeSet::new();
+    for (sha256, der) in listed {
+        let yes = match &der {
+            Err(_) => true,
+            Ok(der) => confirmed.contains(&sha256) || ask(&sha256, der),
+        };
+        if !yes {
+            held.push(sha256);
+            continue;
+        }
+        if der.is_ok() {
+            kept.insert(sha256.clone());
+        }
+        offered.push((sha256, der));
+    }
+    *confirmed = kept;
+    (offered, held)
+}
+
 /// What the runkit offers the owner keyring at this boot.
 pub enum Enrolment {
     /// The certificates enrolled on SYSTEM ([`owner_certs`]).
-    Load(Vec<(String, Result<Vec<u8>>)>),
+    Load(Listed),
     /// None: the keyring is sealed empty.
     None,
 }
@@ -379,6 +456,9 @@ pub fn enrol_and_seal(
     }
 }
 
+/// Enrolled certificates by SHA-256, as [`owner_certs`] lists them.
+pub type Listed = Vec<(String, Result<Vec<u8>>)>;
+
 /// The certificates enrolled on the SYSTEM mounted at `system`, each by the
 /// SHA-256 its file is named by, in name order: its DER, or why it is not
 /// offered. At most [`MAX_OWNER_CERTS`] are listed.
@@ -386,7 +466,7 @@ pub fn enrol_and_seal(
 /// # Errors
 ///
 /// The directory exists and cannot be listed.
-pub fn owner_certs(system: &Path) -> Result<Vec<(String, Result<Vec<u8>>)>> {
+pub fn owner_certs(system: &Path) -> Result<Listed> {
     let directory = system.join(OWNER_CERTS_DIR);
     if directory.symlink_metadata().is_err() {
         return Ok(Vec::new());

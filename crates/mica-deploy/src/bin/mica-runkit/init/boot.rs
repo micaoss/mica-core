@@ -482,17 +482,42 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     // The support image, the root and every core component are mapped: the
     // owner's certificates go in now, and the keyring is sealed before any
     // driver extension maps. A factory reset boot offers none and maps none.
+    let mut unconfirmed = Vec::new();
     let enrolment = if reset.is_some() {
         Enrolment::None
     } else {
-        Enrolment::Load(
-            trust::owner_certs(Path::new("/system")).unwrap_or_else(|error| {
-                eprintln!("mica-init: enrolled certificates unreadable: {error:#}");
-                Vec::new()
-            }),
-        )
+        let listed = trust::owner_certs(Path::new("/system")).unwrap_or_else(|error| {
+            eprintln!("mica-init: enrolled certificates unreadable: {error:#}");
+            Vec::new()
+        });
+        if config.product.owner_enrolment.require_physical_confirmation {
+            let meta = Path::new("/newroot/mnt/data/meta");
+            let mut confirmed = trust::confirmed(meta);
+            let held = confirmed.clone();
+            let (offered, waiting) =
+                trust::confirm_enrolment(listed, &mut confirmed, |sha256, der| {
+                    confirm_on_console(control, sha256, der)
+                });
+            if confirmed != held
+                && let Err(error) = trust::write_confirmed(meta, &confirmed)
+            {
+                eprintln!("mica-init: confirmed certificates not recorded: {error:#}");
+            }
+            unconfirmed = waiting;
+            Enrolment::Load(offered)
+        } else {
+            Enrolment::Load(listed)
+        }
     };
-    let sealed = trust::enrol_and_seal(trust, &mut KernelKeyring, enrolment);
+    let mut sealed = trust::enrol_and_seal(trust, &mut KernelKeyring, enrolment);
+    sealed
+        .trust
+        .owner_certs
+        .extend(unconfirmed.into_iter().map(|sha256| trust::OwnerCert {
+            sha256,
+            state: trust::CertState::Unconfirmed,
+            reason: Some("not confirmed on the device's console".into()),
+        }));
     eprintln!(
         "mica-init: owner keyring {:?}, {} of {} enrolled certificate(s) loaded",
         sealed.trust.owner_keyring,
@@ -664,4 +689,57 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         }
     }
     native::switch_root()
+}
+
+/// How long the console is given to confirm an enrolled certificate.
+const CONFIRM_SECONDS: u64 = 30;
+
+/// Ask on the console whether the enrolled certificate `sha256` (`der`) is
+/// to be trusted: Enter within [`CONFIRM_SECONDS`] confirms it, with the
+/// watchdog fed while it waits. Anything typed before the question is not an
+/// answer.
+fn confirm_on_console(control: &mut BootControl, sha256: &str, der: &[u8]) -> bool {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    let subject = mica_deploy::owner_certs::describe(der, None)
+        .map_or_else(|_| "an unreadable subject".to_owned(), |d| d.subject);
+    let stdin = rustix::stdio::stdin();
+    let ready = |seconds: i64| {
+        let mut fds = [PollFd::new(&stdin, PollFlags::IN)];
+        poll(
+            &mut fds,
+            Some(&Timespec {
+                tv_sec: seconds,
+                tv_nsec: 0,
+            }),
+        )
+        .is_ok_and(|n| n > 0)
+    };
+    let mut buffer = [0_u8; 256];
+    while ready(0) {
+        if rustix::io::read(stdin, &mut buffer).map_or(true, |n| n == 0) {
+            break;
+        }
+    }
+    eprintln!(
+        "mica-init: owner certificate {sha256} ({subject}) is enrolled; press Enter on this console within {CONFIRM_SECONDS} s to trust it"
+    );
+    for _ in 0..CONFIRM_SECONDS {
+        let _ = control.supervisor.kick();
+        if ready(1) {
+            let confirmed = rustix::io::read(stdin, &mut buffer).is_ok_and(|n| n > 0);
+            eprintln!(
+                "mica-init: owner certificate {sha256} {}",
+                if confirmed {
+                    "confirmed"
+                } else {
+                    "not confirmed"
+                }
+            );
+            return confirmed;
+        }
+    }
+    eprintln!(
+        "mica-init: owner certificate {sha256} not confirmed; it is asked again at the next boot"
+    );
+    false
 }

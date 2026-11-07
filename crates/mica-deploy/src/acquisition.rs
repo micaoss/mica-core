@@ -17,9 +17,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod extensions;
 mod sets;
 mod store;
 mod transfer;
+pub use extensions::{ReadyExtension, staged_extensions};
 pub use sets::*;
 use transfer::*;
 
