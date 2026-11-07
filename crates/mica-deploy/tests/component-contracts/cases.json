@@ -161,7 +161,7 @@
         "storage": "ubi",
         "ubi": {
           "mtd": "ubi",
-          "storeReserve": 58720256
+          "storeReserve": 60817408
         }
       }
     },
