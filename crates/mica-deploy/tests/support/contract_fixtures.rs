@@ -78,6 +78,7 @@ pub struct Fixtures {
     pub catalog: String,
     pub chunker: String,
     pub core_set: String,
+    pub driver_ext: String,
 }
 
 /// The chunker vector's input, derived so that a port reproduces it without
@@ -155,8 +156,9 @@ fn pretty(value: &Value) -> String {
     text
 }
 
-/// Derive the five files from the unsigned parts of `cases` and `firmware`.
-pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
+/// Derive the files from the unsigned parts of `cases`, `firmware` and
+/// `driver_ext`.
+pub fn generate(cases: &Value, firmware: &Value, driver_ext: &Value) -> Fixtures {
     let mut cases = cases.clone();
     let valid = cases["valid"].as_object_mut().expect("valid descriptor");
     for component in ["kernel", "rootfs"] {
@@ -503,5 +505,51 @@ pub fn generate(cases: &Value, firmware: &Value) -> Fixtures {
         catalog,
         chunker,
         core_set,
+        driver_ext: driver_extension(&cases["valid"]["kernel"], driver_ext),
     }
+}
+
+/// What the driver extension vector says of the image's layout.
+pub const DRIVER_EXT_LAYOUT: &str = "The image is a squashfs with a dm-verity tree appended, mapped \
+     with its root hash and the PKCS#7 signature of the root hash by the channel's mica driver key, \
+     which the kernel checks. It holds `manifest.json` (the manifest's exact bytes), the modules \
+     under `modules/<kernelRelease>/updates/mica-ext/<name>/` at the paths `modules` lists, and the \
+     firmware under `firmware/` at the paths `firmware` lists. `load` and the keys of `options` are \
+     module names: a module path's file name without `.ko`, with `-` read as `_`";
+
+/// Why the driver extension vector holds its documents as strings.
+pub const DRIVER_EXT_WIRE_FORM: &str = "`descriptorBytes` (`ext.json`) and `manifestBytes` \
+     (`manifest.json` in the image) are exact bytes: JSON with no whitespace and every object's \
+     keys in sorted order, which a reader re-serializes and compares. The descriptor is not \
+     signed; `extId` is the SHA-256 of its bytes, and a reader accepts it only when the manifest \
+     in the signed image agrees with it on name, version, arch and kernel, and the kernel it is to \
+     run on is `kernel` (id, release and arch)";
+
+/// The driver extension vector: a valid descriptor and manifest for the
+/// golden deployment's kernel, and the cases a reader refuses. `invalid` is
+/// input; everything that depends on the kernel is derived.
+fn driver_extension(kernel: &Value, input: &Value) -> String {
+    let mut descriptor = input["descriptor"].clone();
+    descriptor["kernel"] = kernel["id"].clone();
+    descriptor["arch"] = kernel["arch"].clone();
+    let mut manifest = input["manifest"].clone();
+    for field in ["name", "version", "arch", "kernel"] {
+        manifest[field] = descriptor[field].clone();
+    }
+    manifest["kernelRelease"] = kernel["release"].clone();
+    let descriptor_bytes = serde_json::to_string(&descriptor).expect("canonical descriptor");
+    pretty(&json!({
+        "layout": DRIVER_EXT_LAYOUT,
+        "wireForm": DRIVER_EXT_WIRE_FORM,
+        "kernel": {"id": kernel["id"], "release": kernel["release"], "arch": kernel["arch"]},
+        "descriptor": descriptor,
+        "descriptorBytes": descriptor_bytes,
+        "extId": hex::encode(digest::digest(&digest::SHA256, descriptor_bytes.as_bytes())),
+        "manifest": manifest,
+        "manifestBytes": serde_json::to_string(&manifest).expect("canonical manifest"),
+        "invalidNote": "Each case changes one document of the valid pair (`remove` drops the field \
+             at `pointer`, else `value` replaces it; `pretty` re-serializes the document with \
+             whitespace) and names the refusal the reader draws",
+        "invalid": input["invalid"],
+    }))
 }

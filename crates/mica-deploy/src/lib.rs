@@ -11,6 +11,7 @@ pub mod core_set;
 pub mod debian_version;
 pub mod defaults;
 pub mod deployments;
+pub mod driver_ext;
 pub mod factory_reset;
 pub mod firmware;
 pub mod fit_env;

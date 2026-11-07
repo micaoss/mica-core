@@ -350,7 +350,7 @@ impl Artifact {
 }
 
 impl VerityImage {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         self.image.validate(MAX_INTEGER)?;
         self.signature.validate(65536)?;
         hash(&self.root_hash)?;

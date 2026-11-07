@@ -5,8 +5,8 @@
 //!     crates/mica-deploy/tests/component-contracts
 //! ```
 //!
-//! It reads the unsigned inputs from the directory's `cases.json` and
-//! `firmware.json` and writes every file, signed with the TEST-ONLY keys
+//! It reads the unsigned inputs from the directory's `cases.json`,
+//! `firmware.json` and `driver-ext.json` and writes every file, signed with the TEST-ONLY keys
 //! `tests/support/contract_fixtures.rs` derives from its labels. Running it
 //! twice changes nothing; `tests/contract_fixtures.rs` holds the committed
 //! files to that.
@@ -30,7 +30,11 @@ fn main() -> anyhow::Result<()> {
             directory.join(name),
         )?)?)
     };
-    let generated = contract_fixtures::generate(&read("cases.json")?, &read("firmware.json")?);
+    let generated = contract_fixtures::generate(
+        &read("cases.json")?,
+        &read("firmware.json")?,
+        &read("driver-ext.json")?,
+    );
     fs::write(directory.join("deployment.json"), generated.deployment)?;
     fs::write(directory.join("envelope.json"), generated.envelope)?;
     fs::write(directory.join("firmware.json"), generated.firmware)?;
@@ -38,5 +42,6 @@ fn main() -> anyhow::Result<()> {
     fs::write(directory.join("catalog.json"), generated.catalog)?;
     fs::write(directory.join("chunker.json"), generated.chunker)?;
     fs::write(directory.join("set.json"), generated.core_set)?;
+    fs::write(directory.join("driver-ext.json"), generated.driver_ext)?;
     Ok(())
 }

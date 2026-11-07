@@ -1,0 +1,496 @@
+{
+  "descriptor": {
+    "arch": "amd64",
+    "content": {
+      "image": {
+        "bytes": 12288,
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "rootHash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "signature": {
+        "bytes": 1458,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "verity": {
+        "algorithm": "sha256",
+        "dataBlockSize": 4096,
+        "dataBlocks": 2,
+        "hashBlockSize": 4096,
+        "hashOffset": 8192,
+        "salt": "4444444444444444444444444444444444444444444444444444444444444444",
+        "version": 1
+      }
+    },
+    "kernel": "f6f85b8cd250a537e4a0f5947b2d2d74eb6e1e60d558412feb48b2450093d74a",
+    "name": "rtl8125",
+    "schema": "mica/driver-ext-descriptor/v1",
+    "version": "9.13.1"
+  },
+  "descriptorBytes": "{\"arch\":\"amd64\",\"content\":{\"image\":{\"bytes\":12288,\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"rootHash\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"signature\":{\"bytes\":1458,\"sha256\":\"3333333333333333333333333333333333333333333333333333333333333333\"},\"verity\":{\"algorithm\":\"sha256\",\"dataBlockSize\":4096,\"dataBlocks\":2,\"hashBlockSize\":4096,\"hashOffset\":8192,\"salt\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"version\":1}},\"kernel\":\"f6f85b8cd250a537e4a0f5947b2d2d74eb6e1e60d558412feb48b2450093d74a\",\"name\":\"rtl8125\",\"schema\":\"mica/driver-ext-descriptor/v1\",\"version\":\"9.13.1\"}",
+  "extId": "80b4b0c7688493bf21a9052b41ca7a37c69b81e048e1de771842e25a2b76cb38",
+  "invalid": [
+    {
+      "changes": [
+        {
+          "bytes": "{\"schema\":",
+          "document": "descriptor"
+        }
+      ],
+      "name": "descriptor-not-json",
+      "refusal": "invalid driver extension JSON"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pretty": true
+        }
+      ],
+      "name": "descriptor-whitespace",
+      "refusal": "noncanonical driver extension JSON"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/signed",
+          "value": true
+        }
+      ],
+      "name": "descriptor-unknown-field",
+      "refusal": "unknown, missing or invalid driver extension fields"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/content",
+          "remove": true
+        }
+      ],
+      "name": "descriptor-without-content",
+      "refusal": "unknown, missing or invalid driver extension fields"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/schema",
+          "value": "mica/driver-ext/v1"
+        }
+      ],
+      "name": "descriptor-wrong-schema",
+      "refusal": "unsupported driver extension descriptor schema"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/name",
+          "value": "RTL8125"
+        },
+        {
+          "document": "manifest",
+          "pointer": "/name",
+          "value": "RTL8125"
+        }
+      ],
+      "name": "descriptor-uppercase-name",
+      "refusal": "invalid driver extension name"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/name",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "name": "descriptor-long-name",
+      "refusal": "invalid driver extension name"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/version",
+          "value": "9.13.1-rc1"
+        }
+      ],
+      "name": "descriptor-bad-version",
+      "refusal": "invalid driver extension version"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/arch",
+          "value": "riscv64"
+        }
+      ],
+      "name": "descriptor-bad-arch",
+      "refusal": "invalid driver extension architecture"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/kernel",
+          "value": "6.12.107"
+        }
+      ],
+      "name": "descriptor-bad-kernel",
+      "refusal": "invalid driver extension kernel id"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/content/image/bytes",
+          "value": 8192
+        }
+      ],
+      "name": "descriptor-image-geometry",
+      "refusal": "image length does not match verity tree"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/content/verity/algorithm",
+          "value": "sha1"
+        }
+      ],
+      "name": "descriptor-verity-algorithm",
+      "refusal": "unsupported verity geometry"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pretty": true
+        }
+      ],
+      "name": "manifest-whitespace",
+      "refusal": "noncanonical driver extension JSON"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/blacklist",
+          "value": [
+            "r8169"
+          ]
+        }
+      ],
+      "name": "manifest-unknown-field",
+      "refusal": "unknown, missing or invalid driver extension fields"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/load",
+          "remove": true
+        }
+      ],
+      "name": "manifest-without-load",
+      "refusal": "unknown, missing or invalid driver extension fields"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/schema",
+          "value": "mica/driver-ext-descriptor/v1"
+        }
+      ],
+      "name": "manifest-wrong-schema",
+      "refusal": "unsupported driver extension manifest schema"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/kernelRelease",
+          "value": "6.12.107 mica"
+        }
+      ],
+      "name": "manifest-bad-kernel-release",
+      "refusal": "invalid driver extension kernel release"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/version",
+          "value": "9.13.2"
+        }
+      ],
+      "name": "manifest-other-version",
+      "refusal": "driver extension manifest does not match its descriptor"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/name",
+          "value": "rtl8126"
+        }
+      ],
+      "name": "manifest-other-name",
+      "refusal": "driver extension manifest does not match its descriptor"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/kernel",
+          "value": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      ],
+      "name": "manifest-other-kernel",
+      "refusal": "driver extension manifest does not match its descriptor"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/modules",
+          "value": []
+        },
+        {
+          "document": "manifest",
+          "pointer": "/load",
+          "value": []
+        },
+        {
+          "document": "manifest",
+          "pointer": "/options",
+          "value": {}
+        },
+        {
+          "document": "manifest",
+          "pointer": "/firmware",
+          "value": []
+        }
+      ],
+      "name": "manifest-empty",
+      "refusal": "empty driver extension"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/modules",
+          "value": [
+            "/lib/modules/r8125.ko"
+          ]
+        }
+      ],
+      "name": "module-absolute-path",
+      "refusal": "invalid driver extension module path"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/modules",
+          "value": [
+            "../r8125.ko"
+          ]
+        }
+      ],
+      "name": "module-parent-path",
+      "refusal": "invalid driver extension module path"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/modules",
+          "value": [
+            "r8125.ko.xz"
+          ]
+        }
+      ],
+      "name": "module-not-ko",
+      "refusal": "invalid driver extension module path"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/modules",
+          "value": [
+            "r8125.ko",
+            "net/r8125.ko"
+          ]
+        }
+      ],
+      "name": "module-twice",
+      "refusal": "duplicate driver extension module"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/modules",
+          "value": [
+            "r8125.ko",
+            "r8125_ptp.ko",
+            "r8125-ptp.ko"
+          ]
+        }
+      ],
+      "name": "module-dash-is-underscore",
+      "refusal": "duplicate driver extension module"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/load",
+          "value": [
+            "r8169"
+          ]
+        }
+      ],
+      "name": "load-foreign-module",
+      "refusal": "driver extension loads a module it does not carry"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/load",
+          "value": [
+            "r8125",
+            "r8125"
+          ]
+        }
+      ],
+      "name": "load-twice",
+      "refusal": "driver extension loads a module it does not carry"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/options",
+          "value": {
+            "r8169": "aspm=0"
+          }
+        }
+      ],
+      "name": "options-foreign-module",
+      "refusal": "driver extension sets options of a module it does not carry"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/options/r8125",
+          "value": "aspm=0\ninstall r8125 /bin/sh"
+        }
+      ],
+      "name": "options-newline",
+      "refusal": "invalid driver extension module options"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/options/r8125",
+          "value": ""
+        }
+      ],
+      "name": "options-empty",
+      "refusal": "invalid driver extension module options"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/firmware",
+          "value": [
+            "rtl_nic/../../x.fw"
+          ]
+        }
+      ],
+      "name": "firmware-parent-path",
+      "refusal": "invalid or duplicate driver extension firmware path"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/firmware",
+          "value": [
+            "rtl_nic/rtl8125b-2.fw",
+            "rtl_nic/rtl8125b-2.fw"
+          ]
+        }
+      ],
+      "name": "firmware-twice",
+      "refusal": "invalid or duplicate driver extension firmware path"
+    },
+    {
+      "changes": [
+        {
+          "document": "descriptor",
+          "pointer": "/kernel",
+          "value": "5555555555555555555555555555555555555555555555555555555555555555"
+        },
+        {
+          "document": "manifest",
+          "pointer": "/kernel",
+          "value": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      ],
+      "name": "other-kernel",
+      "refusal": "driver extension built for another kernel"
+    },
+    {
+      "changes": [
+        {
+          "document": "manifest",
+          "pointer": "/kernelRelease",
+          "value": "6.12.108"
+        }
+      ],
+      "name": "other-kernel-release",
+      "refusal": "driver extension built for another kernel"
+    }
+  ],
+  "invalidNote": "Each case changes one document of the valid pair (`remove` drops the field at `pointer`, else `value` replaces it; `pretty` re-serializes the document with whitespace) and names the refusal the reader draws",
+  "kernel": {
+    "arch": "amd64",
+    "id": "f6f85b8cd250a537e4a0f5947b2d2d74eb6e1e60d558412feb48b2450093d74a",
+    "release": "6.12.107"
+  },
+  "layout": "The image is a squashfs with a dm-verity tree appended, mapped with its root hash and the PKCS#7 signature of the root hash by the channel's mica driver key, which the kernel checks. It holds `manifest.json` (the manifest's exact bytes), the modules under `modules/<kernelRelease>/updates/mica-ext/<name>/` at the paths `modules` lists, and the firmware under `firmware/` at the paths `firmware` lists. `load` and the keys of `options` are module names: a module path's file name without `.ko`, with `-` read as `_`",
+  "manifest": {
+    "arch": "amd64",
+    "firmware": [
+      "rtl_nic/rtl8125b-2.fw"
+    ],
+    "kernel": "f6f85b8cd250a537e4a0f5947b2d2d74eb6e1e60d558412feb48b2450093d74a",
+    "kernelRelease": "6.12.107",
+    "load": [
+      "r8125"
+    ],
+    "modules": [
+      "r8125.ko"
+    ],
+    "name": "rtl8125",
+    "options": {
+      "r8125": "aspm=0"
+    },
+    "schema": "mica/driver-ext/v1",
+    "version": "9.13.1"
+  },
+  "manifestBytes": "{\"arch\":\"amd64\",\"firmware\":[\"rtl_nic/rtl8125b-2.fw\"],\"kernel\":\"f6f85b8cd250a537e4a0f5947b2d2d74eb6e1e60d558412feb48b2450093d74a\",\"kernelRelease\":\"6.12.107\",\"load\":[\"r8125\"],\"modules\":[\"r8125.ko\"],\"name\":\"rtl8125\",\"options\":{\"r8125\":\"aspm=0\"},\"schema\":\"mica/driver-ext/v1\",\"version\":\"9.13.1\"}",
+  "wireForm": "`descriptorBytes` (`ext.json`) and `manifestBytes` (`manifest.json` in the image) are exact bytes: JSON with no whitespace and every object's keys in sorted order, which a reader re-serializes and compares. The descriptor is not signed; `extId` is the SHA-256 of its bytes, and a reader accepts it only when the manifest in the signed image agrees with it on name, version, arch and kernel, and the kernel it is to run on is `kernel` (id, release and arch)"
+}

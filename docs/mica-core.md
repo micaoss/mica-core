@@ -1153,6 +1153,24 @@ without `wireguard`, naming the missing feature, instead of rendering configurat
 cannot run. It reads them from `mica-deploy status`, which reports each deployment's
 `kernelFeatures` when its kernel claims any.
 
+**Driver extensions.** A driver extension is out-of-tree kernel modules and firmware for exactly
+one kernel, in a squashfs image with a dm-verity tree appended. It is not Ed25519-signed: its
+root hash carries a PKCS#7 signature by the channel's mica driver key, which the kernel checks
+against its builtin keyring when it maps the image, and the same key signs the modules inside.
+`ext.json`, `mica/driver-ext-descriptor/v1`, is canonical JSON of at most 4096 bytes: `name`
+(1 to 32 lowercase letters, digits and hyphens), `version` (dotted numbers), `arch`, `kernel` (the
+id of the kernel component it is built for) and `content` (the image, root hash, signature and
+geometry, as a root's). The extension id is the SHA-256 of its bytes. The image holds
+`manifest.json`, `mica/driver-ext/v1`, canonical as well: the descriptor's name, version, arch
+and kernel, `kernelRelease`, `modules` (`.ko` paths below
+`modules/<kernelRelease>/updates/mica-ext/<name>/`, at most 64, no two of one module name),
+`load` (module names to load at boot), `options` (a modprobe options line per module), both
+naming only the extension's own modules, and `firmware` (paths below `firmware/`, at most 256).
+A module name is a path's file name without `.ko`, `-` read as `_`. Paths are relative, of plain
+components, at most four deep. An extension counts only when the manifest of its mapped image
+agrees with its descriptor and the kernel it is to run on has its kernel id, release and arch
+(`mica_deploy::driver_ext::check`); nothing on the device installs one yet.
+
 **Sets.** `mica/set/v1`, signed with the release key in the same envelope, is the components of
 one kind, channel and architecture: `kind` (lowercase letters and digits), `channel` (`general`,
 or lowercase letters, digits and hyphens), `arch`, `generation` (monotonic within its kind,
@@ -1314,7 +1332,8 @@ over the baked `fleet`; the provisioning status reports it, and nothing on the d
 yet.
 
 The shared fixtures in `crates/mica-deploy/tests/component-contracts/` (the documents, the
-catalog, the refused schemas and cases, the chunker vector and the broken indexes) are generated
+catalog, the refused schemas and cases, the chunker vector and the broken indexes, and the driver
+extension pair with its refused cases) are generated
 by the `component-contract-fixtures` example, signed with test-only keys, and copied by mica-build.
 
 ### 6.3 mica-deploy
