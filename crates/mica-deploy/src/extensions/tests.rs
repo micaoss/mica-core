@@ -218,3 +218,28 @@ fn a_pending_change_is_kept_and_its_builds_are_named() {
     write_state(dir.path(), &State::default()).unwrap();
     assert!(!dir.path().join("extensions/state.json").exists());
 }
+
+#[test]
+fn a_pair_has_its_own_trial_id() {
+    let mut alone = State::default();
+    alone
+        .pending
+        .get_or_insert_default()
+        .entry("a".repeat(64))
+        .or_default()
+        .insert("rtl8125".into(), "b".repeat(64));
+    let paired = |deployment: char| State {
+        pair: Some(deployment.to_string().repeat(64)),
+        ..alone.clone()
+    };
+    let ids = [
+        alone.pending_id(),
+        paired('c').pending_id(),
+        paired('d').pending_id(),
+    ];
+    assert!(ids.iter().all(Option::is_some));
+    assert_ne!(ids[0], ids[1]);
+    assert_ne!(ids[0], ids[2]);
+    assert_ne!(ids[1], ids[2]);
+    assert_eq!(paired('c').pending_id(), ids[1]);
+}

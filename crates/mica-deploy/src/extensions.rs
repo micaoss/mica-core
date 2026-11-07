@@ -113,13 +113,18 @@ impl State {
             .collect()
     }
 
-    /// The trial id of the pending change: the digest of what it proposes.
+    /// The trial id of the pending change: the digest of what it proposes
+    /// and, for a pair, of the deployment it is paired with, so two trials
+    /// never share an id.
     #[must_use]
     pub fn pending_id(&self) -> Option<String> {
         let pending = self.pending.as_ref()?;
-        Some(crate::components::sha256(
-            &serde_json::to_vec(pending).unwrap_or_default(),
-        ))
+        let mut digested = serde_json::to_vec(pending).unwrap_or_default();
+        if let Some(pair) = &self.pair {
+            digested.push(b'\n');
+            digested.extend_from_slice(pair.as_bytes());
+        }
+        Some(crate::components::sha256(&digested))
     }
 
     /// The deployment the pending change is paired with, if it is a pair.

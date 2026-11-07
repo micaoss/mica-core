@@ -1397,7 +1397,7 @@ keeps the confirmed `builds` and at most one `pending` change, the whole `builds
 A change is for the running kernel, alone, with a trial of its own in DATA
 `meta/set-trial.json` (kind `extensions`, the SHA-256 of `pending` as its id, three boots); or,
 while a deployment is on trial, for that deployment's kernel, paired with it (`pair`) and on its
-trial. A change for any other kernel, a kernel only the fallback runs included, is refused, and
+trial, its id the SHA-256 of `pending` and `pair`. A change for any other kernel, a kernel only the fallback runs included, is refused, and
 so is any change while the deployment on trial is the one running. Repeating a change keeps its
 trial. One thing is on trial at a time: no change is made while a core set is on trial alone,
 and no set or deployment is installed while a change is. The kernel must be of the same
