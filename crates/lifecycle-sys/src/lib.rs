@@ -24,7 +24,8 @@ pub use startup::{
 pub use trim::trim_free_space;
 pub use ubi::{
     UBI_MAX_RENAME, UBI_MAX_VOLUME_NAME, UbiVolumeKind, mtd_bad_block, ubi_block_create,
-    ubi_block_remove, ubi_leb_change, ubi_mkvol, ubi_rename, ubi_rmvol, ubi_volume_update,
+    ubi_block_remove, ubi_is_mapped, ubi_leb_change, ubi_mkvol, ubi_rename, ubi_rmvol, ubi_rsvol,
+    ubi_volume_update,
 };
 
 #[cfg(not(all(

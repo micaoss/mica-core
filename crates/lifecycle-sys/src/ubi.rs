@@ -44,6 +44,12 @@ struct RenameRequest {
 }
 
 #[repr(C, packed)]
+struct ResizeRequest {
+    bytes: i64,
+    volume: i32,
+}
+
+#[repr(C, packed)]
 struct LebChangeRequest {
     leb: i32,
     bytes: i32,
@@ -54,9 +60,11 @@ struct LebChangeRequest {
 
 const MKVOL: Opcode = 0x4098_6f00;
 const RMVOL: Opcode = 0x4004_6f01;
+const RSVOL: Opcode = 0x400c_6f02;
 const RNVOL: Opcode = 0x5110_6f03;
 const VOLUP: Opcode = 0x4008_4f00;
 const EBCH: Opcode = 0x4004_4f02;
+const EBISMAP: Opcode = 0x8004_4f05;
 const VOLCRBLK: Opcode = 0x4080_4f07;
 const VOLRMBLK: Opcode = 0x0000_4f08;
 const MEMGETBADBLOCK: Opcode = 0x4008_4d0b;
@@ -73,14 +81,20 @@ const _: () = {
     assert!(size_of::<RenameEntry>() == 136);
     assert!(size_of::<RenameRequest>() == 4368 && align_of::<RenameRequest>() == 1);
     assert!(std::mem::offset_of!(RenameRequest, entries) == 16);
+    assert!(size_of::<ResizeRequest>() == 12 && align_of::<ResizeRequest>() == 1);
+    assert!(std::mem::offset_of!(ResizeRequest, volume) == 8);
     assert!(size_of::<LebChangeRequest>() == 16);
     assert!(MKVOL == ioctl::opcode::write::<MkvolRequest>(b'o', 0));
     assert!(RMVOL == ioctl::opcode::write::<i32>(b'o', 1));
+    assert!(RSVOL == ioctl::opcode::write::<ResizeRequest>(b'o', 2));
     assert!(RNVOL == ioctl::opcode::write::<RenameRequest>(b'o', 3));
     assert!(VOLUP == ioctl::opcode::write::<i64>(b'O', 0));
     // The kernel's request number encodes an `__s32` although the argument
     // is the whole change request.
     assert!(EBCH == ioctl::opcode::write::<i32>(b'O', 2));
+    // A read request by its number, although the kernel reads the LEB number
+    // through the pointer and answers in the return value.
+    assert!(EBISMAP == ioctl::opcode::read::<i32>(b'O', 5));
     assert!(VOLCRBLK == ioctl::opcode::write::<[u8; 128]>(b'O', 7));
     assert!(VOLRMBLK == ioctl::opcode::none(b'O', 8));
     assert!(MEMGETBADBLOCK == ioctl::opcode::write::<i64>(b'M', 11));
@@ -140,6 +154,22 @@ pub fn ubi_rmvol(device: impl AsFd, volume: u32) -> io::Result<()> {
     let volume = volume_id(volume)?;
     // SAFETY: UBI_IOCRMVOL reads one __s32 volume number and writes nothing.
     unsafe { ioctl::ioctl(device, Setter::<RMVOL, _>::new(volume)) }
+}
+
+/// Resize volume `volume` of the UBI device `device` to `bytes`, in one
+/// volume-table update.
+#[allow(unsafe_code)]
+pub fn ubi_rsvol(device: impl AsFd, volume: u32, bytes: u64) -> io::Result<()> {
+    let request = ResizeRequest {
+        bytes: i64::try_from(bytes)
+            .ok()
+            .filter(|bytes| *bytes > 0)
+            .ok_or(io::Errno::INVAL)?,
+        volume: volume_id(volume)?,
+    };
+    // SAFETY: UBI_IOCRSVOL reads the packed 12-byte ubi_rsvol_req, every byte
+    // initialized, and writes nothing back.
+    unsafe { ioctl::ioctl(device, Setter::<RSVOL, _>::new(request)) }
 }
 
 /// Rename volumes of the UBI device `device` in one volume-table update.
@@ -211,6 +241,47 @@ pub fn ubi_block_create(volume: impl AsFd) -> io::Result<()> {
 pub fn ubi_block_remove(volume: impl AsFd) -> io::Result<()> {
     // SAFETY: UBI_IOCVOLRMBLK takes no argument; NoArg passes null.
     unsafe { ioctl::ioctl(volume, NoArg::<VOLRMBLK>::new()) }
+}
+
+/// UBI_IOCEBISMAP: a LEB number in, the answer in the return value.
+struct LebMapped(i32);
+
+// SAFETY: UBI_IOCEBISMAP reads one __s32 through the pointer and returns 1
+// (mapped) or 0 (unmapped) as the call's result; it writes nothing into
+// userspace.
+#[allow(unsafe_code)]
+unsafe impl ioctl::Ioctl for LebMapped {
+    type Output = bool;
+    const IS_MUTATING: bool = false;
+
+    fn opcode(&self) -> Opcode {
+        EBISMAP
+    }
+
+    fn as_ptr(&mut self) -> *mut std::ffi::c_void {
+        (&raw mut self.0).cast()
+    }
+
+    unsafe fn output_from_ptr(
+        out: IoctlOutput,
+        _: *mut std::ffi::c_void,
+    ) -> io::Result<Self::Output> {
+        match out {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(io::Errno::PROTO),
+        }
+    }
+}
+
+/// Whether logical erase block `leb` of the volume behind `volume` is mapped
+/// to a physical one: whether anything was ever written there.
+#[allow(unsafe_code)]
+pub fn ubi_is_mapped(volume: impl AsFd, leb: u32) -> io::Result<bool> {
+    let leb = volume_id(leb)?;
+    // SAFETY: see the Ioctl implementation; the LEB number lives on this
+    // frame through the synchronous call.
+    unsafe { ioctl::ioctl(volume, LebMapped(leb)) }
 }
 
 /// MEMGETBADBLOCK: an offset in, the answer in the return value.

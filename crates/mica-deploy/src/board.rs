@@ -76,10 +76,20 @@ impl Storage {
 
 /// The UBI device of a `ubi` board.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Ubi {
     /// The MTD partition holding the UBI device.
     pub mtd: String,
+    /// The bytes of the UBI device kept free for the store when the runkit
+    /// grows the empty DATA volume at the first boot (`docs/mica-core.md`
+    /// 6.6); absent, DATA keeps its factory size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_reserve: Option<u64>,
+}
+
+impl Ubi {
+    /// The largest store reserve a policy may state.
+    pub const MAX_STORE_RESERVE: u64 = 4096 * MIB;
 }
 
 /// The GPT numbers of the three partitions the device binds: the boot medium
@@ -328,6 +338,12 @@ impl BoardFacts {
             .as_ref()
             .context("UBI device absent from the boot policy")?;
         ensure!(valid_mtd_name(&ubi.mtd), "invalid UBI MTD partition");
+        if let Some(bytes) = ubi.store_reserve {
+            ensure!(
+                (self.reserves.system()..=Ubi::MAX_STORE_RESERVE).contains(&bytes),
+                "invalid UBI store reserve"
+            );
+        }
         ensure!(!self.data_quotas, "UBIFS has no project quotas");
         match &self.firmware {
             Target::MtdLoader { partition, .. } => {

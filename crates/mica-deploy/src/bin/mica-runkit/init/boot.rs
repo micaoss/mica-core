@@ -227,6 +227,23 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     // pending core set is counted there, and the count is spent before the
     // set is tried. Nothing is bound into `/usr` or `/etc` yet, which the
     // composition needs.
+    // A UBI board grows its empty DATA before the kernel formats it at the
+    // mount below. DATA at its factory size is a working system, so a failure
+    // is logged and the boot goes on.
+    if let (Some(_), Some(policy)) = (&ubi, &config.board.ubi)
+        && let Some(reserve) = policy.store_reserve
+    {
+        match run(
+            control,
+            Startup::UbiGrowData {
+                mtd: policy.mtd.clone(),
+                reserve,
+            },
+        ) {
+            Ok(done) => eprintln!("mica-init: DATA {}", done.trim()),
+            Err(error) => eprintln!("mica-init: DATA not grown: {error:#}"),
+        }
+    }
     let quotas = (|| -> Result<bool> {
         if let Some(ubi) = &ubi {
             // UBIFS has no project quotas: the policy turns them off.

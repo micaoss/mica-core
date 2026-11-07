@@ -142,6 +142,29 @@
         }
       }
     },
+    "ssd202d": {
+      "arch": "armhf",
+      "board": {
+        "boot": "uboot-fit",
+        "bootTrust": "none",
+        "dataQuotas": false,
+        "firmware": {
+          "format": "mtd-loader",
+          "maxBytes": 1572864,
+          "partition": "loader"
+        },
+        "kernel": "fit",
+        "reserves": {
+          "data": 4194304,
+          "system": 4194304
+        },
+        "storage": "ubi",
+        "ubi": {
+          "mtd": "ubi",
+          "storeReserve": 67108864
+        }
+      }
+    },
     "uefi-arm64": {
       "arch": "arm64",
       "board": {

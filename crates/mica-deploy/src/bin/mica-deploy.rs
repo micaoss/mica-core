@@ -637,10 +637,15 @@ fn execute() -> Result<()> {
             },
             core_boot()?,
         )?;
-        println!(
-            "{}",
-            json!({"boot":receipt,"state":store.effective_state()?,"deployments":store.describe(&keys)?,"sets":sets})
-        );
+        let mut status = json!({"boot":receipt,"state":store.effective_state()?,"deployments":store.describe(&keys)?,"sets":sets});
+        if let BootBackend::Ubi { ubi } = &store.boot {
+            status["ubi"] = mica_deploy::ubi::space(
+                ubi.as_ref(),
+                policy.board.reserves.system(),
+                policy.board.ubi.as_ref().and_then(|u| u.store_reserve),
+            )?;
+        }
+        println!("{status}");
         return Ok(());
     }
     ensure!(

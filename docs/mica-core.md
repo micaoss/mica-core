@@ -1453,7 +1453,8 @@ UBI's. A reader that does not know `storage` refuses a `ubi` policy rather than 
 because the policy's unknown fields are refused.
 
 **The policy.** On `ubi`, `board` carries `ubi: { "mtd": <name> }`, the MTD partition that holds
-the UBI device (1 to 63 of `A-Z a-z 0-9 . _ -`), and neither `partitions` nor `records`; the
+the UBI device (1 to 63 of `A-Z a-z 0-9 . _ -`), optionally `ubi.storeReserve`, the bytes DATA's
+growth leaves to the store (from `reserves.system` to 4 GiB; below), and neither `partitions` nor `records`; the
 policy carries no `systemPartUuid` or `dataPartUuid`. `boot` is `uboot-fit`, `dataQuotas` is
 `false` (UBIFS has no project quotas), `reserves.esp` is refused (there is no ESP), and the board
 declares its other `reserves` (the defaults are sized for disks). Its `firmware` target is
@@ -1474,7 +1475,7 @@ document (6.2).
 | Volume | Kind | Holds |
 | --- | --- | --- |
 | `system` | dynamic, UBIFS | SYSTEM's small files: `deployments/<id>.json`, `roots/<rootId>/rootfs.roothash{,.p7s}`, `kernels/<kernelId>/support.roothash{,.p7s}`, `sets/core/` (the signed sets, `state.json`, `objects/<componentId>/core.roothash{,.p7s}`) |
-| `data` | dynamic, UBIFS | DATA |
+| `data` | dynamic, UBIFS | DATA; empty in the factory image, grown once at the first boot (below) |
 | `records-a`, `records-b` | dynamic, one LEB each | The two boot record copies |
 | `k-<kernelId>` | static | The kernel's `boot.itb` |
 | `s-<kernelId>` | static | The kernel's `support.img` |
@@ -1493,6 +1494,20 @@ and every `k-`, `s-`, `r-` or `c-` volume no retained deployment or set names. N
 touched. An object costs its size rounded up to whole LEBs; installation keeps `reserves.system`
 free in the UBI device's available LEBs, and a download keeps `reserves.data` on DATA. Delta
 transfer reads its seeds from the object volumes' character devices.
+
+**DATA growth.** UBIFS fixes its largest size when it formats a volume, and it formats an empty
+one at its first mount, so DATA is sized once, before that mount. When the policy carries
+`ubi.storeReserve`, the runkit, before it mounts DATA, has a supervised startup worker look at
+`data`: it must be a sound dynamic volume; if any of its LEBs is mapped (`UBI_IOCEBISMAP`), it
+is formatted and keeps its size; otherwise it is resized (`UBI_IOCRSVOL`) to its LEBs plus the
+device's available LEBs less `storeReserve` rounded up to whole LEBs, when that adds at least one.
+The growth only adds, and a formatted DATA is left as it is; a power cut before the
+mount repeats it, with nothing left to add. A failure is logged, and DATA mounts at the size it
+has. The available LEBs at the first boot already exclude the factory deployment and core set,
+so `storeReserve` covers what the store has not yet written: the next deployment and core set
+and `reserves.system`. Without `storeReserve`, DATA keeps the size the image gives it.
+`mica-deploy status` on a `ubi` board reports `ubi`: `lebBytes`, `availableLebs`, `dataLebs`,
+`systemReserveLebs` and, when the policy carries it, `storeReserveLebs`.
 
 **Records.** The format is the FIT one, unchanged: a copy is 65536 bytes, the CRC-32 of bytes 5
 onward in bytes 0 to 3, a flag in byte 4, then `mica_entries=v1|...` and zeros, and the active

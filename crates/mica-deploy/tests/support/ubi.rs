@@ -211,6 +211,33 @@ impl UbiDevice for DirUbi {
         Ok(id)
     }
 
+    fn resize(&self, id: u32, bytes: u64) -> Result<()> {
+        let mut table = self.table()?;
+        let others: u64 = table
+            .volumes
+            .iter()
+            .filter(|(other, _)| **other != id)
+            .map(|(_, v)| v.reserved_lebs)
+            .sum();
+        let entry = table.volumes.get_mut(&id).context("no such volume")?;
+        let lebs = bytes.div_ceil(LEB);
+        ensure!(!entry.is_static && lebs > 0, "invalid resize");
+        ensure!(others + lebs <= table.lebs, "no space");
+        entry.reserved_lebs = lebs;
+        self.save(&table)
+    }
+
+    /// A dynamic volume's LEB holds data when its file reaches into it.
+    fn mapped(&self, volume: &File, leb: u32) -> Result<bool> {
+        let table = self.table()?;
+        let id = self.id_of(volume, &table)?;
+        ensure!(
+            u64::from(leb) < table.volumes[&id].reserved_lebs,
+            "LEB out of range"
+        );
+        Ok(volume.metadata()?.len() > u64::from(leb) * LEB)
+    }
+
     fn remove(&self, id: u32) -> Result<()> {
         let mut table = self.table()?;
         table.volumes.remove(&id).context("no such volume")?;

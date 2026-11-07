@@ -51,6 +51,13 @@ pub enum Operation {
     UbiBlock {
         volume: String,
     },
+    /// Grow the empty `data` volume of the UBI device on MTD partition `mtd`,
+    /// keeping `reserve` bytes free for the store (`ubi::grow_data`), and
+    /// print what was done.
+    UbiGrowData {
+        mtd: String,
+        reserve: u64,
+    },
     Verity {
         device: String,
         name: String,
@@ -177,6 +184,24 @@ fn perform(operation: Operation) -> Result<()> {
         Operation::Loop { image } => println!("{}", attach_loop(Path::new(&image))?),
         Operation::Partition { uuid } => println!("{}", gpt::find_partition(&uuid)?),
         Operation::UbiBlock { volume } => println!("{}", create_ubiblock(&volume)?),
+        Operation::UbiGrowData { mtd, reserve } => {
+            use crate::ubi::DataGrowth;
+            let ubi = crate::ubi::SysUbi::attached(&mtd)?;
+            println!(
+                "{}",
+                match crate::ubi::grow_data(&ubi, reserve)? {
+                    DataGrowth::Grown { from, to } => format!("grown from {from} to {to} LEBs"),
+                    DataGrowth::Kept {
+                        lebs,
+                        available,
+                        reserve,
+                    } => format!(
+                        "kept at {lebs} LEBs: {available} free, {reserve} kept for the store"
+                    ),
+                    DataGrowth::Formatted { lebs } => format!("formatted at {lebs} LEBs"),
+                }
+            );
+        }
         Operation::Verity {
             device,
             name,

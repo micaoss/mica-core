@@ -529,6 +529,17 @@ fn a_ubi_board_section_is_refused_by_name() {
         ),
         ("/ubi/mtd", json!(""), "invalid UBI MTD partition"),
         ("/ubi/mtd", json!("ubi root"), "invalid UBI MTD partition"),
+        // Below the system reserve it must hold, and above 4 GiB.
+        (
+            "/ubi/storeReserve",
+            json!(1024 * 1024),
+            "invalid UBI store reserve",
+        ),
+        (
+            "/ubi/storeReserve",
+            json!(4096_u64 * 1024 * 1024 + 1),
+            "invalid UBI store reserve",
+        ),
         ("/dataQuotas", json!(true), "UBIFS has no project quotas"),
         (
             "/firmware",

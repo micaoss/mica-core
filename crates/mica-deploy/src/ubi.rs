@@ -10,6 +10,9 @@ use std::{
 
 pub use lifecycle_sys::UbiVolumeKind as VolumeKind;
 
+mod growth;
+pub use growth::{DataGrowth, grow_data, space};
+
 /// The volume holding SYSTEM's files.
 pub const SYSTEM: &str = "system";
 /// The volume holding DATA.
@@ -53,6 +56,12 @@ pub trait UbiDevice: Send + Sync + std::fmt::Debug {
     fn available_lebs(&self) -> Result<u64>;
     /// Every volume.
     fn volumes(&self) -> Result<Vec<Volume>>;
+    /// Resize volume `id` to `bytes`, in one volume-table update. Nothing may
+    /// hold the volume open.
+    fn resize(&self, id: u32, bytes: u64) -> Result<()>;
+    /// Whether logical erase block `leb` of `volume` (opened for reading)
+    /// holds data.
+    fn mapped(&self, volume: &File, leb: u32) -> Result<bool>;
     /// Create a volume of `bytes`, returning its number.
     fn create(&self, name: &str, bytes: u64, kind: VolumeKind) -> Result<u32>;
     /// Remove volume `id`.
@@ -344,6 +353,15 @@ impl UbiDevice for SysUbi {
     fn create(&self, name: &str, bytes: u64, kind: VolumeKind) -> Result<u32> {
         lifecycle_sys::ubi_mkvol(self.control()?, name, bytes, kind)
             .with_context(|| format!("create UBI volume {name}"))
+    }
+
+    fn resize(&self, id: u32, bytes: u64) -> Result<()> {
+        lifecycle_sys::ubi_rsvol(self.control()?, id, bytes)
+            .with_context(|| format!("resize UBI volume {id}"))
+    }
+
+    fn mapped(&self, volume: &File, leb: u32) -> Result<bool> {
+        lifecycle_sys::ubi_is_mapped(volume, leb).context("query a UBI LEB")
     }
 
     fn remove(&self, id: u32) -> Result<()> {
