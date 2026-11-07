@@ -57,3 +57,34 @@ export function FilePicker({ label, hint, accept, chooseLabel, emptyLabel, submi
     </Field>
   )
 }
+
+/// A file chosen as one field of a form, which submits it with the rest.
+export function FileChooser({ label, accept, chooseLabel, emptyLabel, onChange }: {
+  label: string
+  accept?: string
+  chooseLabel: string
+  emptyLabel: string
+  onChange: (file?: File) => void
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  const [file, setFile] = useState<File>()
+  const choose = (event: ChangeEvent<HTMLInputElement>) => {
+    setFile(event.target.files?.[0])
+    onChange(event.target.files?.[0])
+  }
+
+  return (
+    <Field>
+      <FieldTitle>{label}</FieldTitle>
+      <InputGroup>
+        <InputGroupText className="min-w-0 flex-1 truncate px-3 text-left">
+          {file?.name ?? emptyLabel}
+        </InputGroupText>
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton onClick={() => input.current?.click()}>{chooseLabel}</InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
+      <input ref={input} className="sr-only" type="file" accept={accept} onChange={choose} tabIndex={-1} aria-hidden="true" />
+    </Field>
+  )
+}

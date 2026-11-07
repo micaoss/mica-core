@@ -6,7 +6,7 @@ export interface TaskAccepted {
 export interface TaskRecord {
   id: string
   operation: string
-  /// `network.apply`, `app.apply` or `settings.apply`.
+  /// `network.apply`, `app.apply`, `settings.apply` or `drivers.apply`.
   kind: string
   dotPath: string
   source: string

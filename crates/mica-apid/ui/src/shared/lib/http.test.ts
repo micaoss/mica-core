@@ -32,6 +32,19 @@ describe('api client', () => {
     expect(((fetch.mock.calls[1][1] as RequestInit).headers as Headers).get('x-csrf-token')).toBe('csrf-value')
   })
 
+  it('leaves a form its own multipart content type', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetch)
+
+    await api('/api/v1/system/extensions', { method: 'POST', body: new FormData() })
+    await api('/api/v1/session', json('POST', { password: 'p' }))
+
+    expect(new Headers(fetch.mock.calls[0][1]?.headers).has('content-type')).toBe(false)
+    expect(new Headers(fetch.mock.calls[1][1]?.headers).get('content-type')).toBe('application/json')
+  })
+
   it('turns the API error envelope into a typed error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ error: { code: 'csrf_invalid', message: 'CSRF rejected', path: 'network' } }),

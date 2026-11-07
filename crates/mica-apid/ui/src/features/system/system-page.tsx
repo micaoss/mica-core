@@ -31,11 +31,12 @@ import { AutomaticUpdatesPanel } from '@/features/system/automatic-updates-panel
 import { CredentialRecoveryPanel } from '@/features/recovery/credential-recovery-panel'
 import { FactoryResetPanel } from '@/features/recovery/factory-reset-panel'
 import { ResetPanel } from '@/features/recovery/reset-panel'
+import { DriversPanel } from '@/features/system/drivers-panel'
 
 // The prototype has six tabs: recovery is folded into update, general and
 // diagnostics. A `#recovery` anchor resolves to update rather than dropping
 // the reader on the first tab.
-const TABS = ['general', 'information', 'time', 'update', 'storage', 'diagnostics'] as const
+const TABS = ['general', 'information', 'time', 'update', 'storage', 'drivers', 'diagnostics'] as const
 
 export function SystemPage() {
   const { t } = useTranslation()
@@ -75,6 +76,7 @@ export function SystemPage() {
           </PageSection>
         </TabsContent>
         <TabsContent value="storage" className="grid gap-6 pt-4"><StoragePanel /></TabsContent>
+        <TabsContent value="drivers" className="grid gap-6 pt-4"><DriversPanel /></TabsContent>
         <TabsContent value="diagnostics" className="grid gap-6 pt-4">
           <DiagnosticsPanel />
           <LogsPanel />

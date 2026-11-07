@@ -1116,7 +1116,10 @@ written to the update uploads, which micad removes once read and apid removes on
 `DELETE /api/v1/system/extensions/{name}` `{password}` and `POST
 /api/v1/system/extensions/{name}/drop` `{password, kernel}`. The audit ring records each as
 `owner-cert-add`, `owner-cert-remove`, `driver-extension-install`, `driver-extension-remove` or
-`driver-extension-drop`: requested, refused, throttled or wrong-password.
+`driver-extension-drop`: requested, refused, throttled or wrong-password. The console's System
+page has them on its Drivers tab: the certificates with their standing, the running kernel's
+extensions with their boot state, a change on trial, the builds a staged update waits for (upload
+one, or update without it), and a password dialog for each change, which follows its task.
 
 **The local socket.** apid also serves the API on `/run/mica/apid.sock`, whenever it runs, for
 the device itself. A caller there carries no credential: the kernel's peer credentials
