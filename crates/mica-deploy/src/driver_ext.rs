@@ -2,8 +2,9 @@
 //! modules and firmware for exactly one kernel, in a signed dm-verity image.
 //!
 //! Trust is the kernel's: the image's root hash carries a PKCS#7 signature the
-//! kernel checks against its builtin keyring when the image is mapped, with the
-//! same mica driver key that signs the modules inside. The descriptor
+//! kernel checks when the image is mapped, by a key that chains to its builtin
+//! keyring or to an owner certificate enrolled on the device, the chain carried
+//! in the PKCS#7; the modules inside are signed the same way. The descriptor
 //! (`ext.json`, `mica/driver-ext-descriptor/v1`) is not signed. It locates the
 //! image and its geometry, and a reader checks it against the manifest the
 //! signed image carries (`manifest.json`, `mica/driver-ext/v1`) before the

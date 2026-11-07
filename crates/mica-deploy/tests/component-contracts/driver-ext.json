@@ -470,7 +470,7 @@
     "id": "f6f85b8cd250a537e4a0f5947b2d2d74eb6e1e60d558412feb48b2450093d74a",
     "release": "6.12.107"
   },
-  "layout": "The image is a squashfs with a dm-verity tree appended, mapped with its root hash and the PKCS#7 signature of the root hash by the channel's mica driver key, which the kernel checks. It holds `manifest.json` (the manifest's exact bytes), the modules under `modules/<kernelRelease>/updates/mica-ext/<name>/` at the paths `modules` lists, and the firmware under `firmware/` at the paths `firmware` lists. `load` and the keys of `options` are module names: a module path's file name without `.ko`, with `-` read as `_`",
+  "layout": "The image is a squashfs with a dm-verity tree appended, mapped with its root hash and the PKCS#7 signature of the root hash, which the kernel checks: by a key that chains to the kernel's builtin keyring or to an owner certificate enrolled on the device, the chain carried in the PKCS#7, as the modules inside are signed. It holds `manifest.json` (the manifest's exact bytes), the modules under `modules/<kernelRelease>/updates/mica-ext/<name>/` at the paths `modules` lists, and the firmware under `firmware/` at the paths `firmware` lists. `load` and the keys of `options` are module names: a module path's file name without `.ko`, with `-` read as `_`",
   "manifest": {
     "arch": "amd64",
     "firmware": [

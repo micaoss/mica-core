@@ -1155,8 +1155,9 @@ cannot run. It reads them from `mica-deploy status`, which reports each deployme
 
 **Driver extensions.** A driver extension is out-of-tree kernel modules and firmware for exactly
 one kernel, in a squashfs image with a dm-verity tree appended. It is not Ed25519-signed: its
-root hash carries a PKCS#7 signature by the channel's mica driver key, which the kernel checks
-against its builtin keyring when it maps the image, and the same key signs the modules inside.
+root hash carries a PKCS#7 signature the kernel checks when it maps the image, by a key that
+chains to its builtin keyring or to an owner certificate enrolled on the device (the chain
+carried in the PKCS#7), and the modules inside are signed the same way.
 `ext.json`, `mica/driver-ext-descriptor/v1`, is canonical JSON of at most 4096 bytes: `name`
 (1 to 32 lowercase letters, digits and hyphens), `version` (dotted numbers), `arch`, `kernel` (the
 id of the kernel component it is built for) and `content` (the image, root hash, signature and

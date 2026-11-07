@@ -511,8 +511,9 @@ pub fn generate(cases: &Value, firmware: &Value, driver_ext: &Value) -> Fixtures
 
 /// What the driver extension vector says of the image's layout.
 pub const DRIVER_EXT_LAYOUT: &str = "The image is a squashfs with a dm-verity tree appended, mapped \
-     with its root hash and the PKCS#7 signature of the root hash by the channel's mica driver key, \
-     which the kernel checks. It holds `manifest.json` (the manifest's exact bytes), the modules \
+     with its root hash and the PKCS#7 signature of the root hash, which the kernel checks: by a key \
+     that chains to the kernel's builtin keyring or to an owner certificate enrolled on the device, \
+     the chain carried in the PKCS#7, as the modules inside are signed. It holds `manifest.json` (the manifest's exact bytes), the modules \
      under `modules/<kernelRelease>/updates/mica-ext/<name>/` at the paths `modules` lists, and the \
      firmware under `firmware/` at the paths `firmware` lists. `load` and the keys of `options` are \
      module names: a module path's file name without `.ko`, with `-` read as `_`";
