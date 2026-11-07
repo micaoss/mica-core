@@ -1432,9 +1432,13 @@ boot has mapped yet, whose signature the kernel checks at the next boot that map
 An owner's build comes in an archive: `MICAUPD1` with its `ext.json` where a system's signed
 envelope would be, and the image and root hash signature as the objects. `import` stages it in
 the workspace (`verified/ext-<extId>.json`, the objects by digest; `kind` `extension`).
-`update --archive` installs it as a change, unless it is for the kernel of the system the last
-check selected, when it stays staged. A system update, `install` included, takes the builds
-staged for its kernel as if each were given with `--extension`; `discard` removes them.
+`extension-import <archive>` and `update --archive` install it as a change, unless it is for the
+kernel of the system the last check selected, when it stays staged; `extension-import` answers
+`{"extension", "staged", "extensionId"}`. `extension-drop <name> --kernel <id>` stages the
+decision that the system with that kernel runs without the extension (`verified/ext-drop-<kernel>-<name>`).
+A system update, `install` included, takes the builds staged for its kernel as if each were
+given with `--extension`, and the drops as if given with `--drop-extension` where no build of the
+extension is taken; `waitsForExtension` leaves out both, and `discard` removes them.
 
 **Owner certificates.** `owner-cert-add <certificate> [--clock-synced] [--by <console|api|cli>]
 [--source <text>]` enrols a PEM or DER certificate for the next boot (`{"sha256", "applies":

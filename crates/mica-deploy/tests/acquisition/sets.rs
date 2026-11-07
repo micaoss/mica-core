@@ -643,3 +643,36 @@ fn an_extension_archive_stages_the_build_for_its_kernel() {
             .is_empty()
     );
 }
+
+#[test]
+fn a_dropped_extension_is_staged_for_its_kernel_until_discarded() {
+    let (dir, store) = fixture();
+    let keys = [[0; 32]];
+    let acq = acquisition(&dir, &store, &keys);
+    let (kernel, other) = ("a".repeat(64), "b".repeat(64));
+    acq.drop_extension("rtl8125", &kernel).unwrap();
+    acq.drop_extension("ax88179", &kernel).unwrap();
+    assert!(acq.drop_extension("Not-A-Name", &kernel).is_err());
+    assert!(acq.drop_extension("rtl8125", "../k").is_err());
+    assert_eq!(
+        mica_deploy::acquisition::staged_drops(&acq.root, &kernel).unwrap(),
+        std::collections::BTreeSet::from(["ax88179".to_owned(), "rtl8125".to_owned()])
+    );
+    assert!(
+        mica_deploy::acquisition::staged_drops(&acq.root, &other)
+            .unwrap()
+            .is_empty()
+    );
+    // Drops are not builds.
+    assert!(
+        mica_deploy::acquisition::staged_extensions(&acq.root, &kernel)
+            .unwrap()
+            .is_empty()
+    );
+    acq.discard().unwrap();
+    assert!(
+        mica_deploy::acquisition::staged_drops(&acq.root, &kernel)
+            .unwrap()
+            .is_empty()
+    );
+}

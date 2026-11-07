@@ -72,6 +72,13 @@ Driver extensions:
                   healthy one keeps it
   extension-remove <name> [--kernel <id>]
                   stop installing an extension, on trial in the same way
+  extension-import <archive>
+                  an owner's build in a MICAUPD1 archive: installed as
+                  extension-install does, or staged for the system a check
+                  selected when it is for that system's kernel
+  extension-drop <name> --kernel <id>
+                  the system with that kernel runs without the extension,
+                  as if its install were given --drop-extension
   install ... --extension <descriptor>
                   a build for the new system's kernel, its objects in the
                   install's --objects by digest, on the system's trial; a
@@ -189,6 +196,15 @@ enum Action {
     ExtensionRemove {
         name: String,
         kernel: Option<String>,
+    },
+    /// Stage an owner's build from its archive, and take it.
+    ExtensionImport {
+        archive: PathBuf,
+    },
+    /// Stage that a system with the kernel `kernel` runs without `name`.
+    ExtensionDrop {
+        name: String,
+        kernel: String,
     },
     OwnerCerts,
     OwnerCertAdd {
@@ -516,6 +532,13 @@ impl Cli {
             "extension-remove" => Action::ExtensionRemove {
                 name: words.argument("name")?,
                 kernel: words.option("kernel"),
+            },
+            "extension-import" => Action::ExtensionImport {
+                archive: words.argument("archive")?.into(),
+            },
+            "extension-drop" => Action::ExtensionDrop {
+                name: words.argument("name")?,
+                kernel: words.required("kernel")?,
             },
             _ => anyhow::bail!("unknown command {name:?}; mica-deploy help lists them"),
         };
@@ -899,6 +922,8 @@ fn execute() -> Result<()> {
                 | Action::SetInstall { .. }
                 | Action::ExtensionInstall { .. }
                 | Action::ExtensionRemove { .. }
+                | Action::ExtensionImport { .. }
+                | Action::ExtensionDrop { .. }
                 | Action::OwnerCertAdd { .. }
                 | Action::OwnerCertRemove { .. }
                 | Action::Rollback { .. }
@@ -1039,11 +1064,11 @@ fn execute() -> Result<()> {
                 }
                 Imported::Deployment(system) => {
                     let envelope = read_bounded(&system.path, 24576)?;
-                    let staged = mica_deploy::acquisition::staged_extensions(
-                        &acquisition.root,
+                    let staged = with_staged(
                         &mica_deploy::components::authenticate_deployment(&envelope, &keys)?
                             .kernel
                             .id,
+                        KernelExtensions::default(),
                     )?;
                     writable(backend, true, || {
                         store.install_with_extensions(
@@ -1058,42 +1083,19 @@ fn execute() -> Result<()> {
                             &system.objects,
                             &receipt,
                             None,
-                            &KernelExtensions {
-                                descriptors: staged,
-                                dropped: Vec::new(),
-                            },
+                            &staged,
                         )
                     })?;
                     return finish(&format!("installed system {}", system.version), reboot);
                 }
                 Imported::Extension(build) => {
-                    // A build for the kernel of the system a check selected
-                    // waits for that system's install, which takes it.
-                    if build.kernel != receipt.kernel_id
-                        && selected_system(&store)?
-                            .is_some_and(|selected| selected.kernel_id == build.kernel)
-                    {
+                    if take_extension(&build, &store, &keys, &receipt, backend)?.is_none() {
                         println!(
                             "staged driver extension {} {} for the system update to kernel {}",
                             build.name, build.version, build.kernel
                         );
                         return Ok(());
                     }
-                    let descriptor = read_bounded(
-                        &build.path,
-                        mica_deploy::driver_ext::MAX_DESCRIPTOR_BYTES as u64,
-                    )?;
-                    let extension = mica_deploy::driver_ext::parse_descriptor(&descriptor)?;
-                    let content = &extension.descriptor.content;
-                    writable(backend, true, || {
-                        store.install_extension(
-                            &descriptor,
-                            &build.objects.join(&content.image.sha256),
-                            &build.objects.join(&content.signature.sha256),
-                            &keys,
-                            &receipt.deployment_id,
-                        )
-                    })?;
                     return finish(
                         &format!(
                             "installed driver extension {} {}, on trial from the next boot",
@@ -1192,11 +1194,11 @@ fn execute() -> Result<()> {
             None
         };
         let envelope = read_bounded(&system.path, 24576)?;
-        let staged = mica_deploy::acquisition::staged_extensions(
-            &acquisition.root,
+        let staged = with_staged(
             &mica_deploy::components::authenticate_deployment(&envelope, &keys)?
                 .kernel
                 .id,
+            KernelExtensions::default(),
         )?;
         writable(backend, true, || {
             store.install_with_extensions(
@@ -1211,10 +1213,7 @@ fn execute() -> Result<()> {
                 &system.objects,
                 &receipt,
                 core_set.as_deref(),
-                &KernelExtensions {
-                    descriptors: staged,
-                    dropped: Vec::new(),
-                },
+                &staged,
             )
         })?;
         return finish(&format!("installed system {}", system.version), reboot);
@@ -1226,6 +1225,8 @@ fn execute() -> Result<()> {
             | Action::Check { .. }
             | Action::Fetch { .. }
             | Action::Import { .. }
+            | Action::ExtensionImport { .. }
+            | Action::ExtensionDrop { .. }
             | Action::SetCheck { .. }
             | Action::SetFetch { .. }
     ) {
@@ -1290,6 +1291,25 @@ fn execute() -> Result<()> {
                     "archive is not a regular file"
                 );
                 json!(acquisition.import_any(&mut std::fs::File::open(archive)?)?)
+            }
+            Action::ExtensionImport { archive } => {
+                ensure!(
+                    archive.symlink_metadata()?.is_file(),
+                    "archive is not a regular file"
+                );
+                let Imported::Extension(build) =
+                    acquisition.import_any(&mut std::fs::File::open(archive)?)?
+                else {
+                    anyhow::bail!(
+                        "the archive holds no driver extension; it was staged as import stages it"
+                    );
+                };
+                let installed = take_extension(&build, &store, &keys, &receipt, backend)?;
+                json!({"extension": build, "staged": installed.is_none(), "extensionId": installed})
+            }
+            Action::ExtensionDrop { name, kernel } => {
+                acquisition.drop_extension(&name, &kernel)?;
+                json!({"dropped": name, "kernel": kernel})
             }
             Action::SetCheck {
                 kind,
@@ -1393,23 +1413,21 @@ fn execute() -> Result<()> {
             dropped,
         } => {
             let envelope = read_bounded(&descriptor, 24576)?;
-            let mut descriptors = extensions
+            let descriptors = extensions
                 .iter()
                 .map(|path| {
                     read_bounded(path, mica_deploy::driver_ext::MAX_DESCRIPTOR_BYTES as u64)
                 })
                 .collect::<std::io::Result<Vec<_>>>()?;
-            // The builds an archive staged for the new kernel go with it.
-            for staged in mica_deploy::acquisition::staged_extensions(
-                Path::new("/mica/updates"),
+            let given = with_staged(
                 &mica_deploy::components::authenticate_deployment(&envelope, &keys)?
                     .kernel
                     .id,
-            )? {
-                if !descriptors.contains(&staged) {
-                    descriptors.push(staged);
-                }
-            }
+                KernelExtensions {
+                    descriptors,
+                    dropped,
+                },
+            )?;
             store
                 .install_with_extensions(
                     &envelope,
@@ -1426,10 +1444,7 @@ fn execute() -> Result<()> {
                         .map(|path| read_bounded(&path, set_state::MAX_ENVELOPE_BYTES))
                         .transpose()?
                         .as_deref(),
-                    &KernelExtensions {
-                        descriptors,
-                        dropped,
-                    },
+                    &given,
                 )
                 .map(|value| json!(value))
         }
@@ -1517,6 +1532,8 @@ fn execute() -> Result<()> {
         | Action::Check { .. }
         | Action::Fetch { .. }
         | Action::Import { .. }
+        | Action::ExtensionImport { .. }
+        | Action::ExtensionDrop { .. }
         | Action::SetCheck { .. }
         | Action::SetFetch { .. } => unreachable!(),
     })?;
@@ -1526,6 +1543,9 @@ fn execute() -> Result<()> {
     }
     Ok(())
 }
+
+/// The acquisition workspace.
+const UPDATES: &str = "/mica/updates";
 
 /// The system the last `check` or `fetch` selected, in DATA's `meta/`.
 const SELECTED_SYSTEM: &str = "selected-system.json";
@@ -1549,19 +1569,79 @@ fn record_selected_system(store: &DeploymentStore, selected: Option<SelectedSyst
 }
 
 /// What a system with `kernel` waits for: the extensions the `running`
-/// kernel runs with no build for `kernel`, installed or staged by an archive.
+/// kernel runs with no build for `kernel`, installed or staged by an archive,
+/// and not dropped.
 fn waits_for_extension(
     store: &DeploymentStore,
     running: &str,
     kernel: &str,
 ) -> Result<Vec<mica_deploy::deployments::Wait>> {
-    let staged =
-        mica_deploy::acquisition::staged_extension_names(Path::new("/mica/updates"), kernel)?;
+    let root = Path::new(UPDATES);
+    let staged = mica_deploy::acquisition::staged_extension_names(root, kernel)?;
+    let dropped = mica_deploy::acquisition::staged_drops(root, kernel)?;
     Ok(store
         .waits_for_extension(running, kernel)?
         .into_iter()
-        .filter(|wait| !staged.contains(&wait.name))
+        .filter(|wait| !staged.contains(&wait.name) && !dropped.contains(&wait.name))
         .collect())
+}
+
+/// What a system update with `kernel` takes beside the builds and drops
+/// `given`: those staged in the workspace for that kernel, a drop only where
+/// no build of the extension is taken.
+fn with_staged(kernel: &str, mut given: KernelExtensions) -> Result<KernelExtensions> {
+    let root = Path::new(UPDATES);
+    for staged in mica_deploy::acquisition::staged_extensions(root, kernel)? {
+        if !given.descriptors.contains(&staged) {
+            given.descriptors.push(staged);
+        }
+    }
+    let built: std::collections::BTreeSet<String> = given
+        .descriptors
+        .iter()
+        .filter_map(|bytes| mica_deploy::driver_ext::parse_descriptor(bytes).ok())
+        .map(|extension| extension.descriptor.name)
+        .collect();
+    for name in mica_deploy::acquisition::staged_drops(root, kernel)? {
+        if !built.contains(&name) && !given.dropped.contains(&name) {
+            given.dropped.push(name);
+        }
+    }
+    Ok(given)
+}
+
+/// Take a build an archive staged: one for the kernel of the system a check
+/// selected stays staged for that system's install, which takes it; any
+/// other is installed as a change. Answers the change's id once installed.
+fn take_extension(
+    build: &mica_deploy::acquisition::ReadyExtension,
+    store: &DeploymentStore,
+    keys: &[[u8; 32]],
+    receipt: &BootReceipt,
+    backend: BootKind,
+) -> Result<Option<String>> {
+    if build.kernel != receipt.kernel_id
+        && selected_system(store)?.is_some_and(|selected| selected.kernel_id == build.kernel)
+    {
+        return Ok(None);
+    }
+    let descriptor = read_bounded(
+        &build.path,
+        mica_deploy::driver_ext::MAX_DESCRIPTOR_BYTES as u64,
+    )?;
+    let extension = mica_deploy::driver_ext::parse_descriptor(&descriptor)?;
+    let content = &extension.descriptor.content;
+    writable(backend, true, || {
+        let id = store.install_extension(
+            &descriptor,
+            &build.objects.join(&content.image.sha256),
+            &build.objects.join(&content.signature.sha256),
+            keys,
+            &receipt.deployment_id,
+        )?;
+        store.collect_extensions(&booted_extensions()?, keys)?;
+        Ok(Some(id))
+    })
 }
 
 /// The system the last check selected, if any reads.
@@ -1907,6 +1987,15 @@ mod tests {
             parse("extension-remove rtl8125").unwrap().command,
             Action::ExtensionRemove { name, kernel: None } if name == "rtl8125"
         ));
+        assert!(matches!(
+            parse("extension-import /v/ext.micaupd").unwrap().command,
+            Action::ExtensionImport { archive } if archive == Path::new("/v/ext.micaupd")
+        ));
+        assert!(matches!(
+            parse("extension-drop rtl8125 --kernel k").unwrap().command,
+            Action::ExtensionDrop { name, kernel } if name == "rtl8125" && kernel == "k"
+        ));
+        assert!(parse("extension-drop rtl8125").is_err());
         assert!(matches!(
             parse("extension-remove rtl8125 --kernel k").unwrap().command,
             Action::ExtensionRemove { name, kernel: Some(kernel) }

@@ -88,7 +88,60 @@ pub fn staged_extension_names(root: &Path, kernel: &str) -> Result<BTreeSet<Stri
         .collect())
 }
 
+fn drop_prefix(kernel: &str) -> String {
+    format!("ext-drop-{kernel}-")
+}
+
+/// The extensions a system with the kernel `kernel` runs without, as
+/// [`Acquisition::drop_extension`] staged them in the workspace at `root`.
+///
+/// # Errors
+///
+/// The workspace cannot be read.
+pub fn staged_drops(root: &Path, kernel: &str) -> Result<BTreeSet<String>> {
+    let verified = root.join("verified");
+    let mut dropped = BTreeSet::new();
+    if verified.symlink_metadata().is_err() {
+        return Ok(dropped);
+    }
+    let prefix = drop_prefix(kernel);
+    for entry in fs::read_dir(&verified)? {
+        if let Some(name) = entry?
+            .file_name()
+            .to_str()
+            .and_then(|file| file.strip_prefix(&prefix))
+            .filter(|name| crate::extensions::valid_name(name))
+        {
+            dropped.insert(name.to_owned());
+        }
+    }
+    Ok(dropped)
+}
+
 impl Acquisition<'_> {
+    /// Stage the decision that a system with the kernel `kernel` runs
+    /// without the extension `name`: its install leaves it out as if given
+    /// `--drop-extension`, and `discard` removes the decision.
+    ///
+    /// # Errors
+    ///
+    /// An invalid name or kernel, or a write that fails.
+    pub fn drop_extension(&self, name: &str, kernel: &str) -> Result<()> {
+        ensure!(
+            crate::extensions::valid_name(name),
+            "invalid driver extension name"
+        );
+        crate::deployments::valid_id(kernel)?;
+        self.prepare()?;
+        atomic_write(
+            &self
+                .root
+                .join("verified")
+                .join(format!("{}{name}", drop_prefix(kernel))),
+            b"",
+        )
+    }
+
     pub(super) fn import_extension(
         &self,
         descriptor: &[u8],

@@ -21,7 +21,7 @@ mod extensions;
 mod sets;
 mod store;
 mod transfer;
-pub use extensions::{ReadyExtension, staged_extension_names, staged_extensions};
+pub use extensions::{ReadyExtension, staged_drops, staged_extension_names, staged_extensions};
 pub use sets::*;
 use transfer::*;
 
