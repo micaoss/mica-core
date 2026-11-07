@@ -8,6 +8,7 @@ use std::{
     path::PathBuf,
 };
 
+mod extensions;
 mod install;
 mod io;
 mod lifecycle;
@@ -129,6 +130,10 @@ pub struct DeploymentStore {
     /// The workspace's `verified/`, whose staged descriptors' objects
     /// collection keeps.
     pub staged: Option<PathBuf>,
+    /// This boot's trust record (`boot::trust::TRUST`): where it exists, every
+    /// root hash signature of a root or core component installed is held to
+    /// the system's form.
+    pub trust: PathBuf,
 }
 
 /// The device a deployment must name: the board and architecture of the signed
@@ -151,7 +156,15 @@ impl DeploymentStore {
             reserves: crate::board::Reserves::default(),
             boot_trust: crate::board::BootTrust::default(),
             staged: None,
+            trust: PathBuf::from(crate::boot::trust::TRUST),
         }
+    }
+
+    /// Read this boot's trust record at `trust`.
+    #[must_use]
+    pub fn with_trust(mut self, trust: PathBuf) -> Self {
+        self.trust = trust;
+        self
     }
 
     /// Keep the reserves the board declares.

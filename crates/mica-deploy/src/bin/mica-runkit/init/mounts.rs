@@ -8,6 +8,7 @@ use mica_deploy::{
             self,
             native::{self, Operation as Startup},
         },
+        trust::{BuiltinTrust, Sealed},
     },
     components::VerityImage,
     ubi::SysUbi,
@@ -22,11 +23,12 @@ pub(super) fn bounded_file(path: &str, limit: u64) -> Result<Vec<u8>> {
 
 pub(super) fn run(control: &mut BootControl, operation: Startup) -> Result<String> {
     // Formatting DATA, a secure erase first when the board asks, takes as long
-    // as the medium needs; the watchdog is fed meanwhile.
-    let limit = if matches!(operation, Startup::FormatData { .. }) {
-        600_000
-    } else {
-        30_000
+    // as the medium needs, and indexing the modules runs the root's depmod
+    // over the whole tree; the watchdog is fed meanwhile.
+    let limit = match operation {
+        Startup::FormatData { .. } => 600_000,
+        Startup::ModuleIndex { .. } => 120_000,
+        _ => 30_000,
     };
     control
         .supervisor
@@ -82,14 +84,15 @@ pub(super) fn mount(
 /// (`set_state::objects_dir`).
 const CORE_OBJECTS: &str = "/system/sets/core/objects";
 
-/// Mount each of `cores`, verified, from the sets' objects on SYSTEM at
-/// `/run/mica-core/<package>`, refuse a
+/// Mount each of `cores`, verified and admitted by `trust`, from the sets'
+/// objects on SYSTEM at `/run/mica-core/<package>`, refuse a
 /// composition that would shadow a file, and compose the components' `usr`
 /// and `etc` over the root's with read-only overlays. Runs before anything
 /// binds into either tree: an overlay does not show the submounts of its
 /// layers.
 pub(super) fn compose_core(
     control: &mut BootControl,
+    trust: &mut BuiltinTrust,
     ubi: Option<&SysUbi>,
     cores: &[&mica_deploy::components::CoreComponent],
 ) -> Result<()> {
@@ -101,6 +104,7 @@ pub(super) fn compose_core(
         let target = format!("/run/mica-core/{}", core.package);
         verified_mount(
             control,
+            trust,
             ubi,
             &match ubi {
                 Some(_) => format!("c-{}", core.id),
@@ -135,10 +139,42 @@ pub(super) fn compose_core(
     Ok(())
 }
 
-/// Open `image` under a signed dm-verity mapping `name` and mount it at
-/// `target`: from the file `object` through a loop device, or on a `ubi`
-/// board from the static volume named `object` through its `ubiblock`.
+/// Open the system's `image` under a signed dm-verity mapping `name` and
+/// mount it at `target`, its signature admitted by `trust` first: from the
+/// file `object` through a loop device, or on a `ubi` board from the static
+/// volume named `object` through its `ubiblock`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn verified_mount(
+    control: &mut BootControl,
+    trust: &mut BuiltinTrust,
+    ubi: Option<&SysUbi>,
+    object: &str,
+    signature: &str,
+    name: &str,
+    target: &str,
+    image: &VerityImage,
+) -> Result<()> {
+    trust.admit(&bounded_file(signature, 65536)?)?;
+    mapped_mount(control, ubi, object, signature, name, target, image)
+}
+
+/// [`verified_mount`] for a driver extension, which maps only once the
+/// owner keyring is sealed.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn extension_mount(
+    control: &mut BootControl,
+    _sealed: &Sealed,
+    ubi: Option<&SysUbi>,
+    object: &str,
+    signature: &str,
+    name: &str,
+    target: &str,
+    image: &VerityImage,
+) -> Result<()> {
+    mapped_mount(control, ubi, object, signature, name, target, image)
+}
+
+fn mapped_mount(
     control: &mut BootControl,
     ubi: Option<&SysUbi>,
     object: &str,

@@ -77,10 +77,11 @@ pub struct Released {
 
 /// No requested action can be authorized by a tool status or a shell marker.
 pub fn release(io: &mut impl LifecycleIo, budget: Budget, owner: &Ownership) -> Result<Released> {
-    // A deployment's mappings: the root, the kernel support image and one per
-    // core component.
+    // A deployment's mappings: the root, the kernel support image, one per
+    // core component and one per driver extension.
     ensure!(
-        owner.mappings.len() <= 2 + crate::components::MAX_CORE_COMPONENTS
+        owner.mappings.len()
+            <= 2 + crate::components::MAX_CORE_COMPONENTS + crate::extensions::MAX_EXTENSIONS
             && owner.loops.len() <= 128
             && owner.mounts.len() <= 4096,
         "excessive ownership record"

@@ -205,6 +205,7 @@ impl DeploymentStore {
     ) -> Result<()> {
         let kind = set.kind;
         let files = self.set_objects(set);
+        super::install::hold_system_signatures(&self.trust, &self.system, &files, objects)?;
         let mut bytes = envelope.len() as u64;
         let mut lebs = 0;
         for (path, artifact) in &files {

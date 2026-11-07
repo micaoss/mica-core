@@ -90,6 +90,34 @@ pub(super) fn publish_object(
     Ok(sync_dir(parent)?)
 }
 
+/// Hold every root hash signature among `files`, the one held already or
+/// the one `objects` brings, to the system's form (`docs/mica-core.md` 6.3)
+/// with the owner certificates enrolled on the SYSTEM at `system`.
+pub(super) fn hold_system_signatures(
+    trust: &Path,
+    system: &Path,
+    files: &[(Place, &crate::components::Artifact)],
+    objects: &Path,
+) -> Result<()> {
+    for (place, artifact) in files {
+        let Place::File(path) = place else { continue };
+        if !path.to_string_lossy().ends_with(".roothash.p7s") {
+            continue;
+        }
+        let source = if path.symlink_metadata().is_ok() {
+            path.clone()
+        } else {
+            objects.join(&artifact.sha256)
+        };
+        crate::boot::trust::require_system_signature(
+            trust,
+            system,
+            &read_bounded(&source, 65536)?,
+        )?;
+    }
+    Ok(())
+}
+
 /// Which core set a new deployment boots with.
 #[derive(Debug)]
 pub enum CoreChoice {
@@ -420,6 +448,7 @@ impl DeploymentStore {
         );
         ensure!(entries.len() <= 2, "retained deployment set is full");
         let files = self.object_paths(&deployment);
+        hold_system_signatures(&self.trust, &self.system, &files, objects)?;
         // Validate every missing input and reserve both destination filesystems
         // before exposing any candidate. Reused objects require no source copy.
         let mut system_bytes = 0_u64;

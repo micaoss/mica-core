@@ -1,103 +1,10 @@
 //! Making a `gpt` board's DATA again for a factory reset, before the root
-//! starts, with the verified root's own `mke2fs`.
-//!
-//! The initramfs carries no e2fsprogs; the root does. Nothing of the root is
-//! written and nothing is changed into: its program runs under its own
-//! dynamic loader, which finds the root's libraries by an explicit search
-//! path. Every link on the way is resolved inside the root, so an absolute
-//! link such as `/lib64/ld-linux-x86-64.so.2` names the root's file, not the
-//! initramfs's.
+//! starts, with the verified root's own `mke2fs` (`root_program`).
 
+use super::root_program::root_command;
 use crate::board::DataFormat;
-use anyhow::{Context, Result, bail, ensure};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
-
-/// The dynamic loader and the multiarch triplet of a Debian root, per
-/// architecture.
-fn loader(arch: &str) -> Result<(&'static [&'static str], &'static str)> {
-    Ok(match arch {
-        "amd64" => (
-            &[
-                "lib64/ld-linux-x86-64.so.2",
-                "usr/lib64/ld-linux-x86-64.so.2",
-                "usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
-            ],
-            "x86_64-linux-gnu",
-        ),
-        "arm64" => (
-            &[
-                "lib/ld-linux-aarch64.so.1",
-                "usr/lib/ld-linux-aarch64.so.1",
-                "usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1",
-            ],
-            "aarch64-linux-gnu",
-        ),
-        "armhf" => (
-            &[
-                "lib/ld-linux-armhf.so.3",
-                "usr/lib/ld-linux-armhf.so.3",
-                "usr/lib/arm-linux-gnueabihf/ld-linux-armhf.so.3",
-            ],
-            "arm-linux-gnueabihf",
-        ),
-        _ => bail!("unsupported architecture"),
-    })
-}
-
-/// `relative`, a path inside the tree at `root`, with every link on the way
-/// resolved inside that tree.
-pub fn resolve(root: &Path, relative: &str) -> Result<PathBuf> {
-    let mut pending: Vec<String> = relative
-        .split('/')
-        .filter(|part| !part.is_empty())
-        .rev()
-        .map(String::from)
-        .collect();
-    let mut current = PathBuf::new();
-    let mut links = 0;
-    while let Some(part) = pending.pop() {
-        match part.as_str() {
-            "." => continue,
-            ".." => {
-                current.pop();
-                continue;
-            }
-            _ => {}
-        }
-        let candidate = current.join(&part);
-        let full = root.join(&candidate);
-        if fs::symlink_metadata(&full)?.file_type().is_symlink() {
-            links += 1;
-            ensure!(links <= 16, "too many links below {}", root.display());
-            let target = fs::read_link(&full)?;
-            let target = target.to_str().context("a link that is not UTF-8")?;
-            if target.starts_with('/') {
-                current = PathBuf::new();
-            }
-            pending.extend(
-                target
-                    .split('/')
-                    .filter(|part| !part.is_empty())
-                    .rev()
-                    .map(String::from),
-            );
-        } else {
-            current = candidate;
-        }
-    }
-    Ok(root.join(current))
-}
-
-fn first(root: &Path, candidates: &[&str]) -> Result<PathBuf> {
-    candidates
-        .iter()
-        .find_map(|candidate| resolve(root, candidate).ok().filter(|path| path.is_file()))
-        .with_context(|| format!("no {} in the root", candidates[0]))
-}
+use anyhow::{Context, Result, ensure};
+use std::{fs, path::Path, process::Command};
 
 /// The command that formats `device` as the board's DATA with the `mke2fs`
 /// of the root at `root`.
@@ -107,33 +14,12 @@ fn first(root: &Path, candidates: &[&str]) -> Result<PathBuf> {
 /// The root has no loader or no `mke2fs` for `arch`, or `format` or
 /// `device` is not one to pass.
 pub fn mke2fs(root: &Path, arch: &str, device: &str, format: &DataFormat) -> Result<Command> {
-    let (loaders, triplet) = loader(arch)?;
-    let loader = first(root, loaders)?;
-    let program = first(root, &["usr/sbin/mke2fs", "sbin/mke2fs"])?;
-    let mut libraries = Vec::new();
-    for directory in [
-        format!("usr/lib/{triplet}"),
-        format!("lib/{triplet}"),
-        "usr/lib".to_owned(),
-        "lib".to_owned(),
-    ] {
-        if let Ok(path) = resolve(root, &directory)
-            && path.is_dir()
-            && !libraries.contains(&path)
-        {
-            libraries.push(path);
-        }
-    }
     ensure!(
         !device.is_empty() && !device.starts_with('-') && !device.contains(char::is_whitespace),
         "invalid DATA device"
     );
-    let mut command = Command::new(loader);
+    let mut command = root_command(root, arch, &["usr/sbin/mke2fs", "sbin/mke2fs"], "mke2fs")?;
     command
-        .env_clear()
-        .arg("--library-path")
-        .arg(std::env::join_paths(&libraries)?)
-        .arg(program)
         .args(["-q", "-F", "-t", "ext4", "-b", "4096", "-L", "data", "-O"])
         .arg(&format.features);
     if let Some(bytes) = format.bytes_per_inode {
@@ -214,27 +100,6 @@ mod tests {
     }
 
     #[test]
-    fn links_resolve_inside_the_root() {
-        let root = root();
-        let path = root.path();
-        assert_eq!(
-            resolve(path, "lib64/ld-linux-x86-64.so.2").unwrap(),
-            path.join("usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2")
-        );
-        assert_eq!(
-            resolve(path, "lib/../lib/x86_64-linux-gnu").unwrap(),
-            path.join("usr/lib/x86_64-linux-gnu")
-        );
-        // Out of the root by `..` is the root.
-        assert_eq!(
-            resolve(path, "../../usr/sbin/mke2fs").unwrap(),
-            path.join("usr/sbin/mke2fs")
-        );
-        symlink("loop", path.join("loop")).unwrap();
-        assert!(resolve(path, "loop").is_err());
-    }
-
-    #[test]
     fn the_roots_mke2fs_runs_under_its_own_loader() {
         let root = root();
         let path = root.path();
@@ -258,6 +123,8 @@ mod tests {
             [
                 "--library-path",
                 &libraries,
+                "--argv0",
+                "mke2fs",
                 &program,
                 "-q",
                 "-F",
@@ -296,7 +163,7 @@ mod tests {
     #[test]
     #[ignore = "needs a Debian root with e2fsprogs at MICA_TEST_MKE2FS_ROOT"]
     fn the_roots_mke2fs_makes_the_boards_data() {
-        let root = PathBuf::from(std::env::var("MICA_TEST_MKE2FS_ROOT").unwrap());
+        let root = std::path::PathBuf::from(std::env::var("MICA_TEST_MKE2FS_ROOT").unwrap());
         let arch = match std::env::consts::ARCH {
             "x86_64" => "amd64",
             "aarch64" => "arm64",

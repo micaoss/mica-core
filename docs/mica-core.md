@@ -363,7 +363,8 @@ absence is reported with its reason rather than as a healthy reading:
   root after it finishes the reset on SYSTEM: micad runs `mica-deploy factory-reset --finish`
   before anything else, and every locked mica-deploy command finishes it first. The finish
   removes every other deployment and every core set but the running deployment's, with the
-  objects only they held, records the reset in `meta/` and removes the request last, so an
+  objects only they held, and every driver extension and enrolled owner certificate, which the
+  boot into the reset neither maps nor loads (6.5), records the reset in `meta/` and removes the request last, so an
   interruption anywhere before that runs the reset again at the next boot. While a reset is
   staged, mica-deploy refuses everything that would change what it keeps. A runkit that says
   only `{"factoryReset": true}` erases DATA in place and keeps `meta/` (6.5); micad then stages
@@ -1137,6 +1138,8 @@ A product carries MQTT when its `FEATURES` has `mqtt` and its root holds both pa
 | Where | Holds |
 | --- | --- |
 | SYSTEM (`/mnt/system`) | At most two deployments: descriptors, signatures, content-addressed objects under `kernels/` and `roots/`. At most three sets of each kind under `sets/<kind>/` (6.2) |
+| SYSTEM `extensions/` | Driver extensions (6.5): `state.json`, the build of each extension per kernel component id, and `objects/<extId>/` with `ext.json`, `ext.roothash.p7s` and `ext.img` (on a `ubi` board the volume `x-<extId>`, 6.6); at most 16 per kernel |
+| SYSTEM `owner-certs/` | The owner's enrolled certificates for driver extensions: `<sha256>.der`, at most 16 of at most 16 KiB |
 | SYSTEM `factory-reset/` | A staged factory reset (3.7): `request.json` and `snapshot/`, the files of DATA's `meta/` it restores; present only from its staging to its finish |
 | ESP, or the U-Boot environment on a FIT board | The boot records that select a deployment and count trial attempts |
 | DATA `/mnt/data/meta` | Transaction state, catalog checkpoints, the firmware receipt and the record of the last factory reset (`factory-reset-done.json`); a factory reset restores the first three from its snapshot. A reset staged for a runkit of version 1 (`factory-reset.json`), which keeps this directory |
@@ -1359,7 +1362,7 @@ by the `component-contract-fixtures` example, signed with test-only keys, and co
 `/usr/bin/mica-deploy <command>` prints JSON, exits non-zero on failure and bounds every read by
 a budget (`--max-bytes`): `status`, `check`, `fetch`, `import`, `install`, `set-check`,
 `set-fetch`, `set-install`, `booted`, `confirm`, `reject`, `rollback`, `fail-boot`, `probe`,
-`discard`, `gc`, `firmware-readback`. micad names the source, the channel and the budget; left
+`discard`, `gc`, `firmware-readback`, `extension-install`, `extension-remove`. micad names the source, the channel and the budget; left
 out, they are the device's, resolved as micad resolves them (section 6.2): `source.url` of
 `/mica/config/updates.json` over the image's `update.source`, the channel each names for the
 kind of set, else `general`, and `source.maxBytes`, else 500 MB.
@@ -1379,10 +1382,33 @@ root on the device; micad passes its requester and source (`--by console|api|cli
 `factory-reset --finish` finishes the one the runkit carried out at this boot (`{"finished",
 "formatted", "removed"}`, or `{"finished": false}`); every other locked command finishes it
 first. While a reset is staged, `update`, `check`, `fetch`, `import`, `install`, the set
-commands, `rollback`, `reject` and a recording `firmware-readback` are refused, and `status`
+commands, the extension commands, `rollback`, `reject` and a recording `firmware-readback` are
+refused, and `status`
 names it in `factoryReset` (`state`: `staged`, `formatted` once the runkit made DATA again,
 `degraded` when it erased it in place; `deployment`, `requested`). `mica-deploy help` lists the
 commands.
+**Driver extensions.** `extension-install <descriptor> --objects <dir>` installs the driver
+extension a `mica/driver-ext-descriptor/v1` descriptor names, with `ext.img` and
+`ext.roothash.p7s` from `<dir>`, for the kernel it is built for, replacing that kernel's build of
+the same name (`{"extensionId"}`). The kernel must be one a retained deployment runs, of the same
+architecture, with `driver-ext` in its `features`; the objects are held to the descriptor's sizes
+and digests. Their root hash signature is the kernel's to check, when the image is mapped at the
+next boot of that kernel (6.5); mica-deploy does not check it. `extension-remove <name>
+[--kernel <id>]` stops installing an extension, for one kernel or every one (`{"removed",
+"removedExtensions"}`). Both, and `gc`, then collect the builds no state names and this boot did
+not map, and stop installing builds for kernels no retained deployment runs. `status` reports
+`extensions`: `installed` (the state), `boot` (`/run/mica/extensions.json`) and `trust`
+(`/run/mica/trust.json`).
+
+**The system's signatures.** Where the runkit sealed an owner keyring (`/run/mica/trust.json`,
+6.5), `install`, `set-install` and every update hold the root hash signature of each root, kernel
+support image and core component they install to the form mica signs in, which an owner's
+signature does not take: one signer, named by issuer and serial number, no certificates carried
+(a key the kernel trusts only through an enrolled certificate authority has to carry its chain),
+and not one of the certificates enrolled on SYSTEM. A key rotation keeps that form, so a system
+signed with the next key installs. Without the record, from a runkit that enrols nothing, the
+kernel trusts no owner's key, and nothing is held.
+
 Installation is a durable file transaction, proven by a fault suite that interrupts it before
 and after every observed IO. `fetch` takes the objects smallest first, so a power cut is most
 likely to cost the last and largest; on a `ubi` board it costs exactly the object in flight
@@ -1449,8 +1475,9 @@ read one format.
 - **`init`**, PID 1 of the signed initramfs: requires dm-verity signature enforcement, arms the
   watchdog, reads the policy, authenticates the selected deployment, opens root and support as
   signed dm-verity mappings, composes the core components (below), mounts DATA (with `prjquota` and the project directories unless the
-  board turns quotas off), carries out a staged factory reset, seeds the persistent machine identity, binds modules and firmware, and
-  hands over to the root's init. No network and no shell exist at this stage.
+  board turns quotas off), carries out a staged factory reset, seals the owner keyring, maps the
+  driver extensions and composes or binds modules and firmware (below), seeds the persistent
+  machine identity, and hands over to the root's init. No network and no shell exist at this stage.
   A factory reset staged on SYSTEM (3.7) is carried out at a boot of the deployment it names;
   one for another deployment, or one that cannot be read, waits and resets nothing. Before DATA
   is mounted the runkit makes it again: on a `gpt` board, once the partition is held to the
@@ -1487,6 +1514,39 @@ the components' trees, in package order, over the root's own, with no upper laye
 appear at the paths a package would have used (`/usr/bin/micad`, `/etc/init.d/apid`, the units
 and their enablement links). Shutdown releases the component mappings with the root's.
 
+**Trust, and driver extensions at boot.** The kernel checks every root hash signature against
+its secondary keyring: its builtin keys and, with mica-linux `CONFIG_MICA_OWNER_KEYRING`, the
+owner keyring `.mica_owner`, empty and open until the runkit seals it. The runkit maps the
+support image, the root and every core component first, while only the builtin keys are
+trusted, and holds their signatures to the system's form as well (6.3). It then adds the certificates enrolled on SYSTEM (`owner-certs/`, in name order;
+none at a factory reset boot) with `add_key("asymmetric")` and seals the keyring with
+`KEYCTL_RESTRICT_KEYRING`, whether or not one was added; a keyring sealed already counts, and
+one it cannot seal stops the boot. A kernel without the keyring trusts its builtin keys alone.
+Only then are extensions mapped. The order is in the types (`boot::trust`): a `BuiltinTrust`
+admits the system's mappings and is spent by the seal, a process takes only one, and only the
+`Sealed` the seal answers admits an extension. The runkit records `/run/mica/trust.json`:
+`ownerKeyring` (`sealed` or `absent`) and `ownerCerts`, each with its `sha256`, `state` (`loaded` or
+`rejected`) and `reason`.
+
+Each build `extensions/state.json` names for the booted kernel, in name order, is held to its
+descriptor and opened like a core component, a signed dm-verity mapping `mica-ext-<name>`
+mounted at `/run/mica-ext/<name>`. Its `manifest.json` is held to the descriptor and to the
+kernel's id, release and architecture, and its trees to the manifest: exactly the files it
+lists, and nothing but files and directories. A module name or firmware path an earlier
+extension carries is refused. One that does not map is `refused`; one that maps and does not
+hold is `unused`, and its mapping is released at shutdown; the boot goes on either way. The
+modules of those that hold are composed over the support image's in a tmpfs at
+`/run/mica-modules` and indexed there by the root's own `depmod`, run as `mke2fs` is above
+(`-b` the composition, `-o` the index, search order `updates built-in`, so an extension's module
+comes before the support image's of the same name). `/usr/lib/modules` is then a read-only
+overlay of the index, the extensions' `modules` trees and the support image's, and
+`/usr/lib/firmware` one of the extensions' `firmware` trees over the support image's. A root
+without kmod's `depmod`, or an index that fails, composes no extension (all `unused`); with
+nothing to compose, the support image's trees are bound as before. Module options and boot loads
+go to `/run/modprobe.d/mica-ext-<name>.conf` and `/run/modules-load.d/mica-ext-<name>.conf`. The
+record is `/run/mica/extensions.json`: `skipped` when none was mapped at all, and per extension
+its `name`, `id`, `version`, `state` (`mapped`, `unused` or `refused`) and `reason`.
+
 **The root interface level.** A `mica/rootfs/v1` root states an `interfaceLevel`, and each core
 component the levels it runs on (`root: { min, max }`); a core set whose selection does not run
 on a root is not composed over it, and a deployment is not installed with a set that does not
@@ -1509,7 +1569,8 @@ the component's `requires` (6.2), held only on a root that carries that package.
 
 `crates/lifecycle-sys` is the only crate allowed `unsafe`: typed, bounded wrappers for the
 watchdog, loop devices, device-mapper, ext4 project ids and quotas (`FS_IOC_FSSETXATTR`,
-`quotactl_fd`), the clock's synchronized bit, `FITRIM` and `BLKSECDISCARD`. The boot/shutdown gate proves every structure
+`quotactl_fd`), the clock's synchronized bit, `FITRIM`, `BLKSECDISCARD` and the owner keyring
+(`add_key`, `KEYCTL_RESTRICT_KEYRING`). The boot/shutdown gate proves every structure
 and request number against the kernel headers for x86-64 and aarch64
 (`scripts/gate/boot-shutdown/uapi.c`).
 
@@ -1544,13 +1605,14 @@ document (6.2).
 
 | Volume | Kind | Holds |
 | --- | --- | --- |
-| `system` | dynamic, UBIFS | SYSTEM's small files: `deployments/<id>.json`, `roots/<rootId>/rootfs.roothash{,.p7s}`, `kernels/<kernelId>/support.roothash{,.p7s}`, `sets/core/` (the signed sets, `state.json`, `objects/<componentId>/core.roothash{,.p7s}`) |
+| `system` | dynamic, UBIFS | SYSTEM's small files: `deployments/<id>.json`, `roots/<rootId>/rootfs.roothash{,.p7s}`, `kernels/<kernelId>/support.roothash{,.p7s}`, `sets/core/` (the signed sets, `state.json`, `objects/<componentId>/core.roothash{,.p7s}`), `extensions/` (`state.json`, `objects/<extId>/ext.json` and `ext.roothash.p7s`), `owner-certs/` |
 | `data` | dynamic, UBIFS | DATA; empty in the factory image, grown once at the first boot (below) |
 | `records-a`, `records-b` | dynamic, one LEB each | The two boot record copies |
 | `k-<kernelId>` | static | The kernel's `boot.itb` |
 | `s-<kernelId>` | static | The kernel's `support.img` |
 | `r-<rootId>` | static | The root's `rootfs.img` |
 | `c-<componentId>` | static | A core component's `core.img` |
+| `x-<extId>` | static | A driver extension's `ext.img` |
 | `p.<name>` | static | The object `<name>` while it is written |
 
 A static volume's data size is exactly the signed length of its object. An object is written
@@ -1560,8 +1622,8 @@ through its character device and checked against the signed digest, then renamed
 one volume-table update. An existing `<name>` is reused only when it is static, neither corrupted
 nor marked mid-update, of the signed size and of the signed digest. Collection and `gc` remove
 volumes (`UBI_IOCRMVOL`) as they remove files, after the records stop naming them: every `p.*`,
-and every `k-`, `s-`, `r-` or `c-` volume no retained deployment or set names. No other volume is
-touched. An object costs its size rounded up to whole LEBs; installation keeps `reserves.system`
+and every `k-`, `s-`, `r-` or `c-` volume no retained deployment or set names; an `x-` volume
+goes with its driver extension (6.3). No other volume is touched. An object costs its size rounded up to whole LEBs; installation keeps `reserves.system`
 free in the UBI device's available LEBs, and a download keeps `reserves.data` on DATA. Delta
 transfer reads its seeds from the object volumes' character devices.
 

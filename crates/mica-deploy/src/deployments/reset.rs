@@ -34,8 +34,10 @@ impl DeploymentStore {
     }
 
     /// Finish a factory reset on SYSTEM: retire every deployment but the
-    /// running one and collect what only they held, and leave each kind of
-    /// set with the running deployment's set alone. Answer what was removed.
+    /// running one and collect what only they held, leave each kind of set
+    /// with the running deployment's set alone, and remove every driver
+    /// extension and every enrolled owner certificate, which the boot into
+    /// the reset neither mapped nor loaded. Answer what was removed.
     /// Every step can run again. The caller holds the transaction lock and
     /// writable mounts.
     pub fn finish_factory_reset(&self, receipt: &BootReceipt, keys: &[[u8; 32]]) -> Result<usize> {
@@ -91,6 +93,7 @@ impl DeploymentStore {
             sync_dir(&directory)?;
         }
         removed += self.release_unreferenced(kind, keys)?;
+        removed += self.remove_all_extensions()?;
         Ok(removed)
     }
 }

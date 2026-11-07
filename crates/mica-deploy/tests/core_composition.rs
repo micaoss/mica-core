@@ -1,4 +1,5 @@
-//! Composing core components over the root: names, overlay arguments, shadowing.
+//! Composing core components over the root and driver extensions over the
+//! kernel support image: names, overlay arguments, shadowing.
 // Tests and fixtures answer a broken expectation by panicking.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -11,12 +12,13 @@ fn file(path: &Path) {
 }
 
 #[test]
-fn the_mappings_startup_owns_are_the_root_the_support_and_the_core_components() {
+fn the_mappings_startup_owns_are_the_root_the_support_the_core_components_and_the_extensions() {
     for name in [
         "mica-root",
         "mica-support",
         "mica-core-micad",
         "mica-core-mica-apid-ui",
+        "mica-ext-rtl8125",
     ] {
         assert!(mica_mapping(name), "{name}");
     }
@@ -27,6 +29,10 @@ fn the_mappings_startup_owns_are_the_root_the_support_and_the_core_components() 
         "crypt-root",
         "mica-rootfs",
         "mica-core--x",
+        "mica-ext-",
+        "mica-ext-RTL",
+        "mica-ext--x",
+        "mica-ext-a.b",
     ] {
         assert!(!mica_mapping(name), "{name}");
     }
@@ -79,6 +85,96 @@ fn an_overlay_composes_only_core_trees_over_the_roots_own() {
         (
             "/newroot/usr",
             vec!["/run/mica-core/a:b/usr", "/newroot/usr"],
+        ),
+    ] {
+        assert!(
+            overlay_data(target, &lower(&layers)).is_err(),
+            "{target} {layers:?}"
+        );
+    }
+}
+
+#[test]
+fn an_overlay_composes_only_extension_trees_over_the_support_images_own() {
+    use mica_deploy::extensions::{MODULE_INDEX_LAYER, MODULE_STAGING};
+    let lower = |layers: &[&str]| layers.iter().map(|l| (*l).to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        overlay_data(
+            "/newroot/usr/lib/modules",
+            &lower(&[
+                MODULE_INDEX_LAYER,
+                "/run/mica-ext/a/modules",
+                "/run/mica-ext/b/modules",
+                "/support/modules"
+            ])
+        )
+        .unwrap()
+        .to_str()
+        .unwrap(),
+        format!(
+            "lowerdir={MODULE_INDEX_LAYER}:/run/mica-ext/a/modules:/run/mica-ext/b/modules:/support/modules"
+        )
+    );
+    overlay_data(
+        MODULE_STAGING,
+        &lower(&["/run/mica-ext/a/modules", "/support/modules"]),
+    )
+    .unwrap();
+    overlay_data(
+        "/newroot/usr/lib/firmware",
+        &lower(&["/run/mica-ext/a/firmware", "/support/firmware"]),
+    )
+    .unwrap();
+    for (target, layers) in [
+        // The composed modules without their index, or the index elsewhere.
+        (
+            "/newroot/usr/lib/modules",
+            vec!["/run/mica-ext/a/modules", "/support/modules"],
+        ),
+        (
+            "/newroot/usr/lib/modules",
+            vec![
+                "/run/mica-ext/a/modules",
+                MODULE_INDEX_LAYER,
+                "/support/modules",
+            ],
+        ),
+        (
+            MODULE_STAGING,
+            vec![
+                MODULE_INDEX_LAYER,
+                "/run/mica-ext/a/modules",
+                "/support/modules",
+            ],
+        ),
+        ("/newroot/usr/lib/firmware", vec!["/support/firmware"]),
+        (
+            "/newroot/usr/lib/firmware",
+            vec!["/run/mica-ext/a/modules", "/support/firmware"],
+        ),
+        (
+            "/newroot/usr/lib/firmware",
+            vec!["/run/mica-ext/a/firmware", "/support/modules"],
+        ),
+        (
+            "/newroot/usr/lib/firmware",
+            vec![
+                "/run/mica-ext/a/firmware",
+                "/run/mica-ext/a/firmware",
+                "/support/firmware",
+            ],
+        ),
+        (
+            "/newroot/usr/lib/firmware",
+            vec!["/run/mica-ext/../x/firmware", "/support/firmware"],
+        ),
+        (
+            "/newroot/usr/lib/firmware",
+            vec!["/run/mica-core/micad/firmware", "/support/firmware"],
+        ),
+        (
+            "/newroot/usr/lib",
+            vec!["/run/mica-ext/a/lib", "/newroot/usr/lib"],
         ),
     ] {
         assert!(

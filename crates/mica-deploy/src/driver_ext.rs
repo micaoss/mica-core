@@ -116,7 +116,7 @@ fn relative_path(path: &str) -> bool {
 }
 
 /// The module name kmod knows a `.ko` path by.
-fn module_name(path: &str) -> String {
+pub(crate) fn module_name(path: &str) -> String {
     let file = path.rsplit('/').next().unwrap_or(path);
     file.strip_suffix(".ko").unwrap_or(file).replace('-', "_")
 }

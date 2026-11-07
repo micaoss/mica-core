@@ -19,6 +19,7 @@ use std::{
 
 pub mod format;
 pub mod gpt;
+pub mod root_program;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -78,7 +79,15 @@ pub enum Operation {
         signature: String,
         image: VerityImage,
     },
-    /// Compose core components' trees over the root's own, read-only.
+    /// Index the driver extensions' modules composed over the support
+    /// image's for the kernel release `release`, with the `depmod` of the
+    /// verified root at `/newroot` (`root_program::module_index`).
+    ModuleIndex {
+        arch: String,
+        release: String,
+    },
+    /// Compose core components' trees over the root's own, or driver
+    /// extensions' over the kernel support image's, read-only.
     Overlay {
         target: String,
         lower: Vec<String>,
@@ -93,7 +102,7 @@ pub fn overlay_data(target: &str, lower: &[String]) -> Result<CString> {
     let tree = match target {
         "/newroot/usr" => "usr",
         "/newroot/etc" => "etc",
-        _ => bail!("only /usr and /etc are composed"),
+        _ => return extension_overlay_data(target, lower),
     };
     ensure!(
         lower.len() >= 2 && lower.len() <= 17 && lower.last().map(String::as_str) == Some(target),
@@ -109,6 +118,49 @@ pub fn overlay_data(target: &str, lower: &[String]) -> Result<CString> {
             crate::boot::mica_mapping(&format!("{}{package}", crate::boot::CORE_MAPPING_PREFIX))
                 && seen.insert(package),
             "invalid or repeated core layer"
+        );
+    }
+    Ok(CString::new(format!("lowerdir={}", lower.join(":")))?)
+}
+
+/// The overlay data of a driver extension composition
+/// (`crate::extensions`): the extensions' `modules` or `firmware` trees, in
+/// the order given, over the kernel support image's own, at the root's
+/// `/usr/lib/modules` or `/usr/lib/firmware`; the root's modules also under
+/// the module index made for them, and while the index is made, at its
+/// staging directory with no index. No layer may repeat; no upper layer.
+pub fn extension_overlay_data(target: &str, lower: &[String]) -> Result<CString> {
+    use crate::extensions::{MODULE_INDEX_LAYER, MODULE_STAGING};
+    let (tree, index) = match target {
+        "/newroot/usr/lib/modules" => ("modules", true),
+        MODULE_STAGING => ("modules", false),
+        "/newroot/usr/lib/firmware" => ("firmware", false),
+        _ => bail!("only /usr, /etc and the support trees are composed"),
+    };
+    let support = format!("/support/{tree}");
+    let mut layers = lower;
+    if index {
+        ensure!(
+            layers.first().map(String::as_str) == Some(MODULE_INDEX_LAYER),
+            "the composed modules are under their index"
+        );
+        layers = &layers[1..];
+    }
+    ensure!(
+        layers.len() >= 2
+            && layers.len() <= 1 + crate::extensions::MAX_EXTENSIONS
+            && layers.last() == Some(&support),
+        "a composition is driver extensions over the support image's own tree"
+    );
+    let mut seen = std::collections::BTreeSet::new();
+    for layer in &layers[..layers.len() - 1] {
+        let name = layer
+            .strip_prefix(&format!("{}/", crate::extensions::MOUNTS))
+            .and_then(|rest| rest.strip_suffix(&format!("/{tree}")))
+            .context("an extension layer is /run/mica-ext/<name>/<tree>")?;
+        ensure!(
+            crate::extensions::valid_name(name) && seen.insert(name),
+            "invalid or repeated extension layer"
         );
     }
     Ok(CString::new(format!("lowerdir={}", lower.join(":")))?)
@@ -234,6 +286,9 @@ fn perform(operation: Operation) -> Result<()> {
             signature,
             image,
         } => super::verity::open(&device, &name, Path::new(&signature), &image)?,
+        Operation::ModuleIndex { arch, release } => {
+            root_program::module_index(Path::new("/newroot"), &arch, &release)?;
+        }
         Operation::Overlay { target, lower } => {
             let data = overlay_data(&target, &lower)?;
             rustix::mount::mount(

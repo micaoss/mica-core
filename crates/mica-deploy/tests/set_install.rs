@@ -972,3 +972,18 @@ fn a_system_update_never_downgrades_core_or_moves_it_off_its_channel() {
     let error = format!("{:#}", device.choose(None, old_podman(), None).unwrap_err());
     assert!(error.contains(&strict_id), "{error}");
 }
+
+/// Where the runkit sealed an owner keyring, a set whose root hash
+/// signatures are not in the system's form is not installed.
+#[test]
+fn a_set_not_signed_as_the_system_signs_is_refused_where_an_owner_keyring_is_sealed() {
+    let mut device = Device::bare();
+    let record = device.store.system.parent().unwrap().join("trust.json");
+    fs::write(&record, r#"{"ownerKeyring":"sealed","ownerCerts":[]}"#).unwrap();
+    device.store = device.store.with_trust(record.clone());
+    let error = format!("{:#}", device.install(&seed().0).unwrap_err());
+    assert!(error.contains("signature"), "{error}");
+    assert!(!device.held(&image_dir(&seed().0, "micad")));
+    fs::remove_file(&record).unwrap();
+    device.install(&seed().0).unwrap();
+}

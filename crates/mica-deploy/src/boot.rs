@@ -3,6 +3,7 @@
 mod data_projects;
 pub mod shutdown;
 pub mod startup;
+pub mod trust;
 
 pub use data_projects::{data_projects, variable_budget};
 
@@ -19,13 +20,18 @@ pub use data_projects::{data_projects, variable_budget};
 /// A product file that exists and cannot be read within its bound.
 /// The prefix of a core component's verity mapping: `mica-core-<package>`.
 pub const CORE_MAPPING_PREFIX: &str = "mica-core-";
+/// The prefix of a driver extension's verity mapping: `mica-ext-<name>`.
+pub const EXTENSION_MAPPING_PREFIX: &str = "mica-ext-";
 
 /// Whether `name` is a verity mapping MICA's startup creates and its shutdown
-/// releases: the root, the kernel support image, or a core component. Every
-/// other mapping is foreign and is never touched.
+/// releases: the root, the kernel support image, a core component or a
+/// driver extension. Every other mapping is foreign and is never touched.
 pub fn mica_mapping(name: &str) -> bool {
     name == "mica-root"
         || name == "mica-support"
+        || name
+            .strip_prefix(EXTENSION_MAPPING_PREFIX)
+            .is_some_and(crate::extensions::valid_name)
         || name
             .strip_prefix(CORE_MAPPING_PREFIX)
             .is_some_and(|package| {

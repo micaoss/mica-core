@@ -11,6 +11,7 @@ use mica_deploy::{
             self,
             native::{self, Operation as Startup},
         },
+        trust::{self, BuiltinTrust, Enrolment, KernelKeyring},
         utf16_variable,
     },
     components::{component_id, verify_deployment},
@@ -188,6 +189,8 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         "selected deployment identity mismatch"
     );
     let paths = deployment.paths()?;
+    // Until the owner keyring is sealed, every mapping is the system's.
+    let mut trust = BuiltinTrust::take().context("the system's trust is spent")?;
     let (rootfs, support) = match &ubi {
         Some(_) => (
             format!("r-{}", deployment.rootfs.id),
@@ -200,6 +203,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     };
     verified_mount(
         control,
+        &mut trust,
         ubi.as_ref(),
         &rootfs,
         &format!("/system/roots/{}/rootfs.roothash.p7s", deployment.rootfs.id),
@@ -209,6 +213,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     )?;
     verified_mount(
         control,
+        &mut trust,
         ubi.as_ref(),
         &support,
         &format!(
@@ -465,6 +470,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     );
     compose_core(
         control,
+        &mut trust,
         ubi.as_ref(),
         &core_set::select(&composition.set, &features, &deployment.rootfs.facts())?,
     )?;
@@ -473,29 +479,38 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         pending: composition.pending,
         paired: composition.paired,
     };
-    for (source, target) in [
-        ("/support/modules", "/newroot/usr/lib/modules"),
-        ("/support/firmware", "/newroot/usr/lib/firmware"),
-    ] {
-        ensure!(
-            fs::symlink_metadata(target)?.is_dir() && fs::read_dir(target)?.next().is_none(),
-            "invalid support mountpoint {target}"
-        );
-        run(
-            control,
-            Startup::Bind {
-                source: source.into(),
-                target: target.into(),
-            },
-        )?;
-        run(
-            control,
-            Startup::Remount {
-                target: target.into(),
-                options: "remount,bind,ro,nodev,nosuid".into(),
-            },
-        )?;
-    }
+    // The support image, the root and every core component are mapped: the
+    // owner's certificates go in now, and the keyring is sealed before any
+    // driver extension maps. A factory reset boot offers none and maps none.
+    let enrolment = if reset.is_some() {
+        Enrolment::None
+    } else {
+        Enrolment::Load(
+            trust::owner_certs(Path::new("/system")).unwrap_or_else(|error| {
+                eprintln!("mica-init: enrolled certificates unreadable: {error:#}");
+                Vec::new()
+            }),
+        )
+    };
+    let sealed = trust::enrol_and_seal(trust, &mut KernelKeyring, enrolment);
+    eprintln!(
+        "mica-init: owner keyring {:?}, {} of {} enrolled certificate(s) loaded",
+        sealed.trust.owner_keyring,
+        sealed
+            .trust
+            .owner_certs
+            .iter()
+            .filter(|cert| cert.state == trust::CertState::Loaded)
+            .count(),
+        sealed.trust.owner_certs.len()
+    );
+    let extensions = extensions::compose(
+        control,
+        &sealed,
+        ubi.as_ref(),
+        &deployment.kernel,
+        reset.is_some(),
+    )?;
     (|| -> Result<()> {
         persistent_machine_id(Path::new("/newroot/mnt/data/state"), || {
             Ok(fs::read_to_string("/proc/sys/kernel/random/uuid")?
@@ -542,6 +557,11 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     )?;
     fs::write("/run/mica/deployment.json", &envelope)?;
     fs::write(core_set::BOOT_FILE, serde_json::to_vec(&core_boot)?)?;
+    fs::write(trust::TRUST, serde_json::to_vec(&sealed.trust)?)?;
+    fs::write(
+        mica_deploy::extensions::BOOT_FILE,
+        serde_json::to_vec(&extensions)?,
+    )?;
     fs::write("/run/mica/core-set.json", &composition.envelope)?;
     // systemd execs /run/initramfs/shutdown at the end of its shutdown and
     // the exit ramdisk releases storage; openrc-init reboots by itself, so an

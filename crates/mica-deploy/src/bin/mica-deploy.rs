@@ -63,6 +63,14 @@ The steps, as micad runs them:
   set-install <set> --objects <dir>
   firmware-readback [<manifest>] [--record]
 
+Driver extensions:
+  extension-install <descriptor> --objects <dir>
+                  install a driver extension for the kernel it is built
+                  for, from ext.img and ext.roothash.p7s in <dir>; it maps
+                  from the next boot of that kernel
+  extension-remove <name> [--kernel <id>]
+                  stop installing an extension, for one kernel or every one
+
 Every command but update, factory-reset, help and version answers in JSON.
 
   --source <url>    the update root; source.url of /mica/config/updates.json,
@@ -151,6 +159,14 @@ enum Action {
     SetInstall {
         set: PathBuf,
         objects: PathBuf,
+    },
+    ExtensionInstall {
+        descriptor: PathBuf,
+        objects: PathBuf,
+    },
+    ExtensionRemove {
+        name: String,
+        kernel: Option<String>,
     },
 }
 
@@ -400,6 +416,14 @@ impl Cli {
             "set-install" => Action::SetInstall {
                 set: words.argument("set")?.into(),
                 objects: words.required("objects")?.into(),
+            },
+            "extension-install" => Action::ExtensionInstall {
+                descriptor: words.argument("descriptor")?.into(),
+                objects: words.required("objects")?.into(),
+            },
+            "extension-remove" => Action::ExtensionRemove {
+                name: words.argument("name")?,
+                kernel: words.option("kernel"),
             },
             _ => anyhow::bail!("unknown command {name:?}; mica-deploy help lists them"),
         };
@@ -696,6 +720,11 @@ fn execute() -> Result<()> {
                 "requested": request.requested,
             });
         }
+        status["extensions"] = json!({
+            "installed": mica_deploy::extensions::read_state(&store.system)?.builds,
+            "boot": mica_deploy::extensions::booted(Path::new(mica_deploy::extensions::BOOT_FILE))?,
+            "trust": mica_deploy::boot::trust::recorded(Path::new(mica_deploy::boot::trust::TRUST))?,
+        });
         if let BootBackend::Ubi { ubi } = &store.boot {
             status["ubi"] = mica_deploy::ubi::space(
                 ubi.as_ref(),
@@ -733,6 +762,8 @@ fn execute() -> Result<()> {
                 | Action::SetCheck { .. }
                 | Action::SetFetch { .. }
                 | Action::SetInstall { .. }
+                | Action::ExtensionInstall { .. }
+                | Action::ExtensionRemove { .. }
                 | Action::Rollback { .. }
                 | Action::Reject { .. }
                 | Action::FirmwareReadback { record: true, .. }
@@ -1095,7 +1126,11 @@ fn execute() -> Result<()> {
     // Confirming a boot settles the set on trial, which writes SYSTEM.
     let install = matches!(
         cli.command,
-        Action::Install { .. } | Action::Gc | Action::SetInstall { .. }
+        Action::Install { .. }
+            | Action::Gc
+            | Action::SetInstall { .. }
+            | Action::ExtensionInstall { .. }
+            | Action::ExtensionRemove { .. }
     ) || (matches!(cli.command, Action::Confirm)
         && store.sets_need_settling(&receipt.deployment_id, &booted_core)?);
     let reboot = matches!(cli.command, Action::Rollback { reboot: true });
@@ -1141,9 +1176,32 @@ fn execute() -> Result<()> {
                     .as_deref(),
             )
             .map(|value| json!(value)),
-        Action::Gc => store
-            .collect(&receipt, &keys)
-            .map(|count| json!({"removedFiles":count})),
+        Action::Gc => {
+            let removed = store.collect(&receipt, &keys)?;
+            let extensions = store.collect_extensions(&booted_extensions()?, &keys)?;
+            Ok(json!({"removedFiles": removed, "removedExtensions": extensions}))
+        }
+        Action::ExtensionInstall {
+            descriptor,
+            objects,
+        } => {
+            let id = store.install_extension(
+                &read_bounded(
+                    &descriptor,
+                    mica_deploy::driver_ext::MAX_DESCRIPTOR_BYTES as u64,
+                )?,
+                &objects.join("ext.img"),
+                &objects.join("ext.roothash.p7s"),
+                &keys,
+            )?;
+            store.collect_extensions(&booted_extensions()?, &keys)?;
+            Ok(json!({ "extensionId": id }))
+        }
+        Action::ExtensionRemove { name, kernel } => {
+            let removed = store.remove_extension(&name, kernel.as_deref())?;
+            let collected = store.collect_extensions(&booted_extensions()?, &keys)?;
+            Ok(json!({ "removed": removed, "removedExtensions": collected }))
+        }
         Action::SetInstall { set, objects } => store
             .install_set(
                 &read_bounded(&set, set_state::MAX_ENVELOPE_BYTES)?,
@@ -1176,6 +1234,15 @@ fn execute() -> Result<()> {
         command("reboot", &[])?;
     }
     Ok(())
+}
+
+/// The driver extensions this boot mapped, which a collection keeps.
+fn booted_extensions() -> Result<std::collections::BTreeSet<String>> {
+    Ok(
+        mica_deploy::extensions::booted(Path::new(mica_deploy::extensions::BOOT_FILE))?
+            .map(|record| record.mapped())
+            .unwrap_or_default(),
+    )
 }
 
 /// Why a check has nowhere to look.
@@ -1449,6 +1516,20 @@ mod tests {
             Action::SetInstall { set, objects }
                 if set == Path::new("/v/set.json") && objects == Path::new("/v/o")
         ));
+        assert!(matches!(
+            parse("extension-install /v/ext.json --objects /v/o").unwrap().command,
+            Action::ExtensionInstall { descriptor, objects }
+                if descriptor == Path::new("/v/ext.json") && objects == Path::new("/v/o")
+        ));
+        assert!(matches!(
+            parse("extension-remove rtl8125").unwrap().command,
+            Action::ExtensionRemove { name, kernel: None } if name == "rtl8125"
+        ));
+        assert!(matches!(
+            parse("extension-remove rtl8125 --kernel k").unwrap().command,
+            Action::ExtensionRemove { name, kernel: Some(kernel) }
+                if name == "rtl8125" && kernel == "k"
+        ));
     }
 
     #[test]
@@ -1587,6 +1668,10 @@ mod tests {
             "factory-reset --cancel --reboot",
             "factory-reset --finish --by cli",
             "status --reboot",
+            "extension-install /v/ext.json",
+            "extension-remove",
+            "extension-remove a b",
+            "extension-remove a --kernel",
             "help me",
         ] {
             assert!(parse(line).is_err(), "{line:?} parsed");

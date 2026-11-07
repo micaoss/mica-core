@@ -18,6 +18,7 @@ use std::{
 };
 
 mod boot;
+mod extensions;
 mod mounts;
 use boot::*;
 use mounts::*;
