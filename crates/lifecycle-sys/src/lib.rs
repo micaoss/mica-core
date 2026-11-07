@@ -10,6 +10,7 @@ use rustix::{
 
 mod clock;
 mod dm;
+mod keyring;
 mod quota;
 mod startup;
 mod trim;
@@ -17,6 +18,7 @@ mod ubi;
 pub use clock::clock_synchronized;
 use dm::*;
 pub use dm::{DmStatus, DmTarget, dm_remove, dm_status, dm_table};
+pub use keyring::{add_asymmetric_key, keyring_named, restrict_keyring};
 pub use quota::{ProjectQuota, project_of, project_quota, set_project_inherit, set_project_limits};
 pub use startup::{
     DmCreated, dm_create, dm_discard_created, dm_load_verity, dm_resume, loop_attach, loop_free,

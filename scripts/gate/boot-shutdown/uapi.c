@@ -125,3 +125,5 @@ _Static_assert(UBI_IOCVOLCRBLK == 0x40804f07, "UBI block create request");
 _Static_assert(UBI_IOCVOLRMBLK == 0x4f08, "UBI block remove request");
 _Static_assert(sizeof(__kernel_loff_t) == 8, "MTD offset size");
 _Static_assert(MEMGETBADBLOCK == 0x40084d0b, "MTD bad block request");
+#include <linux/keyctl.h>
+_Static_assert(KEYCTL_RESTRICT_KEYRING == 29, "keyring restriction request");
