@@ -132,7 +132,7 @@ impl DeploymentStore {
                     .pending
                     .as_ref()
                     .and_then(|_| set_state::read_trial(&self.meta))
-                    .filter(|trial| trial.kind == kind)
+                    .filter(|trial| trial.kind == kind.into())
                     .map(|trial| trial.attempts_left),
                 boot,
             },
@@ -158,6 +158,12 @@ impl DeploymentStore {
         ensure!(
             self.effective_state()?.candidate.is_none(),
             "a deployment is on trial; confirm it before a set update"
+        );
+        ensure!(
+            crate::extensions::read_state(&self.system)?
+                .pending
+                .is_none(),
+            "an extension change is on trial; let it settle before a set update"
         );
         let mut state = set_state::read_state(&self.system, kind)?;
         ensure!(state.pending.is_none(), "another set is pending");
@@ -271,7 +277,7 @@ impl DeploymentStore {
 
     /// The deployments a confirmation of `booted` leaves: every entry with a
     /// boot left, and the one booted.
-    fn retained_deployments(&self, booted: Option<&str>) -> Result<BTreeSet<String>> {
+    pub(super) fn retained_deployments(&self, booted: Option<&str>) -> Result<BTreeSet<String>> {
         Ok(self
             .entries()?
             .into_iter()

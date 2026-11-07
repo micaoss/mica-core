@@ -11,8 +11,8 @@ use mica_deploy::{
     core_set::{self, CoreBoot},
     defaults::{Defaults, GENERAL_CHANNEL},
     deployments::{
-        BootBackend, BootReceipt, DeploymentStore, SetTarget, SharedDataFailure, Target,
-        read_bounded,
+        BootBackend, BootReceipt, DeploymentStore, KernelExtensions, SetTarget, SharedDataFailure,
+        Target, read_bounded,
     },
     factory_reset, set_state,
     ubi::SysUbi,
@@ -60,16 +60,25 @@ The steps, as micad runs them:
   set-check --kind <kind> [--source <url>] [--channel <channel>] [--deployment <descriptor>]
   set-fetch --kind <kind> [--source <url>] [--channel <channel>] [--deployment <descriptor>]
   install <descriptor> --objects <dir> [--core-set <set>]
+          [--extension <descriptor>]... [--drop-extension <name>]...
   set-install <set> --objects <dir>
   firmware-readback [<manifest>] [--record]
 
 Driver extensions:
   extension-install <descriptor> --objects <dir>
-                  install a driver extension for the kernel it is built
-                  for, from ext.img and ext.roothash.p7s in <dir>; it maps
-                  from the next boot of that kernel
+                  install a driver extension for the running kernel, or the
+                  kernel of the system on trial, from ext.img and
+                  ext.roothash.p7s in <dir>; the next boots try it, and a
+                  healthy one keeps it
   extension-remove <name> [--kernel <id>]
-                  stop installing an extension, for one kernel or every one
+                  stop installing an extension, on trial in the same way
+  install ... --extension <descriptor>
+                  a build for the new system's kernel, its objects in the
+                  install's --objects by digest, on the system's trial; a
+                  system with a new kernel waits for a build of each
+                  extension the running kernel runs
+  install ... --drop-extension <name>
+                  the new system's kernel runs without the extension
 
 Every command but update, factory-reset, help and version answers in JSON.
 
@@ -153,6 +162,10 @@ enum Action {
         objects: PathBuf,
         /// The core channel's latest set, fetched for this deployment.
         core_set: Option<PathBuf>,
+        /// Driver extension descriptors for the deployment's kernel.
+        extensions: Vec<PathBuf>,
+        /// Driver extensions its kernel runs without.
+        dropped: Vec<String>,
     },
     /// Publish a signed set beside the current one of its kind and start its
     /// trial. The kind is the one the set was signed as.
@@ -172,6 +185,9 @@ enum Action {
 
 /// An action's arguments: its options by name, then its positional
 /// arguments in order. Each is taken once, and what is left over is refused.
+/// The options that may be given more than once.
+const REPEATABLE: &[&str] = &["extension", "drop-extension"];
+
 struct Words {
     options: Vec<(String, Option<String>)>,
     positional: std::collections::VecDeque<String>,
@@ -207,7 +223,7 @@ impl Words {
                 None => (option, None),
             };
             ensure!(
-                !words.options.iter().any(|(seen, _)| seen == name),
+                REPEATABLE.contains(&name) || !words.options.iter().any(|(seen, _)| seen == name),
                 "--{name} is given twice"
             );
             let value = if flags.contains(&name) {
@@ -224,6 +240,11 @@ impl Words {
             words.options.push((name.to_owned(), value));
         }
         Ok(words)
+    }
+
+    /// Every value of the repeatable option `name`, in order.
+    fn options(&mut self, name: &str) -> Vec<String> {
+        std::iter::from_fn(|| self.option(name)).collect()
     }
 
     fn option(&mut self, name: &str) -> Option<String> {
@@ -412,6 +433,12 @@ impl Cli {
                 descriptor: words.argument("descriptor")?.into(),
                 objects: words.required("objects")?.into(),
                 core_set: words.option("core-set").map(PathBuf::from),
+                extensions: words
+                    .options("extension")
+                    .into_iter()
+                    .map(PathBuf::from)
+                    .collect(),
+                dropped: words.options("drop-extension"),
             },
             "set-install" => Action::SetInstall {
                 set: words.argument("set")?.into(),
@@ -720,8 +747,17 @@ fn execute() -> Result<()> {
                 "requested": request.requested,
             });
         }
+        let extensions = mica_deploy::extensions::read_state(&store.system)?;
         status["extensions"] = json!({
-            "installed": mica_deploy::extensions::read_state(&store.system)?.builds,
+            "pending": extensions.pending,
+            "pair": extensions.paired(),
+            // A change alone has its own trial; a pair's is its deployment's.
+            "attemptsLeft": extensions.pending_id().filter(|_| extensions.pair.is_none()).and_then(|id| {
+                set_state::read_trial(&store.meta)
+                    .filter(|trial| trial.kind == set_state::TrialKind::Extensions && trial.id == id)
+                    .map(|trial| trial.attempts_left)
+            }),
+            "installed": extensions.builds,
             "boot": mica_deploy::extensions::booted(Path::new(mica_deploy::extensions::BOOT_FILE))?,
             "trust": mica_deploy::boot::trust::recorded(Path::new(mica_deploy::boot::trust::TRUST))?,
         });
@@ -1051,6 +1087,12 @@ fn execute() -> Result<()> {
             release: Some(&release),
         };
         let source = |given| or_device(given, |device| device.source.clone().context(NO_SOURCE));
+        // What the selected system's kernel would wait for.
+        let waits = |selected: Option<&mica_deploy::catalog::SelectedRelease>| {
+            selected.map_or(Ok(Vec::new()), |selected| {
+                store.waits_for_extension(&receipt.kernel_id, &selected.deployment.kernel.id)
+            })
+        };
         let channel = |given, kind: SetKind| {
             or_device(given, |device| Ok(device.channel(kind.as_str()).to_owned()))
         };
@@ -1059,12 +1101,19 @@ fn execute() -> Result<()> {
             Action::Discard => json!({"removedFiles":acquisition.discard()?}),
             Action::Check { source: given } => {
                 let catalog = acquisition.check(&source(given)?)?;
-                json!({"revision":catalog.checkpoint.revision,"selected":catalog.selected})
+                let waits = waits(catalog.selected.as_ref())?;
+                json!({"revision":catalog.checkpoint.revision,"selected":catalog.selected,
+                    "waitsForExtension":waits})
             }
             Action::Fetch { source: given } => {
                 let catalog = acquisition.check(&source(given)?)?;
+                let waits = waits(catalog.selected.as_ref())?;
                 match catalog.selected {
-                    Some(selected) => json!(acquisition.fetch(selected)?),
+                    Some(selected) => {
+                        let mut fetched = json!(acquisition.fetch(selected)?);
+                        fetched["waitsForExtension"] = json!(waits);
+                        fetched
+                    }
                     None => serde_json::Value::Null,
                 }
             }
@@ -1123,7 +1172,10 @@ fn execute() -> Result<()> {
         return Ok(());
     }
     let booted_core = core_boot()?;
-    // Confirming a boot settles the set on trial, which writes SYSTEM.
+    let booted_trial =
+        mica_deploy::extensions::booted(Path::new(mica_deploy::extensions::BOOT_FILE))?
+            .and_then(|record| record.trial);
+    // Confirming a boot settles what is on trial, which writes SYSTEM.
     let install = matches!(
         cli.command,
         Action::Install { .. }
@@ -1132,7 +1184,12 @@ fn execute() -> Result<()> {
             | Action::ExtensionInstall { .. }
             | Action::ExtensionRemove { .. }
     ) || (matches!(cli.command, Action::Confirm)
-        && store.sets_need_settling(&receipt.deployment_id, &booted_core)?);
+        && (store.sets_need_settling(&receipt.deployment_id, &booted_core)?
+            || store.extensions_need_settling(
+                &receipt.deployment_id,
+                booted_trial.as_ref(),
+                &keys,
+            )?));
     let reboot = matches!(cli.command, Action::Rollback { reboot: true });
     let result = writable(backend, install, || match cli.command {
         Action::Confirm => {
@@ -1142,12 +1199,17 @@ fn execute() -> Result<()> {
             // confirms nothing composed over it.
             // The answer is the deployment state; `status` reports the sets.
             store.settle_sets(&receipt.deployment_id, &booted_core, &keys)?;
+            store.settle_extensions(&receipt.deployment_id, booted_trial.as_ref(), &keys)?;
             Ok(json!(state))
         }
-        // A boot that failed with a set alone on trial is the set's failure,
-        // and its trial has already paid for it: the deployment is kept.
+        // A boot that failed with a set or an extension change alone on
+        // trial is that trial's failure, and the trial has already paid for
+        // it: the deployment is kept.
         Action::FailBoot if booted_core.pending && !booted_core.paired => {
             Ok(json!({"retired": false, "setTrial": "core"}))
+        }
+        Action::FailBoot if booted_trial.as_ref().is_some_and(|trial| !trial.paired) => {
+            Ok(json!({"retired": false, "setTrial": "extensions"}))
         }
         Action::FailBoot => store
             .fail_boot(&receipt)
@@ -1158,8 +1220,10 @@ fn execute() -> Result<()> {
             descriptor,
             objects,
             core_set,
+            extensions,
+            dropped,
         } => store
-            .install(
+            .install_with_extensions(
                 &read_bounded(&descriptor, 24576)?,
                 &keys,
                 &Target {
@@ -1174,6 +1238,15 @@ fn execute() -> Result<()> {
                     .map(|path| read_bounded(&path, set_state::MAX_ENVELOPE_BYTES))
                     .transpose()?
                     .as_deref(),
+                &KernelExtensions {
+                    descriptors: extensions
+                        .iter()
+                        .map(|path| {
+                            read_bounded(path, mica_deploy::driver_ext::MAX_DESCRIPTOR_BYTES as u64)
+                        })
+                        .collect::<std::io::Result<_>>()?,
+                    dropped,
+                },
             )
             .map(|value| json!(value)),
         Action::Gc => {
@@ -1193,12 +1266,14 @@ fn execute() -> Result<()> {
                 &objects.join("ext.img"),
                 &objects.join("ext.roothash.p7s"),
                 &keys,
+                &receipt.deployment_id,
             )?;
             store.collect_extensions(&booted_extensions()?, &keys)?;
             Ok(json!({ "extensionId": id }))
         }
         Action::ExtensionRemove { name, kernel } => {
-            let removed = store.remove_extension(&name, kernel.as_deref())?;
+            let removed =
+                store.remove_extension(&name, kernel.as_deref(), &keys, &receipt.deployment_id)?;
             let collected = store.collect_extensions(&booted_extensions()?, &keys)?;
             Ok(json!({ "removed": removed, "removedExtensions": collected }))
         }
@@ -1506,11 +1581,22 @@ mod tests {
         ));
         assert!(matches!(
             parse("install /v/id.json --objects /v/objects --core-set /v/set.json").unwrap().command,
-            Action::Install { descriptor, objects, core_set: Some(set) }
+            Action::Install { descriptor, objects, core_set: Some(set), extensions, dropped }
                 if descriptor == Path::new("/v/id.json")
                     && objects == Path::new("/v/objects")
                     && set == Path::new("/v/set.json")
+                    && extensions.is_empty()
+                    && dropped.is_empty()
         ));
+        assert!(matches!(
+            parse("install /v/id.json --objects /v/o --extension /v/a.json --drop-extension b --extension /v/c.json")
+                .unwrap()
+                .command,
+            Action::Install { extensions, dropped, core_set: None, .. }
+                if extensions == [Path::new("/v/a.json"), Path::new("/v/c.json")]
+                    && dropped == ["b"]
+        ));
+        assert!(parse("install /v/id.json --objects /v/o --objects /v/p").is_err());
         assert!(matches!(
             parse("set-install /v/set.json --objects /v/o").unwrap().command,
             Action::SetInstall { set, objects }

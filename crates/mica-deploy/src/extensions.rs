@@ -3,15 +3,20 @@
 //! makes of them.
 //!
 //! SYSTEM `extensions/state.json` names, per kernel component id, the build
-//! of each extension by its extension id (`driver_ext`). Each build is in
+//! of each extension by its extension id (`driver_ext`): the confirmed
+//! `builds`, and at most one change on trial, `pending`, the whole proposed
+//! `builds`. A pending change is tried alone, with its boots counted in the
+//! trial file of `set_state` as kind `extensions` with the id
+//! [`State::pending_id`], or with the deployment `pair` and that
+//! deployment's trial. Each build is in
 //! `extensions/objects/<extId>/`: its descriptor `ext.json`, its root hash
 //! signature `ext.roothash.p7s` and its image `ext.img`, which on a `ubi`
 //! board is the static volume `x-<extId>` instead. The state is written
 //! after the objects it names, so a build is whole before it counts; objects
 //! nothing names are collected.
 //!
-//! The runkit maps the builds the state names for the booted kernel, after
-//! the owner keyring is sealed (`boot::trust`), holds each mapped image's
+//! The runkit maps the builds [`boot_choice`] picks for the booted kernel,
+//! after the owner keyring is sealed (`boot::trust`), holds each mapped image's
 //! manifest to its descriptor and kernel and its trees to its manifest, and
 //! records what it did in [`BOOT_FILE`].
 
@@ -50,41 +55,113 @@ pub const MODULE_STAGING: &str = "/run/mica-modules/base/usr/lib/modules";
 /// The index `depmod` writes for them (as `<out>/usr/lib/modules`).
 pub const MODULE_INDEX_LAYER: &str = "/run/mica-modules/out/usr/lib/modules";
 
-/// `state.json`: kernel component id → extension name → extension id.
+/// Kernel component id → extension name → extension id.
+pub type Builds = BTreeMap<String, BTreeMap<String, String>>;
+
+/// `state.json`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
-    pub builds: BTreeMap<String, BTreeMap<String, String>>,
+    /// What is confirmed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub builds: Builds,
+    /// The change on trial: what `builds` would become.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending: Option<Builds>,
+    /// The deployment the pending change is paired with: it is mapped when
+    /// that deployment boots, and its trial is the deployment's. Without a
+    /// pending change it means nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pair: Option<String>,
+}
+
+fn validate_builds(builds: &Builds) -> Result<()> {
+    ensure!(builds.len() <= MAX_KERNELS, "too many extension kernels");
+    for (kernel, builds) in builds {
+        crate::deployments::valid_id(kernel)?;
+        ensure!(
+            !builds.is_empty() && builds.len() <= MAX_EXTENSIONS,
+            "invalid extension builds"
+        );
+        for (name, id) in builds {
+            ensure!(valid_name(name), "invalid extension name");
+            crate::deployments::valid_id(id)?;
+        }
+    }
+    Ok(())
 }
 
 impl State {
     fn validate(&self) -> Result<()> {
-        ensure!(
-            self.builds.len() <= MAX_KERNELS,
-            "too many extension kernels"
-        );
-        for (kernel, builds) in &self.builds {
-            crate::deployments::valid_id(kernel)?;
-            ensure!(
-                !builds.is_empty() && builds.len() <= MAX_EXTENSIONS,
-                "invalid extension builds"
-            );
-            for (name, id) in builds {
-                ensure!(valid_name(name), "invalid extension name");
-                crate::deployments::valid_id(id)?;
-            }
+        validate_builds(&self.builds)?;
+        if let Some(pending) = &self.pending {
+            validate_builds(pending)?;
+        }
+        if let Some(pair) = &self.pair {
+            crate::deployments::valid_id(pair)?;
         }
         Ok(())
     }
 
-    /// Every extension id the state names.
+    /// Every extension id the state names, confirmed or pending.
     #[must_use]
     pub fn ids(&self) -> BTreeSet<&str> {
         self.builds
             .values()
+            .chain(self.pending.iter().flat_map(BTreeMap::values))
             .flat_map(|builds| builds.values().map(String::as_str))
             .collect()
     }
+
+    /// The trial id of the pending change: the digest of what it proposes.
+    #[must_use]
+    pub fn pending_id(&self) -> Option<String> {
+        let pending = self.pending.as_ref()?;
+        Some(crate::components::sha256(
+            &serde_json::to_vec(pending).unwrap_or_default(),
+        ))
+    }
+
+    /// The deployment the pending change is paired with, if it is a pair.
+    #[must_use]
+    pub fn paired(&self) -> Option<&str> {
+        self.pending.as_ref().and(self.pair.as_deref())
+    }
+}
+
+/// A pending change a boot mapped, in [`BootExtensions`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct BootTrial {
+    /// Whether it was mapped with its paired deployment, whose trial it is.
+    pub paired: bool,
+    /// Its [`State::pending_id`].
+    pub id: String,
+}
+
+/// Which builds a boot of the deployment `deployment`, which runs the kernel
+/// `kernel`, maps, and the trial they are: the pending change when it is
+/// paired with `deployment`; the pending change alone when it changes
+/// `kernel`'s builds and `spend` spends a boot of its trial (given its id);
+/// else the confirmed builds.
+pub fn boot_choice(
+    state: &State,
+    deployment: &str,
+    kernel: &str,
+    spend: impl FnOnce(&str) -> bool,
+) -> (BTreeMap<String, String>, Option<BootTrial>) {
+    let confirmed = state.builds.get(kernel).cloned().unwrap_or_default();
+    let (Some(pending), Some(id)) = (&state.pending, state.pending_id()) else {
+        return (confirmed, None);
+    };
+    let proposed = pending.get(kernel).cloned().unwrap_or_default();
+    let paired = match state.pair.as_deref() {
+        Some(pair) if pair == deployment => true,
+        Some(_) => return (confirmed, None),
+        None if proposed != confirmed && spend(&id) => false,
+        None => return (confirmed, None),
+    };
+    (proposed, Some(BootTrial { paired, id }))
 }
 
 /// An extension name as `driver_ext` admits it.
@@ -138,7 +215,7 @@ pub fn write_state(system: &Path, state: &State) -> Result<()> {
     state.validate()?;
     let directory = dir(system);
     let path = directory.join(STATE);
-    if state.builds.is_empty() {
+    if state.builds.is_empty() && state.pending.is_none() {
         if path.symlink_metadata().is_ok() {
             fs::remove_file(&path)?;
             mica_fs::sync_dir(&directory)?;
@@ -181,6 +258,9 @@ pub struct BootExtensions {
     /// Why no extension was mapped at all, when none was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skipped: Option<String>,
+    /// The pending change these are, when they are one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trial: Option<BootTrial>,
     pub extensions: Vec<BootExtension>,
 }
 

@@ -987,3 +987,23 @@ fn a_set_not_signed_as_the_system_signs_is_refused_where_an_owner_keyring_is_sea
     fs::remove_file(&record).unwrap();
     device.install(&seed().0).unwrap();
 }
+
+/// One trial at a time: a set waits while a driver extension change is on
+/// trial.
+#[test]
+fn a_set_waits_while_an_extension_change_is_on_trial() {
+    let device = Device::bare();
+    let kernel = "1".repeat(64);
+    mica_deploy::extensions::write_state(
+        &device.store.system,
+        &mica_deploy::extensions::State {
+            pending: Some([(kernel, [("rtl8125".to_owned(), "2".repeat(64))].into())].into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let error = format!("{:#}", device.install(&seed().0).unwrap_err());
+    assert!(error.contains("an extension change is on trial"), "{error}");
+    mica_deploy::extensions::write_state(&device.store.system, &Default::default()).unwrap();
+    device.install(&seed().0).unwrap();
+}

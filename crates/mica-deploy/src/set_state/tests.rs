@@ -109,3 +109,16 @@ fn a_damaged_trial_tries_nothing() {
         assert!(trial_is_over(&meta, CORE, ID));
     }
 }
+
+/// A driver extension change's trial is no set's, and a set's trial is no
+/// change's: one trial file, one thing on trial.
+#[test]
+fn a_trial_is_of_one_kind() {
+    let (_dir, _system, meta) = dirs();
+    start_trial(&meta, TrialKind::Extensions, ID).unwrap();
+    assert!(!spend_attempt(&meta, CORE, ID));
+    assert!(trial_is_over(&meta, CORE, ID));
+    assert!(spend_attempt(&meta, TrialKind::Extensions, ID));
+    let text = std::fs::read_to_string(meta.join("set-trial.json")).unwrap();
+    assert!(text.contains("\"kind\":\"extensions\""), "{text}");
+}

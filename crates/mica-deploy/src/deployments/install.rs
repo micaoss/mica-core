@@ -405,6 +405,32 @@ impl DeploymentStore {
         receipt: &BootReceipt,
         latest: Option<&[u8]>,
     ) -> Result<State> {
+        self.install_with_extensions(
+            envelope,
+            keys,
+            target,
+            objects,
+            receipt,
+            latest,
+            &KernelExtensions::default(),
+        )
+    }
+
+    /// [`Self::install`], with the driver extensions the deployment's kernel
+    /// runs (`extensions`), paired with it as one change on its trial. While
+    /// an extension the running kernel runs has no build for a new kernel
+    /// and is not dropped, the installation waits ([`WaitsForExtension`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn install_with_extensions(
+        &self,
+        envelope: &[u8],
+        keys: &[[u8; 32]],
+        target: &Target,
+        objects: &Path,
+        receipt: &BootReceipt,
+        latest: Option<&[u8]>,
+        extensions: &KernelExtensions,
+    ) -> Result<State> {
         use crate::components::{authenticate_deployment, component_id};
         let deployment = authenticate_deployment(envelope, keys)?;
         ensure!(
@@ -433,6 +459,7 @@ impl DeploymentStore {
         ensure!(state.candidate.is_none(), "another deployment is pending");
         let choice = self.core_choice(&deployment, keys, target, objects, latest)?;
         self.validate_receipt(receipt)?;
+        let pairing = self.pair_extensions(&deployment, &receipt.kernel_id, extensions)?;
         ensure!(
             state.current.as_deref() == Some(receipt.deployment_id.as_str())
                 && entries
@@ -585,6 +612,9 @@ impl DeploymentStore {
             cores.pending = Some(set_id.clone());
         }
         crate::set_state::write_state(&self.system, kind, &cores)?;
+        if let Some(pairing) = pairing {
+            self.publish_pairing(pairing, objects, &id)?;
+        }
         // The entry is the activation commit. All referenced bytes are durable.
         match &self.boot {
             BootBackend::Uefi { esp } => {

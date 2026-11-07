@@ -180,7 +180,7 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
             write(&root.join("candidate-objects"), &archive);
         }
         d["generation"] = json!(generation);
-        if operation == "ext-install" {
+        if operation.starts_with("ext-") {
             // A kernel whose runkit maps driver extensions.
             d["kernel"]["features"] = json!(["driver-ext"]);
         }
@@ -327,7 +327,7 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
         archive.extend(fs::read(root.join("candidate-objects")).unwrap());
         write(&root.join("candidate.archive"), &archive);
     }
-    if !["install", "reuse", "import", "ext-install"].contains(&operation) {
+    if !["install", "reuse", "import", "ext-install", "ext-pair"].contains(&operation) {
         store
             .install(
                 &envelopes[2],
@@ -345,7 +345,7 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
             )
             .unwrap();
     }
-    if !["install", "reuse", "import", "ext-install"].contains(&operation) {
+    if !["install", "reuse", "import", "ext-install", "ext-pair"].contains(&operation) {
         if store.boot.is_fit() {
             let mut environment = store.boot.records().unwrap();
             environment.records[0].tries_left = Some(2);
@@ -378,24 +378,61 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
         .unwrap();
         write(&root.join("retained-id"), running.deployment_id.as_bytes());
     }
-    if operation == "ext-install" {
-        // The running kernel has a build of the extension; its next one is
-        // downloaded beside it.
+    if operation.starts_with("ext-") {
+        // The running kernel runs a confirmed build of the extension. Its
+        // next build is downloaded beside it: for the same kernel, or for the
+        // kernel of the system update it comes with, its objects by digest.
         let kernel = deployments[1]["kernel"]["id"].as_str().unwrap();
         let arch = deployments[1]["kernel"]["arch"].as_str().unwrap();
         let old = extension(root, "ext-1", kernel, arch, 50);
-        let id = store
-            .install_extension(
-                &old,
-                &root.join("ext-1/ext.img"),
-                &root.join("ext-1/ext.roothash.p7s"),
-                &[public],
-            )
-            .unwrap();
+        let id = hash(&old);
+        let directory = mica_deploy::extensions::object_dir(&store.system, &id);
+        fs::create_dir_all(&directory).unwrap();
+        for file in ["ext.json", "ext.roothash.p7s", "ext.img"] {
+            let bytes = fs::read(root.join("ext-1").join(file)).unwrap();
+            match kind {
+                Kind::Ubi if file == "ext.img" => {
+                    ubi::DirUbi::open_at(&root.join("store/ubi"))
+                        .put_static(&format!("x-{id}"), &bytes);
+                }
+                _ => write(&directory.join(file), &bytes),
+            }
+        }
+        mica_deploy::extensions::write_state(
+            &store.system,
+            &mica_deploy::extensions::State {
+                builds: [(
+                    kernel.to_owned(),
+                    [("rtl8125".to_owned(), id.clone())].into(),
+                )]
+                .into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         write(&root.join("ext-old-id"), id.as_bytes());
-        let new = extension(root, "ext-2", kernel, arch, 51);
-        write(&root.join("ext-new-id"), hash(&new).as_bytes());
         write(&root.join("ext-kernel"), kernel.as_bytes());
+        let next = if operation == "ext-install" {
+            kernel
+        } else {
+            deployments[2]["kernel"]["id"].as_str().unwrap()
+        };
+        assert!((next != kernel) == (operation != "ext-install"));
+        let new = extension(root, "ext-2", next, arch, 51);
+        for file in ["ext.img", "ext.roothash.p7s"] {
+            let bytes = fs::read(root.join("ext-2").join(file)).unwrap();
+            write(&root.join("objects").join(hash(&bytes)), &bytes);
+        }
+        write(&root.join("ext-new-id"), hash(&new).as_bytes());
+        write(&root.join("ext-next-kernel"), next.as_bytes());
+        write(
+            &root.join("candidate-id"),
+            component_id(&deployments[2]).unwrap().as_bytes(),
+        );
+        write(
+            &root.join("fallback-kernel"),
+            deployments[0]["kernel"]["id"].as_str().unwrap().as_bytes(),
+        );
     }
     if operation == "gc" {
         store.confirm(&receipt(&deployments[2], kind)).unwrap();
@@ -447,26 +484,56 @@ fn extension(root: &Path, dir: &str, kernel: &str, arch: &str, fill: u8) -> Vec<
     write(&root.join(dir).join("ext.json"), &descriptor);
     descriptor
 }
-/// After an extension install, whatever was interrupted: the build the state
-/// names is whole, and once the install ran through it is the new one alone.
+/// After an extension install, alone or with a system update, whatever was
+/// interrupted: the confirmed build stays, a pending change names the new
+/// build whole, is on its trial alone or paired with the update, and once the
+/// install ran through it is there.
 fn validate_extensions(root: &Path, kind: Kind, operation: &str, finished: bool) {
-    if operation != "ext-install" {
+    if !operation.starts_with("ext-") {
         return;
     }
     let store = store(root, kind);
     let kernel = fs::read_to_string(root.join("ext-kernel")).unwrap();
+    let next = fs::read_to_string(root.join("ext-next-kernel")).unwrap();
     let (old, new) = (
         fs::read_to_string(root.join("ext-old-id")).unwrap(),
         fs::read_to_string(root.join("ext-new-id")).unwrap(),
     );
     let state = mica_deploy::extensions::read_state(&store.system).unwrap();
-    let named = &state.builds[&kernel]["rtl8125"];
-    assert!(*named == old || *named == new, "{named}");
+    assert_eq!(state.builds[&kernel]["rtl8125"], old);
+    held_build(root, kind, &store, &old);
+    let Some(pending) = &state.pending else {
+        assert!(!finished, "the change is pending");
+        return;
+    };
+    assert_eq!(pending[&next]["rtl8125"], new);
+    held_build(root, kind, &store, &new);
+    if operation == "ext-pair" {
+        let candidate = fs::read_to_string(root.join("candidate-id")).unwrap();
+        assert_eq!(state.pair.as_deref(), Some(candidate.as_str()));
+        assert_eq!(
+            pending[&kernel]["rtl8125"], old,
+            "the running kernel's stays"
+        );
+    } else {
+        assert_eq!(state.pair, None);
+        let trial = mica_deploy::set_state::read_trial(&store.meta).unwrap();
+        assert_eq!(trial.kind, mica_deploy::set_state::TrialKind::Extensions);
+        assert_eq!(Some(trial.id), state.pending_id());
+    }
+    if finished && kind == Kind::Ubi {
+        let names = ubi::DirUbi::open_at(&root.join("store/ubi")).names();
+        assert!(!names.iter().any(|name| name.starts_with("p.")));
+    }
+}
+
+/// The build `named` is held whole, as its descriptor says.
+fn held_build(root: &Path, kind: Kind, store: &DeploymentStore, named: &str) {
     let directory = mica_deploy::extensions::object_dir(&store.system, named);
     let extension =
         mica_deploy::driver_ext::parse_descriptor(&fs::read(directory.join("ext.json")).unwrap())
             .unwrap();
-    assert_eq!(extension.id, *named);
+    assert_eq!(extension.id, named);
     let content = &extension.descriptor.content;
     let image = match kind {
         Kind::Ubi => ubi::DirUbi::open_at(&root.join("store/ubi")).read(&format!("x-{named}")),
@@ -483,15 +550,6 @@ fn validate_extensions(root: &Path, kind: Kind, operation: &str, finished: bool)
             (bytes.len() as u64, hash(&bytes)),
             (artifact.bytes, artifact.sha256.clone())
         );
-    }
-    if finished {
-        assert_eq!(*named, new);
-        assert!(!mica_deploy::extensions::object_dir(&store.system, &old).exists());
-        if kind == Kind::Ubi {
-            let names = ubi::DirUbi::open_at(&root.join("store/ubi")).names();
-            assert!(!names.contains(&format!("x-{old}")));
-            assert!(!names.iter().any(|name| name.starts_with("p.")));
-        }
     }
 }
 /// A signed general core set of one component, `micad` at `version`, whose
@@ -547,6 +605,28 @@ fn run_operation(root: &Path, kind: Kind, operation: &str) {
                 )
                 .unwrap();
         }
+        "ext-pair" => {
+            store
+                .install_with_extensions(
+                    &fs::read(root.join("candidate.json")).unwrap(),
+                    &[public],
+                    &Target {
+                        board: if kind.fit() { "cx3576" } else { "uefi-x64" },
+                        arch: if kind.fit() { "arm64" } else { "amd64" },
+                        product: "uefi-x64-dev",
+                        features: &[],
+                    },
+                    &root.join("objects"),
+                    &serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())
+                        .unwrap(),
+                    None,
+                    &mica_deploy::deployments::KernelExtensions {
+                        descriptors: vec![fs::read(root.join("ext-2/ext.json")).unwrap()],
+                        dropped: Vec::new(),
+                    },
+                )
+                .unwrap();
+        }
         "confirm" => {
             store.confirm(&receipt).unwrap();
         }
@@ -554,12 +634,16 @@ fn run_operation(root: &Path, kind: Kind, operation: &str) {
             store.collect(&receipt, &[public]).unwrap();
         }
         "ext-install" => {
+            let running: BootReceipt =
+                serde_json::from_slice(&fs::read(root.join("current-receipt.json")).unwrap())
+                    .unwrap();
             store
                 .install_extension(
                     &fs::read(root.join("ext-2/ext.json")).unwrap(),
                     &root.join("ext-2/ext.img"),
                     &root.join("ext-2/ext.roothash.p7s"),
                     &[public],
+                    &running.deployment_id,
                 )
                 .unwrap();
             store

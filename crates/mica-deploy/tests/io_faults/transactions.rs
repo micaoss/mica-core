@@ -37,6 +37,7 @@ pub(super) fn transactions_survive_each_boundary() {
             "reset-stage",
             "reset-finish",
             "ext-install",
+            "ext-pair",
         ] {
             // Only a `ubi` board writes an import straight into its store.
             if operation == "import" && kind != Kind::Ubi {
@@ -108,7 +109,7 @@ pub(super) fn transactions_survive_each_boundary() {
                         // Restart the interrupted transaction with its durable
                         // state; an already published candidate is reconciled.
                         let restarted = store(case.path(), kind);
-                        if operation != "install"
+                        if !["install", "ext-pair"].contains(&operation)
                             || restarted.effective_state().unwrap().candidate.is_none()
                         {
                             run_operation(case.path(), kind, operation);
@@ -499,8 +500,9 @@ pub(super) fn a_factory_reset_is_staged_only_over_a_confirmed_running_deployment
     }
 }
 
-/// A driver extension's next build replaces its last for the same kernel,
-/// and the last one's objects are collected.
+/// A driver extension's next build for the running kernel is a change on
+/// trial; a healthy boot of it replaces the last build, whose objects are
+/// then collected.
 #[test]
 pub(super) fn an_extension_install_replaces_the_build_and_collects_the_last() {
     for kind in KINDS {
@@ -510,9 +512,166 @@ pub(super) fn an_extension_install_replaces_the_build_and_collects_the_last() {
         run_operation(root.path(), kind, "ext-install");
         validate(root.path(), kind);
         validate_extensions(root.path(), kind, "ext-install", true);
-        // Run again, it changes nothing.
+        // Run again, it changes nothing, not even the trial.
+        let store = store(root.path(), kind);
+        assert!(mica_deploy::set_state::spend_attempt(
+            &store.meta,
+            mica_deploy::set_state::TrialKind::Extensions,
+            &mica_deploy::extensions::read_state(&store.system)
+                .unwrap()
+                .pending_id()
+                .unwrap()
+        ));
         run_operation(root.path(), kind, "ext-install");
         validate_extensions(root.path(), kind, "ext-install", true);
+        assert_eq!(
+            mica_deploy::set_state::read_trial(&store.meta)
+                .unwrap()
+                .attempts_left,
+            mica_deploy::set_state::TRIAL_ATTEMPTS - 1
+        );
+        // A healthy boot that mapped it commits it.
+        let public: [u8; 32] = fs::read(root.path().join("public"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let running: BootReceipt =
+            serde_json::from_slice(&fs::read(root.path().join("current-receipt.json")).unwrap())
+                .unwrap();
+        let state = mica_deploy::extensions::read_state(&store.system).unwrap();
+        let trial = mica_deploy::extensions::BootTrial {
+            paired: false,
+            id: state.pending_id().unwrap(),
+        };
+        assert_eq!(
+            store
+                .settle_extensions(&running.deployment_id, Some(&trial), &[public])
+                .unwrap(),
+            mica_deploy::deployments::SetSettlement::Committed
+        );
+        assert!(mica_deploy::set_state::read_trial(&store.meta).is_none());
+        let state = mica_deploy::extensions::read_state(&store.system).unwrap();
+        assert_eq!(state.builds, state_after(&state, root.path()));
+        let old = fs::read_to_string(root.path().join("ext-old-id")).unwrap();
+        assert_eq!(
+            store
+                .collect_extensions(&std::collections::BTreeSet::new(), &[public])
+                .unwrap(),
+            1
+        );
+        assert!(!mica_deploy::extensions::object_dir(&store.system, &old).exists());
+    }
+}
+
+/// The confirmed builds once the new build of `rtl8125` replaced the old.
+fn state_after(
+    state: &mica_deploy::extensions::State,
+    root: &Path,
+) -> mica_deploy::extensions::Builds {
+    assert!(state.pending.is_none());
+    let kernel = fs::read_to_string(root.join("ext-kernel")).unwrap();
+    let new = fs::read_to_string(root.join("ext-new-id")).unwrap();
+    [(kernel, [("rtl8125".to_owned(), new)].into())].into()
+}
+
+/// A system update with a new kernel waits for a build of each extension the
+/// running kernel runs; given one, the build is paired with the deployment.
+#[test]
+pub(super) fn a_system_update_with_a_new_kernel_waits_for_its_extensions() {
+    for kind in KINDS {
+        let root = TempDir::new().unwrap();
+        seed(root.path(), kind, "ext-pair");
+        let store = store(root.path(), kind);
+        let public: [u8; 32] = fs::read(root.path().join("public"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let running: BootReceipt =
+            serde_json::from_slice(&fs::read(root.path().join("current-receipt.json")).unwrap())
+                .unwrap();
+        let target = Target {
+            board: if kind.fit() { "cx3576" } else { "uefi-x64" },
+            arch: if kind.fit() { "arm64" } else { "amd64" },
+            product: "uefi-x64-dev",
+            features: &[],
+        };
+        let candidate = fs::read(root.path().join("candidate.json")).unwrap();
+        let error = store
+            .install(
+                &candidate,
+                &[public],
+                &target,
+                &root.path().join("objects"),
+                &running,
+                None,
+            )
+            .unwrap_err();
+        let waits = error
+            .downcast_ref::<mica_deploy::deployments::WaitsForExtension>()
+            .unwrap();
+        let next = fs::read_to_string(root.path().join("ext-next-kernel")).unwrap();
+        assert_eq!(
+            waits.0,
+            [mica_deploy::deployments::Wait {
+                name: "rtl8125".into(),
+                kernel: next.clone()
+            }]
+        );
+        assert_eq!(
+            store
+                .waits_for_extension(&running.kernel_id, &next)
+                .unwrap(),
+            waits.0
+        );
+        assert!(store.effective_state().unwrap().candidate.is_none());
+        // Dropped, it installs with nothing for the new kernel.
+        let dropped = TempDir::new().unwrap();
+        seed(dropped.path(), kind, "ext-pair");
+        let other = super::store(dropped.path(), kind);
+        other
+            .install_with_extensions(
+                &fs::read(dropped.path().join("candidate.json")).unwrap(),
+                &[fs::read(dropped.path().join("public"))
+                    .unwrap()
+                    .try_into()
+                    .unwrap()],
+                &target,
+                &dropped.path().join("objects"),
+                &serde_json::from_slice(
+                    &fs::read(dropped.path().join("current-receipt.json")).unwrap(),
+                )
+                .unwrap(),
+                None,
+                &mica_deploy::deployments::KernelExtensions {
+                    descriptors: Vec::new(),
+                    dropped: vec!["rtl8125".into()],
+                },
+            )
+            .unwrap();
+        let state = mica_deploy::extensions::read_state(&other.system).unwrap();
+        let next = fs::read_to_string(dropped.path().join("ext-next-kernel")).unwrap();
+        assert!(!state.pending.unwrap().contains_key(&next));
+        // Given, it is paired; the confirmed builds stay for the running kernel.
+        run_operation(root.path(), kind, "ext-pair");
+        validate(root.path(), kind);
+        validate_extensions(root.path(), kind, "ext-pair", true);
+        let candidate_id = fs::read_to_string(root.path().join("candidate-id")).unwrap();
+        // A healthy boot of the pair that mapped it commits it.
+        let state = mica_deploy::extensions::read_state(&store.system).unwrap();
+        let trial = mica_deploy::extensions::BootTrial {
+            paired: true,
+            id: state.pending_id().unwrap(),
+        };
+        assert_eq!(
+            store
+                .settle_extensions(&candidate_id, Some(&trial), &[public])
+                .unwrap(),
+            mica_deploy::deployments::SetSettlement::Committed
+        );
+        let state = mica_deploy::extensions::read_state(&store.system).unwrap();
+        let new = fs::read_to_string(root.path().join("ext-new-id")).unwrap();
+        assert_eq!(state.builds[&next]["rtl8125"], new);
+        assert!(state.pending.is_none() && state.pair.is_none());
     }
 }
 
@@ -546,5 +705,90 @@ pub(super) fn a_finished_factory_reset_leaves_the_running_deployment_alone() {
         // Run again, it does nothing more.
         run_operation(root.path(), kind, "reset-finish");
         validate_reset(root.path(), kind, "reset-finish");
+    }
+}
+
+/// With a system on trial, an extension change is for its kernel and paired
+/// with it; the running kernel takes none, nor does a kernel only the
+/// fallback runs, and the system on trial must not be the one running.
+#[test]
+pub(super) fn an_extension_change_with_a_system_on_trial_is_paired_with_it() {
+    for kind in KINDS {
+        let root = TempDir::new().unwrap();
+        // The candidate is installed and on trial, then the running kernel
+        // gets its confirmed build.
+        seed(root.path(), kind, "ext-trial");
+        let store = store(root.path(), kind);
+        let public: [u8; 32] = fs::read(root.path().join("public"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let running: BootReceipt =
+            serde_json::from_slice(&fs::read(root.path().join("current-receipt.json")).unwrap())
+                .unwrap();
+        let candidate = fs::read_to_string(root.path().join("candidate-id")).unwrap();
+        assert_eq!(
+            store.effective_state().unwrap().candidate.as_deref(),
+            Some(candidate.as_str())
+        );
+        let arch = if kind.fit() { "arm64" } else { "amd64" };
+        let install = |dir: &str, kernel: &str, fill: u8, booted: &str| {
+            let descriptor = extension(root.path(), dir, kernel, arch, fill);
+            store.install_extension(
+                &descriptor,
+                &root.path().join(dir).join("ext.img"),
+                &root.path().join(dir).join("ext.roothash.p7s"),
+                &[public],
+                booted,
+            )
+        };
+        for kernel in ["ext-kernel", "fallback-kernel"] {
+            let kernel = fs::read_to_string(root.path().join(kernel)).unwrap();
+            let error = install("ext-3", &kernel, 52, &running.deployment_id)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("only for the running kernel"), "{error}");
+        }
+        let next = fs::read_to_string(root.path().join("ext-next-kernel")).unwrap();
+        let error = install("ext-3", &next, 52, &candidate)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("confirm the running deployment"), "{error}");
+        let id = install("ext-3", &next, 52, &running.deployment_id).unwrap();
+        let state = mica_deploy::extensions::read_state(&store.system).unwrap();
+        assert_eq!(state.paired(), Some(candidate.as_str()));
+        assert_eq!(state.pending.as_ref().unwrap()[&next]["rtl8125"], id);
+        assert!(
+            mica_deploy::set_state::read_trial(&store.meta).is_none(),
+            "a pair's trial is its deployment's"
+        );
+        // The runkit maps it on a boot of the pair alone.
+        let (builds, trial) =
+            mica_deploy::extensions::boot_choice(&state, &candidate, &next, |_| unreachable!());
+        assert_eq!(
+            (builds["rtl8125"].clone(), trial.unwrap().paired),
+            (id, true)
+        );
+        let kernel = fs::read_to_string(root.path().join("ext-kernel")).unwrap();
+        let (builds, trial) = mica_deploy::extensions::boot_choice(
+            &state,
+            &running.deployment_id,
+            &kernel,
+            |_| unreachable!(),
+        );
+        assert_eq!(
+            (builds["rtl8125"].clone(), trial),
+            (
+                fs::read_to_string(root.path().join("ext-old-id")).unwrap(),
+                None
+            )
+        );
+        // A confirmed boot of another deployment leaves the pair to its own.
+        assert_eq!(
+            store
+                .settle_extensions(&running.deployment_id, None, &[public])
+                .unwrap(),
+            mica_deploy::deployments::SetSettlement::Unchanged
+        );
     }
 }

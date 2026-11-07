@@ -10,8 +10,9 @@
 //!   runkit mounts SYSTEM read-only and reads it. It survives a reset of DATA,
 //!   so a device always knows which set is its own.
 //! - **DATA `meta/set-trial.json`** counts the boots a pending set has left.
-//!   There is one, for every kind: one thing is on trial at a time, and the
-//!   file's shape says so. The runkit spends a boot before it tries the set,
+//!   There is one, for every kind and for a change of the driver extensions
+//!   (`extensions`): one thing is on trial at a time, and the file's shape
+//!   says so. The runkit spends a boot before it tries the set,
 //!   so a boot that never reaches the health gate, a watchdog reset included,
 //!   still costs one. A trial that is missing, names another set or has
 //!   nothing left means the pending set is not tried, and `current` is.
@@ -72,11 +73,28 @@ impl SetState {
 /// The most deployments a device retains, and so the most bound to a set.
 const MAX_BOUND: usize = 2;
 
+/// What is on trial: a set of a kind, or a change of the driver extensions,
+/// whose id is the digest of the proposed state (`crate::extensions`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TrialKind {
+    Core,
+    Extensions,
+}
+
+impl From<SetKind> for TrialKind {
+    fn from(kind: SetKind) -> Self {
+        match kind {
+            SetKind::Core => Self::Core,
+        }
+    }
+}
+
 /// The boots the pending set has left.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SetTrial {
-    pub kind: SetKind,
+    pub kind: TrialKind,
     pub id: String,
     pub attempts_left: u8,
 }
@@ -157,9 +175,9 @@ pub fn read_trial(meta: &Path) -> Option<SetTrial> {
 }
 
 /// Give the set `id` of `kind` its boots.
-pub fn start_trial(meta: &Path, kind: SetKind, id: &str) -> Result<()> {
+pub fn start_trial(meta: &Path, kind: impl Into<TrialKind>, id: &str) -> Result<()> {
     let trial = SetTrial {
-        kind,
+        kind: kind.into(),
         id: id.to_owned(),
         attempts_left: TRIAL_ATTEMPTS,
     };
@@ -181,11 +199,11 @@ pub fn end_trial(meta: &Path) -> Result<()> {
 /// a trial that is not this set's or has no boot left, or when the spent count
 /// cannot be made durable: a set tried without a count is a set tried forever.
 #[must_use]
-pub fn spend_attempt(meta: &Path, kind: SetKind, pending: &str) -> bool {
+pub fn spend_attempt(meta: &Path, kind: impl Into<TrialKind>, pending: &str) -> bool {
     let Some(trial) = read_trial(meta) else {
         return false;
     };
-    if trial.kind != kind || trial.id != pending || trial.attempts_left == 0 {
+    if trial.kind != kind.into() || trial.id != pending || trial.attempts_left == 0 {
         return false;
     }
     let spent = SetTrial {
@@ -200,7 +218,8 @@ pub fn spend_attempt(meta: &Path, kind: SetKind, pending: &str) -> bool {
 /// Whether a pending set that was not booted is finished: its trial is gone,
 /// is another set's, or has no boot left.
 #[must_use]
-pub fn trial_is_over(meta: &Path, kind: SetKind, pending: &str) -> bool {
+pub fn trial_is_over(meta: &Path, kind: impl Into<TrialKind>, pending: &str) -> bool {
+    let kind = kind.into();
     read_trial(meta)
         .is_none_or(|trial| trial.kind != kind || trial.id != pending || trial.attempts_left == 0)
 }

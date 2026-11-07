@@ -15,6 +15,7 @@ mod lifecycle;
 mod reset;
 mod sets;
 mod staged;
+pub use extensions::{KernelExtensions, Wait, WaitsForExtension};
 pub use install::*;
 pub use io::*;
 pub use mica_fs::{read_bounded, sync_dir};

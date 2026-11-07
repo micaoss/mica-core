@@ -1,5 +1,6 @@
-//! Driver extensions on SYSTEM: installed for a kernel a retained deployment
-//! runs, replaced by name, removed, collected, and all gone with the owner's
+//! Driver extensions on SYSTEM: installed for the running kernel as a change
+//! on trial, committed by a healthy boot or dropped when the trial is spent,
+//! replaced by name, removed, collected, and all gone with the owner's
 //! certificates at the end of a factory reset.
 // Tests and fixtures answer a broken expectation by panicking.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -14,7 +15,7 @@ use aws_lc_rs::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use mica_deploy::{
     components::component_id,
-    deployments::{BootBackend, DeploymentStore},
+    deployments::{BootBackend, DeploymentStore, SetSettlement},
     extensions,
 };
 use serde_json::{Value, json};
@@ -56,6 +57,8 @@ struct Device {
     objects: PathBuf,
     /// The id of the kernel the one deployment runs.
     kernel: String,
+    /// The one deployment, which runs.
+    deployment: String,
     ubi: Option<std::sync::Arc<ubi::DirUbi>>,
 }
 
@@ -129,6 +132,7 @@ impl Device {
             store,
             objects,
             kernel: id,
+            deployment,
             ubi: device,
         }
     }
@@ -167,7 +171,28 @@ impl Device {
             &self.objects.join("ext.img"),
             &self.objects.join("ext.roothash.p7s"),
             &[key()],
+            &self.deployment,
         )
+    }
+
+    fn remove(&self, name: &str, kernel: Option<&str>) -> anyhow::Result<usize> {
+        self.store
+            .remove_extension(name, kernel, &[key()], &self.deployment)
+    }
+
+    /// Confirm a boot that mapped the pending change, alone.
+    fn commit(&self) -> SetSettlement {
+        let id = extensions::read_state(&self.store.system)
+            .unwrap()
+            .pending_id()
+            .unwrap();
+        self.store
+            .settle_extensions(
+                &self.deployment,
+                Some(&extensions::BootTrial { paired: false, id }),
+                &[key()],
+            )
+            .unwrap()
     }
 
     fn builds(&self) -> Vec<(String, String)> {
@@ -195,6 +220,8 @@ fn an_extension_is_installed_replaced_and_collected() {
     for on_ubi in [false, true] {
         let device = Device::new(on_ubi, &["driver-ext"]);
         let first = device.install("rtl8125", "1.0", 1).unwrap();
+        assert!(device.builds().is_empty(), "on trial");
+        assert_eq!(device.commit(), SetSettlement::Committed);
         assert_eq!(device.builds(), [("rtl8125".to_owned(), first.clone())]);
         assert!(device.held(&first));
         let descriptor = extensions::object_dir(&device.store.system, &first).join("ext.json");
@@ -205,8 +232,15 @@ fn an_extension_is_installed_replaced_and_collected() {
             "installing it again changes nothing"
         );
 
+        assert!(
+            extensions::read_state(&device.store.system)
+                .unwrap()
+                .pending
+                .is_none()
+        );
         let second = device.install("rtl8125", "1.1", 2).unwrap();
         assert_ne!(second, first);
+        assert_eq!(device.commit(), SetSettlement::Committed);
         assert_eq!(device.builds(), [("rtl8125".to_owned(), second.clone())]);
         // The build this boot mapped stays until it is not mapped.
         let mapped = BTreeSet::from([first.clone()]);
@@ -224,16 +258,16 @@ fn an_extension_is_installed_replaced_and_collected() {
         );
         assert!(!device.held(&first) && device.held(&second), "{on_ubi}");
 
-        assert_eq!(device.store.remove_extension("other", None).unwrap(), 0);
-        assert_eq!(
-            device
-                .store
-                .remove_extension("rtl8125", Some(&"0".repeat(64)))
-                .unwrap(),
-            0
-        );
-        assert_eq!(device.store.remove_extension("rtl8125", None).unwrap(), 1);
+        assert_eq!(device.remove("other", None).unwrap(), 0);
+        assert!(device.remove("rtl8125", Some(&"0".repeat(64))).is_err());
+        assert_eq!(device.remove("rtl8125", None).unwrap(), 1);
+        assert_eq!(device.commit(), SetSettlement::Committed);
         assert!(device.builds().is_empty());
+        assert!(
+            !extensions::dir(&device.store.system)
+                .join("state.json")
+                .exists()
+        );
         assert!(
             device.held(&second),
             "removed from the state, then collected"
@@ -254,7 +288,7 @@ fn an_extension_is_refused_for_a_kernel_the_device_cannot_run_it_on() {
         .install_bytes(&device.descriptor("rtl8125", "1.0", 1, &other, "amd64"))
         .unwrap_err()
         .to_string();
-    assert!(error.contains("no retained deployment"), "{error}");
+    assert!(error.contains("only for the running kernel"), "{error}");
     let kernel = device.kernel.clone();
     let error = device
         .install_bytes(&device.descriptor("rtl8125", "1.0", 1, &kernel, "arm64"))
@@ -297,6 +331,7 @@ fn a_kernel_runs_a_bounded_number_of_extensions() {
 fn builds_for_a_kernel_no_deployment_runs_are_collected() {
     let device = Device::new(false, &["driver-ext"]);
     let id = device.install("rtl8125", "1.0", 1).unwrap();
+    device.commit();
     let mut state = extensions::read_state(&device.store.system).unwrap();
     let builds = state.builds.remove(&device.kernel).unwrap();
     state.builds.insert("0".repeat(64), builds);
@@ -333,4 +368,86 @@ fn a_factory_reset_removes_every_extension_and_enrolled_certificate() {
         assert!(!certs.exists());
         assert_eq!(device.store.remove_all_extensions().unwrap(), 0, "again");
     }
+}
+
+/// A change alone is tried for its boots, each spent before it is mapped; a
+/// healthy boot that did not map it changes nothing while boots are left,
+/// and once they are spent nothing maps it, the change is dropped and the
+/// confirmed builds stay.
+#[test]
+fn a_change_whose_trial_is_spent_is_dropped() {
+    let device = Device::new(false, &["driver-ext"]);
+    let first = device.install("rtl8125", "1.0", 1).unwrap();
+    device.commit();
+    let second = device.install("rtl8125", "1.1", 2).unwrap();
+    let state = extensions::read_state(&device.store.system).unwrap();
+    let spend = |id: &str| {
+        mica_deploy::set_state::spend_attempt(
+            &device.store.meta,
+            mica_deploy::set_state::TrialKind::Extensions,
+            id,
+        )
+    };
+    for boot in 1..=mica_deploy::set_state::TRIAL_ATTEMPTS {
+        let (builds, trial) =
+            extensions::boot_choice(&state, &device.deployment, &device.kernel, spend);
+        assert_eq!(builds["rtl8125"], second);
+        assert!(!trial.unwrap().paired);
+        if boot < mica_deploy::set_state::TRIAL_ATTEMPTS {
+            assert_eq!(
+                device
+                    .store
+                    .settle_extensions(&device.deployment, None, &[key()])
+                    .unwrap(),
+                SetSettlement::Unchanged,
+                "a boot that did not map it, with boots left"
+            );
+        }
+    }
+    let (builds, trial) =
+        extensions::boot_choice(&state, &device.deployment, &device.kernel, spend);
+    assert_eq!((builds["rtl8125"].clone(), trial), (first.clone(), None));
+    assert!(
+        device
+            .store
+            .extensions_need_settling(&device.deployment, None, &[key()])
+            .unwrap()
+    );
+    assert_eq!(
+        device
+            .store
+            .settle_extensions(&device.deployment, None, &[key()])
+            .unwrap(),
+        SetSettlement::Dropped
+    );
+    assert_eq!(device.builds(), [("rtl8125".to_owned(), first)]);
+    assert!(mica_deploy::set_state::read_trial(&device.store.meta).is_none());
+    assert_eq!(
+        device
+            .store
+            .collect_extensions(&BTreeSet::new(), &[key()])
+            .unwrap(),
+        1
+    );
+    assert!(!device.held(&second));
+}
+
+/// One trial at a time: a change waits while a core set is on trial.
+#[test]
+fn a_change_waits_while_a_core_set_is_on_trial() {
+    let device = Device::new(false, &["driver-ext"]);
+    let sets = device.store.system.join("sets/core");
+    fs::create_dir_all(&sets).unwrap();
+    fs::write(
+        sets.join("state.json"),
+        format!(
+            "{{\"current\":\"{}\",\"pending\":\"{}\"}}",
+            "1".repeat(64),
+            "2".repeat(64)
+        ),
+    )
+    .unwrap();
+    let error = device.install("rtl8125", "1.0", 1).unwrap_err().to_string();
+    assert!(error.contains("a core set is on trial"), "{error}");
+    assert!(device.remove("rtl8125", None).is_err());
 }

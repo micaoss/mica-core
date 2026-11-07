@@ -178,7 +178,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         id: id.clone(),
         system_device: device.clone(),
         board: config.board.clone(),
-        core_trial: false,
+        trial_alone: false,
     });
     eprintln!("mica-init: SYSTEM mounted read-only");
     let envelope = bounded_file(&format!("/system/deployments/{id}.json"), 24576)?;
@@ -453,7 +453,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     // spent a boot of its trial, and the deployment under it is not retired
     // for it. A paired set's trial is the deployment's.
     if let Some(attempt) = attempt.as_mut() {
-        attempt.core_trial = composition.pending && !composition.paired;
+        attempt.trial_alone = composition.pending && !composition.paired;
     }
     eprintln!(
         "mica-init: core set {} ({} generation {}){}",
@@ -508,9 +508,17 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         control,
         &sealed,
         ubi.as_ref(),
+        &id,
         &deployment.kernel,
         reset.is_some(),
     )?;
+    // A failed boot of a change alone on trial is the change's, as a core
+    // set's is.
+    if let Some(attempt) = attempt.as_mut()
+        && extensions.trial.as_ref().is_some_and(|trial| !trial.paired)
+    {
+        attempt.trial_alone = true;
+    }
     (|| -> Result<()> {
         persistent_machine_id(Path::new("/newroot/mnt/data/state"), || {
             Ok(fs::read_to_string("/proc/sys/kernel/random/uuid")?

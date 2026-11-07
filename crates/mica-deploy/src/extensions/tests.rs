@@ -124,6 +124,7 @@ fn options_and_loads_go_to_the_run_directories_as_kmod_reads_them() {
 fn the_boot_record_names_what_was_mapped() {
     let record = BootExtensions {
         skipped: None,
+        trial: None,
         extensions: vec![
             BootExtension {
                 name: "a".into(),
@@ -157,4 +158,63 @@ fn the_boot_record_names_what_was_mapped() {
     assert_eq!(booted(&path).unwrap(), None);
     fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
     assert_eq!(booted(&path).unwrap(), Some(record));
+}
+
+/// A change alone is tried only on a boot of a kernel whose builds it
+/// changes, so a boot of another kernel spends nothing of its trial; a pair
+/// maps only with its deployment.
+#[test]
+fn a_boot_maps_the_pending_change_only_where_it_is_tried() {
+    let build = |id: &str| BTreeMap::from([("rtl8125".to_owned(), id.repeat(64))]);
+    let (running, other) = ("a".repeat(64), "b".repeat(64));
+    let mut state = State {
+        builds: Builds::from([(running.clone(), build("1")), (other.clone(), build("2"))]),
+        pending: Some(Builds::from([
+            (running.clone(), build("3")),
+            (other.clone(), build("2")),
+        ])),
+        pair: None,
+    };
+    let refuse = |_: &str| false;
+    let (builds, trial) = boot_choice(&state, "d", &other, |_| panic!("spent"));
+    assert_eq!((builds, trial), (build("2"), None));
+    assert_eq!(
+        boot_choice(&state, "d", &running, refuse),
+        (build("1"), None)
+    );
+    let (builds, trial) = boot_choice(&state, "d", &running, |id| {
+        assert_eq!(Some(id.to_owned()), state.pending_id());
+        true
+    });
+    assert_eq!(builds, build("3"));
+    assert!(!trial.unwrap().paired);
+    state.pair = Some("e".repeat(64));
+    let (builds, trial) = boot_choice(&state, &"e".repeat(64), &running, |_| panic!("spent"));
+    assert_eq!(builds, build("3"));
+    assert!(trial.unwrap().paired);
+    assert_eq!(
+        boot_choice(&state, "d", &running, |_| panic!("spent")),
+        (build("1"), None)
+    );
+}
+
+/// The state with a change on trial reads back as it was written, and a
+/// pending change names its builds for collection.
+#[test]
+fn a_pending_change_is_kept_and_its_builds_are_named() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let state = State {
+        builds: Builds::new(),
+        pending: Some(Builds::from([(
+            "a".repeat(64),
+            BTreeMap::from([("rtl8125".to_owned(), "3".repeat(64))]),
+        )])),
+        pair: Some("e".repeat(64)),
+    };
+    write_state(dir.path(), &state).unwrap();
+    assert_eq!(read_state(dir.path()).unwrap(), state);
+    assert!(state.ids().contains("3".repeat(64).as_str()));
+    assert_eq!(state.paired(), Some("e".repeat(64).as_str()));
+    write_state(dir.path(), &State::default()).unwrap();
+    assert!(!dir.path().join("extensions/state.json").exists());
 }

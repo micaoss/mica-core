@@ -1138,7 +1138,7 @@ A product carries MQTT when its `FEATURES` has `mqtt` and its root holds both pa
 | Where | Holds |
 | --- | --- |
 | SYSTEM (`/mnt/system`) | At most two deployments: descriptors, signatures, content-addressed objects under `kernels/` and `roots/`. At most three sets of each kind under `sets/<kind>/` (6.2) |
-| SYSTEM `extensions/` | Driver extensions (6.5): `state.json`, the build of each extension per kernel component id, and `objects/<extId>/` with `ext.json`, `ext.roothash.p7s` and `ext.img` (on a `ubi` board the volume `x-<extId>`, 6.6); at most 16 per kernel |
+| SYSTEM `extensions/` | Driver extensions (6.3, 6.5): `state.json`, the confirmed build of each extension per kernel component id (`builds`) and at most one change on trial (`pending`, with the deployment it is paired with, `pair`), and `objects/<extId>/` with `ext.json`, `ext.roothash.p7s` and `ext.img` (on a `ubi` board the volume `x-<extId>`, 6.6); at most 16 per kernel |
 | SYSTEM `owner-certs/` | The owner's enrolled certificates for driver extensions: `<sha256>.der`, at most 16 of at most 16 KiB |
 | SYSTEM `factory-reset/` | A staged factory reset (3.7): `request.json` and `snapshot/`, the files of DATA's `meta/` it restores; present only from its staging to its finish |
 | ESP, or the U-Boot environment on a FIT board | The boot records that select a deployment and count trial attempts |
@@ -1271,7 +1271,8 @@ reaches healthy. What follows is the core kind.
   `sets/core/objects/<component id>/` holds each component (`core.img`, `core.roothash.p7s`,
   `core.roothash`). Only the running system writes them, and a deployment's collection keeps every
   set the state names. DATA `meta/set-trial.json` (`kind`, `id`, `attemptsLeft`) counts the boots
-  (three) of a pending set that is not a pair. There is one such file for every kind, so one set is on trial at a time.
+  (three) of a pending set that is not a pair. There is one such file for every kind and for a
+  driver extension change (kind `extensions`, 6.3), so one thing is on trial at a time.
   The runkit mounts DATA before it composes, then picks the set:
   - a pair's set, when the deployment it is bound to boots;
   - a deployment's `bound` set, when that deployment boots;
@@ -1294,8 +1295,8 @@ reaches healthy. What follows is the core kind.
   - `confirm`, which the health gate calls, makes the booted set current (with its deployment,
     for a pair), or drops a set alone whose trial is spent and a pair whose deployment is no
     longer retained. `fail-boot` with a set alone on trial retires no deployment.
-  - A set alone is not installed while a deployment is on trial, and a deployment is not
-    installed while a set alone is pending.
+  - A set alone is not installed while a deployment or a driver extension change is on trial,
+    and a deployment is not installed while a set alone is pending.
 
 The server catalog is **unsigned** and comes in three documents, each fetched only when needed.
 The configured source is an **update root** ending in `/` (http or https, a host, no user info,
@@ -1389,15 +1390,40 @@ names it in `factoryReset` (`state`: `staged`, `formatted` once the runkit made 
 commands.
 **Driver extensions.** `extension-install <descriptor> --objects <dir>` installs the driver
 extension a `mica/driver-ext-descriptor/v1` descriptor names, with `ext.img` and
-`ext.roothash.p7s` from `<dir>`, for the kernel it is built for, replacing that kernel's build of
-the same name (`{"extensionId"}`). The kernel must be one a retained deployment runs, of the same
-architecture, with `driver-ext` in its `features`; the objects are held to the descriptor's sizes
-and digests. Their root hash signature is the kernel's to check, when the image is mapped at the
-next boot of that kernel (6.5); mica-deploy does not check it. `extension-remove <name>
-[--kernel <id>]` stops installing an extension, for one kernel or every one (`{"removed",
-"removedExtensions"}`). Both, and `gc`, then collect the builds no state names and this boot did
-not map, and stop installing builds for kernels no retained deployment runs. `status` reports
-`extensions`: `installed` (the state), `boot` (`/run/mica/extensions.json`) and `trust`
+`ext.roothash.p7s` from `<dir>`, replacing its kernel's build of the same name
+(`{"extensionId"}`); `extension-remove <name> [--kernel <id>]` stops installing one
+(`{"removed", "removedExtensions"}`). Either is a change on trial: `extensions/state.json`
+keeps the confirmed `builds` and at most one `pending` change, the whole `builds` it proposes.
+A change is for the running kernel, alone, with a trial of its own in DATA
+`meta/set-trial.json` (kind `extensions`, the SHA-256 of `pending` as its id, three boots); or,
+while a deployment is on trial, for that deployment's kernel, paired with it (`pair`) and on its
+trial. A change for any other kernel, a kernel only the fallback runs included, is refused, and
+so is any change while the deployment on trial is the one running. Repeating a change keeps its
+trial. One thing is on trial at a time: no change is made while a core set is on trial alone,
+and no set or deployment is installed while a change is. The kernel must be of the same
+architecture, with `driver-ext` in its `features`; the objects are held to the descriptor's
+sizes and digests. Their root hash signature is the kernel's to check, when the image is mapped
+(6.5); mica-deploy does not check it. `confirm` commits the change this boot mapped (`trial` in
+`/run/mica/extensions.json`), without kernels no retained deployment runs; it drops a change
+alone whose trial is spent, and a pair whose deployment booted without it or is no longer
+retained. `fail-boot` with a change alone on trial retires no deployment (`{"retired": false,
+"setTrial": "extensions"}`).
+
+**A new kernel waits for its extensions.** `install` of a deployment whose kernel is not the
+running one is refused while an extension the running kernel's confirmed builds name has no
+build for the new kernel; the error begins `waitsForExtension:` and names them. `install ...
+--extension <descriptor>` (repeatable) brings a build for the new kernel, its objects by digest
+in the install's `--objects`, and `--drop-extension <name>` (repeatable) lets the new kernel run
+without one. Either makes a change paired with the new deployment, named before its entry
+exists, as a paired set is. The running kernel's builds stay for a rollback, and go with their
+kernel. `check` and `fetch` report `waitsForExtension` (`[{name, kernel}]`) for the system they
+select.
+
+The extension commands and `gc` then collect the builds neither `builds` nor `pending` names and
+this boot did not map, stop installing confirmed builds for kernels no retained deployment runs,
+and drop a pair whose deployment is not retained; a change alone keeps its kernels, whose digest
+is its trial's id. `status` reports `extensions`: `installed` (the confirmed builds), `pending`,
+`pair`, `attemptsLeft` (of a change alone), `boot` (`/run/mica/extensions.json`) and `trust`
 (`/run/mica/trust.json`).
 
 **The system's signatures.** Where the runkit sealed an owner keyring (`/run/mica/trust.json`,
@@ -1414,7 +1440,7 @@ any owner certificate is in. Exact holding, to the issuer and serial number of t
 certificates carried in the signed boot policy, needs mica-build and the core together and comes
 after owner enrolment.
 
-Installation, of a deployment or of a driver extension, is a durable file transaction, proven by
+Installation, of a deployment, of a driver extension or of both paired, is a durable file transaction, proven by
 a fault suite that interrupts it before and after every observed IO. `fetch` takes the objects smallest first, so a power cut is most
 likely to cost the last and largest; on a `ubi` board it costs exactly the object in flight
 (6.6), and `--max-bytes` counts the objects written into the store with the workspace.
@@ -1533,7 +1559,9 @@ admits the system's mappings and is spent by the seal, a process takes only one,
 `ownerKeyring` (`sealed` or `absent`) and `ownerCerts`, each with its `sha256`, `state` (`loaded` or
 `rejected`) and `reason`.
 
-Each build `extensions/state.json` names for the booted kernel, in name order, is held to its
+The runkit picks the builds for the booted kernel: the pending change's when it is paired with
+the deployment booting; the pending change's when it is alone, changes this kernel's builds and
+a boot of its trial is spent first; else the confirmed ones. Each, in name order, is held to its
 descriptor and opened like a core component, a signed dm-verity mapping `mica-ext-<name>`
 mounted at `/run/mica-ext/<name>`. Its `manifest.json` is held to the descriptor and to the
 kernel's id, release and architecture, and its trees to the manifest: exactly the files it
@@ -1549,8 +1577,11 @@ overlay of the index, the extensions' `modules` trees and the support image's, a
 without kmod's `depmod`, or an index that fails, composes no extension (all `unused`); with
 nothing to compose, the support image's trees are bound as before. Module options and boot loads
 go to `/run/modprobe.d/mica-ext-<name>.conf` and `/run/modules-load.d/mica-ext-<name>.conf`. The
-record is `/run/mica/extensions.json`: `skipped` when none was mapped at all, and per extension
-its `name`, `id`, `version`, `state` (`mapped`, `unused` or `refused`) and `reason`.
+record is `/run/mica/extensions.json`: `skipped` when none was mapped at all, `trial` (`paired`
+and the change's `id`) when the builds are the pending change's, and per extension its `name`,
+`id`, `version`, `state` (`mapped`, `unused` or `refused`) and `reason`. A boot that fails before
+the root runs, with a change alone on trial, is that change's, as a core set's is: the deployment
+is kept.
 
 **The root interface level.** A `mica/rootfs/v1` root states an `interfaceLevel`, and each core
 component the levels it runs on (`root: { min, max }`); a core set whose selection does not run

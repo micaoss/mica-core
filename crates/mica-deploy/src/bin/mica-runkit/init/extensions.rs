@@ -8,6 +8,7 @@ use mica_deploy::{
     components::KernelComponent,
     driver_ext,
     extensions::{self as ext, BootExtension, BootExtensions, BootState, Claims},
+    set_state::{self, TrialKind},
     ubi::SysUbi,
 };
 use std::{fs, path::Path};
@@ -17,8 +18,10 @@ use super::*;
 /// The size of the tmpfs the composed modules' index is made in.
 const MODULE_INDEX_BYTES: u64 = 16 << 20;
 
-/// Map the extensions SYSTEM names for `kernel`, none at a factory reset
-/// boot (`reset`), and compose what they carry into the root's
+/// Map the extensions SYSTEM names for `kernel` at a boot of the deployment
+/// `deployment` (`ext::boot_choice`, spending a boot of a change alone on
+/// trial in DATA's `meta`), none at a factory reset boot (`reset`), and
+/// compose what they carry into the root's
 /// `/usr/lib/modules` and `/usr/lib/firmware`; the kernel support image's
 /// own trees are bound there when nothing is composed. An extension that
 /// does not map, or that maps and does not hold to its descriptor, kernel
@@ -31,6 +34,7 @@ pub(super) fn compose(
     control: &mut BootControl,
     sealed: &Sealed,
     ubi: Option<&SysUbi>,
+    deployment: &str,
     kernel: &KernelComponent,
     reset: bool,
 ) -> Result<BootExtensions> {
@@ -46,7 +50,17 @@ pub(super) fn compose(
         Default::default()
     } else {
         match ext::read_state(Path::new("/system")) {
-            Ok(mut state) => state.builds.remove(&kernel.id).unwrap_or_default(),
+            Ok(state) => {
+                let (builds, trial) = ext::boot_choice(&state, deployment, &kernel.id, |id| {
+                    set_state::spend_attempt(
+                        Path::new("/newroot/mnt/data/meta"),
+                        TrialKind::Extensions,
+                        id,
+                    )
+                });
+                record.trial = trial;
+                builds
+            }
             Err(error) => {
                 record.skipped = Some(format!("{error:#}"));
                 Default::default()
