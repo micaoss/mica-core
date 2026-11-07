@@ -101,10 +101,13 @@ pub fn chunk(reader: &mut impl Read, mut found: impl FnMut(u64, u64, String)) ->
     Ok(offset)
 }
 
+/// Each chunk digest a seed holds, and where: the seed, the offset, the length.
+pub type SeedMap = BTreeMap<String, (PathBuf, u64, u64)>;
+
 /// Where each distinct chunk digest can be read on this device. The first
 /// source of a digest wins; a seed that disagrees with itself is not a
 /// question worth asking, because every byte copied out is checked again.
-pub fn seed_map(paths: &[PathBuf]) -> Result<BTreeMap<String, (PathBuf, u64, u64)>> {
+pub fn seed_map(paths: &[PathBuf]) -> Result<SeedMap> {
     let mut map = BTreeMap::new();
     for path in paths {
         let Ok(file) = File::open(path) else { continue };

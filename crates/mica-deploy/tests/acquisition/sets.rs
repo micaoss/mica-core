@@ -505,3 +505,65 @@ pub(super) fn a_system_update_fetches_the_image_set_it_takes() {
         assert!(acq.objects().join(sha(object)).is_file());
     }
 }
+
+/// The components of a core set the device holds are delta seeds: an object
+/// whose chunks are all in an installed component is assembled without a
+/// chunk request. A held set that does not authenticate seeds nothing, and the
+/// object still lands. (The set and the descriptor share the fixture key.)
+#[test]
+pub(super) fn a_held_core_component_is_a_delta_seed() {
+    for (name, authentic, requests) in [("authentic", true, 4), ("tampered", false, 5)] {
+        let (archive, key, sha) = archive();
+        let length = u32::from_be_bytes(archive[8..12].try_into().unwrap()) as usize;
+        let descriptor = String::from_utf8(archive[12..12 + length].to_vec()).unwrap();
+        let object = vec![42_u8; 12288];
+        let (_, index) = delta::delta_index(&object);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let source = format!("http://{address}/update/");
+        let server = serve(
+            listener,
+            [
+                delta::delta_catalog(&descriptor, &sha, &format!("http://{address}")),
+                vec![
+                    (delta::http(200, &index), NO_HOLD),
+                    (delta::http(200, &object), NO_HOLD),
+                ],
+            ]
+            .concat(),
+        );
+        let (dir, store) = fixture();
+        let (envelope, public, id) = core_set(1, &object, b"signature");
+        assert_eq!(public, key);
+        let component = mica_deploy::update_set::authenticate(envelope.as_bytes(), &[public])
+            .unwrap()
+            .components[0]
+            .id
+            .clone();
+        hold(
+            &store,
+            &if authentic {
+                envelope
+            } else {
+                envelope.replace("\"signature\":\"", "\"signature\":\"A")
+            },
+            &id,
+        );
+        let installed =
+            mica_deploy::set_state::component_dir(&store.system, SetKind::Core, &component);
+        fs::create_dir_all(&installed).unwrap();
+        fs::write(installed.join("core.img"), &object).unwrap();
+        let keys = [key];
+        let acq = delta::delta_acquisition(&dir, &store, &keys);
+        let selected = acq.check(&source).unwrap().selected.unwrap();
+        acq.fetch(selected)
+            .unwrap_or_else(|error| panic!("{name}: {error:#}"));
+        let seen = server.join().unwrap();
+        assert_eq!(
+            fs::read(acq.objects().join(&sha)).unwrap(),
+            object,
+            "{name}"
+        );
+        assert_eq!(seen.len(), requests, "{name}: {seen:?}");
+    }
+}

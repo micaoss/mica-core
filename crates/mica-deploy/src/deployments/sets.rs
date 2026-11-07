@@ -384,6 +384,25 @@ impl DeploymentStore {
         Ok(settlement)
     }
 
+    /// The held sets of `kind` that authenticate, for delta seeds: a state or
+    /// a set that cannot be read is passed over, never refused.
+    pub(crate) fn held_sets(&self, kind: SetKind, keys: &[[u8; 32]]) -> Vec<UpdateSet> {
+        let Ok(state) = set_state::read_state(&self.system, kind) else {
+            return Vec::new();
+        };
+        named_sets(&state)
+            .iter()
+            .filter_map(|id| {
+                let envelope = read_bounded(
+                    &set_state::set_path(&self.system, kind, id),
+                    set_state::MAX_ENVELOPE_BYTES,
+                )
+                .ok()?;
+                update_set::authenticate(&envelope, keys).ok()
+            })
+            .collect()
+    }
+
     /// The components the held sets of `kind` name.
     fn held_components(&self, kind: SetKind, keys: &[[u8; 32]]) -> Result<BTreeSet<String>> {
         let state = set_state::read_state(&self.system, kind)?;

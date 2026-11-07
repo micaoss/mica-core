@@ -1342,9 +1342,11 @@ Installation is a durable file transaction, proven by a fault suite that interru
 and after every observed IO.
 
 **Delta transfer.** `fetch` first assembles a missing object from chunks the device already holds
-(a content-defined cut both sides perform: `GEAR[b] = sha256("mica-chunker/v1" || b)[0..8]`, cut
-when the top 14 bits of the rolling hash are zero after 4096 bytes, or at 65536), fetching the
-rest from `chunks/<digest>` beside the object's directory (`<store>/objects/<sha256>` and
+(the objects of its deployments, the components of every core set its state names that
+authenticates, and what earlier acquisitions left; one that cannot be read is passed over, and
+they are cut once per fetch) by a content-defined cut both sides perform
+(`GEAR[b] = sha256("mica-chunker/v1" || b)[0..8]`, cut when the top 14 bits of the rolling hash
+are zero after 4096 bytes, or at 65536), fetching the rest from `chunks/<digest>` beside the object's directory (`<store>/objects/<sha256>` and
 `<store>/chunks/<digest>`) by the object's `<path>.index` (`MICAIDX1`). Nothing in that
 path is trusted: the result is verified like a whole download, and any failure falls back to the
 whole object. An origin that publishes no index is still conforming.

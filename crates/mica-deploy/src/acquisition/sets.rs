@@ -185,7 +185,7 @@ impl Acquisition<'_> {
         self.prepare()?;
         let missing = self.set_missing(&selected.set)?;
         self.reserve_missing(&missing)?;
-        self.fetch_objects(missing, &selected.objects)?;
+        self.fetch_objects(missing, &selected.objects, &mut None)?;
         self.set_ready(selected.envelope.as_bytes(), selected.set)
     }
 

@@ -6,6 +6,7 @@ use crate::{
     chunks,
     components::{Artifact, Deployment, authenticate_deployment, component_id},
     deployments::{DeploymentStore, atomic_write, directory, read_bounded, sync_dir, verify_file},
+    update_set::SetKind,
 };
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -278,8 +279,9 @@ impl Acquisition<'_> {
     }
 
     /// Every file on this device that a chunk may be copied out of: the objects
-    /// of the installed deployments, and whatever earlier acquisition left in
-    /// the object store. A seed is read, never trusted -- each chunk taken from
+    /// of the installed deployments, the components of every core set the
+    /// state names, and whatever earlier acquisition left in the object store.
+    /// A seed is read, never trusted -- each chunk taken from
     /// one is checked against the digest that named it, and the assembled
     /// object against the signed digest -- so a seed that cannot be read or
     /// authenticated is skipped rather than refused.
@@ -305,6 +307,14 @@ impl Acquisition<'_> {
                     .filter_map(|(place, _)| self.store.readable(&place).ok().flatten()),
             );
         }
+        for set in self.store.held_sets(SetKind::Core, self.keys) {
+            paths.extend(
+                self.store
+                    .set_objects(&set)
+                    .into_iter()
+                    .filter_map(|(place, _)| self.store.readable(&place).ok().flatten()),
+            );
+        }
         if let Ok(stored) = fs::read_dir(self.objects()) {
             paths.extend(stored.flatten().map(|entry| entry.path()));
         }
@@ -319,12 +329,7 @@ impl Acquisition<'_> {
     /// a whole download does, so the worst a hostile index achieves is wasted
     /// bandwidth. Any failure here is an ordinary `Err` and the caller falls
     /// back to fetching the whole object.
-    fn delta(
-        &self,
-        object: &SourceObject,
-        partial: &Path,
-        seeds: &BTreeMap<String, (PathBuf, u64, u64)>,
-    ) -> Result<()> {
+    fn delta(&self, object: &SourceObject, partial: &Path, seeds: &chunks::SeedMap) -> Result<()> {
         let artifact = Artifact {
             sha256: object.sha256.clone(),
             bytes: object.bytes,
@@ -380,7 +385,10 @@ impl Acquisition<'_> {
         self.prepare()?;
         let missing = self.missing(&selected.deployment)?;
         self.reserve_missing(&missing)?;
-        self.fetch_objects(missing, &selected.objects)?;
+        // The seeds are cut once for the whole fetch, the set's objects
+        // included: re-reading them per call would multiply the slowest step.
+        let mut seeds = None;
+        self.fetch_objects(missing, &selected.objects, &mut seeds)?;
         // The image's set, when installing the deployment would take it: its
         // envelope first, then the components it names.
         if let Some(image) =
@@ -390,13 +398,13 @@ impl Acquisition<'_> {
             let envelope = BTreeMap::from([(image.sha256.clone(), image.bytes)]);
             let missing = self.absent(envelope)?;
             self.reserve_missing(&missing)?;
-            self.fetch_objects(missing, &selected.objects)?;
+            self.fetch_objects(missing, &selected.objects, &mut seeds)?;
             let (set, _) = self
                 .store
                 .image_set(image, &self.objects(), self.keys, self.arch)?;
             let missing = self.set_missing(&set)?;
             self.reserve_missing(&missing)?;
-            self.fetch_objects(missing, &selected.objects)?;
+            self.fetch_objects(missing, &selected.objects, &mut seeds)?;
         }
         self.ready(selected.envelope.as_bytes(), selected.deployment)
     }
@@ -422,12 +430,14 @@ impl Acquisition<'_> {
     /// Fetch every object of `missing` from where `objects` says it is, by
     /// delta where the origin and this device allow, and promote each into the
     /// verified store.
+    /// `seeds` is the caller's cut, made on first need and reused by every
+    /// later call of the same fetch.
     fn fetch_objects(
         &self,
         missing: BTreeMap<String, u64>,
         objects: &[SourceObject],
+        seeds: &mut Option<chunks::SeedMap>,
     ) -> Result<()> {
-        let mut seeds = None;
         // One probe per fetch, not one per object: an origin that did not serve
         // the first index is not expected to serve the next, and being wrong
         // about that costs exactly what this repository did before deltas --
@@ -447,10 +457,7 @@ impl Acquisition<'_> {
             // An interrupted transfer is resumed rather than restarted as a
             // delta: the bytes on disk are already paid for.
             if held == 0 && origin_has_indexes {
-                // The seeds are cut once and reused for every object of this
-                // deployment: re-reading them per object would multiply the
-                // slowest step by the number of objects for nothing.
-                let cut = match &seeds {
+                let cut = match seeds {
                     Some(cut) => cut,
                     None => seeds.insert(chunks::seed_map(&self.seeds())?),
                 };
