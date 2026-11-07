@@ -36,6 +36,7 @@ pub(super) fn transactions_survive_each_boundary() {
             "import",
             "reset-stage",
             "reset-finish",
+            "ext-install",
         ] {
             // Only a `ubi` board writes an import straight into its store.
             if operation == "import" && kind != Kind::Ubi {
@@ -72,6 +73,7 @@ pub(super) fn transactions_survive_each_boundary() {
             );
             validate(baseline.path(), kind);
             validate_reset(baseline.path(), kind, operation);
+            validate_extensions(baseline.path(), kind, operation, true);
             let trace = fs::read_to_string(baseline.path().join("trace")).unwrap();
             assert!(
                 trace.contains("fsync"),
@@ -102,6 +104,7 @@ pub(super) fn transactions_survive_each_boundary() {
                             );
                         }
                         validate(case.path(), kind);
+                        validate_extensions(case.path(), kind, operation, false);
                         // Restart the interrupted transaction with its durable
                         // state; an already published candidate is reconciled.
                         let restarted = store(case.path(), kind);
@@ -121,6 +124,7 @@ pub(super) fn transactions_survive_each_boundary() {
                             validate_import(case.path());
                         }
                         validate_reset(case.path(), kind, operation);
+                        validate_extensions(case.path(), kind, operation, true);
                     });
                     if let Err(error) = check {
                         eprintln!("failed fixture retained: {}", case.keep().display());
@@ -492,6 +496,23 @@ pub(super) fn a_factory_reset_is_staged_only_over_a_confirmed_running_deployment
         assert!(mica_deploy::factory_reset::unstage(&store.system).unwrap());
         assert!(!store.system.join("factory-reset").exists());
         assert!(!mica_deploy::factory_reset::unstage(&store.system).unwrap());
+    }
+}
+
+/// A driver extension's next build replaces its last for the same kernel,
+/// and the last one's objects are collected.
+#[test]
+pub(super) fn an_extension_install_replaces_the_build_and_collects_the_last() {
+    for kind in KINDS {
+        let root = TempDir::new().unwrap();
+        seed(root.path(), kind, "ext-install");
+        validate_extensions(root.path(), kind, "ext-install", false);
+        run_operation(root.path(), kind, "ext-install");
+        validate(root.path(), kind);
+        validate_extensions(root.path(), kind, "ext-install", true);
+        // Run again, it changes nothing.
+        run_operation(root.path(), kind, "ext-install");
+        validate_extensions(root.path(), kind, "ext-install", true);
     }
 }
 

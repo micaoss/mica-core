@@ -180,6 +180,10 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
             write(&root.join("candidate-objects"), &archive);
         }
         d["generation"] = json!(generation);
+        if operation == "ext-install" {
+            // A kernel whose runkit maps driver extensions.
+            d["kernel"]["features"] = json!(["driver-ext"]);
+        }
         d["kernel"]["id"] = json!(component_id(&d["kernel"]).unwrap());
         d["rootfs"]["id"] = json!(component_id(&d["rootfs"]).unwrap());
         if generation == 3 && operation == "pair" {
@@ -323,7 +327,7 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
         archive.extend(fs::read(root.join("candidate-objects")).unwrap());
         write(&root.join("candidate.archive"), &archive);
     }
-    if !["install", "reuse", "import"].contains(&operation) {
+    if !["install", "reuse", "import", "ext-install"].contains(&operation) {
         store
             .install(
                 &envelopes[2],
@@ -341,7 +345,7 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
             )
             .unwrap();
     }
-    if !["install", "reuse", "import"].contains(&operation) {
+    if !["install", "reuse", "import", "ext-install"].contains(&operation) {
         if store.boot.is_fit() {
             let mut environment = store.boot.records().unwrap();
             environment.records[0].tries_left = Some(2);
@@ -374,6 +378,25 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
         .unwrap();
         write(&root.join("retained-id"), running.deployment_id.as_bytes());
     }
+    if operation == "ext-install" {
+        // The running kernel has a build of the extension; its next one is
+        // downloaded beside it.
+        let kernel = deployments[1]["kernel"]["id"].as_str().unwrap();
+        let arch = deployments[1]["kernel"]["arch"].as_str().unwrap();
+        let old = extension(root, "ext-1", kernel, arch, 50);
+        let id = store
+            .install_extension(
+                &old,
+                &root.join("ext-1/ext.img"),
+                &root.join("ext-1/ext.roothash.p7s"),
+                &[public],
+            )
+            .unwrap();
+        write(&root.join("ext-old-id"), id.as_bytes());
+        let new = extension(root, "ext-2", kernel, arch, 51);
+        write(&root.join("ext-new-id"), hash(&new).as_bytes());
+        write(&root.join("ext-kernel"), kernel.as_bytes());
+    }
     if operation == "gc" {
         store.confirm(&receipt(&deployments[2], kind)).unwrap();
         if kind == Kind::Ubi {
@@ -395,6 +418,79 @@ fn seed(root: &Path, kind: Kind, operation: &str) {
                     .join(format!("roots/{}/rootfs.img", "f".repeat(64))),
                 b"unreachable",
             );
+        }
+    }
+}
+/// The objects of a build of the driver extension `rtl8125` for `kernel`,
+/// on `arch`, of fill `fill`, in `<root>/<dir>`, and its descriptor, also
+/// written there.
+fn extension(root: &Path, dir: &str, kernel: &str, arch: &str, fill: u8) -> Vec<u8> {
+    let (image, signature) = (vec![fill; 12288], vec![fill; 900]);
+    write(&root.join(dir).join("ext.img"), &image);
+    write(&root.join(dir).join("ext.roothash.p7s"), &signature);
+    let descriptor = serde_json::to_vec(&json!({
+        "arch": arch,
+        "content": {
+            "image": {"bytes": image.len(), "sha256": hash(&image)},
+            "rootHash": "22".repeat(32),
+            "signature": {"bytes": signature.len(), "sha256": hash(&signature)},
+            "verity": {"algorithm": "sha256", "dataBlockSize": 4096, "dataBlocks": 2,
+                "hashBlockSize": 4096, "hashOffset": 8192, "salt": "44".repeat(32),
+                "version": 1},
+        },
+        "kernel": kernel,
+        "name": "rtl8125",
+        "schema": "mica/driver-ext-descriptor/v1",
+        "version": format!("1.{fill}"),
+    }))
+    .unwrap();
+    write(&root.join(dir).join("ext.json"), &descriptor);
+    descriptor
+}
+/// After an extension install, whatever was interrupted: the build the state
+/// names is whole, and once the install ran through it is the new one alone.
+fn validate_extensions(root: &Path, kind: Kind, operation: &str, finished: bool) {
+    if operation != "ext-install" {
+        return;
+    }
+    let store = store(root, kind);
+    let kernel = fs::read_to_string(root.join("ext-kernel")).unwrap();
+    let (old, new) = (
+        fs::read_to_string(root.join("ext-old-id")).unwrap(),
+        fs::read_to_string(root.join("ext-new-id")).unwrap(),
+    );
+    let state = mica_deploy::extensions::read_state(&store.system).unwrap();
+    let named = &state.builds[&kernel]["rtl8125"];
+    assert!(*named == old || *named == new, "{named}");
+    let directory = mica_deploy::extensions::object_dir(&store.system, named);
+    let extension =
+        mica_deploy::driver_ext::parse_descriptor(&fs::read(directory.join("ext.json")).unwrap())
+            .unwrap();
+    assert_eq!(extension.id, *named);
+    let content = &extension.descriptor.content;
+    let image = match kind {
+        Kind::Ubi => ubi::DirUbi::open_at(&root.join("store/ubi")).read(&format!("x-{named}")),
+        _ => fs::read(directory.join("ext.img")).unwrap(),
+    };
+    for (bytes, artifact) in [
+        (image, &content.image),
+        (
+            fs::read(directory.join("ext.roothash.p7s")).unwrap(),
+            &content.signature,
+        ),
+    ] {
+        assert_eq!(
+            (bytes.len() as u64, hash(&bytes)),
+            (artifact.bytes, artifact.sha256.clone())
+        );
+    }
+    if finished {
+        assert_eq!(*named, new);
+        assert!(!mica_deploy::extensions::object_dir(&store.system, &old).exists());
+        if kind == Kind::Ubi {
+            let names = ubi::DirUbi::open_at(&root.join("store/ubi")).names();
+            assert!(!names.contains(&format!("x-{old}")));
+            assert!(!names.iter().any(|name| name.starts_with("p.")));
         }
     }
 }
@@ -456,6 +552,19 @@ fn run_operation(root: &Path, kind: Kind, operation: &str) {
         }
         "gc" => {
             store.collect(&receipt, &[public]).unwrap();
+        }
+        "ext-install" => {
+            store
+                .install_extension(
+                    &fs::read(root.join("ext-2/ext.json")).unwrap(),
+                    &root.join("ext-2/ext.img"),
+                    &root.join("ext-2/ext.roothash.p7s"),
+                    &[public],
+                )
+                .unwrap();
+            store
+                .collect_extensions(&std::collections::BTreeSet::new(), &[public])
+                .unwrap();
         }
         "import" => {
             let workspace = root.join("store/updates");

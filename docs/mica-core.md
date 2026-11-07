@@ -1407,10 +1407,15 @@ signature does not take: one signer, named by issuer and serial number, no certi
 (a key the kernel trusts only through an enrolled certificate authority has to carry its chain),
 and not one of the certificates enrolled on SYSTEM. A key rotation keeps that form, so a system
 signed with the next key installs. Without the record, from a runkit that enrols nothing, the
-kernel trusts no owner's key, and nothing is held.
+kernel trusts no owner's key, and nothing is held. This is defence in depth, and a known
+residual: a key the running root added to `.secondary_trusted_keys` itself is not told apart by
+the form. The boot order (6.5) is the guarantee: at boot, roots and core components map before
+any owner certificate is in. Exact holding, to the issuer and serial number of the builtin verity
+certificates carried in the signed boot policy, needs mica-build and the core together and comes
+after owner enrolment.
 
-Installation is a durable file transaction, proven by a fault suite that interrupts it before
-and after every observed IO. `fetch` takes the objects smallest first, so a power cut is most
+Installation, of a deployment or of a driver extension, is a durable file transaction, proven by
+a fault suite that interrupts it before and after every observed IO. `fetch` takes the objects smallest first, so a power cut is most
 likely to cost the last and largest; on a `ubi` board it costs exactly the object in flight
 (6.6), and `--max-bytes` counts the objects written into the store with the workspace.
 
