@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use super::*;
@@ -45,16 +45,20 @@ impl std::error::Error for WaitsForExtension {}
 #[derive(Debug, Default)]
 pub struct KernelExtensions {
     /// Descriptors of builds for the new kernel; their objects are in the
-    /// update's objects, by digest.
+    /// update's objects, by digest, or else in `staged`.
     pub descriptors: Vec<Vec<u8>>,
     /// Extensions the new kernel runs without.
     pub dropped: Vec<String>,
+    /// Where the objects of builds an archive staged are, by digest: the
+    /// acquisition workspace's, whatever objects the update itself names.
+    pub staged: Option<PathBuf>,
 }
 
 /// The builds a system update pairs with its deployment, checked.
 pub(super) struct Pairing {
     builds: Vec<(Vec<u8>, Extension)>,
     pending: Builds,
+    staged: Option<PathBuf>,
 }
 
 /// Whether `kernel` maps driver extensions of `extension`'s architecture.
@@ -504,24 +508,36 @@ impl DeploymentStore {
         } else {
             pending.insert(kernel.id.clone(), proposed);
         }
-        Ok(Some(Pairing { builds, pending }))
+        Ok(Some(Pairing {
+            builds,
+            pending,
+            staged: given.staged.clone(),
+        }))
     }
 
-    /// Publish a pairing's builds from `objects`, by digest, then name it
-    /// as the change paired with the deployment `deployment`.
+    /// Publish a pairing's builds from `objects`, by digest, or else from
+    /// the pairing's staged objects, then name it as the change paired with
+    /// the deployment `deployment`.
     pub(super) fn publish_pairing(
         &self,
         pairing: Pairing,
         objects: &Path,
         deployment: &str,
     ) -> Result<()> {
+        let object = |digest: &str| {
+            let given = objects.join(digest);
+            match &pairing.staged {
+                Some(staged) if given.symlink_metadata().is_err() => staged.join(digest),
+                _ => given,
+            }
+        };
         for (descriptor, extension) in &pairing.builds {
             let content = &extension.descriptor.content;
             self.publish_build(
                 descriptor,
                 extension,
-                &objects.join(&content.image.sha256),
-                &objects.join(&content.signature.sha256),
+                &object(&content.image.sha256),
+                &object(&content.signature.sha256),
             )?;
         }
         let mut state = ext::read_state(&self.system)?;

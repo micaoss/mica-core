@@ -1472,8 +1472,8 @@ kernel of the system the last check selected, when it stays staged; `extension-i
 `{"extension", "staged", "extensionId"}`. `extension-drop <name> --kernel <id>` stages the
 decision that the system with that kernel runs without the extension (`verified/ext-drop-<kernel>-<name>`).
 A system update, `install` included, takes the builds staged for its kernel as if each were
-given with `--extension`, and the drops as if given with `--drop-extension` where no build of the
-extension is taken; `waitsForExtension` leaves out both, and `discard` removes them.
+given with `--extension`, its objects read from the workspace whatever `--objects` names, and
+the drops as if given with `--drop-extension` where no build of the extension is taken; `waitsForExtension` leaves out both, and `discard` removes them.
 
 **Owner certificates.** `owner-cert-add <certificate> [--clock-synced] [--by <console|api|cli>]
 [--source <text>]` enrols a PEM or DER certificate for the next boot (`{"sha256", "applies":

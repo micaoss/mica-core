@@ -645,12 +645,65 @@ pub(super) fn a_system_update_with_a_new_kernel_waits_for_its_extensions() {
                 &mica_deploy::deployments::KernelExtensions {
                     descriptors: Vec::new(),
                     dropped: vec!["rtl8125".into()],
+                    staged: None,
                 },
             )
             .unwrap();
         let state = mica_deploy::extensions::read_state(&other.system).unwrap();
         let next = fs::read_to_string(dropped.path().join("ext-next-kernel")).unwrap();
         assert!(!state.pending.unwrap().contains_key(&next));
+        // Staged by an archive, its objects are the workspace's, not the
+        // update's: an offline install from media still pairs it.
+        let staged = TempDir::new().unwrap();
+        seed(staged.path(), kind, "ext-pair");
+        let workspace = staged.path().join("verified-objects");
+        fs::create_dir(&workspace).unwrap();
+        let descriptor = fs::read(staged.path().join("ext-2/ext.json")).unwrap();
+        let content = mica_deploy::driver_ext::parse_descriptor(&descriptor)
+            .unwrap()
+            .descriptor
+            .content;
+        for digest in [&content.image.sha256, &content.signature.sha256] {
+            fs::rename(
+                staged.path().join("objects").join(digest),
+                workspace.join(digest),
+            )
+            .unwrap();
+        }
+        let install = |staged_objects: Option<std::path::PathBuf>| {
+            super::store(staged.path(), kind).install_with_extensions(
+                &fs::read(staged.path().join("candidate.json")).unwrap(),
+                &[fs::read(staged.path().join("public"))
+                    .unwrap()
+                    .try_into()
+                    .unwrap()],
+                &target,
+                &staged.path().join("objects"),
+                &serde_json::from_slice(
+                    &fs::read(staged.path().join("current-receipt.json")).unwrap(),
+                )
+                .unwrap(),
+                None,
+                &mica_deploy::deployments::KernelExtensions {
+                    descriptors: vec![descriptor.clone()],
+                    dropped: Vec::new(),
+                    staged: staged_objects,
+                },
+            )
+        };
+        let missing = install(None).unwrap_err();
+        assert!(
+            missing.chain().any(|cause| cause
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)),
+            "{kind:?}: {missing:#}"
+        );
+        install(Some(workspace.clone())).unwrap();
+        let state =
+            mica_deploy::extensions::read_state(&super::store(staged.path(), kind).system).unwrap();
+        let next = fs::read_to_string(staged.path().join("ext-next-kernel")).unwrap();
+        let new = fs::read_to_string(staged.path().join("ext-new-id")).unwrap();
+        assert_eq!(state.pending.unwrap()[&next]["rtl8125"], new);
         // Given, it is paired; the confirmed builds stay for the running kernel.
         run_operation(root.path(), kind, "ext-pair");
         validate(root.path(), kind);

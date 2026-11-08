@@ -1426,6 +1426,7 @@ fn execute() -> Result<()> {
                 KernelExtensions {
                     descriptors,
                     dropped,
+                    staged: None,
                 },
             )?;
             store
@@ -1587,10 +1588,11 @@ fn waits_for_extension(
 }
 
 /// What a system update with `kernel` takes beside the builds and drops
-/// `given`: those staged in the workspace for that kernel, a drop only where
-/// no build of the extension is taken.
+/// `given`: those staged in the workspace for that kernel, whose objects are
+/// the workspace's, a drop only where no build of the extension is taken.
 fn with_staged(kernel: &str, mut given: KernelExtensions) -> Result<KernelExtensions> {
     let root = Path::new(UPDATES);
+    given.staged = Some(root.join("verified/objects"));
     for staged in mica_deploy::acquisition::staged_extensions(root, kernel)? {
         if !given.descriptors.contains(&staged) {
             given.descriptors.push(staged);

@@ -623,6 +623,7 @@ fn run_operation(root: &Path, kind: Kind, operation: &str) {
                     &mica_deploy::deployments::KernelExtensions {
                         descriptors: vec![fs::read(root.join("ext-2/ext.json")).unwrap()],
                         dropped: Vec::new(),
+                        staged: None,
                     },
                 )
                 .unwrap();
