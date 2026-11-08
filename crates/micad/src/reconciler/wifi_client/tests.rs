@@ -46,7 +46,7 @@ const GOLDEN_EMPTY: &str = "# Managed by micad from wifi.client. Do not edit.\n\
     sae_pwe=2\n";
 /// Golden networkd unit for `wlan0`.
 const GOLDEN_NETWORKD: &str =
-    "[Match]\nName=wlan0\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric=600\n";
+    "[Match]\nName=wlan0\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric=600\nUseMTU=yes\n";
 /// Pre-shared key used by the leak test; distinctive enough that a
 /// substring search for it cannot match anything else.
 const SECRET_PSK: &str = "Zq7-LEAKCANARY-4x";

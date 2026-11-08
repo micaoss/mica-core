@@ -74,11 +74,11 @@ fn dhcp_static_and_unaddressed_interfaces_render_as_ifupdown_stanzas() {
         text,
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
 auto lo\niface lo inet loopback\n\
-\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    udhcpc_opts -b -S\n\
+\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    udhcpc_opts -b -S -O mtu\n\
 \nauto eth1\niface eth1 inet static\n    address 192.168.1.10\n    netmask 255.255.255.0\n    gateway 192.168.1.1\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/eth1 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n    down rm -f /run/mica/resolv.d/eth1 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n\
 \nauto eth2\niface eth2 inet manual\n\
 \nauto eth3\niface eth3 inet6 static\n    address fd00::2\n    netmask 64\n    gateway fd00::1\n\
-\nauto eth4\niface eth4 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 110\n    udhcpc_opts -b -S\n"
+\nauto eth4\niface eth4 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 110\n    udhcpc_opts -b -S -O mtu\n"
     );
 }
 
@@ -179,7 +179,7 @@ fn a_dhcp_interface_with_its_own_dns_asks_the_lease_for_none() {
         text,
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
 auto lo\niface lo inet loopback\n\
-\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    udhcpc_opts -b -S -o -O subnet -O router -O broadcast\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/00-eth0 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n    down rm -f /run/mica/resolv.d/00-eth0 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n"
+\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    udhcpc_opts -b -S -o -O subnet -O router -O broadcast -O mtu\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/00-eth0 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n    down rm -f /run/mica/resolv.d/00-eth0 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n"
     );
 }
 
@@ -344,7 +344,7 @@ fn a_dhcp_interface_off_the_internet_says_so_to_the_lease_script() {
     let text = render(&network, &[], None, &crate::board::Board::default()).unwrap();
     assert!(
         text.contains(
-            "\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    internet 0\n    udhcpc_opts -b -S\n"
+            "\nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    internet 0\n    udhcpc_opts -b -S -O mtu\n"
         ),
         "{text}"
     );
@@ -417,7 +417,7 @@ fn static_routes_are_added_and_removed_with_their_interface() {
     let text = render(&network, &[], None, &crate::board::Board::default()).unwrap();
     assert!(
         text.contains(
-            "    udhcpc_opts -b -S\n    route_1 10.20.0.0/16 via 192.168.1.2 metric 5\n    route_2 10.21.0.0/16\n"
+            "    udhcpc_opts -b -S -O mtu\n    route_1 10.20.0.0/16 via 192.168.1.2 metric 5\n    route_2 10.21.0.0/16\n"
         ),
         "{text}"
     );

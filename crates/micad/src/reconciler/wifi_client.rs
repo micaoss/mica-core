@@ -266,10 +266,11 @@ fn render_config(client: &WifiClientSettings) -> Result<String> {
 /// uplink's, so the radio carries traffic only when no cable does.
 const ROUTE_METRIC: u32 = 600;
 
-/// Render the networkd unit that addresses an associated station link.
+/// Render the networkd unit that addresses an associated station link,
+/// taking the lease's MTU as every DHCP link micad renders does.
 fn render_networkd(interface: &str) -> String {
     format!(
-        "[Match]\nName={interface}\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric={ROUTE_METRIC}\n"
+        "[Match]\nName={interface}\n\n[Network]\nDHCP=yes\n\n[DHCPv4]\nRouteMetric={ROUTE_METRIC}\nUseMTU=yes\n"
     )
 }
 

@@ -7,13 +7,16 @@ const IMAGE_DHCP: &str = "[Match]\nName=eth*\n\n[Network]\nDHCP=yes\n";
 #[test]
 fn the_image_dhcp_file_is_adopted_as_a_dhcp_entry() {
     assert_eq!(adopted_entry(&[IMAGE_DHCP]), Ok(json!({ "dhcp": true })));
+    // Base's file taking the lease's MTU, as micad's own units do.
+    let with_mtu = format!("{IMAGE_DHCP}\n[DHCPv4]\nUseMTU=yes\n");
+    assert_eq!(adopted_entry(&[&with_mtu]), Ok(json!({ "dhcp": true })));
 }
 
 /// The unit micad renders for an undeclared wired port: the image's DHCP
 /// with a route metric, which is micad's to render again once declared.
 #[test]
 fn the_auto_dhcp_unit_is_adopted_as_a_dhcp_entry() {
-    let unit = "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\n\n[DHCPv4]\nRouteMetric=110\n";
+    let unit = "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\n\n[DHCPv4]\nRouteMetric=110\nUseMTU=yes\n";
     assert_eq!(adopted_entry(&[unit]), Ok(json!({ "dhcp": true })));
     assert_eq!(
         adopted_entry(&["[Network]\nDHCP=yes\n[DHCPv4]\nUseDNS=no\n"]),

@@ -138,12 +138,15 @@ pub(super) fn render_unit(
             }
         }
     }
-    if master.is_none() && cfg.dhcp && (metric.is_some() || !cfg.dns.is_empty() || !cfg.internet())
-    {
+    if master.is_none() && cfg.dhcp {
         out.push_str("\n[DHCPv4]\n");
         if let Some(metric) = metric {
             out.push_str(&format!("RouteMetric={metric}\n"));
         }
+        // The lease's MTU (option 26) is the link's: a cloud network's is
+        // smaller than Ethernet's and comes no other way. networkd ignores
+        // it on a link whose `[Link] MTUBytes=` is set.
+        out.push_str("UseMTU=yes\n");
         // An interface kept off the internet takes the lease's address and
         // subnet route, and neither the lease's gateway nor a router
         // advertisement's.

@@ -205,13 +205,15 @@ fn dhcp_stanza(out: &mut String, iface: &str, dns: &[String], metric: Option<u32
     if !internet {
         let _ = writeln!(out, "    internet 0");
     }
+    // `-O mtu` asks for the lease's MTU (option 26), which Base's script
+    // sets on the link, as networkd's `UseMTU=yes` does.
     if dns.is_empty() {
-        let _ = writeln!(out, "    udhcpc_opts -b -S");
+        let _ = writeln!(out, "    udhcpc_opts -b -S -O mtu");
         return;
     }
     let _ = writeln!(
         out,
-        "    udhcpc_opts -b -S -o -O subnet -O router -O broadcast"
+        "    udhcpc_opts -b -S -o -O subnet -O router -O broadcast -O mtu"
     );
     resolver_lines(out, &format!("00-{iface}"), dns);
 }

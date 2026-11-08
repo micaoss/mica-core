@@ -152,7 +152,7 @@ pub(super) async fn a_dhcp_iface_with_its_own_dns_ignores_the_leases() {
     assert_eq!(
         rendered,
         "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\nDNS=1.1.1.1\nDNS=2606:4700:4700::1111\n\n\
-[DHCPv4]\nRouteMetric=100\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n"
+[DHCPv4]\nRouteMetric=100\nUseMTU=yes\nUseDNS=no\n\n[DHCPv6]\nUseDNS=no\n\n[IPv6AcceptRA]\nUseDNS=no\n"
     );
 }
 
@@ -239,12 +239,12 @@ pub(super) async fn dhcp_links_take_distinct_route_metrics_in_name_order() {
         std::fs::read_to_string(dir.path().join(format!("50-mica-{iface}.network"))).unwrap()
     };
     assert!(
-        unit("br0").ends_with("\n[DHCPv4]\nRouteMetric=100\n"),
+        unit("br0").ends_with("\n[DHCPv4]\nRouteMetric=100\nUseMTU=yes\n"),
         "{}",
         unit("br0")
     );
     assert!(
-        unit("eth1").ends_with("\n[DHCPv4]\nRouteMetric=110\n"),
+        unit("eth1").ends_with("\n[DHCPv4]\nRouteMetric=110\nUseMTU=yes\n"),
         "{}",
         unit("eth1")
     );
@@ -277,7 +277,7 @@ pub(super) async fn an_undeclared_wired_port_gets_a_dhcp_unit_with_its_metric() 
     assert_eq!(names, ["50-mica-eth0.network", "60-mica-auto-eth1.network"]);
     assert_eq!(
         std::fs::read_to_string(dir.path().join("60-mica-auto-eth1.network")).unwrap(),
-        "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\n\n[DHCPv4]\nRouteMetric=110\n"
+        "[Match]\nName=eth1\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\n\n[DHCPv4]\nRouteMetric=110\nUseMTU=yes\n"
     );
 
     reconciler
@@ -310,7 +310,7 @@ pub(super) async fn an_interface_off_the_internet_takes_no_gateway_from_its_leas
     };
     assert!(
         unit("eth1").ends_with(
-            "\n[DHCPv4]\nRouteMetric=110\nUseGateway=no\n\n[IPv6AcceptRA]\nUseGateway=no\n"
+            "\n[DHCPv4]\nRouteMetric=110\nUseMTU=yes\nUseGateway=no\n\n[IPv6AcceptRA]\nUseGateway=no\n"
         ),
         "{}",
         unit("eth1")
@@ -349,7 +349,10 @@ pub(super) async fn a_boards_internal_port_takes_no_gateway_and_a_hidden_one_no_
         .await
         .unwrap();
     assert!(!read("50-mica-eth0.network").contains("UseGateway"));
-    assert!(read("50-mica-eth1.network").contains("[DHCPv4]\nRouteMetric=110\nUseGateway=no\n"));
+    assert!(
+        read("50-mica-eth1.network")
+            .contains("[DHCPv4]\nRouteMetric=110\nUseMTU=yes\nUseGateway=no\n")
+    );
     assert!(read("60-mica-auto-eth2.network").contains("UseGateway=no"));
     assert!(!dir.path().join("60-mica-auto-eth9.network").exists());
 
