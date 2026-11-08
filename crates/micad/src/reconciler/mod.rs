@@ -2,6 +2,7 @@
 
 /// Visible to the daemon for the reason `network` is: the bus surfaces the
 /// pairing actions, and they drive the unit this reconciler owns.
+mod admins;
 pub mod bluetooth;
 /// Visible to the daemon for the reason `network` is: the container actions
 /// the bus surfaces drive the unit name this reconciler renders.
@@ -116,6 +117,7 @@ fn openrc_reconcilers(
         Box::new(web::WebReconciler::production(OpenrcUnits::production())),
         Box::new(mdns::MdnsReconciler::production(apps)),
         Box::new(ssdp::SsdpReconciler::production()),
+        Box::new(admins::CloudAdminsReconciler::production()),
         Box::new(services::ServicesReconciler::production(
             micad_settings::Init::Openrc,
         )),
@@ -150,6 +152,7 @@ fn systemd_reconcilers(
         Box::new(web::WebReconciler::production(systemd::Systemd::new())),
         Box::new(mdns::MdnsReconciler::production(apps)),
         Box::new(ssdp::SsdpReconciler::production()),
+        Box::new(admins::CloudAdminsReconciler::production()),
         Box::new(services::ServicesReconciler::production(
             micad_settings::Init::Systemd,
         )),
@@ -191,6 +194,7 @@ mod feature_tests {
             "access.web",
             "access.mdns",
             "access.ssdp",
+            "access.cloudAdmins",
             "services",
         ] {
             assert!(minimal.contains(&always), "{always}: {minimal:?}");
@@ -238,6 +242,7 @@ mod feature_tests {
                 "access.web",
                 "access.mdns",
                 "access.ssdp",
+                "access.cloudAdmins",
                 "services",
                 "bluetooth"
             ]

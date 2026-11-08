@@ -25,6 +25,7 @@ import { ClaimPanel } from '@/features/onboarding/claim-panel'
 import { ProvisioningPanel } from '@/features/onboarding/provisioning-panel'
 import { WebPanel } from './web-panel'
 import { CertificatePanel } from './certificate-panel'
+import { CloudAdminsSection } from './cloud-admins-panel'
 
 interface TokenSummary { id: string; name: string; created: number }
 interface MintedToken extends TokenSummary { token: string }
@@ -43,6 +44,7 @@ export function AccessPage() {
         <div className="grid gap-3"><WebPanel /><CertificatePanel /></div>
       </PageSection>
       {serves('ssh') ? <PageSection title={t('access.ssh.title')} description={t('access.ssh.sectionCopy')}><SshPanel /></PageSection> : null}
+      <CloudAdminsSection />
       <PageSection title={t('access.root.title')} description={t('access.root.description')} tone="danger"><RootPanel /></PageSection>
       <PageSection title={t('access.onboarding.title')} description={t('access.onboarding.addition')}>
         <div className="grid gap-3 lg:grid-cols-2"><ClaimPanel /><ProvisioningPanel /></div>

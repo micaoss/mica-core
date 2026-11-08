@@ -30,6 +30,15 @@ pub struct AccessSettings {
     /// Whether the device answers UPnP discovery (SSDP), on the same rule.
     #[serde(default, skip_serializing_if = "LanDiscoverySettings::is_unset")]
     pub ssdp: LanDiscoverySettings,
+    /// Whether the cloud's SSH users, whom `mica-gce-agent` adds to
+    /// `mica-admins`, are administrators (sudo); absent is the product's
+    /// `CLOUD_ADMINS=` line, off when it names none. Not written while unset.
+    #[serde(
+        rename = "cloudAdmins",
+        default,
+        skip_serializing_if = "LanDiscoverySettings::is_unset"
+    )]
+    pub cloud_admins: LanDiscoverySettings,
     /// Device credential metadata; never holds a plaintext secret.
     #[serde(default)]
     pub device: DeviceCredentialSettings,
@@ -135,11 +144,12 @@ pub struct AuthorizedKey {
     pub comment: Option<String>,
 }
 
-/// A LAN discovery switch (`access.mdns`, `access.ssdp`).
+/// A switch whose default is the product's: the LAN discovery switches
+/// (`access.mdns`, `access.ssdp`) and `access.cloudAdmins`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LanDiscoverySettings {
-    /// On or off; absent is the product's choice, on when it makes none.
+    /// On or off; absent is the product's choice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 }

@@ -1082,6 +1082,14 @@ export const zhCN: Translation = {
       revoked: '令牌 {{name}} 已吊销。', minted: '令牌已创建。', revealClosed: '令牌不再显示。',
       label: '标签', created: '创建时间', revoke: '吊销', mint: '生成令牌', copied: '已复制', revealCopy: '这是设备唯一一次显示它。', closeReveal: '关闭', closeRevealCopy: '关闭此面板后明文令牌会被丢弃，无法再次显示。', closeRevealConfirm: '关闭并丢弃', newLabel: '新令牌标签', placeholder: '部署代理', pending: '正在创建…', create: '创建令牌',
     },
+    cloudAdmins: {
+      title: '云管理员',
+      description: '云平台元数据中的 SSH 用户成为管理员（sudo）。关闭后立即收回该权限；已获得 root 的 Shell 会保持到结束为止。',
+      switch: '云 SSH 用户为管理员',
+      source: { setting: '在此设置', product: '产品默认' },
+      granted: '云 SSH 用户已成为管理员。',
+      revoked: '云 SSH 用户已不再是管理员。',
+    },
     ssh: {
       title: 'SSH', sectionCopy: '授权密钥可获得 root Shell 访问。即使服务已停用，仍可管理密钥。',
       server: 'SSH 服务', serverState: '{{state}} · 仍可管理密钥', remove: '移除',

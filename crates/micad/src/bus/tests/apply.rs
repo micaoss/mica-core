@@ -487,7 +487,9 @@ pub(super) fn only_the_reconcilers_that_start_no_service_run_before_the_name() {
             .copied()
             .filter(|name| !DEFERRED.contains(name))
             .collect();
-        assert_eq!(before, ["hostname", "network"], "{init:?}");
+        // `cloudAdmins` renders the sudo rule and the agent's switch, files
+        // alone, so the grant holds before anything else starts.
+        assert_eq!(before, ["hostname", "network", "cloudAdmins"], "{init:?}");
         for name in DEFERRED {
             assert!(names.contains(&name), "{name} under {init:?}");
         }

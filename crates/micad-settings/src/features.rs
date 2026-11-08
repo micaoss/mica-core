@@ -175,6 +175,14 @@ pub fn product_ssh(product_conf: &str) -> bool {
     line_value(product_conf, "SSH=") == Some("on")
 }
 
+/// Whether a product makes its cloud's SSH users administrators while
+/// `access.cloudAdmins.enabled` is unset, its `CLOUD_ADMINS=` line: `true`
+/// for `on` alone, so a product that names none grants nothing.
+#[must_use]
+pub fn product_cloud_admins(product_conf: &str) -> bool {
+    line_value(product_conf, "CLOUD_ADMINS=") == Some("on")
+}
+
 /// The product's name, its `PRODUCT=` line.
 #[must_use]
 pub fn product_name(product_conf: &str) -> Option<&str> {
@@ -487,6 +495,9 @@ mod tests {
         assert!(!product_ssh("SSH_SERVER=dropbear\n"));
         assert!(!product_ssh("SSH=off\n"));
         assert!(!product_ssh("SSH=yes\n"));
+        assert!(product_cloud_admins("PRODUCT=gcp\nCLOUD_ADMINS=on\n"));
+        assert!(!product_cloud_admins("PRODUCT=gcp\n"));
+        assert!(!product_cloud_admins("CLOUD_ADMINS=yes\n"));
     }
 
     #[test]

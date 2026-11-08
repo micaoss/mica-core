@@ -122,6 +122,8 @@ The tests relocate the rest of what micad writes the same way: the reconcilers' 
 - `MDNS` is `on` (the default) or `off`: whether the device announces itself over mDNS while
   `access.mdns.enabled` is unset (section 3.13). Any word but `off` is on.
 - `SSDP` is the same for UPnP discovery while `access.ssdp.enabled` is unset (section 3.14).
+- `CLOUD_ADMINS` is `on` or `off` (the default): whether the cloud's SSH users are administrators
+  while `access.cloudAdmins.enabled` is unset (section 3.15). Only `on` grants.
 - `SSH_SERVER` is `dropbear` (the default) or `openssh`: Base's choice of SSH server. micad does
   not read it; both servers take the same environment and unit (section 3.8).
 
@@ -134,7 +136,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `hostname` | The hostname |
 | `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`, or `false` on a port the board declares internal, section 3.12): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
 | `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
-| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), LAN discovery (`mdns.enabled` and `ssdp.enabled`, sections 3.13 and 3.14; absent is the product's choice, and each is written only once set), the admin password hash, the device credential, API tokens, claim state |
+| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), LAN discovery (`mdns.enabled` and `ssdp.enabled`, sections 3.13 and 3.14; absent is the product's choice, and each is written only once set), whether the cloud's SSH users are administrators (`cloudAdmins.enabled`, section 3.15, on the same rule), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
 | `container` | The engine switch (`enabled`) and the declared Compose projects (`projects`, section 3.9) |
 | `bluetooth` | The switch (on by default), the trust list, and `provisioning.autoWhenOffline` (BLE provisioning, `docs/ble-provisioning.md`; on by default). Documents that still carry `discoverable`, `alias` or `pin` load, and the keys are dropped at the next save |
@@ -984,6 +986,23 @@ when the product says nothing. It runs only while it is on and apid serves the n
 status` shows the switch, its source, whether it runs and why not, and what it announces; `micad
 ssdp on|off` write the switch and wait for it. The live state (`ssdp`) carries the same, and the
 description's fields.
+
+### 3.15 Cloud administrators
+
+On a cloud product, `mica-gce-agent` makes an account for each SSH user the cloud's metadata
+names (Base's `mica-accounts add-login`) and adds it to Base's group `mica-admins` with
+`--admin`. The grant is not the group but its sudo rule, and micad alone renders it:
+`/run/mica/sudoers.d/50-mica-admins`, `%mica-admins ALL=(ALL:ALL) NOPASSWD: ALL`, `0440`, which
+Base's `/etc/sudoers.d/mica-admins` includes (`@includedir /run/mica/sudoers.d`). The switch is
+`access.cloudAdmins.enabled`; absent, the product's `CLOUD_ADMINS=` line decides (section 3.2),
+off when it names none. On renders the rule; off removes it, so membership grants nothing from
+then on, without the agent and without emptying the group; a shell already root stays root until
+it ends. `/run/mica/cloud-admins`, `on` or `off` (`0644`), says which to the agent, which passes
+`--admin` only while it reads `on`; the rule is written before it says `on` and removed before it
+says `off`. Both are rendered at every start, since `/run` is memory. The live state
+(`cloudAdmins`) is `{enabled, source, productDefault}`, `source` being `setting` or `product`; the console shows the switch while the product grants or the setting is set. The switch is
+written through `PUT /api/v1/settings/access.cloudAdmins.enabled`, and the console's Access page
+shows it, read from `GET /api/v1/state/cloudAdmins`.
 
 ## 4. mica-apid
 

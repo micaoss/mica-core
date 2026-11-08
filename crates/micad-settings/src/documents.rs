@@ -52,6 +52,7 @@ pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 10] = [
             "access.web",
             "access.mdns",
             "access.ssdp",
+            "access.cloudAdmins",
         ],
     ),
     (NETWORK_DOCUMENT, &["network"]),
@@ -149,6 +150,13 @@ pub struct SystemDocument {
     /// `access.ssdp` in the addressed tree. Not written while unset.
     #[serde(default, skip_serializing_if = "LanDiscoverySettings::is_unset")]
     pub ssdp: LanDiscoverySettings,
+    /// `access.cloudAdmins` in the addressed tree. Not written while unset.
+    #[serde(
+        rename = "cloudAdmins",
+        default,
+        skip_serializing_if = "LanDiscoverySettings::is_unset"
+    )]
+    pub cloud_admins: LanDiscoverySettings,
 }
 
 /// `network.json`: the per-interface network configuration.
@@ -368,6 +376,7 @@ impl DocumentSet {
                 web: settings.access.web,
                 mdns: settings.access.mdns,
                 ssdp: settings.access.ssdp,
+                cloud_admins: settings.access.cloud_admins,
             },
             network: NetworkDocument {
                 schema_version: NETWORK_SCHEMA_VERSION,
@@ -437,6 +446,7 @@ impl DocumentSet {
                 web: self.system.web,
                 mdns: self.system.mdns,
                 ssdp: self.system.ssdp,
+                cloud_admins: self.system.cloud_admins,
                 device: self.state.access.device,
                 api_tokens: self.state.access.api_tokens,
             },

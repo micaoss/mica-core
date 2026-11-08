@@ -20,7 +20,7 @@ pub(super) fn writable_tree(password: &str) -> serde_json::Value {
     tree
 }
 
-// The ten dot-paths admitted, each written and
+// The eleven dot-paths admitted, each written and
 // each read back through the route that answers for it.
 //
 // 202 and a task id: persistence has completed, while reconciliation is a
@@ -35,6 +35,7 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
         ("access.ssh.enabled", "true"),
         ("access.mdns.enabled", "false"),
         ("access.ssdp.enabled", "true"),
+        ("access.cloudAdmins.enabled", "false"),
         ("container.enabled", "true"),
         ("mqtt.enabled", "true"),
         ("wifi.client.enabled", "true"),
@@ -72,6 +73,7 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
             "access.ssh.enabled",
             "access.mdns.enabled",
             "access.ssdp.enabled",
+            "access.cloudAdmins.enabled",
             "container.enabled",
             "mqtt.enabled",
             "wifi.client.enabled",
@@ -84,7 +86,7 @@ pub(super) async fn the_write_route_writes_the_scalar_settings() {
 
     let tasks = bearer(&router, "GET", "/api/v1/tasks", &token).await;
     assert_eq!(tasks.status(), StatusCode::OK);
-    assert_eq!(body_json(tasks).await.as_array().unwrap().len(), 10);
+    assert_eq!(body_json(tasks).await.as_array().unwrap().len(), 11);
 
     let missing = bearer(&router, "GET", "/api/v1/tasks/not-retained", &token).await;
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);

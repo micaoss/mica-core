@@ -1277,6 +1277,14 @@ export const en = {
       pending: 'Creating…',
       create: 'Create token',
     },
+    cloudAdmins: {
+      title: 'Cloud administrators',
+      description: 'The SSH users the cloud\'s metadata names become administrators (sudo). Turning this off takes the grant away at once; a shell that is already root stays root until it ends.',
+      switch: 'Cloud SSH users are administrators',
+      source: { setting: 'Set here', product: 'Product default' },
+      granted: 'Cloud SSH users are administrators.',
+      revoked: 'Cloud SSH users are no longer administrators.',
+    },
     ssh: {
       title: 'SSH',
       sectionCopy: 'Authorized keys grant root shell access. Keys can be managed while the server is disabled.',
