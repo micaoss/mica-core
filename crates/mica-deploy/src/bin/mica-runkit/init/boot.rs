@@ -362,17 +362,29 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         // without enforcement and carries no limits. Nothing here creates the
         // ext4.
         let quotas = config.board.data_quotas;
-        mount(
+        let options = if quotas {
+            "rw,noatime,prjquota"
+        } else {
+            "rw,noatime"
+        };
+        // An ext4 smaller than its partition may be a grow the root started
+        // and a power cut stopped: its journal is replayed in a mount of its
+        // own, so the root's online grow never runs in the mount that
+        // recovered it. The mount below decides on a failure here.
+        fs::create_dir_all("/newroot/mnt/data")?;
+        match run(
             control,
-            &data,
-            "/newroot/mnt/data",
-            "ext4",
-            if quotas {
-                "rw,noatime,prjquota"
-            } else {
-                "rw,noatime"
+            Startup::ReplayData {
+                device: data.clone(),
+                target: "/newroot/mnt/data".into(),
+                options: options.into(),
             },
-        )?;
+        ) {
+            Ok(done) if done.trim().is_empty() => {}
+            Ok(done) => eprintln!("mica-init: DATA {}", done.trim()),
+            Err(error) => eprintln!("mica-init: DATA journal not replayed: {error:#}"),
+        }
+        mount(control, &data, "/newroot/mnt/data", "ext4", options)?;
         Ok(quotas)
     })()
     .context(mica_deploy::deployments::SharedDataFailure)?;

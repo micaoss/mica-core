@@ -19,6 +19,7 @@ use std::{
 
 pub mod format;
 pub mod gpt;
+pub mod replay;
 pub mod root_program;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,6 +73,14 @@ pub enum Operation {
         device: String,
         arch: String,
         format: crate::board::DataFormat,
+    },
+    /// Mount and unmount the ext4 on the block device `device` at `target`
+    /// with `options` when it is smaller than the device
+    /// (`replay::replay_data`), and print what was done.
+    ReplayData {
+        device: String,
+        target: String,
+        options: String,
     },
     Verity {
         device: String,
@@ -280,6 +289,17 @@ fn perform(operation: Operation) -> Result<()> {
             "{}",
             format::format_data(Path::new("/newroot"), &arch, &device, &data_format)?
         ),
+        Operation::ReplayData {
+            device,
+            target,
+            options,
+        } => {
+            let (flags, data) = mount_options(&options)?;
+            println!(
+                "{}",
+                replay::replay_data(&device, &target, flags, data.as_c_str())?
+            );
+        }
         Operation::Verity {
             device,
             name,

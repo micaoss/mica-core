@@ -1589,7 +1589,11 @@ read one format.
   unreadable request is set aside as `factory-reset.json.invalid` without erasing. The runkit
   writes `/run/mica/runkit.json` (`{"factoryReset": true, "factoryResetVersion": 2}`) to say it
   carries the reset out, and of which version; a reader that knows only `factoryReset` sees it
-  as before.
+  as before. On a `gpt` board an ext4 on DATA smaller than its partition, as a grow the root
+  started (`systemd-growfs`) leaves when a power cut stops it, is mounted and unmounted once
+  before the mount the root is given, so its journal is replayed there: the kernel's online
+  resize run in the mount that replayed a partial grow hits a kernel BUG
+  (`ext4_flex_group_add`). A failure of that mount is logged and the regular mount decides.
 - **`shutdown`**, PID 1 of a memory-only exit ramdisk that systemd execs at the end of its
   shutdown: releases loops and device-mapper mappings in dependency order within a bounded budget,
   and releases storage only once nothing is mounted, mapped or looped and no page is left to
