@@ -102,7 +102,7 @@ pub(crate) struct SetupResult {
         (status = 429, description = "Too many wrong device codes or logins; retry shortly (`login_throttled`)", body = ApiError),
         (status = 422, description = "The body is not this shape, `deviceCode` is missing on a device whose claim asks for its code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them", body = ApiError),
         (status = 500, description = "Hashing the password failed (`hash_failed`), the stored `access` subtree could not be read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
-        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`. Or the device's code, drawn on the device (`random`), cannot be read (`device_code_unavailable`): nothing claims it without the code", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
         (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
     ),
@@ -339,6 +339,15 @@ async fn check_device_code(
     source: &str,
 ) -> Result<(), Box<Response>> {
     let known = match state.api.get_device_code().await {
+        Ok(value) if value["gate"] == "unavailable" => {
+            return Err(Box::new(api_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ApiError::apid(
+                    "device_code_unavailable",
+                    "this device's code cannot be read, so it cannot be claimed".to_string(),
+                ),
+            )));
+        }
         Ok(value) => required_code(&value),
         Err(err) => return Err(Box::new(bus_api_error(&err, None))),
     };

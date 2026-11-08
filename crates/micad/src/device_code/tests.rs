@@ -39,6 +39,13 @@ const VECTORS: &[(Source, &str, &str, &str, &str)] = &[
         "mica-VST3",
         "WL2K6GAUJMRJWE6U",
     ),
+    (
+        Source::Random,
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "WU2BTGPNXDR",
+        "mica-W95C",
+        "THZNKHLW34BVTSQV",
+    ),
 ];
 
 fn test_secret() -> Vec<u8> {
@@ -318,4 +325,65 @@ fn the_login_prompt_file_follows_its_text() {
     put_issue(&issue, None).expect("remove");
     assert!(!issue.exists());
     put_issue(&issue, None).expect("nothing to remove");
+}
+
+#[test]
+fn a_random_code_is_drawn_once_and_kept_root_only() {
+    use std::os::unix::fs::MetadataExt as _;
+    let root = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(root.path().join("mnt/data/meta")).expect("meta");
+    // Another source draws nothing.
+    write(root.path(), CONFIG_PATH, "source=dmi-uuid\n");
+    ensure_random(root.path()).expect("nothing to draw");
+    assert!(!root.path().join(RANDOM_PATH).exists());
+
+    write(root.path(), CONFIG_PATH, "source=random\n");
+    assert!(device_code(root.path()).is_err(), "no seed yet");
+    ensure_random(root.path()).expect("drawn");
+    let meta = std::fs::metadata(root.path().join(RANDOM_PATH)).expect("seed");
+    assert_eq!(meta.mode() & 0o777, 0o600);
+    let seed = std::fs::read_to_string(root.path().join(RANDOM_PATH)).expect("seed");
+    let code = device_code(root.path()).expect("code");
+    assert_eq!(code.source, Source::Random);
+    assert_eq!(code.code, code_of(Source::Random, seed.trim()));
+    assert_eq!(parse_code(&code.code).as_deref(), Ok(code.code.as_str()));
+    // Kept: a second start draws nothing new.
+    ensure_random(root.path()).expect("kept");
+    assert_eq!(device_code(root.path()).expect("code"), code);
+    // A new DATA, as a factory reset formats it, draws a new one.
+    std::fs::remove_file(root.path().join(RANDOM_PATH)).expect("formatted");
+    ensure_random(root.path()).expect("drawn again");
+    assert_ne!(device_code(root.path()).expect("code").code, code.code);
+    // The prompt and the log name no random code.
+    let issue = root.path().join("issue");
+    assert_eq!(announce(root.path(), &issue).as_deref(), Some(RANDOM_HINT));
+    let shown = std::fs::read_to_string(&issue).expect("issue");
+    assert!(!shown.contains(&printed(&device_code(root.path()).expect("code").code)));
+}
+
+#[test]
+fn a_random_seed_others_can_read_or_that_is_no_seed_is_no_code() {
+    let root = tempfile::tempdir().expect("tempdir");
+    write(root.path(), CONFIG_PATH, "source=random\n");
+    let seed = "ab".repeat(32);
+    write(root.path(), RANDOM_PATH, &format!("{seed}\n"));
+    let path = root.path().join(RANDOM_PATH);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+    assert!(
+        device_code(root.path())
+            .unwrap_err()
+            .contains("not a file of its own")
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    assert_eq!(
+        device_code(root.path()).expect("code").code,
+        code_of(Source::Random, &seed)
+    );
+    for bad in ["AB".repeat(32), "ab".repeat(31), "zz".repeat(32)] {
+        std::fs::write(&path, &bad).expect("write");
+        assert!(device_code(root.path()).is_err(), "{bad}");
+        // An unreadable seed is never replaced.
+        ensure_random(root.path()).expect("left alone");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), bad);
+    }
 }

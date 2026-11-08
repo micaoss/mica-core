@@ -292,3 +292,27 @@ pub(super) async fn a_product_with_the_gate_off_is_claimed_without_the_code() {
     .await;
     assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+// A code drawn on the device that cannot be read keeps the claim closed: no
+// claim without it, with or without a code typed, and the setup session
+// still asks for one.
+#[tokio::test]
+pub(super) async fn an_unreadable_random_code_keeps_the_claim_closed() {
+    let (router, fake) = test_app(unconfigured_tree());
+    fake.set_device_code(json!({ "code": null, "reason": "no seed", "gate": "unavailable" }));
+    let session = get(&router, "/api/v1/session", None).await;
+    let session: serde_json::Value =
+        serde_json::from_str(&body_string(session).await).expect("session JSON");
+    assert_eq!(
+        session,
+        json!({ "state": "setup", "deviceCode": "required" })
+    );
+    for body in [
+        json!({ "password": "first-boot-pw" }),
+        json!({ "deviceCode": "DFN4-L34C-T8N", "password": "first-boot-pw" }),
+    ] {
+        let response = post_json(&router, SETUP_PATH, &body.to_string(), None).await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(envelope(response).await["code"], "device_code_unavailable");
+    }
+}

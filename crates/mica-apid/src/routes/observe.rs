@@ -141,7 +141,7 @@ pub(crate) async fn api_v1_system_info(
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "`{code, source, gate}`, or `{code: null, reason, gate}`; `gate` is `required` or `off`", body = ResourceValue),
+        (status = 200, description = "`{code, source, gate}`, or `{code: null, reason, gate}`; `gate` is `required`, `off`, or `unavailable` when a code drawn on the device (`random`) cannot be read", body = ResourceValue),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),

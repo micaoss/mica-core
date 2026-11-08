@@ -352,7 +352,7 @@ absence is reported with its reason rather than as a healthy reading:
   on DATA goes: STATE with the settings, the claim, the API tokens, the keys, the SSH host keys
   and the machine-id, the containers, the apps, `/srv`, `/mica` and the logs kept there. The
   device code, derived from the hardware, is unchanged, so the device comes back unclaimed, on
-  its factory access point.
+  its factory access point; a `random` code, whose seed is on DATA, is drawn again.
 
   The reset returns the device to the deployment that is running, which must be confirmed. The
   request and a snapshot of the files of DATA's `meta/` that describe SYSTEM (the firmware
@@ -464,7 +464,9 @@ route beyond its subnet; on `bound` it stops that `zcip`, and the flush removes 
 Base's script does this, an OpenRC port with no DHCP server has no IPv4 address.
 
 At start micad logs the device code (`device code`, with its source) and writes it to
-`/run/mica/device-code.issue`, replaced whole: `Device code: XXXX-XXXX-XXX`, then a
+`/run/mica/device-code.issue`, replaced whole: `Device code: XXXX-XXXX-XXX` (for a `random`
+code, which is neither logged nor shown, the line says to run `sudo micad device-code` after
+login, `docs/factory-ap-key.md`), then a
 `Console: <url>` line for each IPv4 address the device holds (the loopback and the container
 engines' links left out, a link-local address kept) and one for `<hostname>.local`, as
 `access.web` serves the console (section 4), then a blank line. micad reads the addresses again
@@ -1080,7 +1082,8 @@ the claimer's proof of holding the device, which reaching its console is not onc
 provisioning has put an unclaimed device on a network. The code is on the label and on the
 device's own console, the login prompt and micad's start line (section 3.8). A missing one is 422
 at `deviceCode`, a wrong one 403 `device_code_incorrect` and counts in the login backoff (429
-`login_throttled`, at most 300 s). A device without a code is claimed without one, and so is one whose
+`login_throttled`, at most 300 s). A device that declares a `random` code and cannot read it
+is not claimed: 503 `device_code_unavailable`. A device without a code is claimed without one, and so is one whose
 product says `CLAIM_DEVICE_CODE=off` (section 3.2): its claim ignores a `deviceCode` sent anyway.
 `GET /api/v1/session` in setup carries `deviceCode`, `required` or `off`, and the setup page asks
 for the code only when it is `required`. The claim sets

@@ -3000,7 +3000,7 @@
         "operationId": "api_v1_device_code",
         "responses": {
           "200": {
-            "description": "`{code, source, gate}`, or `{code: null, reason, gate}`; `gate` is `required` or `off`",
+            "description": "`{code, source, gate}`, or `{code: null, reason, gate}`; `gate` is `required`, `off`, or `unavailable` when a code drawn on the device (`random`) cannot be read",
             "content": {
               "application/json": {
                 "schema": {
@@ -6149,7 +6149,7 @@
             }
           },
           "503": {
-            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`. Or the device's code, drawn on the device (`random`), cannot be read (`device_code_unavailable`): nothing claims it without the code",
             "content": {
               "application/json": {
                 "schema": {

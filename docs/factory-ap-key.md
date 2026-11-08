@@ -27,9 +27,20 @@ the code, and the printed label would no longer match.
 | `dmi-serial` | `/sys/class/dmi/id/product_serial` | "To be filled by O.E.M.", "Default string", "System Serial Number", "Not Specified", "None", "0" (any case); all `0`; all `F` |
 | `dmi-uuid` | `/sys/class/dmi/id/product_uuid` | `03000200-0400-0500-0006-000700080009` (AMI); all `0`; all `F` |
 | `mac` | The address of the Ethernet link (`type` 1) whose `device` path sorts lowest, among links that are permanent (`addr_assign_type` 0), not wireless, not under USB, and not locally administered | no such link |
+| `random` | `/mnt/data/meta/device-code`: 64 lower-case hex characters, a seed micad draws once from the kernel's CSPRNG | absent; anything else; a file not owned by micad's user or readable by group or others |
 
 The raw value is the text read, with surrounding whitespace and NULs removed. It is not otherwise
 changed. A missing file, an unknown source or no value means the device has no code.
+
+`random` is for a board whose hardware holds no secret, such as a cloud VM, where a DMI UUID is
+readable by whoever runs it. When the board declares it and DATA holds no seed, micad draws 32
+bytes at startup, before anything reads the code, and writes their hex root-only (0600, staged,
+synced, renamed, `meta/` synced). A seed already there is never replaced, even an unreadable one.
+The seed survives reboots and updates. A factory reset that formats DATA removes it, so the next
+boot draws a new code. A `random` code is not logged and not put on the login prompt, which a
+cloud copies to its serial output: the prompt says to run `sudo micad device-code` after login.
+A device that declares `random` and cannot read its code is not claimed: `GetDeviceCode` answers
+the gate `unavailable`, and `POST /api/v1/setup` answers 503 `device_code_unavailable`.
 
 ## The code
 
@@ -112,5 +123,6 @@ The secret is the 32 bytes `0x00, 0x01, …, 0x1f`. The raw values are invented.
 | `dmi-serial` | `MXQ1234567` | `Y9E3-49ET-BKD` | `mica-XE9C` | `ZYGL2RYLNSEMMJ6E` |
 | `dmi-uuid` | `4c4c4544-0042-3510-8051-b4c04f4e3332` | `LVVA-BBQD-8Y4` | `mica-2Y83` | `S8QLYFJDZT7BFJ44` |
 | `mac` | `00:1a:2b:3c:4d:5e` | `RYP7-3EEM-S8X` | `mica-VST3` | `WL2K6GAUJMRJWE6U` |
+| `random` | `000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f` | `WU2B-TGPN-XDR` | `mica-W95C` | `THZNKHLW34BVTSQV` |
 
 `device_code::tests::the_documented_vectors_hold` checks this table.

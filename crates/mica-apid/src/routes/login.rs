@@ -91,7 +91,12 @@ pub(crate) async fn api_v1_session_status(
         // What the setup page asks for. Unread, the field stays: the claim
         // itself reads the gate again.
         let gate = match state.api.get_device_code().await {
-            Ok(answer) if super::setup::required_code(&answer).is_none() => "off",
+            Ok(answer)
+                if answer["gate"] != "unavailable"
+                    && super::setup::required_code(&answer).is_none() =>
+            {
+                "off"
+            }
             _ => "required",
         };
         return api_response(StatusCode::OK, SessionStatus::setup(gate));

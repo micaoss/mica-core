@@ -865,7 +865,9 @@ impl MicadService {
 
     /// JSON: this device's code and its source, `{code, source}`, or
     /// `{code: null, reason}` when it has none (`docs/factory-ap-key.md`).
-    /// Never the access-point key or the product secret.
+    /// A board that declares `random` and whose code cannot be read answers
+    /// the gate `unavailable`, which keeps the claim closed. Never the
+    /// access-point key or the product secret.
     pub(super) async fn get_device_code(&self) -> String {
         let code = match &self.device_root {
             Some(root) => crate::device_code::device_code(root),
@@ -873,6 +875,12 @@ impl MicadService {
         };
         let gate = match (&code, &self.device_root) {
             (Ok(_), Some(root)) => crate::device_code::claim_gate(root),
+            (Err(_), Some(root))
+                if crate::device_code::configured_source(root)
+                    == Ok(crate::device_code::Source::Random) =>
+            {
+                "unavailable"
+            }
             _ => "off",
         };
         let mut answer = match code {

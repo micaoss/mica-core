@@ -413,7 +413,9 @@ Restart it, which is what a changed image tag needs.
 <!--
 JSON: this device's code and its source, `{code, source}`, or
 `{code: null, reason}` when it has none (`docs/factory-ap-key.md`).
-Never the access-point key or the product secret.
+A board that declares `random` and whose code cannot be read answers
+the gate `unavailable`, which keeps the claim closed. Never the
+access-point key or the product secret.
 -->
 <method name="GetDeviceCode">
 <arg type="s" direction="out"/>

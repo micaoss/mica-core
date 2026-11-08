@@ -1,7 +1,10 @@
 //! The device code, and the access point's default key derived from it.
 //!
 //! The code names the device by its hardware: a digest of one value the board
-//! declares in [`CONFIG_PATH`], which survives reflashing. The default
+//! declares in [`CONFIG_PATH`], which survives reflashing. A board whose
+//! hardware holds no secret (a cloud VM) declares `random`: a seed micad
+//! draws once from the kernel's CSPRNG and keeps root-only on DATA
+//! ([`RANDOM_PATH`]), so a factory reset that formats DATA makes a new code. The default
 //! access-point key is an HMAC of the code under the product's secret
 //! ([`SECRET_PATH`]), so the label side derives the same key offline from the
 //! printed code (`docs/factory-ap-key.md`). The secret ships in a public
@@ -16,6 +19,11 @@ use crate::ble_provisioning::engine::console_urls;
 
 /// The board's declaration of its code's source: `source=<name>`.
 pub const CONFIG_PATH: &str = "usr/share/mica/device-code.conf";
+/// The seed of a `random` code: 64 hex characters, root's alone.
+pub const RANDOM_PATH: &str = "mnt/data/meta/device-code";
+/// What the login prompt says instead of a `random` code, which only who
+/// can log in and become root reads.
+pub const RANDOM_HINT: &str = "run `sudo micad device-code` after login";
 /// The product secret the default access-point key is derived under.
 pub const SECRET_PATH: &str = "usr/share/mica/ap-secret";
 /// The fewest bytes a product secret holds.
@@ -62,6 +70,8 @@ pub enum Source {
     /// The permanent address of the onboard Ethernet port with the lowest
     /// device path.
     Mac,
+    /// A seed drawn once on the device ([`RANDOM_PATH`]).
+    Random,
 }
 
 impl Source {
@@ -74,6 +84,7 @@ impl Source {
             Self::DmiSerial => "dmi-serial",
             Self::DmiUuid => "dmi-uuid",
             Self::Mac => "mac",
+            Self::Random => "random",
         }
     }
 
@@ -84,6 +95,7 @@ impl Source {
             Self::DmiSerial,
             Self::DmiUuid,
             Self::Mac,
+            Self::Random,
         ]
         .into_iter()
         .find(|source| source.name() == name)
@@ -168,11 +180,77 @@ pub fn read_source(root: &Path, source: Source) -> Result<String, String> {
             value
         }
         Source::Mac => permanent_mac(root)?,
+        Source::Random => random_seed(root)?,
     };
     if value.is_empty() || only(&value, '0') {
         return Err(format!("{} is empty", source.name()));
     }
     Ok(value)
+}
+
+/// Whether `seed` is a `random` code's seed: 64 lower-case hex characters.
+fn valid_seed(seed: &str) -> bool {
+    seed.len() == 64 && seed.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// The seed of a `random` code under `root`, owned by root and readable by
+/// it alone.
+fn random_seed(root: &Path) -> Result<String, String> {
+    use std::os::unix::fs::MetadataExt as _;
+    let path = root.join(RANDOM_PATH);
+    let meta = std::fs::symlink_metadata(&path)
+        .map_err(|err| format!("{} could not be read: {err}", path.display()))?;
+    if !meta.is_file()
+        || meta.mode() & 0o077 != 0
+        || meta.uid() != rustix::process::geteuid().as_raw()
+    {
+        return Err(format!("{} is not a file of its own", path.display()));
+    }
+    let seed = sys_value(&path)?;
+    if !valid_seed(&seed) {
+        return Err(format!("{} holds no seed", path.display()));
+    }
+    Ok(seed)
+}
+
+/// Draw the seed of a `random` code under `root` when the board declares
+/// `random` and there is none: once, durably, before anything reads it.
+/// A seed already there is never replaced, even an unreadable one: the
+/// claim stays closed until it is read again.
+///
+/// # Errors
+/// The seed cannot be drawn or written.
+pub fn ensure_random(root: &Path) -> Result<(), String> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    if configured_source(root) != Ok(Source::Random) {
+        return Ok(());
+    }
+    let path = root.join(RANDOM_PATH);
+    if std::fs::symlink_metadata(&path).is_ok() {
+        return Ok(());
+    }
+    let dir = path.parent().ok_or("no meta directory")?;
+    let fail = |err: std::io::Error| format!("{} could not be written: {err}", path.display());
+    let mut bytes = [0_u8; 32];
+    aws_lc_rs::rand::fill(&mut bytes).map_err(|_| "no random bytes".to_string())?;
+    let seed: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    let staged = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&staged);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&staged)
+        .map_err(fail)?;
+    file.write_all(format!("{seed}\n").as_bytes())
+        .map_err(fail)?;
+    file.sync_all().map_err(fail)?;
+    drop(file);
+    std::fs::rename(&staged, &path).map_err(fail)?;
+    std::fs::File::open(dir)
+        .and_then(|dir| dir.sync_all())
+        .map_err(fail)
 }
 
 /// The CID of the lowest-numbered MMC (not SD) block device.
@@ -399,10 +477,20 @@ pub const ISSUE_PATH: &str = "/run/mica/device-code.issue";
 
 /// Put this device's code where whoever has the device in hand reads it: the
 /// login prompt, through `issue`, and the log micad starts with. A device
-/// without a code gets no line. Returns the code as printed; the console's
-/// addresses join it on the prompt once the network is read.
+/// without a code gets no line. Returns the code as printed, or for a
+/// `random` code [`RANDOM_HINT`]; the console's addresses join it on the
+/// prompt once the network is read.
 pub fn announce(root: &Path, issue: &Path) -> Option<String> {
+    if let Err(reason) = ensure_random(root) {
+        tracing::warn!(%reason, "the random device code could not be made");
+    }
     let code = match device_code(root) {
+        // Only who can log in and become root reads a random code: neither
+        // the log nor the prompt, which a cloud's serial output copies.
+        Ok(code) if code.source == Source::Random => {
+            tracing::info!(source = code.source.name(), "device code present");
+            Some(RANDOM_HINT.to_string())
+        }
         Ok(code) => {
             let printed = printed(&code.code);
             tracing::info!(code = %printed, source = code.source.name(), "device code");
