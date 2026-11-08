@@ -4,8 +4,12 @@ use std::fs;
 /// A fake mica-deploy at `dir/deploy` that appends its arguments to
 /// `dir/calls`, lists what `--objects` holds there too, and answers `answer`
 /// or fails with `refusal`.
+///
+/// The script is made executable by a child process, never written here: a
+/// write descriptor this process held could be inherited by a sibling test's
+/// fork, and exec'ing the script would then fail with ETXTBSY.
 fn fake(dir: &Path, answer: &str, refusal: Option<&str>) -> Drivers {
-    use std::os::unix::fs::PermissionsExt;
+    let source = dir.join("deploy.sh");
     let script = dir.join("deploy");
     let calls = dir.join("calls");
     let end = match refusal {
@@ -13,14 +17,20 @@ fn fake(dir: &Path, answer: &str, refusal: Option<&str>) -> Drivers {
         None => format!("echo '{answer}'\n"),
     };
     fs::write(
-        &script,
+        &source,
         format!(
             "#!/bin/sh\necho \"$*\" >> '{calls}'\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = --objects ]; then ls \"$2\" >> '{calls}'; fi\n  case \"$1\" in *.cert) cat \"$1\" >> '{calls}'; echo >> '{calls}';; esac\n  shift\ndone\n{end}",
             calls = calls.display()
         ),
     )
     .unwrap();
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    let installed = std::process::Command::new("install")
+        .args(["-m", "0755"])
+        .arg(&source)
+        .arg(&script)
+        .status()
+        .unwrap();
+    assert!(installed.success());
     Drivers::new(script)
 }
 
