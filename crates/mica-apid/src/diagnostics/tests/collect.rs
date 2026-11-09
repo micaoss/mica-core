@@ -167,8 +167,12 @@ pub(super) async fn an_erroring_source_is_unavailable_not_fatal() {
         async fn get_failure_evidence(&self) -> anyhow::Result<Value> {
             self.0.get_failure_evidence().await
         }
-        async fn get_log(&self, source: &str) -> anyhow::Result<Value> {
-            self.0.get_log(source).await
+        async fn get_log(
+            &self,
+            source: &str,
+            boot: crate::settings_api::LogBoot,
+        ) -> anyhow::Result<Value> {
+            self.0.get_log(source, boot).await
         }
         async fn reboot(&self) -> anyhow::Result<()> {
             self.0.reboot().await

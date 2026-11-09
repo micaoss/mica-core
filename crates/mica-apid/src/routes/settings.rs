@@ -95,6 +95,14 @@ pub(super) enum ScalarShape {
     /// One of the access point's three modes, `off`, `provisioning` or
     /// `always`.
     ApMode,
+    /// A JSON boolean, or `null` for the product's default.
+    FlagOrDefault,
+    /// The log's cap in KiB, [`micad_settings::MIN_LOG_MAX_KIB`] to
+    /// [`micad_settings::MAX_LOG_MAX_KIB`], or `null` for Base's default.
+    LogCap,
+    /// A log collector, `{enabled, address, port, protocol}`, as
+    /// [`micad_settings::validate_logging`] accepts it.
+    LogRemote,
 }
 
 /// The dot-paths `PUT /api/v1/settings/{path}` writes, and the shape each
@@ -111,7 +119,7 @@ pub(super) enum ScalarShape {
 /// undeclared `wg9` writes a physical-kind `network.wg9` carrying a WireGuard
 /// block. Every path this list does not carry is refused by
 /// [`settings_write_refusal`] before any bus call is made.
-pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 11] = [
+pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 14] = [
     ("hostname", ScalarShape::Hostname),
     ("access.ssh.enabled", ScalarShape::Flag),
     ("access.mdns.enabled", ScalarShape::Flag),
@@ -123,6 +131,9 @@ pub(super) const WRITABLE_SETTINGS: [(&str, ScalarShape); 11] = [
     ("wifi.ap.mode", ScalarShape::ApMode),
     ("time.ntp.servers", ScalarShape::NtpServers),
     ("time.timezone", ScalarShape::Timezone),
+    ("logging.persistent", ScalarShape::FlagOrDefault),
+    ("logging.maxSizeKiB", ScalarShape::LogCap),
+    ("logging.remote", ScalarShape::LogRemote),
 ];
 
 /// The resource the write route's not-found envelope names, being the settings
@@ -132,7 +143,7 @@ pub(super) const SETTINGS_COLLECTION: &str = "settings";
 /// The sentence a refusal carries when nothing more specific is true of the
 /// path: it is a real part of the tree, and this route is not how it is
 /// written.
-pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` and `time.timezone` and no other dot-path; every other subtree is written through its own resource route";
+pub(super) const WRITABLE_SETTINGS_NOTICE: &str = "this route writes `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone`, `logging.persistent`, `logging.maxSizeKiB` and `logging.remote` and no other dot-path; every other subtree is written through its own resource route";
 
 /// The shape `path` is written with, when this route writes it at all.
 pub(super) fn writable_shape(path: &str) -> Option<ScalarShape> {
@@ -189,6 +200,39 @@ pub(super) fn check_scalar(shape: ScalarShape, value: &Value) -> Result<(), Stri
             "the access point runs `off`, `provisioning` (only while no uplink works) or `always`"
                 .to_string()
         }),
+        ScalarShape::FlagOrDefault => (value.is_boolean() || value.is_null())
+            .then_some(())
+            .ok_or_else(|| {
+                "this setting is a switch: the body is `true`, `false`, or `null` for the product's default"
+                    .to_string()
+            }),
+        ScalarShape::LogCap => {
+            if value.is_null() {
+                return Ok(());
+            }
+            let cap = value
+                .as_u64()
+                .and_then(|cap| u32::try_from(cap).ok())
+                .ok_or_else(|| {
+                    "the cap is a whole number of KiB, or `null` for the default".to_string()
+                })?;
+            micad_settings::validate_logging(&micad_settings::LoggingSettings {
+                max_size_kib: Some(cap),
+                ..micad_settings::LoggingSettings::default()
+            })
+        }
+        ScalarShape::LogRemote => {
+            let remote: micad_settings::RemoteLogSettings =
+                serde_json::from_value(value.clone()).map_err(|err| {
+                    format!(
+                        "a collector is {{\"enabled\", \"address\", \"port\", \"protocol\"}}: {err}"
+                    )
+                })?;
+            micad_settings::validate_logging(&micad_settings::LoggingSettings {
+                remote,
+                ..micad_settings::LoggingSettings::default()
+            })
+        }
     }
 }
 
@@ -271,7 +315,9 @@ pub(super) fn settings_write_refusal(path: &str) -> Response {
 /// is actually accepted is narrow: a JSON string for `hostname` and
 /// `time.timezone`, `off`, `provisioning` or `always` for
 /// `wifi.ap.mode`, `true` or `false` for the four switches, and a JSON array
-/// of server strings for `time.ntp.servers`. Anything else is **422**.
+/// of server strings for `time.ntp.servers`; `true`, `false` or `null` for
+/// `logging.persistent`, a number of KiB or `null` for `logging.maxSizeKiB`,
+/// and a collector object for `logging.remote`. Anything else is **422**.
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub(crate) struct SettingsWrite(pub(super) Value);
@@ -280,10 +326,11 @@ pub(crate) struct SettingsWrite(pub(super) Value);
 // which would invite a client to trust the echo over its own GET.
 /// Write one scalar setting by dot-path.
 ///
-/// Accepts eleven paths and no others: `hostname`, `access.ssh.enabled`,
-/// `access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`, `container.enabled`,
-/// `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`
-/// and `time.timezone`. Any other path is refused.
+/// Accepts fourteen paths and no others: `hostname`, `access.ssh.enabled`,
+/// `access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`,
+/// `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,
+/// `time.ntp.servers`, `time.timezone`, `logging.persistent`,
+/// `logging.maxSizeKiB` and `logging.remote`. Any other path is refused.
 ///
 /// Answers **202** with the queued task id on success. Takes a bearer token.
 #[utoipa::path(
@@ -291,7 +338,7 @@ pub(crate) struct SettingsWrite(pub(super) Value);
     path = V1_SETTINGS_DOC,
     context_path = API,
     tag = "resources",
-    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` or `time.timezone`")),
+    params(("path" = String, Path, description = "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone`, `logging.persistent`, `logging.maxSizeKiB` or `logging.remote`")),
     request_body = SettingsWrite,
     responses(
         (status = 202, description = "The value was persisted and its scoped reconciliation was queued", body = TaskAccepted),

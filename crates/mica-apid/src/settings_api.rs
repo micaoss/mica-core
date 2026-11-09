@@ -40,6 +40,13 @@ impl std::error::Error for InvalidTaskPayload {
     }
 }
 
+/// The boot a log read covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogBoot {
+    Current,
+    Previous,
+}
+
 /// The micad operations apid needs, JSON in and out.
 ///
 /// The power actions are here rather than executed locally because micad owns
@@ -108,9 +115,9 @@ pub trait SettingsApi: Send + Sync {
     /// Failure evidence for the diagnostic snapshot: failed units
     /// and a bounded journal excerpt, bounded by micad. Read-only.
     async fn get_failure_evidence(&self) -> anyhow::Result<Value>;
-    /// The newest lines of one allowlisted service's log, bounded by micad;
-    /// a source off the list is micad's `InvalidArgs`. Read-only.
-    async fn get_log(&self, source: &str) -> anyhow::Result<Value>;
+    /// The newest lines of one allowlisted service's log of `boot`, bounded
+    /// by micad; a source off the list is micad's `InvalidArgs`. Read-only.
+    async fn get_log(&self, source: &str, boot: LogBoot) -> anyhow::Result<Value>;
     /// Ask micad to reboot the appliance.
     async fn reboot(&self) -> anyhow::Result<()>;
     /// Ask micad to power the appliance off.

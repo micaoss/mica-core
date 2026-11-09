@@ -179,6 +179,7 @@ impl<'a> Collector<'a> {
                 "update": pick(&state, "update"),
             },
             "journal": pick(&failures, "journal"),
+            "previousBoot": pick(&failures, "previousBoot"),
             "failures": {
                 "units": pick(&failures, "units"),
                 "tasks": failed_tasks(&state),

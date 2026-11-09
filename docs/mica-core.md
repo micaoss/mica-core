@@ -1079,11 +1079,15 @@ redirect to `/_ui/`.
 **The API**, by group: session, setup and password; API tokens; settings, state and tasks;
 network, Wi-Fi, containers, the user's services (`/units`, section 3.10), apps (`/apps`, section
 3.11), Bluetooth, MQTT, SSH keys and LAN discovery (`/mdns`, `/ssdp`); observation (time, storage, system
-information, telemetry, service logs at `/system/logs/{source}`, network status, health, meta);
+information, telemetry, service logs at `/system/logs/{source}` (`?boot=previous` for the boot
+before this one), network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
 fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,
 policy); provisioning status and claim; credential recovery and reset; the factory reset;
 diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
+`PUT /api/v1/settings/{path}` (and `PATCH /api/v1/settings`) writes `logging.persistent` (`true`,
+`false`, or `null` for the product's default), `logging.maxSizeKiB` (a number of KiB or `null`)
+and `logging.remote` (the collector object), each checked as micad checks it before the write.
 `PUT /api/v1/network/{iface}` takes a CAN entry like any other, and the console's network page
 edits a CAN interface's bit rate, restart delay, CAN FD and data bit rate. Its routes tab shows
 the main table's IPv4 routes and edits every interface's `routes` in one list (destination,

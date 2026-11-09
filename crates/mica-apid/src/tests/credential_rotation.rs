@@ -47,8 +47,12 @@ impl SettingsApi for PausedAccessRead {
     async fn get_failure_evidence(&self) -> anyhow::Result<Value> {
         self.inner.get_failure_evidence().await
     }
-    async fn get_log(&self, source: &str) -> anyhow::Result<Value> {
-        self.inner.get_log(source).await
+    async fn get_log(
+        &self,
+        source: &str,
+        boot: crate::settings_api::LogBoot,
+    ) -> anyhow::Result<Value> {
+        self.inner.get_log(source, boot).await
     }
     async fn reboot(&self) -> anyhow::Result<()> {
         self.inner.reboot().await

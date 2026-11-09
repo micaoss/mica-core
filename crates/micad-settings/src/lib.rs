@@ -73,8 +73,9 @@ pub use model::{
     ap_channels, is_bluetooth_address, is_host_name, is_openrc_script_name, is_project_name,
     is_systemd_template, is_systemd_unit_name, is_wpa_quotable, unit_install_values,
     validate_ap_pool, validate_bluetooth, validate_container_project_dirs,
-    validate_container_projects, validate_device_id, validate_dns, validate_logging_for_init,
-    validate_ntp_servers, validate_services, validate_timezone_name, validate_wifi_psk,
+    validate_container_projects, validate_device_id, validate_dns, validate_logging,
+    validate_logging_for_init, validate_ntp_servers, validate_services, validate_timezone_name,
+    validate_wifi_psk,
 };
 pub use network_rules::{
     MAX_CAN_BITRATE, MAX_CAN_DATA_BITRATE, MAX_CAN_RESTART_MS, MAX_IFACE_LEN, NetworkViolation,

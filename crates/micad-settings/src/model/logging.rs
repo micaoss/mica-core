@@ -80,8 +80,12 @@ pub const MAX_LOG_MAX_KIB: u32 = 131_072;
 
 /// The `logging` subtree's whole write rule, called by [`Settings::set`].
 ///
+/// # Errors
+///
+/// Returns the sentence the refusal carries.
+///
 /// [`Settings::set`]: crate::Settings::set
-pub(super) fn validate_logging(logging: &LoggingSettings) -> Result<(), String> {
+pub fn validate_logging(logging: &LoggingSettings) -> Result<(), String> {
     if let Some(cap) = logging.max_size_kib
         && !(MIN_LOG_MAX_KIB..=MAX_LOG_MAX_KIB).contains(&cap)
     {

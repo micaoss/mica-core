@@ -112,7 +112,11 @@ impl SettingsApi for FailingSettings {
     async fn get_failure_evidence(&self) -> anyhow::Result<serde_json::Value> {
         Err(self.error())
     }
-    async fn get_log(&self, _source: &str) -> anyhow::Result<serde_json::Value> {
+    async fn get_log(
+        &self,
+        _source: &str,
+        _boot: crate::settings_api::LogBoot,
+    ) -> anyhow::Result<serde_json::Value> {
         Err(self.error())
     }
 

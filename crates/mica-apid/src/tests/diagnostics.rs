@@ -221,6 +221,9 @@ async fn a_snapshot_is_collected_listed_exported_and_deleted() {
         "journal": { "available": true, "scope": "current boot", "priority": "warning", "lineCount": 2, "sourceLines": 2, "sourceBytes": 80, "truncated": false,
                      "bounds": { "maxLines": 400, "maxBytes": 131072, "maxLineBytes": 1024 },
                      "lines": ["systemd[1]: Failed to start x.service.", "wpa_supplicant[4]: psk=journal-psk-marker"] },
+        "previousBoot": { "available": true, "scope": "previous boot", "priority": "warning", "lineCount": 2, "sourceLines": 2, "sourceBytes": 80, "truncated": false,
+                     "bounds": { "maxLines": 400, "maxBytes": 131072, "maxLineBytes": 1024 },
+                     "lines": ["kernel: watchdog: reset", "micad[1]: token=previous-token-marker"] },
         "units": { "available": true, "count": 0, "truncated": false, "entries": [] },
     }));
 
@@ -339,6 +342,15 @@ async fn a_snapshot_is_collected_listed_exported_and_deleted() {
         "systemd[1]: Failed to start x.service."
     );
     assert_eq!(snapshot["journal"]["lines"][1], diagnostics::REDACTED_LINE);
+    assert_eq!(snapshot["previousBoot"]["scope"], "previous boot");
+    assert_eq!(
+        snapshot["previousBoot"]["lines"][0],
+        "kernel: watchdog: reset"
+    );
+    assert_eq!(
+        snapshot["previousBoot"]["lines"][1],
+        diagnostics::REDACTED_LINE
+    );
     assert_eq!(
         snapshot["system"]["machineId"]["id"],
         "0123456789abcdef0123456789abcdef"

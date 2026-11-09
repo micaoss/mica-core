@@ -17,7 +17,7 @@ use zbus::export::futures_core::Stream;
 use crate::access_cache::{self, AccessCache};
 use crate::audit::Audit;
 use crate::config::BusKind;
-use crate::settings_api::{InvalidTaskPayload, SettingsApi};
+use crate::settings_api::{InvalidTaskPayload, LogBoot, SettingsApi};
 use crate::task_registry::{TaskRecord, TaskRegistry};
 
 /// Upper bound for one connection attempt or method call to micad.
@@ -80,6 +80,7 @@ trait Micad {
     fn get_observed_network(&self) -> zbus::Result<String>;
     fn get_failure_evidence(&self) -> zbus::Result<String>;
     fn get_log(&self, source: &str) -> zbus::Result<String>;
+    fn get_log_of_boot(&self, source: &str, boot: &str) -> zbus::Result<String>;
     fn set_transient_root_password(&self, password: &str) -> zbus::Result<String>;
     fn rotate_wireguard_key(&self, iface: &str) -> zbus::Result<String>;
     fn get_containers(&self) -> zbus::Result<String>;
@@ -505,9 +506,17 @@ impl SettingsApi for BusSettings {
         Ok(serde_json::from_str(&json)?)
     }
 
-    async fn get_log(&self, source: &str) -> anyhow::Result<Value> {
+    /// This boot is `GetLog`, which every micad answers; the previous boot
+    /// is `GetLogOfBoot`.
+    async fn get_log(&self, source: &str, boot: LogBoot) -> anyhow::Result<Value> {
         let proxy = self.proxy().await?;
-        let json = self.call("GetLog", proxy.get_log(source)).await?;
+        let json = match boot {
+            LogBoot::Current => self.call("GetLog", proxy.get_log(source)).await?,
+            LogBoot::Previous => {
+                self.call("GetLogOfBoot", proxy.get_log_of_boot(source, "previous"))
+                    .await?
+            }
+        };
         Ok(serde_json::from_str(&json)?)
     }
 

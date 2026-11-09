@@ -6074,13 +6074,13 @@
           "resources"
         ],
         "summary": "Write one scalar setting by dot-path.",
-        "description": "Accepts eleven paths and no others: `hostname`, `access.ssh.enabled`,\n`access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`, `container.enabled`,\n`mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`\nand `time.timezone`. Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
+        "description": "Accepts fourteen paths and no others: `hostname`, `access.ssh.enabled`,\n`access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`,\n`container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`,\n`time.ntp.servers`, `time.timezone`, `logging.persistent`,\n`logging.maxSizeKiB` and `logging.remote`. Any other path is refused.\n\nAnswers **202** with the queued task id on success. Takes a bearer token.",
         "operationId": "api_v1_settings_write",
         "parameters": [
           {
             "name": "path",
             "in": "path",
-            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers` or `time.timezone`",
+            "description": "The settings dot-path to write: `hostname`, `access.ssh.enabled`, `access.mdns.enabled`, `access.ssdp.enabled`, `access.cloudAdmins.enabled`, `container.enabled`, `mqtt.enabled`, `wifi.client.enabled`, `wifi.ap.mode`, `time.ntp.servers`, `time.timezone`, `logging.persistent`, `logging.maxSizeKiB` or `logging.remote`",
             "required": true,
             "schema": {
               "type": "string"
@@ -7569,7 +7569,7 @@
           "resources"
         ],
         "summary": "Read the newest lines of one service's log.",
-        "description": "micad reads at most 200 lines of the current boot from the allowlisted\nservice (`micad`, `apid`, `time`, `ssh`, `wifi-client`, `wifi-ap`,\n`bluetooth`, `mqtt-broker`, `mqttd`; a feature the product leaves out has\nno log), bounded in bytes and time. Every line is scrubbed here before it\nleaves the device, as a diagnostic snapshot's are: a line carrying a secret\nmarker is replaced whole, and a hardware address is masked.",
+        "description": "micad reads at most 200 lines of the current boot, or with\n`boot=previous` of the one before it, from the allowlisted\nservice (`micad`, `apid`, `time`, `ssh`, `wifi-client`, `wifi-ap`,\n`bluetooth`, `mqtt-broker`, `mqttd`; a feature the product leaves out has\nno log), bounded in bytes and time. Every line is scrubbed here before it\nleaves the device, as a diagnostic snapshot's are: a line carrying a secret\nmarker is replaced whole, and a hardware address is masked. A log that\nkeeps no previous boot answers `available: false` with the reason.",
         "operationId": "api_v1_system_log",
         "parameters": [
           {
@@ -7579,6 +7579,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "boot",
+            "in": "path",
+            "description": "`current` (the default) or `previous`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -7614,7 +7626,7 @@
             }
           },
           "422": {
-            "description": "No such log, or one of a feature this product leaves out (`validation_failed`)",
+            "description": "No such log, one of a feature this product leaves out, or a `boot` other than `current` or `previous` (`validation_failed`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -14287,7 +14299,7 @@
         }
       },
       "SettingsWrite": {
-        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname` and\n`time.timezone`, `off`, `provisioning` or `always` for\n`wifi.ap.mode`, `true` or `false` for the four switches, and a JSON array\nof server strings for `time.ntp.servers`. Anything else is **422**."
+        "description": "The body of a settings `PUT`: the value to write, and nothing around it.\n\nA bare JSON value, the same shape `GET` answers.\n\nThe schema is wide because the dot-path decides what is acceptable. What\nis actually accepted is narrow: a JSON string for `hostname` and\n`time.timezone`, `off`, `provisioning` or `always` for\n`wifi.ap.mode`, `true` or `false` for the four switches, and a JSON array\nof server strings for `time.ntp.servers`; `true`, `false` or `null` for\n`logging.persistent`, a number of KiB or `null` for `logging.maxSizeKiB`,\nand a collector object for `logging.remote`. Anything else is **422**."
       },
       "SetupRequest": {
         "type": "object",

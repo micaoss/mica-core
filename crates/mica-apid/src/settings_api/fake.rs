@@ -717,8 +717,9 @@ impl SettingsApi for FakeSettings {
     }
 
     /// Every source reads `lines` from micad's own echo; a source the fake
-    /// does not know is refused as micad refuses it.
-    async fn get_log(&self, source: &str) -> anyhow::Result<Value> {
+    /// does not know is refused as micad refuses it. The previous boot is
+    /// kept for `micad` alone.
+    async fn get_log(&self, source: &str, boot: super::LogBoot) -> anyhow::Result<Value> {
         if !matches!(source, "micad" | "apid") {
             let call = zbus::message::Message::method_call("/", "GetLog").build(&())?;
             return Err(zbus::Error::from(
@@ -729,6 +730,24 @@ impl SettingsApi for FakeSettings {
                 .build(&(format!("no log named {source:?}"),))?,
             )
             .into());
+        }
+        if boot == super::LogBoot::Previous {
+            if source != "micad" {
+                return Ok(serde_json::json!({
+                    "source": source,
+                    "available": false,
+                    "detail": "no previous boot is kept (persistent logs are off, or none was kept yet)",
+                }));
+            }
+            return Ok(serde_json::json!({
+                "source": source,
+                "available": true,
+                "lines": [
+                    "2026-09-28T09:59:00+00:00 micad[1]: stopping",
+                    "2026-09-28T09:59:01+00:00 micad[1]: token=hunter22 dropped",
+                ],
+                "truncated": false,
+            }));
         }
         Ok(serde_json::json!({
             "source": source,

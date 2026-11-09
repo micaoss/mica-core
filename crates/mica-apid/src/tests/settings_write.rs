@@ -618,3 +618,65 @@ pub(super) async fn a_patch_with_one_bad_path_writes_nothing() {
     }
     assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
 }
+
+// The log settings: a switch that may return to the product's default, a cap
+// held to Base's range, and a collector checked as micad checks it.
+#[tokio::test]
+pub(super) async fn the_write_route_writes_the_log_settings() {
+    let mut tree = writable_tree("hunter2secret");
+    tree["logging"] = json!({
+        "persistent": true,
+        "maxSizeKiB": 2048,
+        "remote": { "enabled": false, "address": "", "port": 514, "protocol": "udp" }
+    });
+    let (tree, token) = with_token(tree);
+    let (router, fake) = test_app(tree);
+
+    for (path, body) in [
+        ("logging.persistent", "false"),
+        ("logging.persistent", "null"),
+        ("logging.maxSizeKiB", "4096"),
+        ("logging.maxSizeKiB", "null"),
+        (
+            "logging.remote",
+            r#"{"enabled":true,"address":"2001:db8::7","port":6514,"protocol":"tcp"}"#,
+        ),
+    ] {
+        let url = format!("/api/v1/settings/{path}");
+        let response = bearer_json(&router, "PUT", &url, &token, body).await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED, "{path} {body}");
+    }
+    assert_eq!(fake.set_paths().len(), 5);
+
+    for (path, body) in [
+        ("logging.persistent", r#""yes""#),
+        ("logging.maxSizeKiB", "512"),
+        ("logging.maxSizeKiB", "131073"),
+        ("logging.maxSizeKiB", "-1"),
+        (
+            "logging.remote",
+            r#"{"enabled":true,"address":"logs.example.com","port":514,"protocol":"udp"}"#,
+        ),
+        (
+            "logging.remote",
+            r#"{"enabled":true,"address":"192.0.2.7","port":514,"protocol":"tls"}"#,
+        ),
+        (
+            "logging.remote",
+            r#"{"enabled":true,"address":"","port":514}"#,
+        ),
+    ] {
+        let url = format!("/api/v1/settings/{path}");
+        let response = bearer_json(&router, "PUT", &url, &token, body).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{path} {body}"
+        );
+        assert_eq!(envelope(response).await["code"], "validation_failed");
+    }
+    assert_eq!(fake.set_paths().len(), 5, "a refused value is never sent");
+
+    let response = bearer_json(&router, "PUT", "/api/v1/settings/logging", &token, "{}").await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
