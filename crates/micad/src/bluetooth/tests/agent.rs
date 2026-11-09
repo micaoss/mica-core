@@ -91,6 +91,25 @@ async fn closing_the_window_refuses_what_waits() {
     assert_eq!(agent.window().await, None);
 }
 
+/// A code a peer displays authenticates its pairing: it is not logged.
+#[test]
+fn a_displayed_pairing_code_never_reaches_the_log() {
+    let agent = PairingAgent {
+        state: Arc::new(Agent::default()),
+    };
+    let device = zbus::ObjectPath::try_from("/org/bluez/hci0/dev_AA_BB_CC_DD_EE_01").unwrap();
+    let logs = crate::test_log::LogCapture::default();
+    let guard = logs.install();
+    agent.display_pin_code(device.clone(), "735091".to_string());
+    agent.display_passkey(device, 482_613, 2);
+    drop(guard);
+    let captured = logs.text();
+    assert!(captured.contains("peer displays a PIN"), "{captured}");
+    assert!(captured.contains("peer displays a passkey"), "{captured}");
+    assert!(!captured.contains("735091"), "{captured}");
+    assert!(!captured.contains("482613"), "{captured}");
+}
+
 /// The address is read out of the object path BlueZ names a device by.
 #[test]
 fn an_address_is_read_out_of_the_object_path() {

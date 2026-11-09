@@ -186,14 +186,17 @@ impl PairingAgent {
         Err(rejected("a fixed pairing code is not offered"))
     }
 
-    /// The peer is showing a code; nothing to decide.
+    /// The peer is showing a code; nothing to decide. The code is not
+    /// logged: it authenticates the pairing, and a log may leave the device.
     pub(super) fn display_pin_code(&self, device: zbus::ObjectPath<'_>, pincode: String) {
-        tracing::info!(device = %device, pincode, "bluetooth: peer displays a PIN");
+        let _ = pincode;
+        tracing::info!(device = %device, "bluetooth: peer displays a PIN");
     }
 
     /// The same for a passkey.
     pub(super) fn display_passkey(&self, device: zbus::ObjectPath<'_>, passkey: u32, entered: u16) {
-        tracing::info!(device = %device, passkey, entered, "bluetooth: peer displays a passkey");
+        let _ = passkey;
+        tracing::info!(device = %device, entered, "bluetooth: peer displays a passkey");
     }
 
     /// The decision this agent exists for.

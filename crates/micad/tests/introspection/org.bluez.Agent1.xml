@@ -20,7 +20,8 @@ The same, as a number.
 <arg type="u" direction="out"/>
 </method>
 <!--
-The peer is showing a code; nothing to decide.
+The peer is showing a code; nothing to decide. The code is not
+logged: it authenticates the pairing, and a log may leave the device.
 -->
 <method name="DisplayPinCode">
 <arg name="device" type="o" direction="in"/>
