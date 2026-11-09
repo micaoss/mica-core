@@ -380,9 +380,9 @@ impl Supervisor {
         bail!("excessive adopted children")
     }
     pub fn failure(mut self, error: &anyhow::Error) -> ! {
+        let error = format!("{error:#}");
         let _ = diagnostic(&format!(
-            "MICA_SHUTDOWN stage=storage-not-released error={:?}",
-            format!("{error:#}")
+            "MICA_SHUTDOWN stage=storage-not-released error={error:?}"
         ));
         if let Some(budget) = self.budget {
             let until = self.now_ms().saturating_add(2000).min(budget.deadline_ms);
@@ -393,10 +393,14 @@ impl Supervisor {
                 thread::sleep(Duration::from_millis(20));
             }
         }
-        let _ = diagnostic(&format!(
-            "MICA_SHUTDOWN stage=failed watchdogArmed={}",
+        // One line that names the error, on the console and as a kernel
+        // record, whichever of them a slow or busy console keeps.
+        let failed = format!(
+            "MICA_SHUTDOWN stage=failed watchdogArmed={} error={error:?}",
             self.armed
-        ));
+        );
+        let _ = diagnostic(&failed);
+        kernel_record(&failed);
         // PID 1 must stay alive without feeding. Only a verified armed watchdog
         // can provide the emergency reset; this is never graceful completion.
         loop {

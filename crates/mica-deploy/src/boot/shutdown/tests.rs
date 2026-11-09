@@ -77,14 +77,49 @@ fn typed_verity_table_preserves_live_device_provider_and_complete_coverage() {
 }
 
 #[test]
-fn diagnostic_output_never_waits_for_a_full_pipe() {
+fn diagnostic_output_waits_a_bounded_time_for_a_full_pipe() {
     use std::io::Write;
     let (mut writer, _reader) = std::os::unix::net::UnixStream::pair().unwrap();
     writer.set_nonblocking(true).unwrap();
     while writer.write(&[0_u8; 4096]).is_ok() {}
     let started = Instant::now();
-    assert!(write_diagnostic(&writer, "bounded failure").is_err());
-    assert!(started.elapsed() < Duration::from_millis(100));
+    assert!(write_diagnostic(&writer, "bounded failure", 50).is_err());
+    assert!(started.elapsed() < Duration::from_millis(500));
+}
+
+#[test]
+fn a_line_reaches_a_slow_console_whole() {
+    use std::io::{Read, Write};
+    let (mut writer, mut reader) = std::os::unix::net::UnixStream::pair().unwrap();
+    writer.set_nonblocking(true).unwrap();
+    let mut filled = 0;
+    while let Ok(n) = writer.write(&[b'x'; 4096]) {
+        filled += n;
+    }
+    // The console drains slowly while the line waits for room.
+    let drain = std::thread::spawn(move || {
+        let mut all = Vec::new();
+        let mut chunk = [0_u8; 512];
+        reader
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .unwrap();
+        while let Ok(n) = reader.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            all.extend_from_slice(&chunk[..n]);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        all
+    });
+    let line = format!(
+        "MICA_SHUTDOWN stage=empty-observation detail={:?}",
+        "y".repeat(900)
+    );
+    write_diagnostic(&writer, &line, 1500).unwrap();
+    drop(writer);
+    let all = drain.join().unwrap();
+    assert_eq!(&all[filled..], format!("{line}\n").as_bytes());
 }
 
 #[test]

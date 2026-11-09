@@ -213,20 +213,54 @@ pub fn finish(
     bail!("terminal action returned")
 }
 
-/// Bounded best-effort console transport. A failed transition record prevents
-/// terminal authorization; failure diagnostics never wait on a full console.
+/// How long one line waits for a console that takes it slowly: a serial
+/// console a cloud copies to its log drains a full buffer in about half a
+/// second, and every watchdog the shutdown accepts allows 20 s.
+const CONSOLE_WAIT_MS: u64 = 1500;
+
+/// Bounded console transport. A line is written whole, waiting up to
+/// [`CONSOLE_WAIT_MS`] for a slow console, and never longer for one that
+/// takes nothing. A failed transition record prevents terminal
+/// authorization.
 pub fn diagnostic(message: &str) -> Result<()> {
-    write_diagnostic(rustix::stdio::stderr(), message)
+    write_diagnostic(rustix::stdio::stderr(), message, CONSOLE_WAIT_MS)
 }
-pub(super) fn write_diagnostic(fd: impl std::os::fd::AsFd, message: &str) -> Result<()> {
+pub(super) fn write_diagnostic(
+    fd: impl std::os::fd::AsFd,
+    message: &str,
+    wait_ms: u64,
+) -> Result<()> {
     let fd = fd.as_fd();
     let flags = rustix::fs::fcntl_getfl(fd)?;
     rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)?;
     let mut line = message.as_bytes()[..message.len().min(1023)].to_vec();
     line.push(b'\n');
-    ensure!(
-        rustix::io::write(fd, &line)? == line.len(),
-        "incomplete lifecycle console write"
-    );
+    let until = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
+    let mut rest = &line[..];
+    while !rest.is_empty() {
+        match rustix::io::write(fd, rest) {
+            Ok(written) if written > 0 => {
+                rest = &rest[written..];
+                continue;
+            }
+            Ok(_) | Err(rustix::io::Errno::AGAIN | rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(error.into()),
+        }
+        ensure!(
+            std::time::Instant::now() < until,
+            "incomplete lifecycle console write"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     Ok(())
+}
+
+/// `message` as one critical kernel log record (`/dev/kmsg`), best effort:
+/// the kernel prints a record whole, so a failure stays readable on a console
+/// whose lines interleave, and is kept in the kernel's log.
+pub fn kernel_record(message: &str) {
+    use std::io::Write as _;
+    if let Ok(mut kmsg) = std::fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+        let _ = kmsg.write_all(format!("<2>{}\n", &message[..message.len().min(900)]).as_bytes());
+    }
 }
