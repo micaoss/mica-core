@@ -325,6 +325,25 @@ mod tests {
         assert!(bcrypt::verify("12345678", &stored_root_hash(&shadow)).unwrap());
     }
 
+    /// Neither a password that is set nor one that is refused reaches the log.
+    #[test]
+    fn a_transient_password_never_reaches_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let shadow = fixture(dir.path());
+        let logs = crate::test_log::LogCapture::default();
+        let guard = logs.install();
+        set_transient_root_password(&shadow, "marker-root-5f1c9a").unwrap();
+        let refused = set_transient_root_password(&shadow, "mk-7c2").unwrap_err();
+        drop(guard);
+        crate::test_log::assert_quiet(&logs.text(), &["marker-root-5f1c9a", "mk-7c2"]);
+        assert!(!format!("{refused:#}").contains("mk-7c2"), "{refused:#}");
+        assert!(
+            logs.text().contains("transient root password set"),
+            "{}",
+            logs.text()
+        );
+    }
+
     #[test]
     fn a_password_longer_than_the_ceiling_is_rejected_and_the_ceiling_is_not() {
         let dir = tempfile::tempdir().unwrap();

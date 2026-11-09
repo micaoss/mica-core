@@ -42,3 +42,13 @@ impl tracing_subscriber::fmt::MakeWriter<'_> for LogCapture {
         self.clone()
     }
 }
+
+/// Assert that none of `markers` reached `captured`.
+pub fn assert_quiet(captured: &str, markers: &[&str]) {
+    for marker in markers {
+        assert!(
+            !captured.contains(marker),
+            "a secret reached the log: {marker}\n{captured}"
+        );
+    }
+}

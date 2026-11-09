@@ -318,6 +318,11 @@ absence is reported with its reason rather than as a healthy reading:
   once `journalctl --list-boots` names that boot, on OpenRC Base's `logread -b -1`, from its
   `mica-boot` marker. A log that keeps no previous boot (in RAM, or none kept yet) answers
   `available: false` with that reason.
+- **No secret at the source.** A log may be kept on DATA or forwarded raw (`logging.remote`), so
+  micad and apid log no password, pre-shared key, WireGuard key, token, pairing code or device
+  code, and a parser's sentence about a refused document or STATE is logged with the values it
+  quotes replaced by `"…"`. Tests capture the log of each path that handles one with marker
+  values. apid's scrub of what leaves through the API stays as a second line.
 
 ### 3.7 Lifecycle
 

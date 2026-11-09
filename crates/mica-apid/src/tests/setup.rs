@@ -316,3 +316,72 @@ pub(super) async fn an_unreadable_random_code_keeps_the_claim_closed() {
         assert_eq!(envelope(response).await["code"], "device_code_unavailable");
     }
 }
+
+/// What apid logs while a device is claimed and signed in to.
+#[derive(Clone, Default)]
+struct LogCapture(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogCapture {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl tracing_subscriber::fmt::MakeWriter<'_> for LogCapture {
+    type Writer = Self;
+
+    fn make_writer(&self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+// Passwords and the device code, right and wrong, never reach apid's log: a
+// log may be kept on DATA or forwarded off the device.
+#[tokio::test]
+pub(super) async fn a_claim_and_a_sign_in_log_no_secret() {
+    let logs = LogCapture::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(logs.clone())
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .finish();
+    let guard = tracing::subscriber::set_default(subscriber);
+
+    let (router, _) = test_app(unconfigured_tree());
+    for (code, password) in [
+        ("DFN4-L34C-T8X", "marker-wrong-code-pw"),
+        ("DFN4-L34C-T8N", "mk-sh0"),
+        ("DFN4-L34C-T8N", "marker-admin-pw-6e2a"),
+    ] {
+        let body = json!({ "deviceCode": code, "password": password }).to_string();
+        post_json(&router, SETUP_PATH, &body, None).await;
+    }
+    for password in ["marker-bad-login-4d1", "marker-admin-pw-6e2a"] {
+        let body = json!({ "password": password }).to_string();
+        post_json(&router, "/api/v1/session", &body, None).await;
+    }
+    drop(guard);
+
+    let captured = String::from_utf8_lossy(&logs.0.lock().unwrap()).into_owned();
+    assert!(
+        captured.contains("audit event"),
+        "the capture saw nothing: {captured}"
+    );
+    for marker in [
+        "marker-wrong-code-pw",
+        "mk-sh0",
+        "marker-admin-pw-6e2a",
+        "marker-bad-login-4d1",
+        "DFN4",
+    ] {
+        assert!(
+            !captured.contains(marker),
+            "{marker} reached the log:\n{captured}"
+        );
+    }
+}

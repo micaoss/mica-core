@@ -7,6 +7,8 @@ pub(super) async fn the_psk_reaches_the_config_file_and_nothing_else() {
     let dir = tempfile::tempdir().unwrap();
     let (reconciler, paths) = fixture(dir.path(), "inactive", "disabled");
 
+    let logs = crate::test_log::LogCapture::default();
+    let guard = logs.install();
     let state = reconciler
         .apply(&settings_with(client(
             true,
@@ -14,6 +16,8 @@ pub(super) async fn the_psk_reaches_the_config_file_and_nothing_else() {
         )))
         .await
         .unwrap();
+    drop(guard);
+    crate::test_log::assert_quiet(&logs.text(), &[SECRET_PSK]);
 
     // Anti-tautology: the key must genuinely have been applied, or every
     // absence below would be vacuous.

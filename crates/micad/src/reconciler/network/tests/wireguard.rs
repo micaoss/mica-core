@@ -298,6 +298,8 @@ pub(super) async fn a_preshared_key_is_a_file_the_netdev_names_and_a_new_key_reb
         preshared_key: Some(peer_key(byte)),
         ..peer(1)
     };
+    let logs = crate::test_log::LogCapture::default();
+    let guard = logs.install();
     reconciler
         .apply(&settings_with(&[(
             "wg0",
@@ -305,6 +307,10 @@ pub(super) async fn a_preshared_key_is_a_file_the_netdev_names_and_a_new_key_reb
         )]))
         .await
         .unwrap();
+    drop(guard);
+    let private_key =
+        std::fs::read_to_string(dir.path().join("networkd-secrets/wg-wg0.key")).unwrap();
+    crate::test_log::assert_quiet(&logs.text(), &[&peer_key(7), private_key.trim()]);
 
     let psk_file = dir.path().join("networkd-psk/wg-wg0-0.psk");
     let netdev = std::fs::read_to_string(dir.path().join("50-mica-wg0.netdev")).unwrap();

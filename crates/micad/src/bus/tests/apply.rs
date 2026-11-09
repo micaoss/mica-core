@@ -552,3 +552,27 @@ pub(super) fn several_paths_apply_the_subtree_they_share() {
         "services.units.\"a.service\""
     );
 }
+
+/// A write that carries secrets logs none of them, landed or refused.
+#[tokio::test]
+pub(super) async fn a_written_secret_never_reaches_the_log() {
+    let (service, _calls, _dir) = service_with_mock();
+    let logs = crate::test_log::LogCapture::default();
+    let guard = logs.install();
+    service
+        .persist_settings(&[(
+            "wifi.client.networks".to_string(),
+            serde_json::json!([{ "ssid": "office", "psk": "marker-psk-31d7e0" }]),
+        )])
+        .await
+        .expect("a valid key lands");
+    service
+        .persist_settings(&[(
+            "wifi.client.networks".to_string(),
+            serde_json::json!([{ "ssid": "office", "psk": ["marker-type-2c9f"] }]),
+        )])
+        .await
+        .expect_err("a key that is not text is refused");
+    drop(guard);
+    crate::test_log::assert_quiet(&logs.text(), &["marker-psk-31d7e0", "marker-type-2c9f"]);
+}

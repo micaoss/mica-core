@@ -13,7 +13,11 @@ pub(super) async fn the_key_reaches_the_config_file_and_nothing_else() {
         ..lab_ap()
     };
 
+    let logs = crate::test_log::LogCapture::default();
+    let guard = logs.install();
     let state = reconciler.apply(&settings_with(ap)).await.unwrap();
+    drop(guard);
+    crate::test_log::assert_quiet(&logs.text(), &[SECRET_PSK]);
 
     // Anti-tautology: the key must genuinely have been applied, or every
     // absence below would be vacuous.
