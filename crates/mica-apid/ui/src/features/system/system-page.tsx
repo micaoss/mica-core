@@ -26,6 +26,7 @@ import { TimePanel } from '@/features/system/time-panel'
 import { StoragePanel } from '@/features/system/storage-panel'
 import { DiagnosticsPanel } from '@/features/system/diagnostics-panel'
 import { LogsPanel } from '@/features/system/logs-panel'
+import { LoggingPanel } from '@/features/system/logging-panel'
 import { RollbackPanel } from '@/features/system/rollback-panel'
 import { AutomaticUpdatesPanel } from '@/features/system/automatic-updates-panel'
 import { CredentialRecoveryPanel } from '@/features/recovery/credential-recovery-panel'
@@ -80,6 +81,7 @@ export function SystemPage() {
         <TabsContent value="diagnostics" className="grid gap-6 pt-4">
           <DiagnosticsPanel />
           <LogsPanel />
+          <LoggingPanel />
         </TabsContent>
       </Tabs>
     </Page>

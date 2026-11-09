@@ -39,9 +39,10 @@ export function LogsPanel() {
   const serves = useFeatures()
   const sources = SOURCES.filter((source) => source.feature === undefined || serves(source.feature))
   const [source, setSource] = useState('micad')
+  const [boot, setBoot] = useState<'current' | 'previous'>('current')
   const log = useQuery({
-    queryKey: ['system-log', source],
-    queryFn: () => api<ServiceLog>(`/api/v1/system/logs/${encodeURIComponent(source)}`),
+    queryKey: ['system-log', source, boot],
+    queryFn: () => api<ServiceLog>(`/api/v1/system/logs/${encodeURIComponent(source)}${boot === 'previous' ? '?boot=previous' : ''}`),
     retry: false,
   })
   return (
@@ -55,6 +56,13 @@ export function LogsPanel() {
           <SelectTrigger className="w-48" aria-label={t('system.logs.source')}><SelectValue /></SelectTrigger>
           <SelectContent>{sources.map((option) => <SelectItem key={option.name} value={option.name}>{t(`system.logs.sources.${option.name}`)}</SelectItem>)}</SelectContent>
         </Select>
+        <Select value={boot} onValueChange={(value) => setBoot(value === 'previous' ? 'previous' : 'current')}>
+          <SelectTrigger className="w-44" aria-label={t('system.logs.boot')}><SelectValue>{t(`system.logs.boots.${boot}`)}</SelectValue></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="current">{t('system.logs.boots.current')}</SelectItem>
+            <SelectItem value="previous">{t('system.logs.boots.previous')}</SelectItem>
+          </SelectContent>
+        </Select>
         <Button type="button" variant="outline" size="sm" onClick={() => void log.refetch()} disabled={log.isFetching}>
           {log.isFetching ? <Spinner /> : <RefreshCcw />}
           {t('system.logs.refresh')}
@@ -66,7 +74,7 @@ export function LogsPanel() {
         <>
           {log.data.truncated ? <p className="text-sm text-muted-foreground">{t('system.logs.truncated')}</p> : null}
           <pre aria-label={t('system.logs.lines')} className="max-h-96 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-            {(log.data.lines ?? []).length > 0 ? (log.data.lines ?? []).join('\n') : t('system.logs.empty')}
+            {(log.data.lines ?? []).length > 0 ? (log.data.lines ?? []).join('\n') : t(boot === 'previous' ? 'system.logs.emptyPrevious' : 'system.logs.empty')}
           </pre>
         </>
       ) : null}

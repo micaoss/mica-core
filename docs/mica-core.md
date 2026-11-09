@@ -1088,6 +1088,10 @@ diagnostic snapshots; console bundles. `GET /meta` lists the product's features,
 `PUT /api/v1/settings/{path}` (and `PATCH /api/v1/settings`) writes `logging.persistent` (`true`,
 `false`, or `null` for the product's default), `logging.maxSizeKiB` (a number of KiB or `null`)
 and `logging.remote` (the collector object), each checked as micad checks it before the write.
+The console's System → Diagnostics tab reads a service log of this boot or the previous one, and
+its Logging section sets the three; forwarding carries the fixed warning that logs leave
+unencrypted and unredacted, for a collector reached through WireGuard/VPN only, and offers TCP
+only on systemd.
 `PUT /api/v1/network/{iface}` takes a CAN entry like any other, and the console's network page
 edits a CAN interface's bit rate, restart delay, CAN FD and data bit rate. Its routes tab shows
 the main table's IPv4 routes and edits every interface's `routes` in one list (destination,
