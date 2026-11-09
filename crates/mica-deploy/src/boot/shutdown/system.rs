@@ -40,13 +40,8 @@ impl LifecycleIo for SystemIo<'_> {
         Ok(())
     }
     fn event(&mut self, stage: &str, detail: &str) {
-        if self
-            .supervisor
-            .record(&format!("MICA_SHUTDOWN stage={stage} detail={detail:?}"))
-            .is_err()
-        {
-            self.supervisor.poisoned = true;
-        }
+        self.supervisor
+            .note(&format!("MICA_SHUTDOWN stage={stage} detail={detail:?}"));
     }
     fn terminal(&mut self, action: Action, released: Released) -> Result<()> {
         self.supervisor.terminal(action, released)

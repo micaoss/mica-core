@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 use std::{
     fs::{self, File, OpenOptions},
     io::Read,
+    os::fd::AsFd,
     os::unix::{
         fs::{FileTypeExt, MetadataExt, OpenOptionsExt},
         process::CommandExt,
@@ -45,6 +46,10 @@ pub fn resolve_watchdog(class: &Path, identity: Option<&str>) -> Result<String> 
     Ok(found.remove(0))
 }
 
+/// How long one console line waits for a slow console within a shutdown:
+/// longer than a console that backs up stalls before it takes more.
+pub const LINE_WAIT_MS: u64 = 5000;
+
 /// The only watchdog owner. All files are close-on-exec; children cannot feed it.
 pub struct Supervisor {
     pub(super) started: Instant,
@@ -53,6 +58,7 @@ pub struct Supervisor {
     pub(super) last_kick: u64,
     pub(super) armed: bool,
     pub(super) poisoned: bool,
+    pub(super) console_lost: bool,
     pub(super) budget: Option<Budget>,
 }
 impl Default for Supervisor {
@@ -69,6 +75,7 @@ impl Supervisor {
             last_kick: 0,
             armed: false,
             poisoned: false,
+            console_lost: false,
             budget: None,
         }
     }
@@ -379,21 +386,35 @@ impl Supervisor {
         self.poisoned = true;
         bail!("excessive adopted children")
     }
-    /// Write `message` as a whole console line. Within the shutdown's budget
-    /// a slow console is waited for, the watchdog fed meanwhile, until a
-    /// second before the cleanup deadline, which leaves the terminal action
-    /// its time; outside it, as [`diagnostic`] does. A line not taken by then
-    /// is an error: the transition was not recorded.
-    pub fn record(&mut self, message: &str) -> Result<()> {
-        let Some(budget) = self.budget else {
-            return diagnostic(message);
-        };
-        let until = budget.cleanup_deadline_ms.saturating_sub(1000);
-        write_line(rustix::stdio::stderr(), message, || {
-            self.kick()?;
-            ensure!(self.now_ms() < until, "incomplete lifecycle console write");
-            Ok(())
-        })
+    /// Write `message` as a whole console line, waiting for a slow console
+    /// at most [`LINE_WAIT_MS`], the watchdog fed meanwhile, and never past a
+    /// second before the cleanup deadline. A console that does not take a
+    /// line by then is given up for the rest of the shutdown; that line and
+    /// every later one are kernel records only. The console is diagnostics:
+    /// losing it never stops the release.
+    pub fn note(&mut self, message: &str) {
+        self.note_on(rustix::stdio::stderr(), message);
+    }
+    pub(super) fn note_on(&mut self, console: impl AsFd, message: &str) {
+        if !self.console_lost {
+            let now = self.now_ms();
+            let until = self
+                .budget
+                .map_or(now.saturating_add(CONSOLE_WAIT_MS), |b| {
+                    now.saturating_add(LINE_WAIT_MS)
+                        .min(b.cleanup_deadline_ms.saturating_sub(1000))
+                });
+            let written = write_line(console, message, || {
+                self.kick()?;
+                ensure!(self.now_ms() < until, "incomplete lifecycle console write");
+                Ok(())
+            });
+            if written.is_ok() {
+                return;
+            }
+            self.console_lost = true;
+        }
+        kernel_record(message);
     }
     /// A failure's line, waited for up to 5 s, never past the watchdog's
     /// feeding deadline; without a budget, as [`diagnostic`] waits.
@@ -443,10 +464,10 @@ impl Supervisor {
             self.now_ms() < budget.cleanup_deadline_ms,
             "terminal deadline exhausted"
         );
-        self.record(&format!(
+        self.note(&format!(
             "MICA_SHUTDOWN stage=action-requested action={}",
             action.as_str()
-        ))?;
+        ));
         let command = match action {
             Action::Reboot => rustix::system::RebootCommand::Restart,
             Action::Poweroff => rustix::system::RebootCommand::PowerOff,

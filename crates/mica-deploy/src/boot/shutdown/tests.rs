@@ -127,6 +127,32 @@ fn a_line_waits_as_long_as_its_caller_allows() {
 }
 
 #[test]
+fn a_stalled_console_never_holds_up_the_shutdown() {
+    use std::io::Write;
+    let (mut console, _held) = std::os::unix::net::UnixStream::pair().unwrap();
+    console.set_nonblocking(true).unwrap();
+    while console.write(&[0_u8; 4096]).is_ok() {}
+    let mut supervisor = Supervisor::new();
+    supervisor.budget = Some(Budget::new(0, 60).unwrap());
+    // The first line waits its bound for the console, then the console is
+    // given up: the line, and every one after it, is a kernel record only.
+    let started = Instant::now();
+    supervisor.note_on(&console, "MICA_SHUTDOWN stage=quiesced detail=\"users=0\"");
+    let waited = started.elapsed();
+    assert!(waited >= Duration::from_millis(LINE_WAIT_MS), "{waited:?}");
+    assert!(
+        waited < Duration::from_millis(LINE_WAIT_MS + 1000),
+        "{waited:?}"
+    );
+    assert!(supervisor.console_lost);
+    let started = Instant::now();
+    supervisor.note_on(&console, "MICA_SHUTDOWN stage=storage-released");
+    assert!(started.elapsed() < Duration::from_millis(100));
+    // A lost console is no supervised work left behind.
+    assert!(!supervisor.poisoned);
+}
+
+#[test]
 fn a_line_reaches_a_slow_console_whole() {
     use std::io::{Read, Write};
     let (mut writer, mut reader) = std::os::unix::net::UnixStream::pair().unwrap();

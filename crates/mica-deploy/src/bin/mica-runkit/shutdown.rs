@@ -54,11 +54,11 @@ fn shutdown(supervisor: &mut Supervisor, args: &[String]) -> Result<()> {
     supervisor.arm(watchdog)?;
     let budget = supervisor.limit_shutdown(request.timeout_ms)?;
     supervisor.prepare_process()?;
-    shutdown::diagnostic(&format!(
+    supervisor.note(&format!(
         "MICA_SHUTDOWN stage=entered action={} source=exitrd deployment={}",
         action.as_str(),
         owner.deployment
-    ))?;
+    ));
     shutdown::finish(
         &mut SystemIo {
             supervisor,

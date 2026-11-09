@@ -217,7 +217,7 @@ pub fn finish(
 /// How long a line written outside a shutdown's budget waits for a console
 /// that takes it slowly. Within the budget the supervisor waits as long as
 /// the budget allows, feeding the watchdog (`Supervisor::record`).
-const CONSOLE_WAIT_MS: u64 = 1500;
+pub(super) const CONSOLE_WAIT_MS: u64 = 1500;
 
 /// Bounded console transport: a line written whole, waiting up to
 /// [`CONSOLE_WAIT_MS`] for a slow console, and never longer for one that
