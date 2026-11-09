@@ -142,11 +142,12 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | `bluetooth` | The switch (on by default), the trust list, and `provisioning.autoWhenOffline` (BLE provisioning, `docs/ble-provisioning.md`; on by default). Documents that still carry `discoverable`, `alias` or `pin` load, and the keys are dropped at the next save |
 | `mqtt` | The switch, the broker listener (default `127.0.0.1:1883`), whether clients authenticate |
 | `time` | NTP servers and the presentation timezone |
+| `logging` | `persistent` (the log kept on DATA across boots) and `maxSizeKiB` (its cap, 1024 to 131072 KiB), each absent until set so the image's and the board's defaults apply; `remote` (`enabled`, an IPv4 or IPv6 `address`, never a host name, `port`, default 514, and `protocol` `udp` or, on systemd only, `tcp`), kept while switched off |
 | `services` | The user's own services (`units`, section 3.10) |
 | `provisioning`, `reset` | Provisioning status; a staged reset |
 
 What an integrator sets lives on DATA, one JSON document per concern in `/mica/config/`
-(`system`, `network`, `dns`, `wifi`, `ssh`, `mqtt`, `time`, `container`, `bluetooth`, `services`, directory `0700`,
+(`system`, `network`, `dns`, `wifi`, `ssh`, `mqtt`, `time`, `logging`, `container`, `bluetooth`, `services`, directory `0700`,
 documents `0600`), beside `updates.json`; what the device mints (identity, credentials,
 provisioning state, a staged reset) is `settings.toml` on STATE. Each document has its own
 schema version, and an unknown key or version is refused, never converted. A document that does
@@ -236,6 +237,7 @@ live-state tree under its name.
 | `container` | Starts `mica-containerd.service` and declares the projects as one set; switched off, stops every container, then stops the service (section 3.9) | the same, `mica-containerd` |
 | `mqtt` | `/var/lib/mica/mqtt/broker.toml`, `/var/lib/mica/mqtt/mqttd-device.env`, `mica-mqtt-broker.service` and `mica-mqttd.service` (`mica-pkgs:docs/mica-pkgs.md` section 3) | the same files, `mica-mqtt-broker` and `mica-mqttd` |
 | `time` | `/var/lib/mica/time/timesyncd.conf`, the target of the image's timesyncd drop-in link, `/run/mica/timezone` | `ntp_servers` in `/var/lib/mica/time/ntpd.conf`, `mica-ntpd` restarted |
+| `logging` | `/var/lib/mica/log/log.env` (`LOG_PERSISTENT` and `LOG_MAX_KIB` only while set, `LOG_REMOTE`, `LOG_REMOTE_PROTOCOL`), staged and checked with Base's `mica-log-env` before it replaces the live file: a file Base refuses is never written, and the refusal quotes Base's reason. `mica-log-settings.service` restarted when the file changed. The live state is the effective values `mica-log-env` reports, with `persistentSource` and `maxSizeKiBSource` `setting` or `default`; a root without `mica-log-env` reports `supported: false` and writes nothing | the same file and check, `mica-syslogd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; `apid.service` started for `mode` `network` or `local` (restarted when the file changed) and stopped for `off` | the same, `apid` |
 | `mdns` | micad's own mDNS responder (section 3.13), from `access.mdns`, the hostname and `access.web` | the same |
 | `ssdp` | micad's own SSDP responder (section 3.14), from `access.ssdp`, the hostname and `access.web` | the same |
@@ -421,6 +423,7 @@ The contract between micad and the packages whose services it drives on an OpenR
 | `mica-bluetoothd` | mica-bluetooth | -- |
 | `mica-ntpd` | mica-openrc | `/var/lib/mica/time/ntpd.conf` (`ntp_servers`) |
 | `mica-network` | mica-openrc | `/var/lib/mica/network/interfaces` |
+| `mica-syslogd` | mica-openrc | `/var/lib/mica/log/log.env` (`LOG_PERSISTENT`, `LOG_MAX_KIB`, `LOG_REMOTE`, `LOG_REMOTE_PROTOCOL`), checked with `mica-log-env` |
 | `docker` | mica-docker | -- |
 
 The SSH server is `mica-sshd` on both inits (`mica-sshd.service` on systemd), dropbear or

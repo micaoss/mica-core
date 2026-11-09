@@ -126,3 +126,36 @@ pub(super) async fn an_apps_unit_is_its_own() {
         "{err}"
     );
 }
+
+/// busybox syslogd forwards over UDP only, so an OpenRC device refuses a
+/// collector over TCP before it is stored; a systemd device stores it.
+#[tokio::test]
+pub(super) async fn an_openrc_device_refuses_forwarding_over_tcp() {
+    let collector = serde_json::json!({
+        "enabled": true, "address": "192.0.2.10", "port": 514, "protocol": "tcp"
+    });
+    for (init, refused) in [
+        (micad_settings::Init::Openrc, true),
+        (micad_settings::Init::Systemd, false),
+    ] {
+        let (service, _calls, dir) = service_with_mock();
+        let service = service.with_user_units(Arc::new(UserUnits::new(
+            init,
+            dir.path(),
+            Arc::new(FakeCommands::default()) as Arc<dyn Commands>,
+            Arc::new(FakeControl::default()) as Arc<dyn UnitControl>,
+        )));
+        let written = service
+            .persist_setting("logging.remote", collector.clone())
+            .await;
+        let stored = service.inner.read().await.settings.logging.remote.enabled;
+        if refused {
+            let err = written.unwrap_err();
+            assert!(err.to_string().contains("UDP only"), "{err}");
+            assert!(!stored);
+        } else {
+            written.unwrap();
+            assert!(stored);
+        }
+    }
+}

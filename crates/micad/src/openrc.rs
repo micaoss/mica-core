@@ -117,6 +117,14 @@ impl FakeCommands {
             );
     }
 
+    /// Answer the command line `line` with `output`, stderr included.
+    pub fn answer_output(&self, line: &str, output: Output) {
+        self.answers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(line.to_string(), output);
+    }
+
     /// Every command line run so far, in order.
     pub fn calls(&self) -> Vec<String> {
         self.calls

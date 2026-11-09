@@ -133,6 +133,16 @@ impl MicadService {
                     message: format!("{}: {}", violation.code, violation.message),
                 });
             }
+            if candidate.logging != inner.settings.logging {
+                micad_settings::validate_logging_for_init(
+                    &candidate.logging,
+                    self.user_units.init(),
+                )
+                .map_err(|message| SettingsError::Validation {
+                    path: path.to_string(),
+                    message,
+                })?;
+            }
             let owners = self.apps.unit_owners();
             if let Some((unit, app)) = candidate
                 .services
@@ -347,7 +357,7 @@ impl MicadService {
 /// waits on none of them; the ones that run before it only render files and
 /// bus calls. The mDNS and SSDP responders open their sockets there too, once
 /// the links are configured.
-pub(super) const DEFERRED: [&str; 12] = [
+pub(super) const DEFERRED: [&str; 13] = [
     "web",
     "mdns",
     "ssdp",
@@ -358,6 +368,7 @@ pub(super) const DEFERRED: [&str; 12] = [
     "container",
     "mqtt",
     "time",
+    "logging",
     "services",
     "bluetooth",
 ];

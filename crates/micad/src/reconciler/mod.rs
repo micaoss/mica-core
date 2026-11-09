@@ -10,6 +10,7 @@ pub mod container;
 mod dns;
 mod enabled;
 mod hostname;
+mod logging;
 pub use hostname::HostnameExecutor;
 /// Visible to the daemon: apps' manifests and `micad mdns` hold their
 /// entries to its rules, and the apps feed it theirs.
@@ -115,6 +116,7 @@ fn openrc_reconcilers(
             engine,
         )),
         Box::new(time::TimeReconciler::openrc()),
+        Box::new(logging::LoggingReconciler::openrc()),
         Box::new(web::WebReconciler::production(OpenrcUnits::production())),
         Box::new(mdns::MdnsReconciler::production(apps)),
         Box::new(ssdp::SsdpReconciler::production()),
@@ -150,6 +152,7 @@ fn systemd_reconcilers(
             systemd::Systemd::new(),
         ))),
         Box::new(time::TimeReconciler::production()),
+        Box::new(logging::LoggingReconciler::production()),
         Box::new(web::WebReconciler::production(systemd::Systemd::new())),
         Box::new(mdns::MdnsReconciler::production(apps)),
         Box::new(ssdp::SsdpReconciler::production()),
@@ -197,6 +200,7 @@ mod feature_tests {
             "access.ssdp",
             "access.cloudAdmins",
             "services",
+            "logging",
         ] {
             assert!(minimal.contains(&always), "{always}: {minimal:?}");
         }
@@ -240,6 +244,7 @@ mod feature_tests {
                 "mqtt",
                 "container",
                 "time",
+                "logging",
                 "access.web",
                 "access.mdns",
                 "access.ssdp",
