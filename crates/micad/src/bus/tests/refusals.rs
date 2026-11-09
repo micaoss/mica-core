@@ -10,7 +10,7 @@ pub(super) struct EmptyJournal;
 
 #[async_trait::async_trait]
 impl crate::diagnostics::JournalReader for EmptyJournal {
-    async fn read(&self, _max_lines: usize) -> anyhow::Result<Vec<u8>> {
+    async fn read(&self, _boot: crate::logs::Boot, _max_lines: usize) -> anyhow::Result<Vec<u8>> {
         Ok(Vec::new())
     }
 }

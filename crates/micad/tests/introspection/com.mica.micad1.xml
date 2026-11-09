@@ -434,9 +434,18 @@ refused; the scrubbing is apid's, before a line leaves the device.
 <arg type="s" direction="out"/>
 </method>
 <!--
+JSON: `GetLog` of `boot`, `current` or `previous`; the previous boot
+is absent with the reason when the log keeps none.
+-->
+<method name="GetLogOfBoot">
+<arg name="source" type="s" direction="in"/>
+<arg name="boot" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
 JSON failure evidence for the diagnostic snapshot: the
-units systemd holds failed and a bounded excerpt of this boot's
-journal at warning and worse. Bounded in size and time by
+units systemd holds failed and bounded excerpts of this boot's
+journal and the previous boot's at warning and worse. Bounded in size and time by
 [`crate::diagnostics`]; the redaction is apid's, at the snapshot.
 -->
 <method name="GetFailureEvidence">

@@ -911,9 +911,24 @@ impl MicadService {
             .to_string())
     }
 
+    /// JSON: `GetLog` of `boot`, `current` or `previous`; the previous boot
+    /// is absent with the reason when the log keeps none.
+    pub(super) async fn get_log_of_boot(&self, source: &str, boot: &str) -> fdo::Result<String> {
+        let features = self.features.clone();
+        let source = crate::logs::source(source, &features)
+            .map_err(|err| fdo::Error::InvalidArgs(format!("{err:#}")))?;
+        let boot = crate::logs::Boot::parse(boot)
+            .map_err(|err| fdo::Error::InvalidArgs(format!("{err:#}")))?;
+        Ok(
+            crate::logs::log_of_boot_json(self.logs.as_ref(), source, boot)
+                .await
+                .to_string(),
+        )
+    }
+
     /// JSON failure evidence for the diagnostic snapshot: the
-    /// units systemd holds failed and a bounded excerpt of this boot's
-    /// journal at warning and worse. Bounded in size and time by
+    /// units systemd holds failed and bounded excerpts of this boot's
+    /// journal and the previous boot's at warning and worse. Bounded in size and time by
     /// [`crate::diagnostics`]; the redaction is apid's, at the snapshot.
     pub(super) async fn get_failure_evidence(&self) -> Result<String, SettingsFault> {
         self.failure_evidence

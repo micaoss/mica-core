@@ -272,7 +272,7 @@ directions, because `SettingsChanged` carries setting values.
 | Group | Members |
 | --- | --- |
 | Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
-| Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
+| Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetLogOfBoot`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
 | Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `FactoryReset` (the administrator password, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so two claims cannot both land), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
@@ -306,14 +306,18 @@ absence is reported with its reason rather than as a healthy reading:
   (`quotactl_fd`), media health and pressure.
 - **System and telemetry**: identity, board, kernel, image, packages, the running deployment;
   thermal zones, watchdogs, the reset reason.
-- **Failure evidence**: failed services and warnings of this boot (`journalctl`, or `logread`
-  and `mica-init failed`).
+- **Failure evidence**: failed services, and warnings of this boot (`journal`) and of the
+  previous boot (`previousBoot`, absent with the reason when the log keeps none), from
+  `journalctl`, or Base's `logread -b 0` / `-b -1` and `mica-init failed`.
 - **The board's ports** (section 3.12): the observed network carries `board` (`declared` or
   `discover`), each listed interface its `declared` (or `null`), and each declared port the
   device lacks as `{name, present: false, declared}`.
 - **Logs** (`GetLog`): the newest 200 lines of one allowlisted service (`micad`, `apid`, `time`,
   `ssh`, `wifi-client`, `wifi-ap`, `bluetooth`, `mqtt-broker`, `mqttd`), bounded in bytes and
-  time.
+  time. `GetLogOfBoot` reads the same of `current` or `previous`: on systemd `journalctl -b -1`
+  once `journalctl --list-boots` names that boot, on OpenRC Base's `logread -b -1`, from its
+  `mica-boot` marker. A log that keeps no previous boot (in RAM, or none kept yet) answers
+  `available: false` with that reason.
 
 ### 3.7 Lifecycle
 
@@ -485,7 +489,8 @@ apid serves no network either. Base links `/etc/issue.d/50-mica-device-code.issu
 file, so agetty shows it under `/etc/issue` on the serial console and every local login prompt.
 
 Failed services are read with mica-openrc's `/usr/lib/mica/mica-init failed`, the log with
-`logread`, and power goes through `openrc-shutdown`.
+its `logread` (`-b 0` for this boot, `-b -1` for the previous; a Base whose `logread` refuses
+`-b` is read whole), and power goes through `openrc-shutdown`.
 
 ### 3.9 Containers
 

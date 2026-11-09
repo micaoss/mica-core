@@ -1,10 +1,10 @@
 //! Failure evidence for the diagnostic snapshot: the
-//! units systemd holds in the `failed` state, and a bounded excerpt of the
-//! current boot's journal.
+//! units systemd holds in the `failed` state, and bounded excerpts of the
+//! current boot's journal and of the previous boot's, when one is kept.
 //!
 //! Both reads are BOUNDED IN SIZE AND TIME by construction, not by intention:
-//! the journal excerpt is capped in lines, bytes and bytes-per-line by
-//! [`bound_excerpt`], and both reads run under a timeout after which the
+//! each journal excerpt is capped in lines, bytes and bytes-per-line by
+//! [`bound_excerpt`], and every read runs under a timeout after which the
 //! member is reported absent with the reason. A `journalctl` that hangs is
 //! killed when its future is dropped; it can never hold the bus dispatcher.
 //!
@@ -14,8 +14,13 @@
 
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use serde_json::{Value as Json, json};
+
+use crate::logs::{Boot, read_failure};
+use crate::openrc::{Commands, Host};
 
 /// The newest lines the excerpt keeps.
 pub const JOURNAL_MAX_LINES: usize = 400;
@@ -36,45 +41,38 @@ pub const MAX_FAILED_UNITS: usize = 64;
 /// Reads the journal's newest lines.
 #[async_trait::async_trait]
 pub trait JournalReader: Send + Sync {
-    /// The newest `max_lines` lines at [`JOURNAL_PRIORITY`] and worse, raw.
-    async fn read(&self, max_lines: usize) -> Result<Vec<u8>>;
+    /// The newest `max_lines` lines of `boot` at [`JOURNAL_PRIORITY`] and
+    /// worse, raw; [`crate::logs::NoPreviousBoot`] when none is kept.
+    async fn read(&self, boot: Boot, max_lines: usize) -> Result<Vec<u8>>;
 }
 
 /// The production reader: `journalctl` on the host, killed on drop.
-pub struct Journalctl;
+pub struct Journalctl {
+    commands: Arc<dyn Commands>,
+}
+
+impl Journalctl {
+    pub fn new(commands: Arc<dyn Commands>) -> Self {
+        Self { commands }
+    }
+
+    pub fn production() -> Self {
+        Self::new(Arc::new(Host))
+    }
+}
 
 #[async_trait::async_trait]
 impl JournalReader for Journalctl {
-    async fn read(&self, max_lines: usize) -> Result<Vec<u8>> {
-        let output = tokio::process::Command::new("journalctl")
-            .args([
-                "-b",
-                "-q",
-                "--no-pager",
-                // The hostname is an operator-chosen string and identifies
-                // the site; it is not evidence, so it is not read.
-                "--no-hostname",
-                "-o",
-                "short-iso",
-                "-p",
-                JOURNAL_PRIORITY,
-                "-n",
-                &max_lines.to_string(),
-            ])
-            .stdin(std::process::Stdio::null())
-            // Dropping the `output` future — which is what a timeout does —
-            // must not leave a journalctl behind holding a pipe nobody reads.
-            .kill_on_drop(true)
-            .output()
-            .await
-            .context("run journalctl")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "journalctl exited {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-        Ok(output.stdout)
+    async fn read(&self, boot: Boot, max_lines: usize) -> Result<Vec<u8>> {
+        // The hostname is an operator-chosen string and identifies the site;
+        // it is not evidence, so it is not read (`--no-hostname`).
+        let lines = max_lines.to_string();
+        crate::logs::journalctl(
+            self.commands.as_ref(),
+            boot,
+            &["-p", JOURNAL_PRIORITY, "-n", &lines],
+        )
+        .await
     }
 }
 
@@ -250,7 +248,7 @@ impl HostFailureEvidence {
     /// The source `main.rs` attaches on a device.
     #[must_use]
     pub fn production() -> Self {
-        Self::new(Box::new(Journalctl), Box::new(SystemdUnits))
+        Self::new(Box::new(Journalctl::production()), Box::new(SystemdUnits))
     }
 
     /// A source over the given reader and lister, on the shipped timeouts.
@@ -278,13 +276,13 @@ impl HostFailureEvidence {
 
 use micad_settings::absent;
 
-/// The `journal` member for one read outcome.
-fn journal_json(outcome: Result<Result<Vec<u8>>, Duration>) -> Json {
+/// The `journal` or `previousBoot` member for one read outcome of `boot`.
+fn journal_json(outcome: Result<Result<Vec<u8>>, Duration>, boot: Boot) -> Json {
     match outcome {
         Err(timeout) => absent(format!(
             "journalctl did not answer within {timeout:?}; the excerpt was abandoned"
         )),
-        Ok(Err(err)) => absent(format!("journal read failed: {err:#}")),
+        Ok(Err(err)) => absent(read_failure("journal read failed", &err)),
         Ok(Ok(raw)) => {
             let excerpt = bound_excerpt(
                 &raw,
@@ -294,7 +292,7 @@ fn journal_json(outcome: Result<Result<Vec<u8>>, Duration>) -> Json {
             );
             json!({
                 "available": true,
-                "scope": "current boot",
+                "scope": boot.scope(),
                 "priority": JOURNAL_PRIORITY,
                 "lineCount": excerpt.lines.len(),
                 "sourceLines": excerpt.source_lines,
@@ -344,12 +342,19 @@ fn units_json(outcome: Result<Result<Vec<FailedUnit>>, Duration>) -> Json {
 #[async_trait::async_trait]
 impl FailureEvidenceSource for HostFailureEvidence {
     async fn observe(&self) -> Result<Json> {
-        let journal =
-            tokio::time::timeout(self.journal_timeout, self.journal.read(JOURNAL_MAX_LINES));
+        let journal = tokio::time::timeout(
+            self.journal_timeout,
+            self.journal.read(Boot::Current, JOURNAL_MAX_LINES),
+        );
+        let previous = tokio::time::timeout(
+            self.journal_timeout,
+            self.journal.read(Boot::Previous, JOURNAL_MAX_LINES),
+        );
         let units = tokio::time::timeout(self.units_timeout, self.units.failed_units());
-        let (journal, units) = tokio::join!(journal, units);
+        let (journal, previous, units) = tokio::join!(journal, previous, units);
         Ok(json!({
-            "journal": journal_json(journal.map_err(|_| self.journal_timeout)),
+            "journal": journal_json(journal.map_err(|_| self.journal_timeout), Boot::Current),
+            "previousBoot": journal_json(previous.map_err(|_| self.journal_timeout), Boot::Previous),
             "units": units_json(units.map_err(|_| self.units_timeout)),
         }))
     }
@@ -363,7 +368,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl JournalReader for FixedJournal {
-        async fn read(&self, _max_lines: usize) -> Result<Vec<u8>> {
+        async fn read(&self, _boot: Boot, _max_lines: usize) -> Result<Vec<u8>> {
             Ok(self.0.clone())
         }
     }
@@ -372,7 +377,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl JournalReader for SlowJournal {
-        async fn read(&self, _max_lines: usize) -> Result<Vec<u8>> {
+        async fn read(&self, _boot: Boot, _max_lines: usize) -> Result<Vec<u8>> {
             tokio::time::sleep(Duration::from_secs(30)).await;
             Ok(b"too late\n".to_vec())
         }
@@ -493,6 +498,8 @@ mod tests {
         assert_eq!(evidence["journal"]["truncated"], false);
         assert_eq!(evidence["journal"]["scope"], "current boot");
         assert_eq!(evidence["journal"]["bounds"]["maxLines"], JOURNAL_MAX_LINES);
+        assert_eq!(evidence["previousBoot"]["available"], true);
+        assert_eq!(evidence["previousBoot"]["scope"], "previous boot");
         assert!(
             evidence["journal"]["lines"][0]
                 .as_str()
@@ -549,6 +556,51 @@ mod tests {
         let empty = units_json(Ok(Ok(Vec::new())));
         assert_eq!(empty["available"], true);
         assert_eq!(empty["count"], 0);
+    }
+
+    /// A journal that keeps no previous boot: the member says so, and the
+    /// current boot's excerpt is unaffected.
+    #[tokio::test]
+    async fn a_previous_boot_none_kept_is_absent_with_the_reason() {
+        let fake = Arc::new(crate::openrc::FakeCommands::default());
+        fake.answer(
+            "journalctl -b -q --no-pager --no-hostname -o short-iso -p warning -n 400",
+            0,
+            "2026-11-09T10:00:00+00:00 micad[1]: a warning\n",
+        );
+        fake.answer(
+            "journalctl --list-boots -q --no-pager",
+            0,
+            "0 1f1e2d3c current\n",
+        );
+        let source = HostFailureEvidence::new(
+            Box::new(Journalctl::new(Arc::clone(&fake) as Arc<dyn Commands>)),
+            Box::new(FixedUnits(Vec::new())),
+        );
+        let evidence = source.observe().await.expect("observe");
+        assert_eq!(evidence["journal"]["lineCount"], 1);
+        assert_eq!(evidence["previousBoot"]["available"], false);
+        assert_eq!(
+            evidence["previousBoot"]["detail"],
+            crate::logs::NoPreviousBoot.to_string()
+        );
+
+        fake.answer(
+            "journalctl --list-boots -q --no-pager",
+            0,
+            "-1 0f1e2d3c previous\n0 1f1e2d3c current\n",
+        );
+        fake.answer(
+            "journalctl -b -1 -q --no-pager --no-hostname -o short-iso -p warning -n 400",
+            0,
+            "2026-11-09T08:59:00+00:00 kernel: an error\n",
+        );
+        let evidence = source.observe().await.expect("observe");
+        assert_eq!(evidence["previousBoot"]["scope"], "previous boot");
+        assert_eq!(
+            evidence["previousBoot"]["lines"],
+            json!(["2026-11-09T08:59:00+00:00 kernel: an error"])
+        );
     }
 
     #[tokio::test]

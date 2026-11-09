@@ -1,4 +1,4 @@
-//! Failure evidence on an OpenRC root: the RAM log through busybox `logread`,
+//! Failure evidence on an OpenRC root: the log through Base's `logread`,
 //! and the failed services through Base's `mica-init failed`.
 
 use std::sync::Arc;
@@ -7,6 +7,7 @@ use anyhow::Result;
 
 use super::{Commands, Host};
 use crate::diagnostics::{FailedUnit, JournalReader, UnitLister};
+use crate::logs::Boot;
 
 /// syslog levels at `warning` and worse, as busybox spells them.
 const WARNING_OR_WORSE: [&str; 5] = ["emerg", "alert", "crit", "err", "warn"];
@@ -41,13 +42,9 @@ fn warning_line(line: &str) -> Option<String> {
 
 #[async_trait::async_trait]
 impl JournalReader for Logread {
-    async fn read(&self, max_lines: usize) -> Result<Vec<u8>> {
-        let output = self
-            .commands
-            .run("logread", &[])
-            .await?
-            .success("logread")?;
-        let lines: Vec<String> = output.stdout.lines().filter_map(warning_line).collect();
+    async fn read(&self, boot: Boot, max_lines: usize) -> Result<Vec<u8>> {
+        let log = crate::logs::logread(self.commands.as_ref(), boot).await?;
+        let lines: Vec<String> = log.lines().filter_map(warning_line).collect();
         let newest = &lines[lines.len().saturating_sub(max_lines)..];
         let mut text = newest.join("\n");
         if !text.is_empty() {
@@ -112,9 +109,9 @@ Sep 28 01:00:04 site-name daemon.crit apid[11]: critical
     #[tokio::test]
     async fn the_log_keeps_warnings_and_worse_without_the_host() {
         let fake = Arc::new(FakeCommands::default());
-        fake.answer("logread", 0, LOG);
+        fake.answer("logread -b 0", 0, LOG);
         let reader = Logread::new(Arc::clone(&fake) as Arc<dyn Commands>);
-        let text = String::from_utf8(reader.read(400).await.unwrap()).unwrap();
+        let text = String::from_utf8(reader.read(Boot::Current, 400).await.unwrap()).unwrap();
         assert_eq!(
             text,
             "Sep 28 01:00:01 daemon.warn micad[10]: a warning\n\
@@ -122,8 +119,27 @@ Sep 28 01:00:04 site-name daemon.crit apid[11]: critical
              Sep 28 01:00:04 daemon.crit apid[11]: critical\n"
         );
         assert!(!text.contains("site-name"));
-        let newest = String::from_utf8(reader.read(1).await.unwrap()).unwrap();
+        let newest = String::from_utf8(reader.read(Boot::Current, 1).await.unwrap()).unwrap();
         assert_eq!(newest, "Sep 28 01:00:04 daemon.crit apid[11]: critical\n");
+    }
+
+    #[tokio::test]
+    async fn the_previous_boot_is_its_own_part_or_none_kept() {
+        let fake = Arc::new(FakeCommands::default());
+        fake.answer("logread -b -1", 0, LOG);
+        let reader = Logread::new(Arc::clone(&fake) as Arc<dyn Commands>);
+        let text = String::from_utf8(reader.read(Boot::Previous, 400).await.unwrap()).unwrap();
+        assert!(text.contains("daemon.crit apid[11]: critical"), "{text}");
+
+        let ram = Arc::new(FakeCommands::default());
+        let reader = Logread::new(Arc::clone(&ram) as Arc<dyn Commands>);
+        let error = reader.read(Boot::Previous, 400).await.unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<crate::logs::NoPreviousBoot>()
+                .is_some(),
+            "{error:#}"
+        );
     }
 
     #[tokio::test]
