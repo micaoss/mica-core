@@ -29,7 +29,7 @@ live state and leaves the tree as it is.
 Every boot then applies the whole tree. On a product with Bluetooth, before the access point
 first starts, micad scans once for the networks nearby with a supplicant of its own and keeps the
 list for a BLE session's `scanWifi`; the access point starts after the scan. The access point
-comes up under the label's SSID and key (`pskSource` `derived`). micad logs the device code and writes `/run/mica/device-code.issue`
+comes up under the label's SSID and key (`pskSource` `derived`). micad writes the device code to `/run/mica/device-code.issue`
 for the login prompt, with the console's URL at each address the device holds.
 
 ## 2. Unclaimed

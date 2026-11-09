@@ -255,11 +255,18 @@ fn the_code_is_put_on_the_login_prompt() {
         "sys/block/mmcblk2/device/cid",
         "150100444a54443452a1b2c3d4e5f600\n",
     );
+    let logs = crate::test_log::LogCapture::default();
+    let guard = logs.install();
     announce(root.path(), &issue);
+    drop(guard);
     assert_eq!(
         std::fs::read_to_string(&issue).expect("issue"),
         "Device code: DFN4-L34C-T8N\n\n"
     );
+    // The code proves who holds the device; the log may leave it.
+    let captured = logs.text();
+    assert!(captured.contains("emmc-cid"), "{captured}");
+    assert!(!captured.contains("DFN4"), "{captured}");
 
     write(root.path(), CONFIG_PATH, "source=serial\n");
     announce(root.path(), &issue);

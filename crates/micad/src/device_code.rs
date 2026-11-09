@@ -476,10 +476,11 @@ pub fn claim_gate(root: &Path) -> &'static str {
 pub const ISSUE_PATH: &str = "/run/mica/device-code.issue";
 
 /// Put this device's code where whoever has the device in hand reads it: the
-/// login prompt, through `issue`, and the log micad starts with. A device
-/// without a code gets no line. Returns the code as printed, or for a
-/// `random` code [`RANDOM_HINT`]; the console's addresses join it on the
-/// prompt once the network is read.
+/// login prompt, through `issue`. The log names only its source: the code is
+/// the claimer's proof of holding the device, and a log may be kept or
+/// forwarded off it. A device without a code gets no line. Returns the code
+/// as printed, or for a `random` code [`RANDOM_HINT`]; the console's
+/// addresses join it on the prompt once the network is read.
 pub fn announce(root: &Path, issue: &Path) -> Option<String> {
     if let Err(reason) = ensure_random(root) {
         tracing::warn!(%reason, "the random device code could not be made");
@@ -493,7 +494,10 @@ pub fn announce(root: &Path, issue: &Path) -> Option<String> {
         }
         Ok(code) => {
             let printed = printed(&code.code);
-            tracing::info!(code = %printed, source = code.source.name(), "device code");
+            tracing::info!(
+                source = code.source.name(),
+                "device code on the login prompt"
+            );
             Some(printed)
         }
         Err(reason) => {

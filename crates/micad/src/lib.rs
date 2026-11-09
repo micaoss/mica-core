@@ -650,4 +650,6 @@ fn make_upload_dirs(root: &Path) {
 }
 
 #[cfg(test)]
+mod test_log;
+#[cfg(test)]
 mod tests;

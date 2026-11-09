@@ -1,7 +1,7 @@
 # Device code and factory access-point key
 
 A device's code names it by its hardware. It is printed on the device's label, shown on the
-device's own console (the login prompt and micad's start line, `docs/mica-core.md` section 3.8)
+device's own console (the login prompt, `docs/mica-core.md` section 3.8)
 and survives reflashing. Under a product's secret, the code also derives the device's default access-point key.
 A label tool can compute that key offline from the printed code. micad implements both derivations
 in `crates/micad/src/device_code.rs`.

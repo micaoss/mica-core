@@ -476,10 +476,11 @@ BusyBox `zcip` on the interface once, which claims and defends a `169.254.0.0/16
 route beyond its subnet; on `bound` it stops that `zcip`, and the flush removes the address. Until
 Base's script does this, an OpenRC port with no DHCP server has no IPv4 address.
 
-At start micad logs the device code (`device code`, with its source) and writes it to
-`/run/mica/device-code.issue`, replaced whole: `Device code: XXXX-XXXX-XXX` (for a `random`
-code, which is neither logged nor shown, the line says to run `sudo micad device-code` after
-login, `docs/factory-ap-key.md`), then a
+At start micad logs where the device code comes from (`device code on the login prompt`, or
+`device code present` for a `random` code, with its source, never the code, which a log kept or
+forwarded off the device would carry) and writes it to `/run/mica/device-code.issue`, replaced
+whole: `Device code: XXXX-XXXX-XXX` (for a `random` code, which is not shown, the line says to
+run `sudo micad device-code` after login, `docs/factory-ap-key.md`), then a
 `Console: <url>` line for each IPv4 address the device holds (the loopback and the container
 engines' links left out, a link-local address kept) and one for `<hostname>.local`, as
 `access.web` serves the console (section 4), then a blank line. micad reads the addresses again
@@ -1136,7 +1137,7 @@ which read the effective state, and the mDNS services, read-only.
 device code the body carries the code as `deviceCode` (dashes, spaces and case ignored): that is
 the claimer's proof of holding the device, which reaching its console is not once BLE
 provisioning has put an unclaimed device on a network. The code is on the label and on the
-device's own console, the login prompt and micad's start line (section 3.8). A missing one is 422
+device's own console, the login prompt (section 3.8), and `micad device-code` prints it. A missing one is 422
 at `deviceCode`, a wrong one 403 `device_code_incorrect` and counts in the login backoff (429
 `login_throttled`, at most 300 s). A device that declares a `random` code and cannot read it
 is not claimed: 503 `device_code_unavailable`. A device without a code is claimed without one, and so is one whose
