@@ -428,10 +428,16 @@ pub(super) fn a_refusal_names_the_file_and_quotes_nothing_the_document_carried()
         "the served refusal quoted the document: {}",
         refusal.message
     );
+    // The parser's sentence is logged, and a log may leave the device: the
+    // value it choked on is not in it, only what kind of thing went wrong.
     assert!(
-        refusal.detail.contains(POURED_PSK),
-        "the fixture must actually reproduce the hazard, or the assertion above \
-         asserts nothing: {}",
+        refusal.detail.contains("invalid type"),
+        "the detail must still say what went wrong: {}",
+        refusal.detail
+    );
+    assert!(
+        !refusal.detail.contains(POURED_PSK),
+        "the logged detail quoted the document: {}",
         refusal.detail
     );
 }

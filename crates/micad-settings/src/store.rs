@@ -45,7 +45,8 @@ pub struct DocumentRefusal {
     /// it can tell which one — and says what class of failure it was, and
     /// nothing else.
     pub message: String,
-    /// The parser's own sentence. **Journal only.**
+    /// The parser's own sentence, every value it quotes from the document
+    /// replaced by `"…"` ([`without_values`]). **Journal only.**
     pub detail: String,
     /// The addressed-tree subtrees this document carries
     /// ([`crate::documents::DOCUMENT_SUBTREES`]) — the exact set of
@@ -75,9 +76,8 @@ impl Format {
     fn parse(self, text: &str) -> Result<Value, String> {
         match self {
             Self::Toml => toml::from_str(text).map_err(|err: toml::de::Error| err.to_string()),
-            Self::Json => {
-                serde_json::from_str(text).map_err(|err: serde_json::Error| err.to_string())
-            }
+            Self::Json => serde_json::from_str(text)
+                .map_err(|err: serde_json::Error| without_values(&err.to_string())),
         }
     }
 
@@ -156,7 +156,37 @@ fn read_document<T: DeserializeOwned + Default>(
             "{document} declares schema version {from}; this build requires {version}"
         )));
     }
-    serde_json::from_value(doc).map_err(|err| SettingsError::Parse(format!("{document}: {err}")))
+    serde_json::from_value(doc).map_err(|err| {
+        SettingsError::Parse(format!("{document}: {}", without_values(&err.to_string())))
+    })
+}
+
+/// `sentence` with every double-quoted span replaced by `"…"`. A parser
+/// quotes the value it choked on, which may be a key or a password, and its
+/// sentence is logged, and a log may be kept or forwarded off the device.
+/// The shape of the sentence, and the names it puts in backticks, stay.
+pub(crate) fn without_values(sentence: &str) -> String {
+    let mut out = String::with_capacity(sentence.len());
+    let mut chars = sentence.chars();
+    while let Some(c) = chars.next() {
+        out.push(c);
+        if c != '"' {
+            continue;
+        }
+        out.push('…');
+        let mut escaped = false;
+        for inner in chars.by_ref() {
+            if escaped {
+                escaped = false;
+            } else if inner == '\\' {
+                escaped = true;
+            } else if inner == '"' {
+                out.push('"');
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// Replace `path` with `text` atomically at [`DOCUMENT_MODE`].
@@ -492,5 +522,27 @@ impl Store {
                 .map(|(name, text)| (container_project_document(name), Some(text.clone()))),
         );
         Ok(writes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::without_values;
+
+    #[test]
+    fn a_parser_sentence_keeps_its_shape_and_loses_its_values() {
+        assert_eq!(
+            without_values(r#"invalid type: string "site-key", expected u8"#),
+            r#"invalid type: string "…", expected u8"#
+        );
+        assert_eq!(
+            without_values(r#"invalid value: string "a \"quoted\" key", expected x and "b""#),
+            r#"invalid value: string "…", expected x and "…""#
+        );
+        assert_eq!(
+            without_values("unknown field `typo`, expected `wifi`"),
+            "unknown field `typo`, expected `wifi`"
+        );
+        assert_eq!(without_values(r#"cut "open"#), r#"cut "…"#);
     }
 }

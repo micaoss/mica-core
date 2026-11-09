@@ -134,9 +134,9 @@ async fn serve() -> anyhow::Result<()> {
     // message names the file, which is what the pour gate requires of it.
     for refusal in &refusals {
         // `detail` is the parser's own sentence and it is logged HERE and
-        // nowhere else: it quotes what it choked on, so a poured document's
-        // site key can be in it, and the journal is on the device while
-        // `configuration.refused` is served over the API.
+        // nowhere else, with the values it quoted replaced: a poured
+        // document's site key could be one, and a log may leave the device,
+        // while `configuration.refused` is served over the API.
         tracing::error!(
             document = refusal.document,
             subtrees = ?refusal.subtrees,
