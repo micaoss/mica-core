@@ -91,6 +91,8 @@ fn fixture() -> (Ownership, Fake) {
             scans: 0,
             refusal: None,
             mutate_then_fail: false,
+            late_holder: false,
+            forced: vec![],
         },
     )
 }
@@ -107,6 +109,8 @@ struct Fake {
     scans: usize,
     refusal: Option<&'static str>,
     mutate_then_fail: bool,
+    late_holder: bool,
+    forced: Vec<Action>,
 }
 impl LifecycleIo for Fake {
     fn now_ms(&self) -> u64 {
@@ -118,6 +122,9 @@ impl LifecycleIo for Fake {
         self.scans += 1;
         if self.reuse_after_scan && self.scans > 3 {
             self.state.blocks[0].association.as_mut().unwrap().inode = 99;
+        }
+        if self.late_holder && self.scans > 2 {
+            self.state.processes = vec![7];
         }
         Ok(self.state.clone())
     }
@@ -210,6 +217,17 @@ impl LifecycleIo for Fake {
                 && self.state.blocks.iter().all(|b| b.association.is_none())
         );
         self.actions.push(action);
+        Ok(())
+    }
+    fn forced(
+        &mut self,
+        action: Action,
+        _error: &anyhow::Error,
+        deadline: u64,
+    ) -> anyhow::Result<()> {
+        self.events.push("storage-not-released".into());
+        self.execute(&Operation::Sync, deadline)?;
+        self.forced.push(action);
         Ok(())
     }
 }
@@ -522,6 +540,48 @@ fn exact_final_actions_require_release_and_returned_calls_fail() {
             .is_err()
         );
         assert!(io.actions.is_empty());
+    }
+}
+
+#[test]
+fn a_poweroff_that_fails_once_quiesced_is_forced_after_one_sync() {
+    let finish = |io: &mut Fake, owner: &Ownership, action| {
+        mica_deploy::boot::shutdown::finish(io, Budget::new(0, 60).unwrap(), owner, action)
+            .unwrap_err()
+    };
+    for action in [Action::Poweroff, Action::Halt] {
+        let (owner, mut io) = fixture();
+        io.autoclear = true;
+        let error = finish(&mut io, &owner, action);
+        assert!(
+            error.to_string().contains("forced action returned"),
+            "{error:#}"
+        );
+        assert_eq!(io.forced, vec![action]);
+        assert!(io.actions.is_empty());
+        assert_eq!(io.calls.last(), Some(&Operation::Sync));
+        assert_eq!(io.events.last().unwrap(), "storage-not-released");
+    }
+    // A reboot waits for the watchdog: its reset is the outcome asked for.
+    let (owner, mut io) = fixture();
+    io.autoclear = true;
+    let error = finish(&mut io, &owner, Action::Reboot);
+    assert!(!error.to_string().contains("forced"), "{error:#}");
+    assert!(io.forced.is_empty());
+    for case in ["holder-before-quiesce", "holder-after-quiesce", "sync"] {
+        let (owner, mut io) = fixture();
+        match case {
+            "holder-before-quiesce" => io.state.processes.push(42),
+            "holder-after-quiesce" => io.late_holder = true,
+            "sync" => {
+                io.autoclear = true;
+                io.sync_failure = true;
+            }
+            _ => unreachable!(),
+        }
+        let error = finish(&mut io, &owner, Action::Poweroff);
+        assert!(io.forced.is_empty(), "{case}: {error:#}");
+        assert!(!io.events.iter().any(|e| e == "storage-released"), "{case}");
     }
 }
 

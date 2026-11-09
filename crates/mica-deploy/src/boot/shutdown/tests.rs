@@ -219,6 +219,11 @@ fn watchdog_errors_and_short_metadata_never_create_a_fresh_budget() {
             .terminal(Action::Reboot, Released { _private: () })
             .is_err()
     );
+    // Unreaped work and a reboot are left to the watchdog.
+    assert!(supervisor.forced(Action::Poweroff).is_err());
+    supervisor.poisoned = false;
+    let error = supervisor.forced(Action::Reboot).unwrap_err();
+    assert_eq!(error.to_string(), "a reboot is never forced");
 }
 
 #[test]

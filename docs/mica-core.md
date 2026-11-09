@@ -1629,9 +1629,15 @@ read one format.
   the shutdown's cleanup deadline. A console that does not take a line by then is given up for the
   rest of the shutdown: that line and every later one are critical kernel records (`/dev/kmsg`)
   only. The console is diagnostics, so losing it never stops the release or the terminal action.
-  A shutdown that fails ends with `MICA_SHUTDOWN stage=failed watchdogArmed=… error=…`,
-  also written as a critical kernel record (`/dev/kmsg`) so it stays whole on a console whose
-  lines interleave, and waits for the armed watchdog's reset.
+  A poweroff or halt whose release fails after `quiesced` is forced instead: once a fresh
+  observation still finds no userspace holder, the error is recorded
+  (`stage=storage-not-released`), one bounded `sync` runs, and the action follows as
+  `MICA_SHUTDOWN stage=forced-action action=…`, never a graceful completion. Nothing left can write,
+  so the watchdog's reset would be no cleaner for storage; it would only turn a stop into a
+  restart. Any other shutdown that fails (a reboot, a failure before `quiesced`, unreaped work, or
+  a forced action refused) ends with `MICA_SHUTDOWN stage=failed watchdogArmed=… error=…`, also
+  written as a critical kernel record (`/dev/kmsg`) so it stays whole on a console whose lines
+  interleave, and waits for the armed watchdog's reset.
   An OpenRC root gets no exit ramdisk: `openrc-init` reboots by itself once the shutdown runlevel
   has left DATA read-only. The exit ramdisk exists on x86-64 and aarch64 only, so a 32-bit
   board runs an OpenRC root.

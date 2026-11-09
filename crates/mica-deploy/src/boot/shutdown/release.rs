@@ -40,7 +40,23 @@ pub trait LifecycleIo {
     fn terminal(&mut self, _action: Action, _released: Released) -> Result<()> {
         bail!("terminal action unavailable")
     }
+    /// A poweroff or halt whose release failed once nothing in userspace
+    /// held storage: record `error`, one bounded sync by `deadline_ms`,
+    /// then the action, marked as forced.
+    fn forced(&mut self, _action: Action, _error: &anyhow::Error, _deadline_ms: u64) -> Result<()> {
+        bail!("forced action unavailable")
+    }
 }
+
+/// A release that failed after `quiesced`: no userspace holder was left.
+#[derive(Debug)]
+struct Quiesced(anyhow::Error);
+impl std::fmt::Display for Quiesced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+impl std::error::Error for Quiesced {}
 
 pub(super) fn remaining(state: &Snapshot, owner: &Ownership) -> String {
     let mounts: Vec<_> = state.mounts.iter().filter(|m| !protected(m)).collect();
@@ -121,6 +137,14 @@ pub fn release(io: &mut impl LifecycleIo, budget: Budget, owner: &Ownership) -> 
         "userspace holders remain after quiesce"
     );
     io.event("quiesced", "users=0");
+    release_quiesced(io, budget, owner).map_err(|error| Quiesced(error).into())
+}
+
+fn release_quiesced(
+    io: &mut impl LifecycleIo,
+    budget: Budget,
+    owner: &Ownership,
+) -> Result<Released> {
     let mut previous = None;
     for pass in 0..12 {
         let mut tried = BTreeSet::new();
@@ -203,20 +227,45 @@ pub fn release(io: &mut impl LifecycleIo, budget: Budget, owner: &Ownership) -> 
 }
 
 /// A returned terminal operation is always a failure, including status zero.
+///
+/// A poweroff or halt whose release failed after `quiesced` is forced once a
+/// fresh observation still finds no userspace holder: the watchdog's reset
+/// would be no cleaner for storage, and it would turn a stop into a restart.
+/// A reboot, a failure before `quiesced`, and a supervisor with unreaped
+/// work (its observation refuses) are left to the watchdog.
 pub fn finish(
     io: &mut impl LifecycleIo,
     budget: Budget,
     owner: &Ownership,
     action: Action,
 ) -> Result<()> {
-    let released = release(io, budget, owner)?;
-    io.terminal(action, released)?;
-    bail!("terminal action returned")
+    let error = match release(io, budget, owner) {
+        Ok(released) => {
+            io.terminal(action, released)?;
+            bail!("terminal action returned")
+        }
+        Err(error) => error,
+    };
+    if action == Action::Reboot || !error.is::<Quiesced>() {
+        return Err(error);
+    }
+    let forced = (|| -> Result<()> {
+        let state = io.scan(budget.operation_deadline(io.now_ms())?)?;
+        ensure!(
+            state.processes.is_empty(),
+            "userspace holder before the forced action"
+        );
+        io.forced(action, &error, budget.operation_deadline(io.now_ms())?)
+    })();
+    match forced {
+        Ok(()) => bail!("forced action returned"),
+        Err(forced) => Err(error.context(format!("forced action refused: {forced:#}"))),
+    }
 }
 
 /// How long a line written outside a shutdown's budget waits for a console
-/// that takes it slowly. Within the budget the supervisor waits as long as
-/// the budget allows, feeding the watchdog (`Supervisor::record`).
+/// that takes it slowly. Within the budget a line waits up to
+/// [`LINE_WAIT_MS`], feeding the watchdog (`Supervisor::note`).
 pub(super) const CONSOLE_WAIT_MS: u64 = 1500;
 
 /// Bounded console transport: a line written whole, waiting up to

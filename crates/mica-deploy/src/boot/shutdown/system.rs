@@ -46,6 +46,14 @@ impl LifecycleIo for SystemIo<'_> {
     fn terminal(&mut self, action: Action, released: Released) -> Result<()> {
         self.supervisor.terminal(action, released)
     }
+    fn forced(&mut self, action: Action, error: &anyhow::Error, deadline: u64) -> Result<()> {
+        self.supervisor.note(&format!(
+            "MICA_SHUTDOWN stage=storage-not-released error={:?}",
+            format!("{error:#}")
+        ));
+        self.worker(&Operation::Sync, deadline)?;
+        self.supervisor.forced(action)
+    }
 }
 
 /// `magic` is a `statfs` `f_type`, a C long.

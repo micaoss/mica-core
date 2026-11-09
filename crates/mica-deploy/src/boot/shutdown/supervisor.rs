@@ -458,6 +458,15 @@ impl Supervisor {
         }
     }
     pub fn terminal(&mut self, action: Action, _released: Released) -> Result<()> {
+        self.act(action, "action-requested")
+    }
+    /// A poweroff or halt whose storage was not released, after the one
+    /// sync `finish` allows: the action, marked as forced. Never a reboot.
+    pub fn forced(&mut self, action: Action) -> Result<()> {
+        ensure!(action != Action::Reboot, "a reboot is never forced");
+        self.act(action, "forced-action")
+    }
+    fn act(&mut self, action: Action, stage: &str) -> Result<()> {
         ensure!(!self.poisoned, "unreaped work prevents terminal action");
         let budget = self.budget.context("missing lifecycle deadline")?;
         ensure!(
@@ -465,7 +474,7 @@ impl Supervisor {
             "terminal deadline exhausted"
         );
         self.note(&format!(
-            "MICA_SHUTDOWN stage=action-requested action={}",
+            "MICA_SHUTDOWN stage={stage} action={}",
             action.as_str()
         ));
         let command = match action {
