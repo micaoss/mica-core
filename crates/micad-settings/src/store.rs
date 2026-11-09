@@ -75,7 +75,9 @@ impl Format {
     /// Parse into a format-neutral tree before enforcing the exact schema.
     fn parse(self, text: &str) -> Result<Value, String> {
         match self {
-            Self::Toml => toml::from_str(text).map_err(|err: toml::de::Error| err.to_string()),
+            Self::Toml => {
+                toml::from_str(text).map_err(|err: toml::de::Error| toml_failure(text, &err))
+            }
             Self::Json => serde_json::from_str(text)
                 .map_err(|err: serde_json::Error| without_values(&err.to_string())),
         }
@@ -159,6 +161,22 @@ fn read_document<T: DeserializeOwned + Default>(
     serde_json::from_value(doc).map_err(|err| {
         SettingsError::Parse(format!("{document}: {}", without_values(&err.to_string())))
     })
+}
+
+/// A TOML parser's failure as its position and its sentence, without the
+/// line of the document its `Display` quotes: STATE holds credential hashes
+/// and tokens, and the failure is logged.
+fn toml_failure(text: &str, err: &toml::de::Error) -> String {
+    let message = without_values(err.message().trim());
+    match err.span() {
+        Some(span) => {
+            let before = &text[..span.start.min(text.len())];
+            let line = before.matches('\n').count() + 1;
+            let column = before.len() - before.rfind('\n').map_or(0, |at| at + 1) + 1;
+            format!("line {line}, column {column}: {message}")
+        }
+        None => message,
+    }
 }
 
 /// `sentence` with every double-quoted span replaced by `"…"`. A parser

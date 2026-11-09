@@ -489,3 +489,19 @@ pub(super) fn rejects_future_settings_without_stripping_or_defaulting_them() {
 }
 
 // --- Declared containers -----------------------------------------------------
+
+/// STATE is not on the refusal path: a STATE that does not parse stops the
+/// load, and micad logs why. The reason says where, never what the line held.
+#[test]
+pub(super) fn a_state_that_does_not_parse_is_refused_without_its_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_at(&dir);
+    fs::write(
+        dir.path().join("settings.toml"),
+        format!("schema_version = 1\n\n[access]\nadmin_password_hash = \"{POURED_PSK}\" broken\n"),
+    )
+    .unwrap();
+    let err = store.load_with_refusals().unwrap_err().to_string();
+    assert!(err.contains("line 4"), "the reason must say where: {err}");
+    assert!(!err.contains(POURED_PSK), "the reason quoted STATE: {err}");
+}
