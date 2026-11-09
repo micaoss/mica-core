@@ -13,6 +13,7 @@ mod access;
 mod bluetooth;
 mod containers;
 mod dns;
+mod logging;
 mod mqtt;
 mod network;
 mod provisioning;
@@ -23,6 +24,7 @@ pub use access::*;
 pub use bluetooth::*;
 pub use containers::*;
 pub use dns::*;
+pub use logging::*;
 pub use mqtt::*;
 pub use network::*;
 pub use provisioning::*;
@@ -65,6 +67,9 @@ pub struct Settings {
     /// The user's own services.
     #[serde(default)]
     pub services: ServicesSettings,
+    /// Whether the log is kept on DATA, its cap, and its collector.
+    #[serde(default)]
+    pub logging: LoggingSettings,
     /// A staged reset intent (schema v12); absent unless one is waiting to be
     /// applied — see [`ResetSettings`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -85,6 +90,7 @@ impl Default for Settings {
             mqtt: MqttSettings::default(),
             time: TimeSettings::default(),
             services: ServicesSettings::default(),
+            logging: LoggingSettings::default(),
             reset: None,
         }
     }
@@ -182,6 +188,12 @@ impl Settings {
         // Same rule as the network keys: a property of the write, not of the
         // tree. A document that already loads keeps loading; only a write that
         // CHANGES the `time` subtree has to satisfy its predicates.
+        if candidate.logging != self.logging {
+            validate_logging(&candidate.logging).map_err(|message| SettingsError::Validation {
+                path: path.to_string(),
+                message,
+            })?;
+        }
         if candidate.time != self.time {
             validate_time_settings(&candidate.time).map_err(|message| {
                 SettingsError::Validation {

@@ -12,9 +12,9 @@ use std::collections::BTreeMap;
 
 use crate::model::{
     AccessSettings, ApiToken, BluetoothSettings, ClaimSettings, ConsoleSettings, ContainerSettings,
-    DeviceCredentialSettings, DnsSettings, IfaceSettings, LanDiscoverySettings, MqttSettings,
-    ProvisioningSettings, ResetSettings, ServicesSettings, Settings, SshSettings, TimeSettings,
-    WebAdminSettings, WebSettings, WifiSettings,
+    DeviceCredentialSettings, DnsSettings, IfaceSettings, LanDiscoverySettings, LoggingSettings,
+    MqttSettings, ProvisioningSettings, ResetSettings, ServicesSettings, Settings, SshSettings,
+    TimeSettings, WebAdminSettings, WebSettings, WifiSettings,
 };
 
 /// Directory the `/mica/config/` documents live in when nothing relocates it.
@@ -25,7 +25,7 @@ pub const DOCUMENT_MODE: u32 = 0o600;
 
 /// The namespace's own index: the documents this schema writes, in the order
 /// the table names them.
-pub const CONFIG_DOCUMENTS: [&str; 10] = [
+pub const CONFIG_DOCUMENTS: [&str; 11] = [
     SYSTEM_DOCUMENT,
     NETWORK_DOCUMENT,
     DNS_DOCUMENT,
@@ -36,6 +36,7 @@ pub const CONFIG_DOCUMENTS: [&str; 10] = [
     CONTAINER_DOCUMENT,
     BLUETOOTH_DOCUMENT,
     SERVICES_DOCUMENT,
+    LOGGING_DOCUMENT,
 ];
 
 /// The addressed-tree subtrees each `/mica/config/` document carries.
@@ -43,7 +44,7 @@ pub const CONFIG_DOCUMENTS: [&str; 10] = [
 /// The document mapping in the form a caller can compute with, rather than as
 /// prose a reader has to re-derive. Two callers need it and both are the
 /// pour's:
-pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 10] = [
+pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 11] = [
     (
         SYSTEM_DOCUMENT,
         &[
@@ -64,6 +65,7 @@ pub const DOCUMENT_SUBTREES: [(&str, &[&str]); 10] = [
     (CONTAINER_DOCUMENT, &["container"]),
     (BLUETOOTH_DOCUMENT, &["bluetooth"]),
     (SERVICES_DOCUMENT, &["services"]),
+    (LOGGING_DOCUMENT, &["logging"]),
 ];
 
 /// The subtrees `document` carries, or `&[]` for a name that is not a
@@ -101,6 +103,8 @@ pub const CONTAINER_DOCUMENT: &str = "container.json";
 pub const BLUETOOTH_DOCUMENT: &str = "bluetooth.json";
 /// The `services` subtree; the services reconciler.
 pub const SERVICES_DOCUMENT: &str = "services.json";
+/// The `logging` subtree; the logging reconciler.
+pub const LOGGING_DOCUMENT: &str = "logging.json";
 
 /// Schema version of `system.json`.
 pub const SYSTEM_SCHEMA_VERSION: u32 = 1;
@@ -122,6 +126,8 @@ pub const CONTAINER_SCHEMA_VERSION: u32 = 1;
 pub const BLUETOOTH_SCHEMA_VERSION: u32 = 1;
 /// Schema version of `services.json`.
 pub const SERVICES_SCHEMA_VERSION: u32 = 1;
+/// Schema version of `logging.json`.
+pub const LOGGING_SCHEMA_VERSION: u32 = 1;
 /// Schema version of the STATE document.
 ///
 /// The remainder is a document too and takes the same rule: it is not exempt
@@ -230,6 +236,18 @@ pub struct TimeDocument {
     /// `time` in the addressed tree.
     #[serde(default)]
     pub time: TimeSettings,
+}
+
+/// `logging.json`: whether the log is kept on DATA, its cap, and its
+/// collector.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoggingDocument {
+    /// Version of this document alone.
+    pub schema_version: u32,
+    /// `logging` in the addressed tree.
+    #[serde(default)]
+    pub logging: LoggingSettings,
 }
 
 /// `container.json`: the container engine policy.
@@ -362,6 +380,7 @@ pub(crate) struct DocumentSet {
     pub projects: BTreeMap<String, String>,
     pub bluetooth: BluetoothDocument,
     pub services: ServicesDocument,
+    pub logging: LoggingDocument,
     pub state: StateDocument,
 }
 
@@ -418,6 +437,10 @@ impl DocumentSet {
                 schema_version: SERVICES_SCHEMA_VERSION,
                 services: settings.services.clone(),
             },
+            logging: LoggingDocument {
+                schema_version: LOGGING_SCHEMA_VERSION,
+                logging: settings.logging.clone(),
+            },
             state: StateDocument {
                 schema_version: STATE_SCHEMA_VERSION,
                 provisioning: settings.provisioning.clone(),
@@ -461,6 +484,7 @@ impl DocumentSet {
             mqtt: self.mqtt.mqtt,
             time: self.time.time,
             services: self.services.services,
+            logging: self.logging.logging,
             reset: self.state.reset,
         }
     }
@@ -498,6 +522,7 @@ document_default!(TimeDocument, time);
 document_default!(ContainerDocument, container);
 document_default!(BluetoothDocument, bluetooth);
 document_default!(ServicesDocument, services);
+document_default!(LoggingDocument, logging);
 document_default!(StateDocument, state);
 
 #[cfg(test)]

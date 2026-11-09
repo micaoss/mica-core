@@ -68,6 +68,7 @@ pub(super) fn configured() -> Settings {
     settings.dns.global.servers = vec!["9.9.9.9".to_string()];
     settings.container.enabled = !settings.container.enabled;
     settings.bluetooth.enabled = !settings.bluetooth.enabled;
+    settings.logging.persistent = Some(false);
     settings.services.units.insert(
         "tailscaled".to_string(),
         micad_settings::UserUnit {
