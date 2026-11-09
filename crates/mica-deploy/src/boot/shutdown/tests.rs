@@ -88,6 +88,45 @@ fn diagnostic_output_waits_a_bounded_time_for_a_full_pipe() {
 }
 
 #[test]
+fn a_line_waits_as_long_as_its_caller_allows() {
+    use std::io::{Read, Write};
+    let (mut writer, mut reader) = std::os::unix::net::UnixStream::pair().unwrap();
+    writer.set_nonblocking(true).unwrap();
+    let mut filled = 0;
+    while let Ok(n) = writer.write(&[b'x'; 4096]) {
+        filled += n;
+    }
+    // A console that stalls for 2 s, longer than the bound outside a
+    // budget, then takes everything: a caller that allows it, as the
+    // supervisor does within its budget, gets the line through whole.
+    let drain = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(2000));
+        let mut all = vec![0_u8; filled];
+        reader.read_exact(&mut all).unwrap();
+        let mut line = Vec::new();
+        let mut byte = [0_u8];
+        while reader.read(&mut byte).unwrap() == 1 && byte[0] != b'\n' {
+            line.push(byte[0]);
+        }
+        line
+    });
+    let mut asked = 0;
+    write_line(&writer, "MICA_SHUTDOWN stage=quiesced", || {
+        asked += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert!(asked > 10, "{asked}");
+    assert_eq!(drain.join().unwrap(), b"MICA_SHUTDOWN stage=quiesced");
+    // A caller that stops waiting ends the write with its error.
+    let (mut full, _held) = std::os::unix::net::UnixStream::pair().unwrap();
+    full.set_nonblocking(true).unwrap();
+    while full.write(&[0_u8; 4096]).is_ok() {}
+    let error = write_line(&full, "never", || bail!("budget spent")).unwrap_err();
+    assert_eq!(error.to_string(), "budget spent");
+}
+
+#[test]
 fn a_line_reaches_a_slow_console_whole() {
     use std::io::{Read, Write};
     let (mut writer, mut reader) = std::os::unix::net::UnixStream::pair().unwrap();

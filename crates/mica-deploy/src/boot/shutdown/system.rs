@@ -40,7 +40,11 @@ impl LifecycleIo for SystemIo<'_> {
         Ok(())
     }
     fn event(&mut self, stage: &str, detail: &str) {
-        if diagnostic(&format!("MICA_SHUTDOWN stage={stage} detail={detail:?}")).is_err() {
+        if self
+            .supervisor
+            .record(&format!("MICA_SHUTDOWN stage={stage} detail={detail:?}"))
+            .is_err()
+        {
             self.supervisor.poisoned = true;
         }
     }

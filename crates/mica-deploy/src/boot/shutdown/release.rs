@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
 
 use super::*;
 
@@ -213,15 +214,14 @@ pub fn finish(
     bail!("terminal action returned")
 }
 
-/// How long one line waits for a console that takes it slowly: a serial
-/// console a cloud copies to its log drains a full buffer in about half a
-/// second, and every watchdog the shutdown accepts allows 20 s.
+/// How long a line written outside a shutdown's budget waits for a console
+/// that takes it slowly. Within the budget the supervisor waits as long as
+/// the budget allows, feeding the watchdog (`Supervisor::record`).
 const CONSOLE_WAIT_MS: u64 = 1500;
 
-/// Bounded console transport. A line is written whole, waiting up to
+/// Bounded console transport: a line written whole, waiting up to
 /// [`CONSOLE_WAIT_MS`] for a slow console, and never longer for one that
-/// takes nothing. A failed transition record prevents terminal
-/// authorization.
+/// takes nothing.
 pub fn diagnostic(message: &str) -> Result<()> {
     write_diagnostic(rustix::stdio::stderr(), message, CONSOLE_WAIT_MS)
 }
@@ -230,12 +230,27 @@ pub(super) fn write_diagnostic(
     message: &str,
     wait_ms: u64,
 ) -> Result<()> {
+    let until = Instant::now() + Duration::from_millis(wait_ms);
+    write_line(fd, message, || {
+        ensure!(Instant::now() < until, "incomplete lifecycle console write");
+        Ok(())
+    })
+}
+
+/// Write `message` and a newline whole to `fd`, made non-blocking, so a
+/// line is never left half on the console. While the console takes nothing
+/// `wait` is asked, every 5 ms, whether to go on waiting: its error ends the
+/// write.
+pub(super) fn write_line(
+    fd: impl std::os::fd::AsFd,
+    message: &str,
+    mut wait: impl FnMut() -> Result<()>,
+) -> Result<()> {
     let fd = fd.as_fd();
     let flags = rustix::fs::fcntl_getfl(fd)?;
     rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)?;
     let mut line = message.as_bytes()[..message.len().min(1023)].to_vec();
     line.push(b'\n');
-    let until = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
     let mut rest = &line[..];
     while !rest.is_empty() {
         match rustix::io::write(fd, rest) {
@@ -246,11 +261,8 @@ pub(super) fn write_diagnostic(
             Ok(_) | Err(rustix::io::Errno::AGAIN | rustix::io::Errno::INTR) => {}
             Err(error) => return Err(error.into()),
         }
-        ensure!(
-            std::time::Instant::now() < until,
-            "incomplete lifecycle console write"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        wait()?;
+        std::thread::sleep(Duration::from_millis(5));
     }
     Ok(())
 }

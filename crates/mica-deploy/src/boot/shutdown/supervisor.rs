@@ -379,9 +379,38 @@ impl Supervisor {
         self.poisoned = true;
         bail!("excessive adopted children")
     }
+    /// Write `message` as a whole console line. Within the shutdown's budget
+    /// a slow console is waited for, the watchdog fed meanwhile, until a
+    /// second before the cleanup deadline, which leaves the terminal action
+    /// its time; outside it, as [`diagnostic`] does. A line not taken by then
+    /// is an error: the transition was not recorded.
+    pub fn record(&mut self, message: &str) -> Result<()> {
+        let Some(budget) = self.budget else {
+            return diagnostic(message);
+        };
+        let until = budget.cleanup_deadline_ms.saturating_sub(1000);
+        write_line(rustix::stdio::stderr(), message, || {
+            self.kick()?;
+            ensure!(self.now_ms() < until, "incomplete lifecycle console write");
+            Ok(())
+        })
+    }
+    /// A failure's line, waited for up to 5 s, never past the watchdog's
+    /// feeding deadline; without a budget, as [`diagnostic`] waits.
+    fn record_failure(&mut self, message: &str) {
+        let now = self.now_ms();
+        let until = self.budget.map_or(now.saturating_add(1500), |b| {
+            now.saturating_add(5000).min(b.deadline_ms)
+        });
+        let _ = write_line(rustix::stdio::stderr(), message, || {
+            self.kick()?;
+            ensure!(self.now_ms() < until, "incomplete lifecycle console write");
+            Ok(())
+        });
+    }
     pub fn failure(mut self, error: &anyhow::Error) -> ! {
         let error = format!("{error:#}");
-        let _ = diagnostic(&format!(
+        self.record_failure(&format!(
             "MICA_SHUTDOWN stage=storage-not-released error={error:?}"
         ));
         if let Some(budget) = self.budget {
@@ -399,7 +428,7 @@ impl Supervisor {
             "MICA_SHUTDOWN stage=failed watchdogArmed={} error={error:?}",
             self.armed
         );
-        let _ = diagnostic(&failed);
+        self.record_failure(&failed);
         kernel_record(&failed);
         // PID 1 must stay alive without feeding. Only a verified armed watchdog
         // can provide the emergency reset; this is never graceful completion.
@@ -414,7 +443,7 @@ impl Supervisor {
             self.now_ms() < budget.cleanup_deadline_ms,
             "terminal deadline exhausted"
         );
-        diagnostic(&format!(
+        self.record(&format!(
             "MICA_SHUTDOWN stage=action-requested action={}",
             action.as_str()
         ))?;

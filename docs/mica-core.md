@@ -1624,9 +1624,10 @@ read one format.
   and releases storage only once nothing is mounted, mapped or looped and no page is left to
   write (the dirty count read after folding every CPU's vm statistics, `stat_refresh`). A boot
   the runkit refuses takes the same path. Each step is a `MICA_SHUTDOWN stage=…` line on the
-  console, written whole: a slow console (a cloud's serial log) is waited for up to 1.5 s a line,
-  and a line it still does not take refuses the terminal action, since the transition was not
-  recorded. A shutdown that fails ends with `MICA_SHUTDOWN stage=failed watchdogArmed=… error=…`,
+  console, written whole: a slow console (a cloud's serial log) is waited for, the watchdog fed
+  meanwhile, until a second before the shutdown's cleanup deadline (1.5 s a line outside a
+  shutdown), and a line it still does not take refuses the terminal action, since the transition
+  was not recorded. A shutdown that fails ends with `MICA_SHUTDOWN stage=failed watchdogArmed=… error=…`,
   also written as a critical kernel record (`/dev/kmsg`) so it stays whole on a console whose
   lines interleave, and waits for the armed watchdog's reset.
   An OpenRC root gets no exit ramdisk: `openrc-init` reboots by itself once the shutdown runlevel
