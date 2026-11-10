@@ -56,6 +56,8 @@ mod power;
 mod presence;
 mod reset;
 mod router;
+#[cfg(test)]
+mod sandbox_tests;
 mod settings;
 mod setup;
 mod snapshots;

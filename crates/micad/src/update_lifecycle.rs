@@ -33,6 +33,9 @@ pub const DEFAULT_CLIENT_PATH: &str = "/usr/bin/mica-deploy";
 /// recorded as `ready` and what may be installed.
 pub const DEFAULT_WORKSPACE_ROOT: &str = "/mica/updates";
 
+/// The uploads directory inside the workspace (see [`UpdateLifecycle::uploads_dir`]).
+pub const UPLOADS: &str = "uploads";
+
 /// Bound on one `probe` subprocess: a handful of stat calls and one fsync;
 /// a minute is a wedged disk, not a slow one.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -194,7 +197,7 @@ impl UpdateLifecycle {
     /// the upload, which is the earlier and cheaper failure.
     #[must_use]
     pub fn uploads_dir(&self) -> PathBuf {
-        self.workspace_root.join("uploads")
+        self.workspace_root.join(UPLOADS)
     }
 
     /// Why `path` must not be handed to the native backend, or `Ok` when it is a regular

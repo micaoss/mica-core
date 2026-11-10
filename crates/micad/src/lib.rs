@@ -380,11 +380,7 @@ async fn serve() -> anyhow::Result<()> {
         }
         service = service.with_logs(Arc::new(logs::HostLogs::production(init)));
         if let Some((units, apps)) = units_and_apps {
-            // apid takes uploads there, and binds it at start: made before the
-            // web reconciler starts apid.
-            if let Err(err) = std::fs::create_dir_all(apps::INCOMING) {
-                tracing::warn!(dir = apps::INCOMING, %err, "the app uploads directory could not be made");
-            }
+            make_upload_dirs(Path::new("/"));
             service = service.with_user_units(units).with_apps(apps);
         }
         service = service.with_storage_status(Arc::new(storage_status::HostStorage::production()));
@@ -635,6 +631,22 @@ fn product_features(path: &std::path::Path) -> micad_settings::Features {
         tracing::error!(path = %path.display(), error = %err, "product features unreadable; serving every feature");
         micad_settings::Features::all()
     })
+}
+
+/// The directories apid takes uploads into, under `root`: app bundles and
+/// update archives. apid's unit binds them writable at start
+/// (`ReadWritePaths=` under `ProtectSystem=strict`) and cannot make them
+/// itself, so they are made before the web reconciler starts apid. A failure
+/// is logged; apid then refuses uploads.
+fn make_upload_dirs(root: &Path) {
+    let updates =
+        Path::new(update_lifecycle::DEFAULT_WORKSPACE_ROOT).join(update_lifecycle::UPLOADS);
+    for dir in [Path::new(apps::INCOMING), updates.as_path()] {
+        let path = root.join(dir.strip_prefix("/").unwrap_or(dir));
+        if let Err(err) = std::fs::create_dir_all(&path) {
+            tracing::warn!(dir = %path.display(), %err, "an upload directory could not be made");
+        }
+    }
 }
 
 #[cfg(test)]

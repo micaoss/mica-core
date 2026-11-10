@@ -1,4 +1,4 @@
-use super::{service_scan_enabled, version_line, wants_version};
+use super::{make_upload_dirs, service_scan_enabled, version_line, wants_version};
 
 fn argv(args: &[&str]) -> Vec<String> {
     args.iter().map(|s| (*s).to_string()).collect()
@@ -99,4 +99,13 @@ fn dry_run_alone_constructs_no_scan() {
 #[test]
 fn dry_run_plus_micad_scan_one_constructs_the_scan() {
     assert!(service_scan_enabled(true, Some("1")));
+}
+
+#[test]
+fn both_upload_directories_are_made_for_apid() {
+    let root = tempfile::tempdir().unwrap();
+    make_upload_dirs(root.path());
+    for dir in ["mica/apps/.incoming", "mica/updates/uploads"] {
+        assert!(root.path().join(dir).is_dir(), "{dir} was not made");
+    }
 }
