@@ -177,6 +177,7 @@ pub(super) async fn a_fetch_failure_never_records_a_descriptor_as_ready() {
     let recorded = settled(&host).await;
     assert_eq!(recorded["state"], "failed");
     assert_eq!(recorded["code"], update_codes::CLIENT_EXIT_FAILURE);
+    assert_eq!(recorded["failedDuring"], "fetch", "{recorded}");
     assert!(recorded.get("deploymentId").is_none());
 }
 
@@ -247,6 +248,9 @@ pub(super) async fn a_failed_check_is_a_failed_state_with_its_reason() {
     // The sentence stays for the operator, and the class is
     // beside it for everything that is not one.
     assert_eq!(recorded["code"], update_codes::CLIENT_EXIT_FAILURE);
+    // The operation the failure ended, so a console says "the check failed"
+    // and not "the last update did not complete".
+    assert_eq!(recorded["failedDuring"], "check", "{recorded}");
 }
 
 // The three remaining `failed` codes, each driven to the recorded

@@ -93,6 +93,11 @@ pub(super) fn render_entry(
     if let Some(code) = code {
         entry.insert("code".into(), json!(code));
     }
+    if state == "failed"
+        && let Some(during) = machine.failed_during
+    {
+        entry.insert("failedDuring".into(), json!(during));
+    }
     if let Some(refusal) = last_refusal {
         entry.insert("last_refusal".into(), json!(refusal.text));
         entry.insert("last_refusal_code".into(), json!(refusal.code));

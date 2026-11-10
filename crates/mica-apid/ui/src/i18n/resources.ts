@@ -1852,6 +1852,7 @@ export const en = {
         system: 'system',
         rebootNeeded: 'The update is installed. Reboot to start it.',
         failed: 'The last update did not complete.',
+        checkFailed: 'The update check failed.',
         runningSystem: 'System {{version}}',
         runningCore: 'core {{version}} ({{channel}})',
         lastCheck: 'checked {{at}}',

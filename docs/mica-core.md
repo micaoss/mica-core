@@ -332,7 +332,8 @@ absence is reported with its reason rather than as a healthy reading:
   new root too (`set-fetch --deployment`), and `install` is given the newest staged `general` set
   (`--core-set`) and takes the set the table of 6.2 names, as one pair with the deployment.
   Fetch, install, the maintenance window and the reboot gate are the same for both; `update.lifecycle` says what is on offer and staged
-  (`kind` is `deployment` or `set`, with `setKind`), and `update.sets.core` the sets held and the
+  (`kind` is `deployment` or `set`, with `setKind`), a `failed` state names the operation it ended
+  in `failedDuring` (`check`, `fetch` or `discard`), and `update.sets.core` the sets held and the
   boots a set on trial has left. micad comes from the
   core set and `mica-deploy` from the root, so micad reads the client's `status` leniently: the
   client may be the newer of the two.

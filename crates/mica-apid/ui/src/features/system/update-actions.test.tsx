@@ -70,6 +70,26 @@ describe('the update overview', () => {
     expect(await screen.findByText('The last update did not complete.')).toBeTruthy()
     expect(screen.getByText('set-check was killed by signal 6 (SIGABRT)')).toBeTruthy()
   })
+
+  it('says a failed check is a failed check, not an unfinished update', async () => {
+    stubFetch({ '/api/v1/update': { lifecycle: { state: 'failed', failedDuring: 'check', code: 'client-exit-failure', reason: 'Invalid component contract: untrusted metadata key' } } })
+    renderPanel(<UpdateOverview />)
+    expect(await screen.findByText('The update check failed.')).toBeTruthy()
+    expect(screen.queryByText('The last update did not complete.')).toBeNull()
+    expect(screen.getByText('Invalid component contract: untrusted metadata key')).toBeTruthy()
+  })
+
+  it('keeps the product result when only the core line could not be checked', async () => {
+    stubFetch({ '/api/v1/update': { lifecycle: {
+      state: 'idle',
+      available: { deploymentId: 'a'.repeat(64), version: '0.0.6', kind: 'deployment' },
+      coreCheckFailed: { code: 'client-exit-failure', reason: 'set-check: Invalid component contract: untrusted metadata key' },
+    } } })
+    renderPanel(<UpdateOverview />)
+    expect(await screen.findByText('Update available: system 0.0.6')).toBeTruthy()
+    expect(screen.getByText('Core line could not be checked: set-check: Invalid component contract: untrusted metadata key')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
+  })
 })
 
 it('displays the running, candidate and fallback identities with the running components', async () => {

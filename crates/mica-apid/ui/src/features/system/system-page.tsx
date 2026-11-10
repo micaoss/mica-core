@@ -96,6 +96,8 @@ interface UpdateStateDoc {
   lifecycle?: {
     state?: string
     reason?: string
+    /// The operation a `failed` state ended: a check is not an unfinished update.
+    failedDuring?: 'check' | 'fetch' | 'discard'
     /// `kind` says whether the candidate is a set or a system deployment, and
     /// `setKind` which kind of set.
     available?: { deploymentId: string; version: string; kind?: UpdateKind; setKind?: string | null }
@@ -237,7 +239,7 @@ export function UpdateOverview() {
     ? t(`system.update.overview.steps.${state}`, { defaultValue: state })
     : following !== undefined ? t('system.update.overview.steps.checking')
     : reboot ? t('system.update.overview.rebootNeeded')
-    : failed ? t('system.update.overview.failed')
+    : failed ? t(lifecycle?.failedDuring === 'check' ? 'system.update.overview.checkFailed' : 'system.update.overview.failed')
     : offered ? t('system.update.overview.available', { what: offered })
     : t('system.update.overview.upToDate')
   return (
@@ -253,6 +255,7 @@ export function UpdateOverview() {
         ].filter(Boolean).join(' · ')}
       </p>
       {failed && lifecycle?.reason ? <Callout tone="danger" title={lifecycle.reason} /> : null}
+      {lifecycle?.coreCheckFailed ? <Callout tone="warning" title={`${t('system.update.coreCheckFailed')}: ${lifecycle.coreCheckFailed.reason}`} /> : null}
       {doc?.install?.status === 'failed' && doc.install.error ? <Callout tone="danger" title={doc.install.error} /> : null}
       {lifecycle?.last_refusal ? <Callout tone="warning" title={lifecycle.last_refusal} /> : null}
       {status.error ? <Callout tone="danger" title={failureDetail(status.error, t('common.requestFailed'))} /> : null}

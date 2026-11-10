@@ -1554,6 +1554,7 @@ export const zhCN: Translation = {
         system: '系统',
         rebootNeeded: '更新已安装，重启后生效。',
         failed: '上次更新未完成。',
+        checkFailed: '检查更新失败。',
         runningSystem: '系统 {{version}}',
         runningCore: 'Core {{version}}（{{channel}}）',
         lastCheck: '上次检查 {{at}}',

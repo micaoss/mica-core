@@ -111,6 +111,7 @@ impl UpdateLifecycle {
                 );
                 machine.last_check = Some(now_rfc3339());
                 machine.failed = Some(failed.clone());
+                machine.failed_during = Some("check");
                 Settled::Failed(failed)
             }
         };
@@ -281,6 +282,7 @@ impl UpdateLifecycle {
                     "update fetch failed"
                 );
                 machine.failed = Some(failed.clone());
+                machine.failed_during = Some("fetch");
                 Settled::Failed(failed)
             }
         };
@@ -320,6 +322,7 @@ impl UpdateLifecycle {
                 format!("discard: {error:#}"),
             )),
         };
+        machine.failed_during = error.as_ref().map(|_| "discard");
         machine.failed = error;
         drop(machine);
         self.record_snapshot_with(Some(CodedReason::new(
@@ -344,6 +347,7 @@ impl UpdateLifecycle {
         }
         machine.operation = Some(operation);
         machine.failed = None;
+        machine.failed_during = None;
         machine.unready = None;
         drop(machine);
         self.record_snapshot().await;

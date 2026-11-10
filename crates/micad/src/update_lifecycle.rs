@@ -116,6 +116,8 @@ struct Machine {
     /// Why the last operation failed, with its code; cleared when the next
     /// one starts.
     failed: Option<CodedReason>,
+    /// The operation `failed` ended: `check`, `fetch` or `discard`.
+    failed_during: Option<&'static str>,
     /// The workspace's refusal, when the last probe did not pass; cleared
     /// when the next operation starts and stays clear when its probe passes.
     unready: Option<Unready>,
