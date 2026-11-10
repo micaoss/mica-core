@@ -737,6 +737,8 @@ impl SettingsApi for FakeSettings {
                 format!("2026-09-28T10:00:00+00:00 {source}[1]: serving"),
                 "2026-09-28T10:00:01+00:00 wpa_supplicant[2]: psk=hunter22 set".to_string(),
                 "2026-09-28T10:00:02+00:00 kernel: link aa:bb:cc:dd:ee:ff up".to_string(),
+                // A line an older micad wrote, still in the journal.
+                "2026-09-28T10:00:03+00:00 micad[1]: device code code=DFN4-L34C-T8N source=emmc-cid".to_string(),
             ],
             "truncated": false,
         }))

@@ -157,3 +157,42 @@ pub(super) fn what_the_schema_does_not_name_does_not_ship() {
     );
     assert_eq!(stats.dropped_fields, 4);
 }
+
+/// The one scrub the log route and the snapshot share: a line naming the
+/// device code, a pairing PIN or passkey, a preshared key or a cookie is
+/// replaced whole, as a password line is; an ordinary line is kept.
+#[test]
+pub(super) fn the_shared_scrub_replaces_claim_and_pairing_secrets_whole() {
+    for line in [
+        "micad[1]: device code code=DFN4-L34C-T8N source=emmc-cid",
+        "micad[1]: device_code=DFN4-L34C-T8N",
+        "micad[1]: Device-Code DFN4-L34C-T8N",
+        "micad[1]: claim code DFN4-L34C-T8N",
+        "bluetoothd[3]: RequestPinCode pincode=123456",
+        "bluetoothd[3]: DisplayPasskey passkey=654321",
+        "wg[4]: PresharedKey=c2VjcmV0",
+        "apid[2]: Cookie: mica_session=abc",
+    ] {
+        let (out, replaced) = crate::diagnostics::scrub(line);
+        assert!(
+            !out.contains("DFN4") && !out.contains("123456") && !out.contains("654321"),
+            "{line} -> {out}"
+        );
+        assert!(
+            !out.contains("c2VjcmV0") && !out.contains("abc"),
+            "{line} -> {out}"
+        );
+        assert_eq!(replaced, 1, "{line}");
+    }
+    for line in [
+        "micad[1]: serving",
+        "micad[1]: update check found 0.0.6 (code 0)",
+        "apid[2]: listening on 0.0.0.0:443",
+    ] {
+        assert_eq!(
+            crate::diagnostics::scrub(line),
+            (line.to_string(), 0),
+            "{line}"
+        );
+    }
+}

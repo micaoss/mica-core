@@ -22,6 +22,9 @@ pub(super) async fn a_service_log_is_served_scrubbed_and_an_unknown_one_is_refus
     // is masked in place.
     let text = log.to_string();
     assert!(!text.contains("hunter22"), "{text}");
+    // The device code is the claimer's proof: an old line carrying it is
+    // replaced whole too.
+    assert!(!text.contains("DFN4-L34C-T8N"), "{text}");
     assert!(!text.contains("aa:bb:cc:dd:ee:ff"), "{text}");
     assert!(log["lines"][2].as_str().unwrap().contains("link"), "{log}");
 

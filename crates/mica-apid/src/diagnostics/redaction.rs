@@ -30,7 +30,7 @@ pub(super) const SNAPSHOT_SECRET_FIELDS: [&str; 14] = [
 
 /// Substrings (matched case-insensitively) that mark a string as carrying
 /// a secret; the whole string is replaced.
-pub(super) const SECRET_MARKERS: [&str; 15] = [
+pub(super) const SECRET_MARKERS: [&str; 25] = [
     "password",
     "passwd",
     "passphrase",
@@ -46,6 +46,18 @@ pub(super) const SECRET_MARKERS: [&str; 15] = [
     "api key",
     "apikey",
     "api_key",
+    // The device code proves who holds the device, and a pairing PIN or
+    // passkey who is pairing with it.
+    "device code",
+    "device_code",
+    "device-code",
+    "devicecode",
+    "claim code",
+    "pincode",
+    "pin code",
+    "passkey",
+    "preshared",
+    "cookie",
 ];
 
 // ---- redaction ----------------------------------------------------------
