@@ -57,6 +57,45 @@ describe('the automatic update policy', () => {
     expect((screen.getByLabelText(/Update server address/) as HTMLInputElement).value).toBe('')
   })
 
+  /// An operator who cleared the address stored `null`: the device follows
+  /// its image again, and must say so rather than "set here".
+  it('says a device whose operator cleared the address is following its image', async () => {
+    stubFetch({
+      '/api/v1/update': policy,
+      '/api/v1/provisioning/status': { ...bakedOnly, operator: { update: { source: null } } },
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    expect(await screen.findAllByText('from the image')).toHaveLength(2)
+    expect(screen.queryByText(/set here/)).toBeNull()
+  })
+
+  /// The collapsed selects show the label, not the protocol value.
+  it('shows the mode, the reboot policy and the cadence unit by their labels', async () => {
+    stubFetch({
+      '/api/v1/update': { lifecycle: { policy: { ...policy.lifecycle.policy, policy: 'auto', rebootPolicy: 'window' } } },
+      '/api/v1/provisioning/status': bakedOnly,
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    const mode = await screen.findByRole('combobox', { name: 'Automatic behaviour' })
+    await waitFor(() => expect(mode.textContent).toContain('Check, download and install'))
+    expect(screen.getByRole('combobox', { name: 'After installing' }).textContent).toContain('Reboot in the window')
+    expect(screen.getByRole('combobox', { name: 'Cadence unit' }).textContent).toContain('Days')
+  })
+
+  /// A value this console does not know is shown as such, never as another one.
+  it('shows a mode it does not know as unknown, with the value', async () => {
+    stubFetch({
+      '/api/v1/update': { lifecycle: { policy: { ...policy.lifecycle.policy, policy: 'download' } } },
+      '/api/v1/provisioning/status': bakedOnly,
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    const mode = await screen.findByRole('combobox', { name: 'Automatic behaviour' })
+    await waitFor(() => expect(mode.textContent).toContain('Unknown (download)'))
+  })
+
   it('writes the address as a patch that names nothing else', async () => {
     const fetch = stubFetch({
       '/api/v1/update': policy,

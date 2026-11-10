@@ -1782,6 +1782,7 @@ export const en = {
         intervalUnits: { minutes: 'Minutes', hours: 'Hours', days: 'Days' },
         rebootPolicy: 'After installing',
         rebootPolicyNames: { manual: 'Wait for a person', window: 'Reboot in the window' },
+        unknownValue: 'Unknown ({{value}})',
         rebootPolicies: {
           manual: 'The update is installed and waits. Somebody reboots the device to start it.',
           window: 'The device reboots inside the same maintenance window, and only when it is safe to reboot.',

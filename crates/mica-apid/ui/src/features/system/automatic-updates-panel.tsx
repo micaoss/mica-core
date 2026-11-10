@@ -246,7 +246,7 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
           <FormField label={t('system.update.automatic.mode')} hint={knownMode ? t(`system.update.automatic.modes.${knownMode}`) : undefined}>
             {(id) => (
               <Select value={currentMode} onValueChange={(value) => setMode(String(value))}>
-                <SelectTrigger id={id} aria-label={t('system.update.automatic.mode')}><SelectValue /></SelectTrigger>
+                <SelectTrigger id={id} aria-label={t('system.update.automatic.mode')}><SelectValue>{knownMode ? t(`system.update.automatic.modeNames.${knownMode}`) : t('system.update.automatic.unknownValue', { value: currentMode })}</SelectValue></SelectTrigger>
                 <SelectContent>{POLICIES.map((option) => <SelectItem value={option} key={option}>{t(`system.update.automatic.modeNames.${option}`)}</SelectItem>)}</SelectContent>
               </Select>
             )}
@@ -256,7 +256,7 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
               <div className="flex gap-2">
                 <Input id={id} type="number" min={0} value={currentInterval} onChange={(event) => setInterval(event.target.value)} required />
                 <Select value={currentUnit} onValueChange={(value) => setUnit(String(value) as CadenceUnit)}>
-                  <SelectTrigger className="w-32" aria-label={t('system.update.automatic.intervalUnit')}><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-32" aria-label={t('system.update.automatic.intervalUnit')}><SelectValue>{t(`system.update.automatic.intervalUnits.${currentUnit}`)}</SelectValue></SelectTrigger>
                   <SelectContent>
                     {(Object.keys(CADENCE_UNITS) as CadenceUnit[]).map((option) => (
                       <SelectItem value={option} key={option}>{t(`system.update.automatic.intervalUnits.${option}`)}</SelectItem>
@@ -272,7 +272,7 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
           <FormField label={t('system.update.automatic.rebootPolicy')} hint={knownReboot ? t(`system.update.automatic.rebootPolicies.${knownReboot}`) : undefined}>
             {(id) => (
               <Select value={currentReboot} onValueChange={(value) => setRebootPolicy(String(value))}>
-                <SelectTrigger id={id} aria-label={t('system.update.automatic.rebootPolicy')}><SelectValue /></SelectTrigger>
+                <SelectTrigger id={id} aria-label={t('system.update.automatic.rebootPolicy')}><SelectValue>{knownReboot ? t(`system.update.automatic.rebootPolicyNames.${knownReboot}`) : t('system.update.automatic.unknownValue', { value: currentReboot })}</SelectValue></SelectTrigger>
                 <SelectContent>{REBOOT_POLICIES.map((option) => <SelectItem value={option} key={option}>{t(`system.update.automatic.rebootPolicyNames.${option}`)}</SelectItem>)}</SelectContent>
               </Select>
             )}

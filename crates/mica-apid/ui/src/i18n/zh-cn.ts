@@ -1497,6 +1497,7 @@ export const zhCN: Translation = {
         intervalUnits: { minutes: '分钟', hours: '小时', days: '天' },
         rebootPolicy: '安装完成后',
         rebootPolicyNames: { manual: '等待人工处理', window: '在窗口内重启' },
+        unknownValue: '未知（{{value}}）',
         rebootPolicies: {
           manual: '更新安装后等待，由人工重启设备使其生效。',
           window: '设备在同一维护窗口内重启，且仅在可安全重启时才会重启。',
