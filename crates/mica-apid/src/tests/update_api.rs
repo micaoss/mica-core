@@ -581,3 +581,76 @@ async fn a_refused_import_removes_the_upload() {
         .unwrap_or_default();
     assert!(left.is_empty(), "a refused import left its upload behind");
 }
+
+/// Why the upload could not be staged decides the answer: a full DATA is
+/// 507, a DATA that is not there or read-only is 503, and anything else
+/// (a permission, an I/O error) is the device's fault, 500.
+#[test]
+fn a_staging_failure_is_answered_by_its_cause() {
+    use crate::update_api::staging_refusal;
+    use rustix::io::Errno;
+    for (errno, status, code) in [
+        (
+            Errno::NOSPC,
+            StatusCode::INSUFFICIENT_STORAGE,
+            "update_storage_full",
+        ),
+        (
+            Errno::DQUOT,
+            StatusCode::INSUFFICIENT_STORAGE,
+            "update_storage_full",
+        ),
+        (
+            Errno::ROFS,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "update_storage_unavailable",
+        ),
+        (
+            Errno::NOENT,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "update_storage_unavailable",
+        ),
+        (
+            Errno::NOTDIR,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "update_storage_unavailable",
+        ),
+        (
+            Errno::ACCESS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "update_staging_failed",
+        ),
+        (
+            Errno::IO,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "update_staging_failed",
+        ),
+    ] {
+        let err = std::io::Error::from_raw_os_error(errno.raw_os_error());
+        assert_eq!(staging_refusal(&err), (status, code), "{err}");
+    }
+}
+
+/// An upload directory that cannot exist (its parent is a file) is a DATA
+/// that is not ready: 503, and micad is not asked anything.
+#[tokio::test]
+async fn an_upload_directory_that_cannot_be_made_is_unavailable_storage() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("data"), b"not a directory").unwrap();
+    let (tree, token) = with_token(configured_tree("hunter2secret"));
+    let fake = Arc::new(FakeSettings::new(tree));
+    let router = app(AppState::new(fake.clone(), SIGNING_KEY)
+        .with_update_uploads(dir.path().join("data/uploads")));
+
+    let response = bearer_bytes(
+        &router,
+        IMPORT_PATH,
+        b"MICAUPD1archive".to_vec(),
+        "application/octet-stream",
+        &token,
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(fake.update_calls().is_empty());
+}

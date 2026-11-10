@@ -9845,8 +9845,18 @@
               }
             }
           },
+          "500": {
+            "description": "The upload could not be staged for another reason, such as a permission (`update_staging_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "503": {
-            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "description": "DATA is not there or is read-only, so the upload has nowhere to go (`update_storage_unavailable`), or the call to micad could not be made (`micad_unreachable`; carries `Retry-After`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9866,7 +9876,7 @@
             }
           },
           "507": {
-            "description": "The upload could not be written (`update_storage_unavailable`)",
+            "description": "The upload does not fit on DATA (`update_storage_full`)",
             "content": {
               "application/json": {
                 "schema": {

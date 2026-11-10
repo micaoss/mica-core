@@ -230,6 +230,25 @@ pub(crate) async fn api_v1_update_install_latest(
     }
 }
 
+/// The answer to an upload that could not be staged, by its cause: a full
+/// DATA (or quota) is **507** `update_storage_full`, a DATA that is not there
+/// or is read-only is **503** `update_storage_unavailable`, and anything else
+/// -- a permission, an I/O error -- is the device's own fault, **500**
+/// `update_staging_failed`. The errno itself goes to the log only.
+pub(crate) fn staging_refusal(err: &std::io::Error) -> (StatusCode, &'static str) {
+    use rustix::io::Errno;
+    match err.raw_os_error().map(Errno::from_raw_os_error) {
+        Some(Errno::NOSPC | Errno::DQUOT) => {
+            (StatusCode::INSUFFICIENT_STORAGE, "update_storage_full")
+        }
+        Some(Errno::ROFS | Errno::NOENT | Errno::NOTDIR) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "update_storage_unavailable",
+        ),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "update_staging_failed"),
+    }
+}
+
 /// Upload a signed offline archive and import it.
 ///
 /// The body is the `MICAUPD1` archive itself, streamed to the device's upload
@@ -257,8 +276,9 @@ pub(crate) async fn api_v1_update_install_latest(
         (status = 409, description = "Another update operation is already running (`update_refused`)", body = ApiError),
         (status = 413, description = "The archive is larger than this device accepts (`archive_too_large`)", body = ApiError),
         (status = 415, description = "The body is not `application/octet-stream` (`archive_type`)", body = ApiError),
-        (status = 507, description = "The upload could not be written (`update_storage_unavailable`)", body = ApiError),
-        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 500, description = "The upload could not be staged for another reason, such as a permission (`update_staging_failed`)", body = ApiError),
+        (status = 507, description = "The upload does not fit on DATA (`update_storage_full`)", body = ApiError),
+        (status = 503, description = "DATA is not there or is read-only, so the upload has nowhere to go (`update_storage_unavailable`), or the call to micad could not be made (`micad_unreachable`; carries `Retry-After`)", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),
         (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
     ),
@@ -305,9 +325,10 @@ pub(crate) async fn api_v1_update_import(
     let uploads = state.update_uploads.as_path();
     if let Err(err) = tokio::fs::create_dir_all(uploads).await {
         tracing::error!(error = %err, "creating the update upload directory failed");
+        let (status, code) = staging_refusal(&err);
         return refuse(
-            StatusCode::INSUFFICIENT_STORAGE,
-            "update_storage_unavailable",
+            status,
+            code,
             "the update upload directory could not be created",
         );
     }
@@ -327,11 +348,8 @@ pub(crate) async fn api_v1_update_import(
         Ok(file) => file,
         Err(err) => {
             tracing::error!(error = %err, "creating the update upload file failed");
-            return refuse(
-                StatusCode::INSUFFICIENT_STORAGE,
-                "update_storage_unavailable",
-                "the upload file could not be created",
-            );
+            let (status, code) = staging_refusal(&err);
+            return refuse(status, code, "the upload file could not be created");
         }
     };
     let mut stream = request.into_body().into_data_stream();
@@ -376,11 +394,8 @@ pub(crate) async fn api_v1_update_import(
         if let Err(err) = file.write_all(&chunk).await {
             let _ = tokio::fs::remove_file(&upload).await;
             tracing::error!(error = %err, "writing the update upload failed");
-            return refuse(
-                StatusCode::INSUFFICIENT_STORAGE,
-                "update_storage_unavailable",
-                "the upload could not be written",
-            );
+            let (status, code) = staging_refusal(&err);
+            return refuse(status, code, "the upload could not be written");
         }
     }
     if magic.len() < ARCHIVE_MAGIC.len() {
@@ -394,11 +409,8 @@ pub(crate) async fn api_v1_update_import(
     if let Err(err) = file.sync_all().await {
         let _ = tokio::fs::remove_file(&upload).await;
         tracing::error!(error = %err, "syncing the update upload failed");
-        return refuse(
-            StatusCode::INSUFFICIENT_STORAGE,
-            "update_storage_unavailable",
-            "the upload could not be written",
-        );
+        let (status, code) = staging_refusal(&err);
+        return refuse(status, code, "the upload could not be written");
     }
     drop(file);
 
