@@ -11,9 +11,14 @@ use micad_settings::{CanConfig, IfaceKind, IfaceSettings, WireguardConfig};
 /// `PrivateKeyFile=` and `PresharedKeyFile=` name the keys rather than carrying
 /// them: the unit file lives in networkd's runtime directory, which is
 /// world-readable, and the key files it points at are not.
+///
+/// `RouteTable=off`, written out although it is networkd's default: the
+/// peers' routes are the tunnel `.network`'s own `[Route]` sections
+/// ([`render_unit`]), and a second source of the same routes would be one
+/// default change away.
 pub(super) fn render_wireguard(iface: &str, cfg: &WireguardConfig, keys: &Keystore) -> String {
     let mut out = format!(
-        "\n[WireGuard]\nPrivateKeyFile={}\n",
+        "\n[WireGuard]\nPrivateKeyFile={}\nRouteTable=off\n",
         keys.key_path(iface).display()
     );
     if let Some(port) = cfg.listen_port {
@@ -135,6 +140,14 @@ pub(super) fn render_unit(
             }
             if let Some(metric) = route.metric {
                 out.push_str(&format!("Metric={metric}\n"));
+            }
+        }
+        // A tunnel's peers' prefixes, as routes networkd owns: it adds them,
+        // and removes the ones a reload no longer names.
+        for route in micad_settings::wireguard_routes(cfg) {
+            out.push_str(&format!("\n[Route]\nDestination={}\n", route.destination));
+            if let Some(source) = route.preferred_source {
+                out.push_str(&format!("PreferredSource={source}\n"));
             }
         }
     }

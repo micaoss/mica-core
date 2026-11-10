@@ -154,3 +154,39 @@ pub(super) async fn a_daemon_with_no_key_store_rotates_nothing() {
     assert!(message.contains("no WireGuard key store"), "{message}");
     assert!(!dir.path().join("secrets").exists());
 }
+
+/// WG-T10/T11 through the one write path every route takes: a peer's
+/// route rule refuses the write before it is stored, with its code, and a
+/// peer within the rules lands.
+#[tokio::test]
+pub(super) async fn a_peer_route_rule_refuses_the_write_before_it_is_stored() {
+    let (service, _dir) = service_with_wireguard();
+    let tunnel = |allowed: &str| {
+        serde_json::json!({
+            "kind": "wireguard",
+            "dhcp": false,
+            "static": { "address": "10.202.0.102/32" },
+            "wireguard": { "peers": [{
+                "publicKey": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+                "allowedIps": [allowed],
+            }] },
+        })
+    };
+    let before = service.get_settings("network").await.expect("settings");
+
+    let err = service
+        .persist_setting("network.wg0", tunnel("0.0.0.0/0"))
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("wireguard_default_route_unsupported"),
+        "{err}"
+    );
+    assert_eq!(service.get_settings("network").await.unwrap(), before);
+
+    service
+        .persist_setting("network.wg0", tunnel("10.202.0.0/24"))
+        .await
+        .expect("a peer subnet lands");
+}

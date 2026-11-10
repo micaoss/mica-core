@@ -26,6 +26,7 @@ mod recovery;
 mod secret;
 mod store;
 mod transaction;
+mod wireguard_routes;
 
 pub use absent::absent;
 pub use api_token::{MAX_TOKENS, is_api_token_id, validate_api_tokens};
@@ -93,3 +94,4 @@ pub use recovery::{
 };
 pub use secret::{hash_password, random_bytes, verify_password};
 pub use store::{DEFAULT_PATH, DocumentRefusal, LoadedStore, Store};
+pub use wireguard_routes::{WireguardRoute, wireguard_route_violations, wireguard_routes};

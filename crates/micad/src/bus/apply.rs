@@ -117,6 +117,22 @@ impl MicadService {
                     });
                 }
             }
+            // The peers' route rules, for the peers this write changes: every
+            // route that writes the network (a peer, an interface, the whole
+            // map, a settings path) meets them here.
+            if candidate.network != inner.settings.network
+                && let Some(violation) = micad_settings::wireguard_route_violations(
+                    &inner.settings.network,
+                    &candidate.network,
+                )
+                .into_iter()
+                .next()
+            {
+                return Err(SettingsError::Validation {
+                    path: path.to_string(),
+                    message: format!("{}: {}", violation.code, violation.message),
+                });
+            }
             let owners = self.apps.unit_owners();
             if let Some((unit, app)) = candidate
                 .services

@@ -20,7 +20,7 @@ pub(super) async fn renders_a_wireguard_netdev_naming_its_key_file_and_its_peers
         netdev,
         format!(
             "[NetDev]\nName=wg0\nKind=wireguard\n\n\
-             [WireGuard]\nPrivateKeyFile={}\nListenPort=51820\n\n\
+             [WireGuard]\nPrivateKeyFile={}\nRouteTable=off\nListenPort=51820\n\n\
              [WireGuardPeer]\nPublicKey={}\nAllowedIPs=10.8.0.0/24\n\
              Endpoint=vpn.example.net:51820\nPersistentKeepalive=25\n",
             dir.path().join("networkd-secrets/wg-wg0.key").display(),
@@ -35,6 +35,117 @@ pub(super) async fn renders_a_wireguard_netdev_naming_its_key_file_and_its_peers
     );
     // A device that did not exist before is not deleted on the way in.
     assert_eq!(*calls.lock().unwrap(), vec!["reload".to_string()]);
+}
+
+/// A tunnel addressed `10.202.0.102/32` with `peers`, the shape the field
+/// device ran.
+fn host_tunnel(peers: Vec<WireguardPeer>) -> IfaceSettings {
+    let mut iface = wireguard_iface(None, peers);
+    iface.static_.as_mut().unwrap().address = "10.202.0.102/32".to_string();
+    iface
+}
+
+fn peer_with(byte: u8, allowed: &[&str]) -> WireguardPeer {
+    WireguardPeer {
+        allowed_ips: allowed.iter().map(ToString::to_string).collect(),
+        ..peer(byte)
+    }
+}
+
+fn routes_of(unit: &str) -> Vec<&str> {
+    unit.split("\n[Route]\n").skip(1).collect()
+}
+
+/// WG-T01: a peer's subnet beyond the tunnel's own address is a `[Route]`
+/// of the tunnel's own `.network`, from the tunnel's address, so networkd
+/// owns it; the netdev turns networkd's own AllowedIPs routes off.
+#[tokio::test]
+pub(super) async fn a_peer_subnet_is_a_route_of_the_tunnel() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, _calls) = reconciler_in(dir.path());
+    let settings = settings_with(&[("wg102", host_tunnel(vec![peer_with(1, &["10.202.0.0/24"])]))]);
+
+    reconciler.apply(&settings).await.unwrap();
+
+    let unit = std::fs::read_to_string(dir.path().join("50-mica-wg102.network")).unwrap();
+    assert_eq!(
+        unit,
+        "[Match]\nName=wg102\n\n[Network]\nAddress=10.202.0.102/32\n\n\
+         [Route]\nDestination=10.202.0.0/24\nPreferredSource=10.202.0.102\n"
+    );
+    let netdev = std::fs::read_to_string(dir.path().join("50-mica-wg102.netdev")).unwrap();
+    assert!(netdev.contains("\nRouteTable=off\n"), "{netdev}");
+}
+
+/// WG-T02/T03/T04/T06: the routes follow the peers -- a changed prefix
+/// replaces its route, a removed peer takes only the routes no one else
+/// asks for, a prefix the entry declares itself stays its own, and the same
+/// settings render the same unit.
+#[tokio::test]
+pub(super) async fn the_routes_follow_the_peers() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reconciler, _calls) = reconciler_in(dir.path());
+    let unit = || std::fs::read_to_string(dir.path().join("50-mica-wg102.network")).unwrap();
+    let mut tunnel = host_tunnel(vec![
+        peer_with(1, &["10.202.0.0/24", "172.16.0.0/16"]),
+        peer_with(2, &["172.16.0.0/16", "10.9.0.0/16"]),
+    ]);
+    tunnel.routes = vec![micad_settings::RouteConfig {
+        destination: "10.9.0.0/16".to_string(),
+        gateway: None,
+        metric: Some(5),
+    }];
+
+    reconciler
+        .apply(&settings_with(&[("wg102", tunnel.clone())]))
+        .await
+        .unwrap();
+    let first = unit();
+    assert_eq!(
+        routes_of(&first),
+        [
+            "Destination=10.9.0.0/16\nMetric=5\n",
+            "Destination=10.202.0.0/24\nPreferredSource=10.202.0.102\n",
+            "Destination=172.16.0.0/16\nPreferredSource=10.202.0.102\n",
+        ]
+    );
+    reconciler
+        .apply(&settings_with(&[("wg102", tunnel.clone())]))
+        .await
+        .unwrap();
+    assert_eq!(unit(), first, "the same peers render the same unit");
+
+    // T02: another prefix on peer 1.
+    tunnel.wireguard.as_mut().unwrap().peers[0].allowed_ips =
+        vec!["10.203.0.0/24".to_string(), "172.16.0.0/16".to_string()];
+    reconciler
+        .apply(&settings_with(&[("wg102", tunnel.clone())]))
+        .await
+        .unwrap();
+    assert_eq!(
+        routes_of(&unit()),
+        [
+            "Destination=10.9.0.0/16\nMetric=5\n",
+            "Destination=10.203.0.0/24\nPreferredSource=10.202.0.102\n",
+            "Destination=172.16.0.0/16\nPreferredSource=10.202.0.102\n",
+        ]
+    );
+
+    // T03/T04: peer 2 goes; 172.16/16 is still peer 1's, 10.9/16 the
+    // entry's own.
+    tunnel.wireguard.as_mut().unwrap().peers.truncate(1);
+    reconciler
+        .apply(&settings_with(&[("wg102", tunnel.clone())]))
+        .await
+        .unwrap();
+    assert_eq!(routes_of(&unit()).len(), 3);
+    // Peer 1 goes too: only the entry's own route is left.
+    tunnel.wireguard.as_mut().unwrap().peers.clear();
+    reconciler
+        .apply(&settings_with(&[("wg102", tunnel)]))
+        .await
+        .unwrap();
+    assert_eq!(routes_of(&unit()), ["Destination=10.9.0.0/16\nMetric=5\n"]);
 }
 
 #[tokio::test]
