@@ -45,7 +45,7 @@ export function InformationPanel() {
             <Panel title={t('system.information.software.title')} description={t('system.information.software.description')} action={<Box className="size-5 text-muted-foreground" />}>
               <FactList facts={[
                 fact('system', t('system.information.software.system'), value.system, systemSummary(value), t),
-                fact('daemon', t('system.information.software.daemon'), value.daemon, join([value.daemon.name, value.daemon.version]), t),
+                fact('daemon', t('system.information.software.daemon'), daemonFact(value.daemon), join([value.daemon.name, value.daemon.version]), t),
                 fact('deployment', t('system.information.software.deployment'), value.deployment, join([value.deployment.id, value.deployment.version]), t),
                 fact('uptime', t('system.information.software.uptime'), value.uptime, value.uptime.seconds === undefined ? undefined : formatUptime(value.uptime.seconds, t), t),
               ]} />
@@ -104,6 +104,12 @@ export function TelemetryPanel() {
 /// observed" and "observed as nothing" are different answers.
 function fact(id: string, label: string, source: AvailableFact, value: string | undefined, t: ReturnType<typeof useTranslation>['t']): Fact {
   return { id, label, value: source.available ? (value ?? t('common.notAvailable')) : <Unavailable fact={source} /> }
+}
+
+/// micad sends its own name and version and no `available`: a non-empty
+/// version is what makes it available. An explicit `false` stays `false`.
+function daemonFact(daemon: SystemInformation['daemon']): AvailableFact {
+  return { available: daemon.available ?? Boolean(daemon.version), detail: daemon.detail }
 }
 
 /// The label's code with its source, or the reason the board has none.

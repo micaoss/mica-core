@@ -492,7 +492,8 @@ export interface SystemInformation {
     /** The pinned SOURCE_DATE_EPOCH every file in the image carries. */
     fileEpoch?: AvailableFact & { epoch?: number; date?: string }
   }
-  daemon: AvailableFact & { name?: string; version?: string }
+  /// micad sends `name` and `version` only; `available` is not in the member.
+  daemon: Partial<AvailableFact> & { name?: string; version?: string }
   packages: AvailableFact & {
     count?: number
     micaCount?: number

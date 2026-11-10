@@ -18,7 +18,8 @@ function information(overrides: Partial<SystemInformation> = {}): SystemInformat
       package: 'mica-system',
       fileEpoch: { available: true, epoch: 1_577_836_800, date: '2020-01-01T00:00:00Z' },
     },
-    daemon: { ...available, name: 'micad', version: '0.4.1-1' },
+    // As micad sends it: its own name and version, and no `available`.
+    daemon: { name: 'micad', version: '0.4.1-1' },
     packages: { ...available, count: 2, micaCount: 1, entries: [
       { name: 'mica-system', version: '2026.09.0', architecture: 'arm64', mica: true },
       { name: 'busybox', version: '1.36.1', architecture: 'arm64', mica: false },
@@ -58,6 +59,31 @@ describe('system information', () => {
     expect(screen.getByText('1d 2h 3m')).toBeTruthy()
     expect(screen.getByText('2 packages, including 1 mica packages.')).toBeTruthy()
     expect(screen.getByText('busybox')).toBeTruthy()
+  })
+
+  /// micad's own version is always known, and the member carries no
+  /// `available`: a version is what makes it available.
+  it('shows the daemon version when the member has no available field', async () => {
+    stubFetch({
+      '/api/v1/system/info': information({ daemon: { name: 'micad', version: '0.0.5' } }),
+      '/api/v1/system/telemetry': telemetryAbsent,
+      '/api/v1/device/code': { code: 'DFN4-L34C-T8N', source: 'emmc-cid' },
+    })
+    renderPanel(<InformationPanel />)
+
+    expect(await screen.findByText('micad · 0.0.5')).toBeTruthy()
+  })
+
+  it('keeps an explicit unavailable daemon unavailable, and a missing version unknown', async () => {
+    stubFetch({
+      '/api/v1/system/info': information({ daemon: { available: false, detail: 'the daemon did not answer', name: 'micad', version: '0.0.5' } }),
+      '/api/v1/system/telemetry': telemetryAbsent,
+      '/api/v1/device/code': { code: 'DFN4-L34C-T8N', source: 'emmc-cid' },
+    })
+    renderPanel(<InformationPanel />)
+
+    expect(await screen.findByText(/the daemon did not answer/)).toBeTruthy()
+    expect(screen.queryByText('micad · 0.0.5')).toBeNull()
   })
 
   it('renders an absent fact as absence with its reason, not as a zero and not as a failure', async () => {
