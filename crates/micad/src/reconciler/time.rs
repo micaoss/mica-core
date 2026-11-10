@@ -11,7 +11,7 @@
 //! always-running base service enabled by the image, so convergence only ever
 //! means "running against the current render", never "off".
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use micad_settings::{Settings, TimeSettings};
@@ -35,8 +35,29 @@ const NTPD_SERVERS_PATH: &str = "/var/lib/mica/time/ntpd.conf";
 const DEFAULT_SERVERS_PATH: &str = "/var/lib/mica/time/timesyncd.conf";
 /// Where the presentation timezone is published for on-device consumers.
 const DEFAULT_TIMEZONE_PATH: &str = "/run/mica/timezone";
-/// Where zone files live, for the reconcile-time existence check.
-const DEFAULT_ZONEINFO_DIR: &str = "/usr/share/zoneinfo";
+/// Where zone files live, for the existence check at write and at reconcile.
+pub(crate) const DEFAULT_ZONEINFO_DIR: &str = "/usr/share/zoneinfo";
+
+/// Whether `zone` is a zone the tzdata under `zoneinfo_dir` carries.
+///
+/// The grammar first ([`micad_settings::validate_timezone_name`] admits no
+/// empty, `.` or `..` component), so a name never climbs out of the tree.
+/// `UTC` needs no file: it is what every consumer falls back to. Any other
+/// name is a zone only when its file is a TZif file, so the tzdata's own
+/// metadata (`zone.tab`, `tzdata.zi`, `leapseconds`) is not one.
+pub(crate) fn zone_installed(zoneinfo_dir: &Path, zone: &str) -> bool {
+    use std::io::Read;
+    if micad_settings::validate_timezone_name(zone).is_err() {
+        return false;
+    }
+    if zone == "UTC" {
+        return true;
+    }
+    let mut magic = [0u8; 4];
+    std::fs::File::open(zoneinfo_dir.join(zone))
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .is_ok_and(|()| &magic == b"TZif")
+}
 /// Mode of both renders: world-readable, owner-writable. Neither carries a
 /// secret — a server name and a zone name are published to every
 /// authenticated API reader anyway.
@@ -155,15 +176,11 @@ fn render_servers(time: &TimeSettings) -> String {
 }
 
 impl<C: UnitControl> TimeReconciler<C> {
-    /// Whether `zone` names a zone file the device actually carries.
-    ///
-    /// Safe as a path join: [`micad_settings::validate_timezone_name`] admits
-    /// no empty, `.` or `..` component, so a stored zone cannot climb out of
-    /// the tzdata tree. A hand-edited settings file could — so the same
-    /// grammar is re-checked here before the name touches the filesystem.
+    /// Whether `zone` names a zone the device actually carries. The write
+    /// surface already refused anything else; a hand-edited settings file
+    /// could still hold one, so the same check runs again here.
     fn zone_available(&self, zone: &str) -> bool {
-        micad_settings::validate_timezone_name(zone).is_ok()
-            && self.zoneinfo_dir.join(zone).is_file()
+        zone_installed(&self.zoneinfo_dir, zone)
     }
 
     /// Bring timesyncd to "running against the current render".
@@ -210,28 +227,31 @@ impl<C: UnitControl> Reconciler for TimeReconciler<C> {
         // against a config older than the settings just applied.
         let servers_changed =
             write_config_if_changed(&self.servers_path, &(self.render)(time), CONFIG_MODE)?;
+        // A zone the tzdata does not carry is rendered as `UTC`, which is
+        // what every consumer would fall back to anyway, so the fallback is
+        // the device's stated one rather than each consumer's.
         let timezone_available = self.zone_available(&time.timezone);
-        if !timezone_available {
-            // A warn and a published fact, never an error: the write surface
-            // already enforced the grammar, so this is a zone the device's
-            // tzdata does not carry — worth surfacing, not worth failing the
-            // NTP half of the subtree over.
-            tracing::warn!(
-                zone = %time.timezone,
-                "time: the configured timezone names no zone file under {}; consumers keep \
-                 falling back to UTC until it is corrected",
-                self.zoneinfo_dir.display()
-            );
-        }
-        write_config_if_changed(
-            &self.timezone_path,
-            &format!("{}\n", time.timezone),
-            CONFIG_MODE,
-        )?;
+        let rendered = if timezone_available {
+            time.timezone.as_str()
+        } else {
+            "UTC"
+        };
+        write_config_if_changed(&self.timezone_path, &format!("{rendered}\n"), CONFIG_MODE)?;
 
         // The timezone render never restarts timesyncd: timesyncd does not
         // read it, and machine time is UTC regardless of it.
         self.converge_unit(servers_changed).await?;
+
+        // The NTP half is applied; the stored zone is still refused, and the
+        // apply says so rather than reporting a success the operator would
+        // read as their zone being in effect.
+        anyhow::ensure!(
+            timezone_available,
+            "time.timezone `{}` is not a zone in this device's tzdata under {}; UTC applies \
+             until a zone it carries is set",
+            time.timezone,
+            self.zoneinfo_dir.display()
+        );
 
         Ok(json!({
             "ntp": {
@@ -432,44 +452,57 @@ mod tests {
         );
     }
 
-    /// A zone the device's tzdata does not carry is a published fact and a
-    /// warning, never an error: the NTP half of the subtree must not be
-    /// blocked by a presentation value, and retries toward the configured
-    /// servers continue regardless.
+    /// A zone the device's tzdata does not carry fails the apply: the NTP
+    /// half is still rendered and converged first, the runtime file says
+    /// `UTC` (what every consumer falls back to), and the stored value is
+    /// left for the operator to correct.
     #[tokio::test]
-    async fn a_missing_zone_is_reported_and_does_not_fail_the_apply() {
+    async fn a_missing_zone_fails_the_apply_after_ntp_and_renders_utc() {
         let dir = tempfile::tempdir().unwrap();
-        let (reconciler, _servers, timezone) = fixture(dir.path(), "active");
+        let (reconciler, servers, timezone) = fixture(dir.path(), "inactive");
 
-        let state = reconciler
+        let err = reconciler
             .apply(&settings(&["0.pool.ntp.org"], "Atlantis/Made_Up"))
             .await
-            .expect("a missing zone file warns; it must never fail the reconcile");
+            .expect_err("an unknown zone must not report success");
 
-        assert_eq!(state["timezone"]["available"], json!(false));
-        // Rendered verbatim anyway: the file describes the settings, and a
-        // later tzdata that carries the zone needs no re-save to take effect.
-        assert_eq!(
-            std::fs::read_to_string(&timezone).unwrap(),
-            "Atlantis/Made_Up\n"
+        assert!(format!("{err:#}").contains("Atlantis/Made_Up"), "{err:#}");
+        assert!(
+            std::fs::read_to_string(&servers)
+                .unwrap()
+                .contains("NTP=0.pool.ntp.org")
         );
+        assert_eq!(
+            reconciler.control.calls(),
+            vec!["start systemd-timesyncd.service".to_string()]
+        );
+        assert_eq!(std::fs::read_to_string(&timezone).unwrap(), "UTC\n");
+    }
+
+    /// A file under zoneinfo that is not a TZif zone (`zone.tab`, `tzdata.zi`)
+    /// is not a zone.
+    #[tokio::test]
+    async fn a_tzdata_metadata_file_is_not_a_zone() {
+        let dir = tempfile::tempdir().unwrap();
+        let (reconciler, _servers, _timezone) = fixture(dir.path(), "active");
+        std::fs::write(dir.path().join("zoneinfo").join("zone.tab"), "# zones\n").unwrap();
+
+        assert!(reconciler.apply(&settings(&[], "zone.tab")).await.is_err());
     }
 
     /// A hand-edited settings file can hold a zone the write surface would
     /// have refused; the existence check re-checks the grammar before the
     /// name touches the filesystem, so `../` climbs nowhere.
     #[tokio::test]
-    async fn a_traversal_shaped_zone_is_unavailable_not_a_path() {
+    async fn a_traversal_shaped_zone_is_refused_not_a_path() {
         let dir = tempfile::tempdir().unwrap();
         let (reconciler, _servers, _timezone) = fixture(dir.path(), "active");
         // A file that WOULD be found if the join were taken verbatim.
-        std::fs::write(dir.path().join("secret"), "x").unwrap();
+        std::fs::write(dir.path().join("secret"), "TZif").unwrap();
 
         let mut tree = settings(&[], "UTC");
         tree.time.timezone = "../secret".to_string();
-        let state = reconciler.apply(&tree).await.unwrap();
-
-        assert_eq!(state["timezone"]["available"], json!(false));
+        assert!(reconciler.apply(&tree).await.is_err());
     }
 
     /// The keys of a JSON object, sorted, for an exact-set assertion.

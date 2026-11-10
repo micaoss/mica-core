@@ -102,6 +102,21 @@ impl MicadService {
                     path: path.to_string(),
                     message,
                 })?;
+            if candidate.time.timezone != inner.settings.time.timezone
+                && let Some(root) = &self.device_root
+            {
+                let zoneinfo =
+                    root.join(crate::reconciler::DEFAULT_ZONEINFO_DIR.trim_start_matches('/'));
+                if !crate::reconciler::zone_installed(&zoneinfo, &candidate.time.timezone) {
+                    return Err(SettingsError::Validation {
+                        path: path.to_string(),
+                        message: format!(
+                            "timezone_invalid: `{}` is not a zone in this device's tzdata",
+                            candidate.time.timezone
+                        ),
+                    });
+                }
+            }
             let owners = self.apps.unit_owners();
             if let Some((unit, app)) = candidate
                 .services

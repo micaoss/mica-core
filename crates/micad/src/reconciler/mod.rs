@@ -26,6 +26,7 @@ mod sshd;
 /// systemd verbs, and the bus needs the trait they are spoken through.
 pub mod systemd;
 mod time;
+pub(crate) use time::{DEFAULT_ZONEINFO_DIR, zone_installed};
 mod web;
 /// Visible to the daemon for the same reason: a BLE scan pauses the access
 /// point this reconciler drives.

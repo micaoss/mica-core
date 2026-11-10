@@ -16,6 +16,7 @@ mod power;
 mod provisioning;
 mod refusals;
 mod state;
+mod timezone;
 mod units;
 mod update_config;
 mod wireguard;
