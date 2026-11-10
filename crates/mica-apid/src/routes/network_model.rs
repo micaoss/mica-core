@@ -110,6 +110,34 @@ pub(crate) struct WireguardPeerEntry {
     pub(super) preshared_key: Option<String>,
 }
 
+/// A peer edited in place under its public key, which is the URL's and not
+/// the body's.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct WireguardPeerEdit {
+    /// The network version the edit was made against, as `GET
+    /// /api/v1/network` or the peer listing's `ETag` answers it; another
+    /// stored version is **409** `version_conflict`. Absent writes
+    /// whatever is stored.
+    #[serde(default)]
+    pub(super) base_version: Option<String>,
+    /// A label for the peer; absent clears it.
+    #[serde(default)]
+    pub(super) name: Option<String>,
+    /// `host:port` to send to; absent clears it.
+    #[serde(default)]
+    pub(super) endpoint: Option<String>,
+    /// CIDRs routed to this peer, at least one.
+    pub(super) allowed_ips: Vec<String>,
+    /// Keepalive interval in seconds, 0 for off; absent clears it.
+    #[serde(default)]
+    pub(super) persistent_keepalive: Option<u16>,
+    /// A new pre-shared key (32 bytes in padded base64); `null` removes the
+    /// stored one and absent keeps it.
+    #[serde(default)]
+    pub(super) preshared_key: Option<String>,
+}
+
 /// One peer as the peer collection reads it: whether it has a pre-shared key
 /// rather than the key, and room for what the tunnel reports about it.
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -284,6 +312,14 @@ pub(crate) struct StaticRoute {
 /// It is the posture [`api_stored_keys`] and [`stored_networks`] already take:
 /// an unreadable list is an error and never an empty one.
 pub(super) async fn api_network_entries(state: &AppState) -> Result<NetworkEntries, Box<Response>> {
+    Ok(api_network_entries_versioned(state).await?.0)
+}
+
+/// [`api_network_entries`], with the [`network_version`] of the map they were
+/// read from, out of the same read.
+pub(super) async fn api_network_entries_versioned(
+    state: &AppState,
+) -> Result<(NetworkEntries, String), Box<Response>> {
     let network = match state.api.get_settings(NETWORK_SETTINGS_PATH).await {
         Ok(value) => value,
         Err(err) => return Err(Box::new(bus_api_error(&err, Some(NETWORK_SETTINGS_PATH)))),
@@ -304,7 +340,7 @@ pub(super) async fn api_network_entries(state: &AppState) -> Result<NetworkEntri
             .at(NETWORK_SETTINGS_PATH),
         )));
     }
-    Ok(entries)
+    Ok((entries, network_version(&network)))
 }
 
 /// `iface` checked as an interface name, or the 422 that says it is not one.
@@ -443,7 +479,8 @@ pub(super) async fn write_network_map(
 /// key drawn when apid starts, in hex. Keyed because the map carries
 /// pre-shared keys the read redacts, and a plain digest would let a reader
 /// check a guess at one. `GET /api/v1/network` answers it, and a whole-map
-/// `PUT` names it as `baseVersion`.
+/// `PUT` names it as `baseVersion`, as a peer add or edit does; the peer
+/// listing answers it as its `ETag`, which a peer removal names in `If-Match`.
 pub(super) fn network_version(map: &Value) -> String {
     static KEY: std::sync::OnceLock<aws_lc_rs::hmac::Key> = std::sync::OnceLock::new();
     let key = KEY.get_or_init(|| {

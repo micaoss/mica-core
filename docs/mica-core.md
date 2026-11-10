@@ -1100,6 +1100,12 @@ prefix, inside another entry's subnet, or equal to another entry's route) and
 `wireguard_endpoint_route_loop` (a numeric endpoint a tunnel prefix would carry; a host name is
 networkd's to resolve). A peer the write leaves as it is keeps running as stored, a `/0` one
 included.
+A tunnel's peers are listed, added, edited in place (`PUT /api/v1/network/{iface}/peers/{publicKey}`;
+the key is the URL's, an absent pre-shared key keeps the stored one and `null` removes it) and
+removed under `/api/v1/network/{iface}/peers`, each write applied before it answers. The
+listing's `ETag` is the network version: an add or an edit names it as `baseVersion` and a
+removal as `If-Match`, and a map changed since is refused `version_conflict`; a write naming no
+version writes whatever is stored.
 
 **LAN discovery** (sections 3.13 and 3.14). `GET /api/v1/mdns` answers the `mdns` live state as
 `{available, state?, error?}`: the switch, its source, the `.local` name, every service with its

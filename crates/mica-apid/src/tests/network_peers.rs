@@ -368,3 +368,205 @@ pub(super) async fn the_network_paths_the_router_does_not_serve_reach_the_reserv
 
 // The document describes every network operation, with every
 // outcome each has: a client reading only `openapi.json` has to learn them.
+
+/// The network version a peer read answers, as its ETag.
+async fn peers_etag(router: &axum::Router, token: &str) -> String {
+    let response = bearer(router, "GET", &peers_url("wg0"), token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let etag = response
+        .headers()
+        .get(axum::http::header::ETAG)
+        .expect("a peer read carries the network version")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(etag.starts_with('"') && etag.ends_with('"'), "{etag}");
+    etag
+}
+
+async fn delete_if_match(
+    router: &axum::Router,
+    path: &str,
+    token: &str,
+    version: &str,
+) -> axum::response::Response {
+    let request = axum::http::Request::builder()
+        .method("DELETE")
+        .uri(path)
+        .header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(axum::http::header::IF_MATCH, version)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    send(router, request).await
+}
+
+/// A peer is edited in place under its key: the body replaces its name,
+/// endpoint (absent clears it), allowed IPs and keepalive; an absent
+/// pre-shared key keeps the stored one, `null` removes it and a key
+/// replaces it, and none is ever answered.
+#[tokio::test]
+pub(super) async fn a_peer_is_edited_in_place_by_its_key() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    let stored = || async {
+        fake.get_settings("network.wg0.wireguard.peers")
+            .await
+            .unwrap()[0]
+            .clone()
+    };
+    let put = |body: serde_json::Value| {
+        let router = router.clone();
+        let token = token.clone();
+        async move {
+            bearer_json(
+                &router,
+                "PUT",
+                &peer_url("wg0", PEER_KEY),
+                &token,
+                &body.to_string(),
+            )
+            .await
+        }
+    };
+
+    let response = put(json!({
+        "name": "gz1",
+        "allowedIps": ["10.8.2.0/24"],
+        "persistentKeepalive": 0,
+        "presharedKey": OTHER_PEER_KEY,
+    }))
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let answered = body_string(response).await;
+    assert!(
+        !answered.contains(OTHER_PEER_KEY),
+        "the pre-shared key was answered: {answered}"
+    );
+    let answered: serde_json::Value = serde_json::from_str(&answered).unwrap();
+    assert_eq!(answered["publicKey"], json!(PEER_KEY));
+    assert_eq!(answered["presharedKey"], json!(true));
+    let peer = stored().await;
+    assert_eq!(peer["name"], json!("gz1"));
+    assert_eq!(peer["allowedIps"], json!(["10.8.2.0/24"]));
+    assert_eq!(peer["persistentKeepalive"], json!(0));
+    assert!(
+        peer.get("endpoint").is_none(),
+        "an absent endpoint clears it: {peer}"
+    );
+    assert_eq!(peer["presharedKey"], json!(OTHER_PEER_KEY));
+
+    assert_eq!(
+        put(json!({ "allowedIps": ["10.8.3.0/24"] })).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        stored().await["presharedKey"],
+        json!(OTHER_PEER_KEY),
+        "an absent key keeps it"
+    );
+    assert_eq!(
+        put(json!({ "allowedIps": ["10.8.3.0/24"], "presharedKey": null }))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert!(
+        stored().await.get("presharedKey").is_none(),
+        "null removes the key"
+    );
+    assert_eq!(
+        fake.get_settings("network.wg0.wireguard.peers")
+            .await
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+/// What a peer edit refuses: an unknown key (404), no allowed IP, a key in
+/// the body (the key is the URL's) and a path segment that is no key.
+#[tokio::test]
+pub(super) async fn a_peer_edit_refuses_what_it_cannot_apply() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    for (path, body, status) in [
+        (
+            peer_url("wg0", OTHER_PEER_KEY),
+            json!({ "allowedIps": ["10.8.2.0/24"] }),
+            StatusCode::NOT_FOUND,
+        ),
+        (
+            peer_url("wg0", PEER_KEY),
+            json!({ "allowedIps": [] }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            peer_url("wg0", PEER_KEY),
+            json!({ "name": "x" }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            peer_url("wg0", PEER_KEY),
+            json!({ "publicKey": OTHER_PEER_KEY, "allowedIps": ["10.8.2.0/24"] }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            peer_url("wg0", "not-a-key"),
+            json!({ "allowedIps": ["10.8.2.0/24"] }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let response = bearer_json(&router, "PUT", &path, &token, &body.to_string()).await;
+        assert_eq!(response.status(), status, "{path} {body}");
+    }
+    assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
+}
+
+/// WG-T08: a peer write naming a network version that is not the stored
+/// one is 409 `version_conflict` and writes nothing; the current one lands.
+/// POST and PUT name it as `baseVersion`, DELETE as `If-Match`.
+#[tokio::test]
+pub(super) async fn a_peer_write_on_a_stale_version_is_refused() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    let etag = peers_etag(&router, &token).await;
+    let version = etag.trim_matches('"').to_string();
+    let stale = "0".repeat(64);
+
+    let add = |base: &str| {
+        json!({ "baseVersion": base, "publicKey": OTHER_PEER_KEY, "allowedIps": ["10.8.1.0/24"] })
+            .to_string()
+    };
+    for response in [
+        bearer_json(&router, "POST", &peers_url("wg0"), &token, &add(&stale)).await,
+        bearer_json(
+            &router,
+            "PUT",
+            &peer_url("wg0", PEER_KEY),
+            &token,
+            &json!({ "baseVersion": stale, "allowedIps": ["10.8.2.0/24"] }).to_string(),
+        )
+        .await,
+        delete_if_match(
+            &router,
+            &peer_url("wg0", PEER_KEY),
+            &token,
+            &format!("\"{stale}\""),
+        )
+        .await,
+    ] {
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(envelope(response).await["code"], "version_conflict");
+    }
+    assert!(fake.set_paths().is_empty(), "{:?}", fake.set_paths());
+
+    let response = bearer_json(&router, "POST", &peers_url("wg0"), &token, &add(&version)).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    // The add changed the map, so the version it was read under is stale.
+    let response = delete_if_match(&router, &peer_url("wg0", OTHER_PEER_KEY), &token, &etag).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let current = peers_etag(&router, &token).await;
+    assert_ne!(current, etag);
+    let response =
+        delete_if_match(&router, &peer_url("wg0", OTHER_PEER_KEY), &token, &current).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+}

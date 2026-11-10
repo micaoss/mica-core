@@ -90,9 +90,9 @@ pub(super) async fn tunnel_peers(
     state: &AppState,
     iface: &str,
     path: &str,
-) -> Result<Vec<WireguardPeer>, Box<Response>> {
+) -> Result<(Vec<WireguardPeer>, String), Box<Response>> {
     check_iface_name(iface, path)?;
-    let entries = api_network_entries(state).await?;
+    let (entries, version) = api_network_entries_versioned(state).await?;
     let Some(cfg) = entries.get(iface) else {
         return Err(Box::new(item_not_found(NETWORK_SETTINGS_PATH, iface)));
     };
@@ -108,11 +108,42 @@ pub(super) async fn tunnel_peers(
             .at(path),
         )));
     }
-    Ok(cfg
+    let peers = cfg
         .wireguard
         .as_ref()
         .map(|wireguard| wireguard.peers.clone())
-        .unwrap_or_default())
+        .unwrap_or_default();
+    Ok((peers, version))
+}
+
+/// 409 `version_conflict` when the request names a network version that is
+/// not `stored`'s; a request naming none writes whatever is stored. The check
+/// and the write are two bus calls, as on the whole-map `PUT`.
+fn check_version(stored: &str, named: Option<&str>, path: &str) -> Result<(), Box<Response>> {
+    if named.is_none_or(|named| named == stored) {
+        return Ok(());
+    }
+    Err(Box::new(api_response(
+        StatusCode::CONFLICT,
+        ApiError::apid(
+            "version_conflict",
+            "the network map changed since it was read; read it again and reapply the changes"
+                .to_string(),
+        )
+        .at(path),
+    )))
+}
+
+/// A path segment that could never be a public key, as 422.
+fn not_a_key(path: &str) -> Response {
+    api_response(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        ApiError::apid(
+            "validation_failed",
+            "a WireGuard public key is 32 bytes spelled in base64".to_string(),
+        )
+        .at(path),
+    )
 }
 
 /// Validate and write a rewritten peer list, in the error envelope.
@@ -155,7 +186,7 @@ pub(super) async fn api_write_peers(
     tag = "resources",
     params(("iface" = String, Path, description = "A declared `network` entry of kind `wireguard`")),
     responses(
-        (status = 200, description = "The stored peers, in stored order, each with the public key that is its `DELETE` path segment and whether it has a pre-shared key", body = Vec<WireguardPeerState>),
+        (status = 200, description = "The stored peers, in stored order, each with the public key that is its `PUT` and `DELETE` path segment and whether it has a pre-shared key. `ETag` is the quoted network version a peer write names (`baseVersion`, `If-Match`)", body = Vec<WireguardPeerState>),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 404, description = "No `network` entry has that name (`settings_not_found`)", body = ApiError),
         (status = 422, description = "The name is not an interface name, or the entry is not a WireGuard one (`validation_failed`)", body = ApiError),
@@ -171,8 +202,8 @@ pub(crate) async fn api_v1_peers_list(
     Path(iface): Path<String>,
 ) -> Response {
     let path = peers_settings_path(&iface);
-    let peers = match tunnel_peers(&state, &iface, &path).await {
-        Ok(peers) => peers,
+    let (peers, version) = match tunnel_peers(&state, &iface, &path).await {
+        Ok(read) => read,
         Err(response) => return *response,
     };
     // What the tunnel reports, joined by public key. An observation that
@@ -189,7 +220,7 @@ pub(crate) async fn api_v1_peers_list(
         })
         .and_then(|entry| entry.pointer("/wireguard/peers"))
         .and_then(Value::as_array);
-    api_response(
+    let mut response = api_response(
         StatusCode::OK,
         peers
             .iter()
@@ -205,7 +236,15 @@ pub(crate) async fn api_v1_peers_list(
                 state
             })
             .collect::<Vec<_>>(),
-    )
+    );
+    // The network version, which a peer write names to refuse a map that
+    // changed since this read.
+    if let Ok(etag) = axum::http::HeaderValue::from_str(&format!("\"{version}\"")) {
+        response
+            .headers_mut()
+            .insert(axum::http::header::ETAG, etag);
+    }
+    response
 }
 
 // 409 and not 422 for a duplicate: the public key IS this collection's
@@ -215,7 +254,9 @@ pub(crate) async fn api_v1_peers_list(
 ///
 /// Answers **404** when `iface` names no declared interface, checked before
 /// anything is written. A duplicate public key is **409** with code
-/// `peer_exists`; a malformed peer is **422**.
+/// `peer_exists`; a malformed peer is **422**. The body may name
+/// `baseVersion` beside the peer, the network version the peer listing's
+/// `ETag` answers; another stored version is **409** `version_conflict`.
 #[utoipa::path(
     post,
     path = V1_NETWORK_PEERS_ROUTE,
@@ -229,7 +270,7 @@ pub(crate) async fn api_v1_peers_list(
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 404, description = "No `network` entry has that name (`settings_not_found`); nothing is written", body = ApiError),
-        (status = 409, description = "A stored peer already carries that public key (`peer_exists`); the key is this collection's identity, so the entry is not replaced silently. Or a network task has not finished (`busy`)", body = ApiError),
+        (status = 409, description = "A stored peer already carries that public key (`peer_exists`); the key is this collection's identity, so the entry is not replaced silently. Or the body's `baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)", body = ApiError),
         (status = 422, description = "The name is not an interface name, the entry is not a WireGuard one, or the peer is one the reconciler would refuse -- a public key that is not 32 bytes of base64, an allowed IP that is not a CIDR, an endpoint that is not `host:port` (`validation_failed`)", body = ApiError),
         (status = 500, description = "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
@@ -244,14 +285,35 @@ pub(crate) async fn api_v1_peers_add(
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let path = peers_settings_path(&iface);
-    let peer: WireguardPeer = match json_body(body, Some(&path)) {
+    let mut body: Value = match json_body(body, Some(&path)) {
+        Ok(body) => body,
+        Err(response) => return *response,
+    };
+    let base_version = match body
+        .as_object_mut()
+        .and_then(|body| body.remove("baseVersion"))
+    {
+        None => None,
+        Some(Value::String(version)) => Some(version),
+        Some(_) => {
+            return api_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                ApiError::apid("validation_failed", "`baseVersion` is a string".to_string())
+                    .at(&path),
+            );
+        }
+    };
+    let peer: WireguardPeer = match json_body(Ok(Json(body)), Some(&path)) {
         Ok(peer) => peer,
         Err(response) => return *response,
     };
-    let mut peers = match tunnel_peers(&state, &iface, &path).await {
-        Ok(peers) => peers,
+    let (mut peers, version) = match tunnel_peers(&state, &iface, &path).await {
+        Ok(read) => read,
         Err(response) => return *response,
     };
+    if let Err(response) = check_version(&version, base_version.as_deref(), &path) {
+        return *response;
+    }
     if peers
         .iter()
         .any(|stored| stored.public_key == peer.public_key)
@@ -281,6 +343,92 @@ pub(crate) async fn api_v1_peers_add(
     api_response(StatusCode::CREATED, echoed)
 }
 
+/// Edit one peer of a WireGuard tunnel in place, identified by its public key.
+///
+/// The key is the URL's: a new identity is a removal and an add. The body
+/// replaces the peer's name, endpoint, allowed IPs and keepalive (an absent
+/// one clears it); its pre-shared key is kept when absent, removed by `null`
+/// and replaced by a key, and is never answered. Applied like an add: the
+/// reconciler re-renders the tunnel before this answers.
+#[utoipa::path(
+    put,
+    path = V1_NETWORK_PEER_ROUTE,
+    context_path = API,
+    tag = "resources",
+    params(
+        ("iface" = String, Path, description = "A declared `network` entry of kind `wireguard`"),
+        ("publicKey" = String, Path, description = "The peer's public key, as `GET /api/v1/network/{iface}/peers` returns it, percent-encoded"),
+    ),
+    request_body = WireguardPeerEdit,
+    responses(
+        (status = 200, description = "The peer was edited; the body carries it as the collection reads it", body = WireguardPeerState),
+        (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
+        (status = 404, description = "No `network` entry has that name, or no peer of it carries that key (`settings_not_found`)", body = ApiError),
+        (status = 409, description = "`baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)", body = ApiError),
+        (status = 422, description = "The name is not an interface name, the entry is not a WireGuard one, the path segment is not a public key, or the edit is one the reconciler would refuse (`validation_failed`); or a peer route rule refuses it (`settings_rejected`, the rule's code first in the message)", body = ApiError),
+        (status = 500, description = "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_peers_edit(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path((iface, public_key)): Path<(String, String)>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let path = peers_settings_path(&iface);
+    if !is_wireguard_key(&public_key) {
+        return not_a_key(&path);
+    }
+    let body: Value = match json_body(body, Some(&path)) {
+        Ok(body) => body,
+        Err(response) => return *response,
+    };
+    // Absent keeps the stored key and `null` removes it, which the typed
+    // body below cannot tell apart.
+    let preshared_named = body.get("presharedKey").is_some();
+    let edit: WireguardPeerEdit = match json_body(Ok(Json(body)), Some(&path)) {
+        Ok(edit) => edit,
+        Err(response) => return *response,
+    };
+    if edit.allowed_ips.is_empty() {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "a peer names at least one allowed IP".to_string(),
+            )
+            .at(&path),
+        );
+    }
+    let (mut peers, version) = match tunnel_peers(&state, &iface, &path).await {
+        Ok(read) => read,
+        Err(response) => return *response,
+    };
+    if let Err(response) = check_version(&version, edit.base_version.as_deref(), &path) {
+        return *response;
+    }
+    let Some(peer) = peers.iter_mut().find(|peer| peer.public_key == public_key) else {
+        return item_not_found(&path, &public_key);
+    };
+    peer.name = edit.name;
+    peer.endpoint = edit.endpoint;
+    peer.allowed_ips = edit.allowed_ips;
+    peer.persistent_keepalive = edit.persistent_keepalive;
+    if preshared_named {
+        peer.preshared_key = edit.preshared_key;
+    }
+    let echoed = WireguardPeerState::from(&*peer);
+    if let Err(response) = api_write_peers(&state, &iface, &peers).await {
+        return *response;
+    }
+    api_response(StatusCode::OK, echoed)
+}
+
 // The HTML pane answers 422 where this answers 404, deliberately: a form's
 // body is a re-rendered page no consumer reads a status from.
 /// Remove one peer from a tunnel, identified by its public key.
@@ -296,13 +444,14 @@ pub(crate) async fn api_v1_peers_add(
     params(
         ("iface" = String, Path, description = "A declared `network` entry of kind `wireguard`"),
         ("publicKey" = String, Path, description = "The peer's public key, as `GET /api/v1/network/{iface}/peers` returns it: 32 bytes in padded base64. Its alphabet contains `/` and `+`, so a key carrying either is percent-encoded"),
+        ("If-Match" = Option<String>, Header, description = "The quoted network version the removal was made against, as the peer listing's `ETag` answers it; another stored version is 409 `version_conflict`"),
     ),
     responses(
         (status = 204, description = "The peer was removed; the reconciler has re-rendered the tunnel without it"),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 404, description = "No `network` entry has that name, or no peer of it carries that key (`settings_not_found`)", body = ApiError),
-        (status = 409, description = "A network task has not finished (`busy`)", body = ApiError),
+        (status = 409, description = "`If-Match` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)", body = ApiError),
         (status = 422, description = "The interface name is not one, the entry is not a WireGuard one, or the path segment is not a WireGuard public key at all (`validation_failed`)", body = ApiError),
         (status = 500, description = "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
@@ -314,25 +463,25 @@ pub(crate) async fn api_v1_peers_remove(
     _credential: ApiCredential,
     State(state): State<AppState>,
     Path((iface, public_key)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
     let path = peers_settings_path(&iface);
     // Before the read, unlike the interface's own absence: a segment that
     // could never be a public key would send the caller looking for a peer
     // they deleted instead of at the URL they typed.
     if !is_wireguard_key(&public_key) {
-        return api_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            ApiError::apid(
-                "validation_failed",
-                "a WireGuard public key is 32 bytes spelled in base64".to_string(),
-            )
-            .at(&path),
-        );
+        return not_a_key(&path);
     }
-    let mut peers = match tunnel_peers(&state, &iface, &path).await {
-        Ok(peers) => peers,
+    let (mut peers, version) = match tunnel_peers(&state, &iface, &path).await {
+        Ok(read) => read,
         Err(response) => return *response,
     };
+    let if_match = headers
+        .get(axum::http::header::IF_MATCH)
+        .map(|value| value.to_str().unwrap_or_default().trim().trim_matches('"'));
+    if let Err(response) = check_version(&version, if_match, &path) {
+        return *response;
+    }
     let Some(index) = peers.iter().position(|peer| peer.public_key == public_key) else {
         return item_not_found(&path, &public_key);
     };

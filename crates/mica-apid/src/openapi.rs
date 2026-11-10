@@ -127,6 +127,7 @@ use utoipa::OpenApi;
         crate::routes::api_v1_network_wireguard_defaults,
         crate::routes::api_v1_peers_list,
         crate::routes::api_v1_peers_add,
+        crate::routes::api_v1_peers_edit,
         crate::routes::api_v1_peers_remove,
         crate::routes::api_v1_reboot,
         crate::routes::api_v1_poweroff,

@@ -4904,7 +4904,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The stored peers, in stored order, each with the public key that is its `DELETE` path segment and whether it has a pre-shared key",
+            "description": "The stored peers, in stored order, each with the public key that is its `PUT` and `DELETE` path segment and whether it has a pre-shared key. `ETag` is the quoted network version a peer write names (`baseVersion`, `If-Match`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4993,7 +4993,7 @@
           "resources"
         ],
         "summary": "Add one peer to a WireGuard tunnel.",
-        "description": "Answers **404** when `iface` names no declared interface, checked before\nanything is written. A duplicate public key is **409** with code\n`peer_exists`; a malformed peer is **422**.",
+        "description": "Answers **404** when `iface` names no declared interface, checked before\nanything is written. A duplicate public key is **409** with code\n`peer_exists`; a malformed peer is **422**. The body may name\n`baseVersion` beside the peer, the network version the peer listing's\n`ETag` answers; another stored version is **409** `version_conflict`.",
         "operationId": "api_v1_peers_add",
         "parameters": [
           {
@@ -5078,7 +5078,7 @@
             }
           },
           "409": {
-            "description": "A stored peer already carries that public key (`peer_exists`); the key is this collection's identity, so the entry is not replaced silently. Or a network task has not finished (`busy`)",
+            "description": "A stored peer already carries that public key (`peer_exists`); the key is this collection's identity, so the entry is not replaced silently. Or the body's `baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -5131,6 +5131,156 @@
       }
     },
     "/api/v1/network/{iface}/peers/{publicKey}": {
+      "put": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Edit one peer of a WireGuard tunnel in place, identified by its public key.",
+        "description": "The key is the URL's: a new identity is a removal and an add. The body\nreplaces the peer's name, endpoint, allowed IPs and keepalive (an absent\none clears it); its pre-shared key is kept when absent, removed by `null`\nand replaced by a key, and is never answered. Applied like an add: the\nreconciler re-renders the tunnel before this answers.",
+        "operationId": "api_v1_peers_edit",
+        "parameters": [
+          {
+            "name": "iface",
+            "in": "path",
+            "description": "A declared `network` entry of kind `wireguard`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "publicKey",
+            "in": "path",
+            "description": "The peer's public key, as `GET /api/v1/network/{iface}/peers` returns it, percent-encoded",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WireguardPeerEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The peer was edited; the body carries it as the collection reads it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WireguardPeerState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No `network` entry has that name, or no peer of it carries that key (`settings_not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`baseVersion` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The name is not an interface name, the entry is not a WireGuard one, the path segment is not a public key, or the edit is one the reconciler would refuse (`validation_failed`); or a peer route rule refuses it (`settings_rejected`, the rule's code first in the message)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored map holds an entry this build cannot read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "resources"
@@ -5155,6 +5305,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The quoted network version the removal was made against, as the peer listing's `ETag` answers it; another stored version is 409 `version_conflict`",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -5203,7 +5365,7 @@
             }
           },
           "409": {
-            "description": "A network task has not finished (`busy`)",
+            "description": "`If-Match` is not the stored map's version (`version_conflict`), or a network task has not finished (`busy`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15277,6 +15439,60 @@
             "description": "The far ends of the tunnel. A `PUT` of this interface replaces them;\nthe peer collection route edits them one at a time."
           }
         }
+      },
+      "WireguardPeerEdit": {
+        "type": "object",
+        "description": "A peer edited in place under its public key, which is the URL's and not\nthe body's.",
+        "required": [
+          "allowedIps"
+        ],
+        "properties": {
+          "allowedIps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CIDRs routed to this peer, at least one."
+          },
+          "baseVersion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The network version the edit was made against, as `GET\n/api/v1/network` or the peer listing's `ETag` answers it; another\nstored version is **409** `version_conflict`. Absent writes\nwhatever is stored."
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`host:port` to send to; absent clears it."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A label for the peer; absent clears it."
+          },
+          "persistentKeepalive": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Keepalive interval in seconds, 0 for off; absent clears it.",
+            "minimum": 0
+          },
+          "presharedKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new pre-shared key (32 bytes in padded base64); `null` removes the\nstored one and absent keeps it."
+          }
+        },
+        "additionalProperties": false
       },
       "WireguardPeerEntry": {
         "type": "object",

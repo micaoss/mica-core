@@ -129,7 +129,10 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
             V1_NETWORK_PEERS_ROUTE,
             get(api_v1_peers_list).post(api_v1_peers_add),
         )
-        .route(V1_NETWORK_PEER_ROUTE, delete(api_v1_peers_remove))
+        .route(
+            V1_NETWORK_PEER_ROUTE,
+            put(api_v1_peers_edit).delete(api_v1_peers_remove),
+        )
         .route(
             V1_NETWORK_WIREGUARD_DEFAULTS_PATH,
             get(api_v1_network_wireguard_defaults),
