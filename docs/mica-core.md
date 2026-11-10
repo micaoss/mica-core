@@ -1599,6 +1599,11 @@ read one format.
   board turns quotas off), carries out a staged factory reset, seals the owner keyring, maps the
   driver extensions and composes or binds modules and firmware (below), seeds the persistent
   machine identity, and hands over to the root's init. No network and no shell exist at this stage.
+  The watchdog is held close-on-exec and its NOWAYOUT is required, so the exec into the root's
+  init closes it unstopped: the kernel's `watchdog: watchdog0: watchdog did not stop!` (KERN_CRIT,
+  shown by `dmesg` and `journalctl -b -p err`) is printed by design at every boot, and the timer
+  keeps running until the root feeds it (systemd's `RuntimeWatchdogSec`, or the `mica-watchdog`
+  service on OpenRC).
   A factory reset staged on SYSTEM (3.7) is carried out at a boot of the deployment it names;
   one for another deployment, or one that cannot be read, waits and resets nothing. Before DATA
   is mounted the runkit makes it again: on a `gpt` board, once the partition is held to the
