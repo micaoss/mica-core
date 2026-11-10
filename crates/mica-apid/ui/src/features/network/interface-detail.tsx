@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
 import { FactList } from '@/shared/components/fact-list'
-import { FormField } from '@/shared/components/form-field'
+import { FormField, ToggleField } from '@/shared/components/form-field'
 import { Page } from '@/shared/components/page'
 import { SegmentedControl } from '@/shared/components/segmented-control'
 import { Button } from '@/shared/components/ui/button'
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/shared/components/ui/switch'
 import { notifySuccess } from '@/shared/feedback/toast'
 import { ChangeBar, EditBar } from './change-bar'
+import { useDns } from './dns-tab'
 import { updateChangeSet } from './change-set'
 import {
   bridgeOf, stageRemove, stageRevert, stageSet, usesInternet, vlansOn,
@@ -242,7 +243,8 @@ function ConfigView({ data, name }: { data: NetworkData; name: string }) {
                     { id: 'gateway', label: t('network.fields.gateway'), value: mono(entry.static?.gateway || t('network.values.none')) },
                     { id: 'dns', label: t('network.fields.dns'), value: mono(entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none')) },
                   ]),
-              { id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry, internalPort(data.staged, name)) ? 'network.values.on' : 'network.values.off') },
+              // A static entry's gateway is its default route; only DHCP has a choice to show.
+              ...(entry.dhcp ? [{ id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry, internalPort(data.staged, name)) ? 'network.values.on' : 'network.values.off') }] : []),
             ]} />
           </Group>
         </>
@@ -300,6 +302,9 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
   const problems = useProblems(data, name)
   const set = (change: (entry: IfaceEntry) => IfaceEntry) => updateChangeSet((current) => stageSet(current, name, iface.kind, change))
   const [customDns, setCustomDns] = useState(Boolean(entry.dns?.length))
+  // The servers typed while the switch was on, kept while it is off.
+  const [dnsDraft, setDnsDraft] = useState<string[]>(entry.dns ?? [])
+  const globalDns = useDns().data?.global.enabled
 
   if (iface.kind === 'can') return <CanForm data={data} name={name} problems={problems} />
   if (bridge) {
@@ -313,10 +318,15 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
     )
   }
 
+  // Back to DHCP, the interface takes the internet choice it had as a DHCP
+  // entry, not the one its static gateway implied.
+  const base = (data.set?.base ?? data.applied.map)[name]
   const toDhcp = () => set((current) => {
     const next: IfaceEntry = { ...current, dhcp: true }
     delete next.static
     delete next.dns
+    if (base?.dhcp && base.internet !== undefined) next.internet = base.internet
+    else delete next.internet
     return next
   })
   const toStatic = () => set((current) => {
@@ -343,19 +353,21 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
       {entry.dhcp ? (
         <Group title={t('network.detail.addressAndDns')}>
           <InternetRow entry={entry} internal={internalPort(data.staged, name)} onChange={(next) => set(() => next)} />
-          <label className="flex items-center justify-between gap-3 text-sm">
-            <span className="grid gap-0.5"><span className="font-medium">{t('network.fields.customDns')}</span><span className="text-muted-foreground">{t('network.detail.customDnsHint')}</span></span>
-            <Switch checked={customDns} onCheckedChange={(on) => { setCustomDns(on); if (!on) set((current) => ({ ...current, dns: [] })) }} aria-label={t('network.fields.customDns')} />
-          </label>
-          {customDns ? (
-            <FormField label={t('network.fields.dns')} hint={problems.dns ? <ProblemText problem={problems.dns} /> : t('network.detail.listHint')}>
-              {(id) => <ListInput id={id} values={entry.dns} placeholder="9.9.9.9, 1.1.1.1" invalid={Boolean(problems.dns)} onChange={(dns) => set((current) => ({ ...current, dns }))} />}
-            </FormField>
-          ) : null}
+          <ToggleField
+            title={t('network.fields.customDns')}
+            description={t('network.detail.customDnsHint')}
+            control={<Switch checked={customDns} onCheckedChange={(on) => { setCustomDns(on); if (on) set((current) => ({ ...current, dns: dnsDraft })); else { setDnsDraft(entry.dns ?? []); set((current) => ({ ...current, dns: [] })) } }} aria-label={t('network.fields.customDns')} />}
+          >
+            {customDns ? (
+              <FormField label={t('network.fields.dns')} hint={problems.dns ? <ProblemText problem={problems.dns} /> : !entry.dns?.length ? <span className="text-destructive">{t('network.detail.dnsRequired')}</span> : t('network.detail.listHint')}>
+                {(id) => <ListInput id={id} values={entry.dns} placeholder="9.9.9.9, 1.1.1.1" invalid={Boolean(problems.dns)} onChange={(dns) => set((current) => ({ ...current, dns }))} />}
+              </FormField>
+            ) : null}
+            {globalDns ? <p className="text-sm text-muted-foreground">{t('network.detail.globalDnsActive')}</p> : null}
+          </ToggleField>
         </Group>
       ) : (
         <Group title={t('network.detail.addressAndDns')}>
-          <InternetRow entry={entry} internal={internalPort(data.staged, name)} onChange={(next) => set(() => next)} />
           <FormField label={t('network.fields.address')} hint={problems.address ? <ProblemText problem={problems.address} /> : t('network.detail.cidrHint')}>
             {(id) => <Input id={id} className="font-mono sm:w-80" value={entry.static?.address ?? ''} aria-invalid={Boolean(problems.address)} onChange={(event) => set((current) => ({ ...current, static: { ...current.static, address: event.target.value.trim() } }))} />}
           </FormField>

@@ -25,18 +25,28 @@ export function FormField({ label, hint, children, className, htmlFor }: {
 
 /// A switch with its explanation, boxed. Replaces `.ui-selector` and the switch
 /// half of `.panel-row`.
-export function ToggleField({ title, description, control }: {
+export function ToggleField({ title, description, control, children }: {
   title: ReactNode
   description?: ReactNode
   control: ReactNode
+  /// What the switch governs, inside the same border as the switch.
+  children?: ReactNode
 }) {
-  return (
-    <Field orientation="horizontal" className="rounded-lg border p-3">
+  const titleId = useId()
+  const header = (
+    <Field orientation="horizontal" className={children ? undefined : 'rounded-lg border p-3'}>
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-sm font-medium">{title}</span>
+        <span id={titleId} className="text-sm font-medium">{title}</span>
         {description ? <span className="text-sm text-muted-foreground">{description}</span> : null}
       </div>
       {control}
     </Field>
+  )
+  if (!children) return header
+  return (
+    <div role="group" aria-labelledby={titleId} className="grid min-w-0 gap-4 rounded-lg border p-3">
+      {header}
+      {children}
+    </div>
   )
 }

@@ -97,14 +97,46 @@ describe('one interface', () => {
     expect(await screen.findByText('Undeclared')).toBeTruthy()
   })
 
-  it('refuses a static gateway on a port off the internet', async () => {
+  it('lets a static interface\'s gateway decide its default route, with no internet switch', async () => {
     stubFetch(networkRoutes({ ...configured(), eth1: { dhcp: false, static: { address: '192.168.10.1/24' }, internet: false } }))
     open('eth1')
     expect(await screen.findByText('LAN only')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
-    expect(screen.getByRole('switch', { name: /^Internet access/ }).getAttribute('aria-checked')).toBe('false')
+    expect(screen.queryByRole('switch', { name: /^Internet access/ })).toBeNull()
+    expect(screen.getByText('Optional. Left empty, this setting adds no default route.')).toBeTruthy()
+    const staged = () => { let entry: unknown; updateChangeSet((set) => { entry = set.staged.eth1; return set }); return entry }
     await userEvent.type(screen.getByLabelText('Gateway'), '192.168.10.254')
-    expect(await screen.findByText('This interface is not used for internet access, so it cannot have a gateway.')).toBeTruthy()
+    expect(screen.queryByText('This interface is not used for internet access, so it cannot have a gateway.')).toBeNull()
+    expect(staged()).toEqual({ dhcp: false, static: { address: '192.168.10.1/24', gateway: '192.168.10.254' }, internet: true })
+    await userEvent.clear(screen.getByLabelText('Gateway'))
+    expect(staged()).toEqual({ dhcp: false, static: { address: '192.168.10.1/24' }, internet: false })
+  })
+
+  it('gives a DHCP interface its own internet choice back when it leaves static mode', async () => {
+    stubFetch(networkRoutes({ ...configured(), eth0: { dhcp: true, internet: false } }))
+    open('eth0')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
+    expect(screen.getByRole('switch', { name: /^Internet access/ })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Static IP address' }))
+    await userEvent.type(screen.getByLabelText('Address'), '192.168.1.5/24')
+    await userEvent.type(screen.getByLabelText('Gateway'), '192.168.1.1')
+    await userEvent.click(screen.getByRole('button', { name: 'DHCP (automatic)' }))
+    let staged: unknown
+    updateChangeSet((set) => { staged = set.staged.eth0; return set })
+    expect(staged).toEqual({ dhcp: true, internet: false })
+  })
+
+  it('keeps the custom DNS switch and its servers in one group, and the draft across off and on', async () => {
+    stubFetch(networkRoutes())
+    open('eth0')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
+    const group = screen.getByRole('group', { name: 'Custom DNS' })
+    await userEvent.click(within(group).getByRole('switch', { name: 'Custom DNS' }))
+    await userEvent.type(within(group).getByLabelText('DNS servers'), '9.9.9.9')
+    await userEvent.click(within(group).getByRole('switch', { name: 'Custom DNS' }))
+    expect(within(group).queryByLabelText('DNS servers')).toBeNull()
+    await userEvent.click(within(group).getByRole('switch', { name: 'Custom DNS' }))
+    expect((within(group).getByLabelText('DNS servers') as HTMLInputElement).value).toContain('9.9.9.9')
   })
 
   it('says so when the device has no such interface', async () => {

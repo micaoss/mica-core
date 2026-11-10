@@ -22,7 +22,8 @@ import { failureDetail, notifyFailure, notifySuccess } from '@/shared/feedback/t
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { provisioningQuery } from './bluetooth'
 import { EditBar } from './change-bar'
-import { inSubnet, intToIp, ipToInt, isIPv4, overlaps, parseCidr, sameEntry, usesInternet, type IfaceEntry } from './model'
+import { inSubnet, intToIp, ipToInt, isIPv4, normalizeStaticRoutingIntent, overlaps, parseCidr, sameEntry, usesInternet, type IfaceEntry } from './model'
+import { useDns } from './dns-tab'
 import { Group, InternetSwitch, Section, useWifiText } from './parts'
 import { countryName, ELSEWHERE, EUROPE } from './regulatory'
 import type { NetworkData } from './use-network'
@@ -51,6 +52,11 @@ interface Draft {
   /// The radio's own addressing as a client.
   addressing: IfaceEntry
   customDns: boolean
+  /// The servers typed while custom DNS was on, kept while it is off.
+  dnsDraft: string[]
+  /// The internet choice the stored addressing had as DHCP, which going back
+  /// to DHCP restores.
+  dhcpInternet?: boolean
 }
 
 /// The radio: one role at a time, client or access point, set on one card
@@ -94,6 +100,8 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
     lease: ap?.dhcpServer?.leaseSeconds ? String(ap.dhcpServer.leaseSeconds) : '',
     addressing: structuredClone(stored),
     customDns: Boolean(stored.dns?.length),
+    dnsDraft: stored.dns ?? [],
+    dhcpInternet: stored.dhcp ? stored.internet : undefined,
   })
   const channels = useQuery({
     queryKey: ['wifi-channels', draft?.country],
@@ -253,8 +261,7 @@ function draftErrors(draft: Draft, data: NetworkData, allowed: number[] | undefi
     if (!address) errors.address = t('network.problems.addressMissing')
     else if (!parseCidr(address)) errors.address = t('network.problems.cidr')
     if (entry.static?.gateway && !inSubnet(entry.static.gateway, address)) errors.gateway = t('network.problems.gatewaySubnet')
-    else if (entry.static?.gateway && !usesInternet(entry, data.applied.ifaces[data.wifi.radio ?? '']?.port?.role === 'internal')) errors.gateway = t('network.problems.gatewayOffInternet')
-  }
+  } else if (draft.customDns && !entry.dns?.length) errors.dns = t('network.detail.dnsRequired')
   const dns = entry.dhcp ? entry.dns : entry.static?.dns
   if ((dns ?? []).some((server) => !isIPv4(server))) errors.dns = t('network.problems.dns', { list: (dns ?? []).filter((server) => !isIPv4(server)).join(', ') })
   return errors
@@ -355,7 +362,7 @@ function ConfigView({ data }: { data: NetworkData }) {
                   { id: 'gateway', label: t('network.fields.gateway'), value: entry.static?.gateway || t('network.values.none'), mono: true },
                   { id: 'dns', label: t('network.fields.dns'), value: entry.static?.dns?.length ? entry.static.dns.join(', ') : t('network.values.none'), mono: true },
                 ]),
-            { id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry, internal) ? 'network.values.on' : 'network.values.off') },
+            ...(entry.dhcp ? [{ id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry, internal) ? 'network.values.on' : 'network.values.off') }] : []),
           ]} />
         </Group>
       </div>
@@ -371,7 +378,9 @@ function ConfigForm({ draft, setDraft, errors, current, allowed, internal, apOff
   const countries = [...EUROPE, ...ELSEWHERE.filter((code) => !EUROPE.includes(code))]
   if (!countries.includes(draft.country)) countries.unshift(draft.country)
   const entry = draft.addressing
-  const setEntry = (next: IfaceEntry) => setDraft({ ...draft, addressing: next })
+  // A static client's gateway is its default route, written as `internet`.
+  const setEntry = (next: IfaceEntry) => setDraft({ ...draft, addressing: normalizeStaticRoutingIntent(next) })
+  const globalDns = useDns().data?.global.enabled
   return (
     <div className="grid gap-5">
       <ToggleField
@@ -452,28 +461,30 @@ function ConfigForm({ draft, setDraft, errors, current, allowed, internal, apOff
       ) : (
         <>
           <FormField label={t('network.detail.preset')}>
-            {() => <SegmentedControl<'dhcp' | 'static'> label={t('network.detail.preset')} cards value={entry.dhcp ? 'dhcp' : 'static'} onValueChange={(preset) => setEntry(preset === 'dhcp' ? { ...withoutAddressing(entry), dhcp: true } : { ...withoutAddressing(entry), dhcp: false, static: { address: entry.static?.address ?? '', ...(entry.static?.gateway ? { gateway: entry.static.gateway } : {}), dns: entry.dns ?? entry.static?.dns ?? [] } })} segments={[{ value: 'dhcp', label: t('network.presets.dhcp') }, { value: 'static', label: t('network.presets.static') }]} />}
+            {() => <SegmentedControl<'dhcp' | 'static'> label={t('network.detail.preset')} cards value={entry.dhcp ? 'dhcp' : 'static'} onValueChange={(preset) => setEntry(preset === 'dhcp' ? withInternet({ ...withoutAddressing(entry), dhcp: true }, draft.dhcpInternet) : { ...withoutAddressing(entry), dhcp: false, static: { address: entry.static?.address ?? '', ...(entry.static?.gateway ? { gateway: entry.static.gateway } : {}), dns: entry.dns ?? entry.static?.dns ?? [] } })} segments={[{ value: 'dhcp', label: t('network.presets.dhcp') }, { value: 'static', label: t('network.presets.static') }]} />}
           </FormField>
-          <ToggleField title={t('network.fields.internet')} description={t('network.detail.internetHint')} control={<InternetSwitch entry={entry} internal={internal} onChange={setEntry} />} />
           {entry.dhcp ? (
             <>
+              <ToggleField title={t('network.fields.internet')} description={t('network.detail.internetHint')} control={<InternetSwitch entry={entry} internal={internal} onChange={setEntry} />} />
               <ToggleField
                 title={t('network.fields.customDns')}
                 description={t('network.detail.customDnsHint')}
-                control={<Switch checked={draft.customDns} onCheckedChange={(on) => setDraft({ ...draft, customDns: on, addressing: on ? entry : { ...entry, dns: [] } })} aria-label={t('network.fields.customDns')} />}
-              />
-              {draft.customDns ? (
-                <FormField label={t('network.fields.dns')} hint={hint('dns', t('network.detail.listHint'))}>
-                  {(id) => <Input id={id} className="font-mono sm:w-80" defaultValue={(entry.dns ?? []).join(', ')} onChange={(event) => setEntry({ ...entry, dns: split(event.target.value) })} />}
-                </FormField>
-              ) : null}
+                control={<Switch checked={draft.customDns} onCheckedChange={(on) => setDraft(on ? { ...draft, customDns: true, addressing: { ...entry, dns: draft.dnsDraft } } : { ...draft, customDns: false, dnsDraft: entry.dns ?? [], addressing: { ...entry, dns: [] } })} aria-label={t('network.fields.customDns')} />}
+              >
+                {draft.customDns ? (
+                  <FormField label={t('network.fields.dns')} hint={hint('dns', t('network.detail.listHint'))}>
+                    {(id) => <Input id={id} className="font-mono sm:w-80" defaultValue={(entry.dns ?? []).join(', ')} onChange={(event) => setEntry({ ...entry, dns: split(event.target.value) })} />}
+                  </FormField>
+                ) : null}
+                {globalDns ? <p className="text-sm text-muted-foreground">{t('network.detail.globalDnsActive')}</p> : null}
+              </ToggleField>
             </>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label={t('network.fields.address')} hint={hint('address', t('network.detail.cidrHint'))}>
                 {(id) => <Input id={id} className="font-mono sm:w-50" value={entry.static?.address ?? ''} placeholder="192.168.31.20/24" onChange={(event) => setEntry({ ...entry, static: { ...entry.static, address: event.target.value.trim() } })} />}
               </FormField>
-              <FormField label={t('network.fields.gateway')} hint={hint('gateway')}>
+              <FormField label={t('network.fields.gateway')} hint={hint('gateway', t('network.detail.gatewayHint'))}>
                 {(id) => <Input id={id} className="font-mono sm:w-50" value={entry.static?.gateway ?? ''} placeholder={t('network.values.none')} onChange={(event) => { const gateway = event.target.value.trim(); const next = { ...entry, static: { address: entry.static?.address ?? '', ...entry.static } }; if (gateway) next.static.gateway = gateway; else delete next.static.gateway; setEntry(next) }} />}
               </FormField>
               <FormField className="sm:col-span-2" label={t('network.fields.dns')} hint={hint('dns', t('network.detail.listHint'))}>
@@ -494,6 +505,14 @@ const split = (text: string) => text.split(/[,，\s]+/).map((item) => item.trim(
 function inBands(channels: number[], bands: string[] | undefined): number[] {
   if (!bands) return channels
   return channels.filter((channel) => bands.includes(channel <= 14 ? '2.4' : '5'))
+}
+
+/// `entry` with the DHCP internet choice `internet`, absent when it had none.
+function withInternet(entry: IfaceEntry, internet: boolean | undefined): IfaceEntry {
+  const next = { ...entry }
+  if (internet === undefined) delete next.internet
+  else next.internet = internet
+  return next
 }
 
 function withoutAddressing(entry: IfaceEntry): IfaceEntry {

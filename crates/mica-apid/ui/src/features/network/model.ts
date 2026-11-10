@@ -36,6 +36,15 @@ export interface IfaceEntry {
 /// declares is off the internet until its entry says otherwise.
 export const usesInternet = (entry: IfaceEntry | undefined, internal = false) => entry?.internet ?? !internal
 
+/// A static entry's `internet` is what its routing says: a gateway, or an
+/// explicit default route, is a default route. Written as a boolean, so an
+/// internal port's absent `false` never hides a gateway; a DHCP entry keeps
+/// its own choice.
+export function normalizeStaticRoutingIntent(entry: IfaceEntry): IfaceEntry {
+  if (entry.dhcp || !entry.static) return entry
+  return { ...entry, internet: Boolean(entry.static.gateway) || (entry.routes ?? []).some((route) => route.destination === '0.0.0.0/0') }
+}
+
 /// The kinds `internet` is for.
 export const carriesInternet = (kind: ViewKind) => kind === 'physical' || kind === 'bridge' || kind === 'vlan' || kind === 'wifi'
 
@@ -111,9 +120,10 @@ export function portEntry(current: IfaceEntry | undefined): IfaceEntry {
 /// the configuration it runs, and the review's dry run says so.
 export function stageSet(set: ChangeSet, name: string, kind: ViewKind, change: (entry: IfaceEntry) => IfaceEntry): ChangeSet {
   const current = set.staged[name] ?? defaultEntry(kind)
-  const next = change(clone(current))
-  if (set.staged[name] !== undefined && sameEntry(current, next)) return set
-  if (set.staged[name] === undefined && sameEntry(defaultEntry(kind), next)) return set
+  const edited = change(clone(current))
+  if (set.staged[name] !== undefined && sameEntry(current, edited)) return set
+  if (set.staged[name] === undefined && sameEntry(defaultEntry(kind), edited)) return set
+  const next = carriesInternet(kind) ? normalizeStaticRoutingIntent(edited) : edited
   const staged = { ...set.staged, [name]: next }
   if (next.kind === 'bridge') {
     const was = current.bridge?.ports ?? []

@@ -10,7 +10,7 @@ import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { DataTable } from '@/shared/components/data-table'
 import { FactList } from '@/shared/components/fact-list'
 import { FormDialog } from '@/shared/components/form-dialog'
-import { FormField, ToggleField } from '@/shared/components/form-field'
+import { FormField } from '@/shared/components/form-field'
 import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
 import { Spinner } from '@/shared/components/ui/spinner'
@@ -116,17 +116,15 @@ export function DnsTab({ data, onEditing }: { data: NetworkData; onEditing: (edi
 
       <Section
         title={t('network.dns.global')}
-        description={draft ? t('network.wifi.editHint') : t('network.dns.globalCopy')}
+        description={draft ? t(draft.enabled ? 'network.dns.onHint' : 'network.dns.offHint') : t('network.dns.globalCopy')}
         editing={draft !== undefined}
-        action={draft ? undefined : <Button size="sm" onClick={start}>{t('network.detail.edit')}</Button>}
+        action={draft
+          ? <Switch checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} aria-label={t('network.dns.global')} />
+          : <Button size="sm" onClick={start}>{t('network.detail.edit')}</Button>}
       >
         {draft ? (
           <div className="grid gap-5">
-            <ToggleField
-              title={t('network.dns.global')}
-              description={t(draft.enabled ? 'network.dns.onHint' : 'network.dns.offHint')}
-              control={<Switch checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} aria-label={t('network.dns.global')} />}
-            />
+            <p className="text-sm text-muted-foreground">{t('network.wifi.editHint')}</p>
             {draft.enabled ? (
               <>
                 {[0, 1, 2].slice(0, MAX_SERVERS).map((index) => {

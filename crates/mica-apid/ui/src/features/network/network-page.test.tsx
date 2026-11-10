@@ -312,6 +312,16 @@ describe('the network page', () => {
     await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/dns/global')).toEqual({ enabled: true, servers: ['9.9.9.9', '1.1.1.1'] }))
   })
 
+  it('puts the global DNS switch in its card\'s header, with no card inside the card', async () => {
+    stubFetch(networkRoutes())
+    open('dns')
+    await screen.findByText('nas.lan')
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    const header = screen.getByRole('heading', { name: 'Global DNS' }).closest('header')!
+    expect(within(header).getByRole('switch', { name: 'Global DNS' })).toBeTruthy()
+    expect(screen.getAllByRole('switch', { name: 'Global DNS' })).toHaveLength(1)
+  })
+
   it('refuses a server the device cannot ask', async () => {
     stubFetch(networkRoutes())
     open('dns')
@@ -560,6 +570,7 @@ describe('the Wi-Fi tab as a client', () => {
     await screen.findByText('-52 dBm · Strong')
     await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
     await userEvent.click(screen.getByRole('button', { name: 'Static IP address' }))
+    expect(screen.queryByRole('switch', { name: 'Internet access' })).toBeNull()
     await userEvent.type(screen.getByLabelText('Address'), '192.168.30.5/24')
     await userEvent.type(screen.getByLabelText('Gateway'), '10.0.0.1')
     const bar = screen.getByRole('region', { name: /Editing/ })
@@ -568,7 +579,37 @@ describe('the Wi-Fi tab as a client', () => {
     await userEvent.clear(screen.getByLabelText('Gateway'))
     await userEvent.type(screen.getByLabelText('Gateway'), '192.168.30.1')
     await userEvent.click(within(bar).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client', client: { addressing: { dhcp: false, static: { address: '192.168.30.5/24', gateway: '192.168.30.1', dns: [] } } } }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client', client: { addressing: { dhcp: false, static: { address: '192.168.30.5/24', gateway: '192.168.30.1', dns: [] }, internet: true } } }))
+  })
+
+  it('keeps the client\'s custom DNS switch with its servers, and an off draft out of the way', async () => {
+    const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'w' }) })
+    open('wifi')
+    await screen.findByText('-52 dBm · Strong')
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    const group = screen.getByRole('group', { name: 'Custom DNS' })
+    await userEvent.click(within(group).getByRole('switch', { name: 'Custom DNS' }))
+    const bar = screen.getByRole('region', { name: /Editing/ })
+    expect(within(bar).getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
+    await userEvent.type(within(group).getByLabelText('DNS servers'), 'not-an-address')
+    await userEvent.click(within(group).getByRole('switch', { name: 'Custom DNS' }))
+    expect(within(group).queryByLabelText('DNS servers')).toBeNull()
+    await userEvent.click(within(group).getByRole('switch', { name: 'Custom DNS' }))
+    expect((within(group).getByLabelText('DNS servers') as HTMLInputElement).value).toBe('not-an-address')
+    await userEvent.click(within(group).getByRole('switch', { name: 'Custom DNS' }))
+    await userEvent.click(within(bar).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client' }))
+  })
+
+  it('says an interface\'s DNS takes no part while global DNS is on', async () => {
+    const routes = joined() as Record<string, unknown>
+    routes['/api/v1/dns'] = { ...(routes['/api/v1/dns'] as object), global: { enabled: true, servers: ['9.9.9.9'] } }
+    stubFetch(routes)
+    open('wifi')
+    await screen.findByText('-52 dBm · Strong')
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    const group = screen.getByRole('group', { name: 'Custom DNS' })
+    expect(await within(group).findByText('Global DNS is on, so this interface\'s DNS takes no part in resolution for now.')).toBeTruthy()
   })
 
   it('offers no access point on a radio the board says cannot run one', async () => {

@@ -137,10 +137,11 @@ describe('what the console refuses to stage', () => {
     expect(validateEntry('wg1', 'wireguard', { kind: 'wireguard', static: { address: '10.9.0.1/24' }, wireguard: { listenPort: 51820, peers: [] } }, staged, [], false).listenPort?.key).toBe('network.problems.portTaken')
   })
 
-  it('refuses a gateway and a default route on an interface off the internet', () => {
-    const entry = { dhcp: false, internet: false, static: { address: '192.168.10.1/24', gateway: '192.168.10.254' }, routes: [{ destination: '0.0.0.0/0', gateway: '192.168.10.254' }] }
+  it('refuses a default route on a DHCP interface off the internet, and lets a static one have its gateway', () => {
+    const map0 = { eth1: { dhcp: false, internet: false, static: { address: '192.168.10.1/24', gateway: '192.168.10.254' } } } as NetworkMap
+    expect(validateEntry('eth1', 'physical', map0.eth1, map0, [], false)).toEqual({})
+    const entry = { dhcp: true, internet: false, routes: [{ destination: '0.0.0.0/0', gateway: '192.168.10.254' }] }
     const problems = validateEntry('eth1', 'physical', entry, map, [], false)
-    expect(problems.gateway?.key).toBe('network.problems.gatewayOffInternet')
     expect(problems.routes?.key).toBe('network.problems.defaultRouteOffInternet')
     expect(validateEntry('eth1', 'physical', { ...entry, internet: true }, map, [], false)).toEqual({})
   })
@@ -254,8 +255,9 @@ describe('a board that declares its ports', () => {
     expect(internalPort(view, 'eth1')).toBe(true)
     expect(keepsInternet(view)).toBe(false)
     expect(keepsInternet(buildView({ ...map, eth1: { ...(map.eth1 as object), internet: true } } as NetworkMap, declared(), off))).toBe(true)
+    // A static internal port's gateway is its default route: the gateway
+    // field decides, not the internal default.
     const entry = { dhcp: false, static: { address: '192.168.10.1/24', gateway: '192.168.10.254' } }
-    expect(validateEntry('eth1', 'physical', entry, map, [], false, true).gateway?.key).toBe('network.problems.gatewayOffInternet')
-    expect(validateEntry('eth1', 'physical', { ...entry, internet: true }, map, [], false, true)).toEqual({})
+    expect(validateEntry('eth1', 'physical', entry, map, [], false, true)).toEqual({})
   })
 })

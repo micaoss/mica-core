@@ -3,6 +3,7 @@ import {
   discardAll,
   inSubnet,
   nextName,
+  normalizeStaticRoutingIntent,
   overlaps,
   pendingChanges,
   rebase,
@@ -23,6 +24,30 @@ const base: NetworkMap = {
 }
 const start = (map: NetworkMap = base): ChangeSet => ({ base: structuredClone(map), staged: structuredClone(map) })
 const kindOf = () => 'physical' as const
+
+describe('a static entry\'s routing intent', () => {
+  it('is its gateway or an explicit default route, written as a boolean', () => {
+    expect(normalizeStaticRoutingIntent({ dhcp: false, static: { address: '192.168.10.1/24', gateway: '192.168.10.254' } }).internet).toBe(true)
+    expect(normalizeStaticRoutingIntent({ dhcp: false, static: { address: '192.168.10.1/24' }, internet: true }).internet).toBe(false)
+    expect(normalizeStaticRoutingIntent({ dhcp: false, static: { address: '192.168.10.1/24' }, routes: [{ destination: '0.0.0.0/0', gateway: '192.168.10.9' }] }).internet).toBe(true)
+    const dhcp = { dhcp: true, internet: false }
+    expect(normalizeStaticRoutingIntent(dhcp)).toBe(dhcp)
+    const once = normalizeStaticRoutingIntent({ dhcp: false, static: { address: '10.0.0.2/24', gateway: '10.0.0.1' } })
+    expect(normalizeStaticRoutingIntent(once)).toEqual(once)
+  })
+
+  it('is written by every edit of a static interface, and only by an edit', () => {
+    const set = start({ ...base, eth2: { dhcp: false, static: { address: '192.168.20.1/24' } } })
+    expect(stageSet(set, 'eth2', 'physical', (entry) => ({ ...entry }))).toBe(set)
+    const gateway = stageSet(set, 'eth2', 'physical', (entry) => ({ ...entry, static: { address: '192.168.20.1/24', gateway: '192.168.20.254' } }))
+    expect(gateway.staged.eth2).toEqual({ dhcp: false, static: { address: '192.168.20.1/24', gateway: '192.168.20.254' }, internet: true })
+    const route = stageSet(set, 'eth2', 'physical', (entry) => ({ ...entry, routes: [{ destination: '10.9.0.0/16', gateway: '192.168.20.9' }] }))
+    expect(route.staged.eth2.internet).toBe(false)
+    // A tunnel and a CAN controller have no `internet` to write.
+    const tunnel = stageSet(start({ wg0: { kind: 'wireguard', static: { address: '10.8.0.1/24' }, wireguard: { peers: [] } } }), 'wg0', 'wireguard', (entry) => ({ ...entry, static: { address: '10.8.0.2/24' } }))
+    expect(tunnel.staged.wg0.internet).toBeUndefined()
+  })
+})
 
 describe('the change set', () => {
   it('stages nothing when an edit lands where it started', () => {
