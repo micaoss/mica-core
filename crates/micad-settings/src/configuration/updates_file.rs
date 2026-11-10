@@ -238,12 +238,77 @@ pub fn write_updates(path: &Path, patch_json: &str) -> Result<UpdatesDocument, W
         })
     })?;
     let base = load_updates(path).map_err(WriteRefusal::Unreadable)?;
+    let mut patch = patch;
+    if let Some(Some(url)) = patch.source.as_mut().and_then(|source| source.url.as_mut()) {
+        let trimmed = url.trim().to_string();
+        // An address already stored is kept as it is, `http` included: a
+        // write that names it unchanged is not one that sets it.
+        if base.source.url.as_ref().and_then(Option::as_deref) != Some(trimmed.as_str())
+            && let Some(message) = source_url_error(&trimmed)
+        {
+            return Err(WriteRefusal::Rejected(ConfigError::Validation {
+                path: path.to_path_buf(),
+                message,
+            }));
+        }
+        *url = trimmed;
+    }
     let document = apply_patch(base, patch);
     save_updates(path, &document).map_err(|err| match err {
         validation @ ConfigError::Validation { .. } => WriteRefusal::Rejected(validation),
         other => WriteRefusal::Unwritable(other),
     })?;
     Ok(document)
+}
+
+/// Why `url` cannot be written as the address this device dials, or `None`.
+///
+/// An absolute `https` URL with a host: no credentials, query or fragment, no
+/// whitespace or control character, a port that fits, and a path ending in
+/// `/`, so `mica-deploy`'s `catalog::source_url` takes it as an update root
+/// (its rule also admits `http`; a write here does not). Private hosts and IP
+/// literals are fine. Checked offline; whether the address answers, and
+/// with what, is the next check's question. The message never repeats the
+/// URL, so a credential written into it is not echoed back.
+/// `mica-deploy`'s bound on a source URL.
+const SOURCE_URL_MAX_LEN: usize = 2048;
+
+fn source_url_error(url: &str) -> Option<String> {
+    if url.len() > SOURCE_URL_MAX_LEN {
+        return Some(format!(
+            "source.url is longer than {SOURCE_URL_MAX_LEN} bytes"
+        ));
+    }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Some("source.url must not contain whitespace or control characters".into());
+    }
+    let Ok(parsed) = url::Url::parse(url) else {
+        return Some("source.url is not an absolute URL with a valid host and port".into());
+    };
+    if parsed.scheme() != "https" {
+        return Some(format!(
+            "source.url must be https, not `{}`",
+            parsed.scheme()
+        ));
+    }
+    // `https:///x` parses with `x` as the host; an address that names none
+    // is refused on its text.
+    let authority = url.split_once("://").map_or("", |(_, rest)| rest);
+    if authority.starts_with('/') || parsed.host_str().is_none_or(str::is_empty) {
+        return Some("source.url names no host".into());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Some("source.url must not carry credentials".into());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Some("source.url must not carry a query or a fragment".into());
+    }
+    if !parsed.path().ends_with('/') {
+        return Some(
+            "source.url is an update root and ends in `/`; the manifest is read below it".into(),
+        );
+    }
+    None
 }
 
 /// Validate `document` and replace the file at `path` with it, atomically.

@@ -148,7 +148,8 @@ function SourcePanel({ layers, error }: { layers?: ProvisioningLayers; error: un
       label: t('system.update.automatic.source'),
       effective: effective?.source ?? undefined,
       baked: baked?.source ?? undefined,
-      overridden: operator !== undefined && 'source' in operator,
+      // A stored `null` is the operator returning the device to its image.
+      overridden: operator?.source != null,
     },
     {
       id: 'coreChannel',

@@ -388,7 +388,7 @@ fn a_patch_may_re_point_the_device_at_another_address() {
 
     write_updates(
         &path,
-        r#"{ "source": { "url": "https://updates.example/repo" } }"#,
+        r#"{ "source": { "url": "https://updates.example/repo/" } }"#,
     )
     .expect("the write lands");
 
@@ -399,7 +399,7 @@ fn a_patch_may_re_point_the_device_at_another_address() {
     let effective = resolve(&baked, load_updates(&path).unwrap());
     assert_eq!(
         effective.selection.unwrap().url.as_deref(),
-        Some("https://updates.example/repo"),
+        Some("https://updates.example/repo/"),
         "the override wins over the baked default"
     );
 }
@@ -543,4 +543,96 @@ fn a_patch_that_is_not_json_is_the_requests_fault() {
     let path = dir.path().join("updates.json");
     let err = write_updates(&path, "not json").expect_err("not a patch");
     assert!(matches!(err, WriteRefusal::Rejected(_)), "{err}");
+}
+
+/// The address a device dials is written as an absolute `https` URL with a
+/// host, and nothing that would carry a secret or hide part of it.
+#[test]
+fn a_source_url_that_is_not_an_absolute_https_address_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("updates.json");
+    let too_long = format!("https://updates.example/{}/", "a".repeat(2048));
+    for url in [
+        "not a URL",
+        "/relative/path/",
+        "updates.example/repo/",
+        "http://updates.example/repo/",
+        "ftp://updates.example/repo/",
+        "https://user:secret@updates.example/repo/",
+        "https://user@updates.example/repo/",
+        "https://updates.example/repo/#part",
+        "https://updates.example/repo/?channel=x",
+        "https://updates.example/repo",
+        "https://updates.example/re po/",
+        "https://updates.example:99999/repo/",
+        "https://updates.example/repo/\u{7}",
+        "https:///repo/",
+        too_long.as_str(),
+        "",
+    ] {
+        let patch = json!({ "source": { "url": url } }).to_string();
+        let err = write_updates(&path, &patch).expect_err(url);
+        assert!(matches!(err, WriteRefusal::Rejected(_)), "{url}: {err}");
+        assert!(err.to_string().contains("source.url"), "{url}: {err}");
+        assert!(
+            !err.to_string().contains("secret"),
+            "the refusal echoes a credential: {err}"
+        );
+        assert!(!path.exists(), "{url} was written");
+    }
+}
+
+/// The update root as `mica-deploy` reads it: the manifest is fetched below
+/// it, so the path ends in `/`.
+#[test]
+fn a_source_url_on_a_private_host_or_with_a_path_and_port_is_accepted_trimmed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("updates.json");
+    for (url, saved) in [
+        ("https://10.0.0.5/repo/", "https://10.0.0.5/repo/"),
+        (
+            "https://[fd00::5]:8443/mica/repo/",
+            "https://[fd00::5]:8443/mica/repo/",
+        ),
+        (
+            "  https://updates.site.local/  ",
+            "https://updates.site.local/",
+        ),
+    ] {
+        let patch = json!({ "source": { "url": url } }).to_string();
+        let document = write_updates(&path, &patch).expect(url);
+        assert_eq!(document.source.url, Some(Some(saved.to_string())), "{url}");
+    }
+}
+
+/// An `http` address already stored stays as it is: a write that names it
+/// unchanged, or names nothing about the source, is not refused for it.
+#[test]
+fn a_stored_http_source_is_kept_but_not_written_anew() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("updates.json");
+    std::fs::write(
+        &path,
+        r#"{ "source": { "url": "http://mirror.site/repo" } }"#,
+    )
+    .unwrap();
+
+    let document =
+        write_updates(&path, r#"{ "policy": "off" }"#).expect("an unrelated write lands");
+    assert_eq!(
+        document.source.url,
+        Some(Some("http://mirror.site/repo".to_string()))
+    );
+    write_updates(
+        &path,
+        r#"{ "source": { "url": "http://mirror.site/repo" } }"#,
+    )
+    .expect("naming the stored address unchanged lands");
+    assert!(
+        write_updates(
+            &path,
+            r#"{ "source": { "url": "http://other.site/repo" } }"#
+        )
+        .is_err()
+    );
 }

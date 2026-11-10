@@ -1474,7 +1474,7 @@ export const zhCN: Translation = {
         fromImage: '来自镜像',
         overridden: '在此设置——镜像中为 {{baked}}',
         urlLabel: '更新服务器地址',
-        urlHint: '留空则恢复为镜像构建时的地址。',
+        urlHint: '以 / 结尾的 https 地址，例如 https://updates.example/mica/。留空则恢复为镜像构建时的地址。',
         coreChannel: 'Core 通道', coreChannelLabel: 'Core 通道', coreChannelHint: 'Core 更新所跟随的通道。留空则跟随镜像自带的通道。',
         sourceSaved: '更新源已保存。',
       policySaved: '更新策略已保存。',

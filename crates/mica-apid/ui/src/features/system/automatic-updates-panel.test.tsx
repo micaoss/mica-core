@@ -66,7 +66,9 @@ describe('the automatic update policy', () => {
     })
     renderPanel(<AutomaticUpdatesPanel />)
 
-    expect(await screen.findAllByText('from the image')).toHaveLength(2)
+    // The effective address is on screen once the layers have loaded.
+    expect(await screen.findByText('https://updates.mica.example/repo')).toBeTruthy()
+    expect(screen.getAllByText('from the image')).toHaveLength(2)
     expect(screen.queryByText(/set here/)).toBeNull()
   })
 
@@ -100,17 +102,17 @@ describe('the automatic update policy', () => {
     const fetch = stubFetch({
       '/api/v1/update': policy,
       '/api/v1/provisioning/status': bakedOnly,
-      'POST /api/v1/update/config': () => jsonResponse({ source: { url: 'https://mirror.site.example/repo' } }),
+      'POST /api/v1/update/config': () => jsonResponse({ source: { url: 'https://mirror.site.example/repo/' } }),
     })
     renderPanel(<AutomaticUpdatesPanel />)
 
-    await userEvent.type(await screen.findByLabelText(/Update server address/), 'https://mirror.site.example/repo')
+    await userEvent.type(await screen.findByLabelText(/Update server address/), 'https://mirror.site.example/repo/')
     await userEvent.click(screen.getByRole('button', { name: 'Save source' }))
 
     await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/update/config')).toBe(true))
     const call = fetch.mock.calls.find(([input]) => String(input) === '/api/v1/update/config')
     expect(call?.[1]?.method).toBe('POST')
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ source: { url: 'https://mirror.site.example/repo' } })
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ source: { url: 'https://mirror.site.example/repo/' } })
   })
 
   /// The core channel is the operator's to change, and clearing it returns

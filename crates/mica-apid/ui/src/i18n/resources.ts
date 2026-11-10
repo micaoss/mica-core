@@ -1757,7 +1757,7 @@ export const en = {
         fromImage: 'from the image',
         overridden: 'set here — the image says {{baked}}',
         urlLabel: 'Update server address',
-        urlHint: 'Empty returns the device to the address the image was built with.',
+        urlHint: 'An https address ending in /, such as https://updates.example/mica/. Empty returns the device to the address the image was built with.',
         coreChannel: 'Core channel',
         coreChannelLabel: 'Core channel',
         coreChannelHint: 'The channel core updates are taken from. Empty follows the image\'s channel.',
