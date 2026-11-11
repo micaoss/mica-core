@@ -263,6 +263,57 @@ async fn a_native_rollback_failure_after_precheck_is_reported_without_claiming_s
     assert_eq!(body_json(response).await["error"]["code"], "micad_failed");
 }
 
+/// A caller that names the target it confirmed rolls back only to that
+/// target: a target that changed since is refused before micad acts, and a
+/// body without the field keeps the plain verdict check.
+#[tokio::test]
+async fn a_rollback_to_an_expected_target_is_refused_once_the_target_changed() {
+    let (router, fake, token) = update_app(permitted_rollback());
+    let body = json!({ "expectedTarget": "c".repeat(64) }).to_string();
+    let response = bearer_json(&router, "POST", ROLLBACK_PATH, &token, &body).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(body_json(response).await["error"]["code"], "target_changed");
+    assert_eq!(fake.update_calls(), vec!["get_update_state".to_string()]);
+
+    for body in [json!({ "expectedTarget": "b".repeat(64) }), json!({})] {
+        let (router, fake, token) = update_app(permitted_rollback());
+        let response = bearer_json(&router, "POST", ROLLBACK_PATH, &token, &body.to_string()).await;
+        assert_eq!(response.status(), StatusCode::OK, "{body}");
+        assert_eq!(
+            fake.update_calls(),
+            vec![
+                "get_update_state".to_string(),
+                format!("rollback {}", "a".repeat(64))
+            ],
+        );
+    }
+
+    // A refused verdict keeps its own reason, whatever the caller expected.
+    let (router, _fake, token) = update_app(json!({
+        "rollback": { "target": null, "permitted": false, "reason": "candidate_pending" },
+    }));
+    let body = json!({ "expectedTarget": "b".repeat(64) }).to_string();
+    let response = bearer_json(&router, "POST", ROLLBACK_PATH, &token, &body).await;
+    assert_eq!(
+        body_json(response).await["error"]["code"],
+        "candidate_pending"
+    );
+
+    for body in [
+        json!({ "expectedTarget": "B".repeat(64) }),
+        json!({ "expectedTarget": "b".repeat(64), "later": 1 }),
+    ] {
+        let (router, fake, token) = update_app(permitted_rollback());
+        let response = bearer_json(&router, "POST", ROLLBACK_PATH, &token, &body.to_string()).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(
+            body_json(response).await["error"]["code"],
+            "request_invalid"
+        );
+        assert!(fake.update_calls().is_empty(), "{body}");
+    }
+}
+
 #[tokio::test]
 async fn a_rollback_from_a_browser_session_needs_its_csrf_token() {
     let (router, fake, _token) = update_app(permitted_rollback());

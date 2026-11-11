@@ -908,7 +908,8 @@ information, the integrity card at `/system/integrity` (checks derived from the 
 update state and the storage status, read again on each request and never verified again), telemetry, service logs at `/system/logs/{source}` (`?boot=previous` for the boot
 before this one), network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
-fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,
+fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback (refused when the target is no longer the
+`expectedTarget` the caller confirmed), reboot override,
 policy); provisioning status and claim; credential recovery and reset; the factory reset;
 diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
 `PUT /api/v1/settings/{path}` (and `PATCH /api/v1/settings`) writes `logging.persistent` (`true`,

@@ -359,7 +359,27 @@ impl Status {
         } else {
             None
         };
-        json!({"permitted":reason.is_none(), "target":if reason.is_none() { self.state.fallback.as_ref() } else { None }, "reason":reason})
+        let target = if reason.is_none() {
+            self.state.fallback.as_ref()
+        } else {
+            None
+        };
+        // What the target is comes from its own verified deployment; an entry
+        // without a tries counter is a confirmed one.
+        let deployment = target.and_then(|id| {
+            self.deployments
+                .iter()
+                .find(|deployment| &deployment.id == id)
+        });
+        json!({
+            "permitted": reason.is_none(),
+            "target": target,
+            "reason": reason,
+            "targetVersion": deployment.map(|deployment| &deployment.version),
+            "targetGeneration": deployment.map(|deployment| deployment.generation),
+            "confirmed": deployment.map(|deployment| deployment.tries_left.is_none()),
+            "requiresReboot": true,
+        })
     }
 
     pub fn merge_into(&self, entry: &mut serde_json::Map<String, Value>) -> Result<()> {
@@ -591,6 +611,32 @@ pub(crate) mod tests {
         assert_eq!(
             Status::parse(&value.to_string()).unwrap().phase().0,
             "rolled-back"
+        );
+    }
+
+    /// The rollback verdict names its target by the version and generation
+    /// of the target's own verified deployment, and whether that deployment
+    /// was confirmed; a refused rollback names no target.
+    #[test]
+    fn the_rollback_verdict_describes_its_target() {
+        let mut value = fixture();
+        let status = Status::parse(&value.to_string()).unwrap();
+        assert_eq!(
+            status.rollback(),
+            json!({"permitted":true, "target":"b".repeat(64), "reason":null,
+                "targetVersion":"test-1", "targetGeneration":1, "confirmed":true,
+                "requiresReboot":true})
+        );
+        value["deployments"][1]["triesLeft"] = json!(2);
+        let verdict = Status::parse(&value.to_string()).unwrap().rollback();
+        assert_eq!(verdict["permitted"], true);
+        assert_eq!(verdict["confirmed"], false);
+        value["state"]["candidate"] = value["state"]["fallback"].clone();
+        assert_eq!(
+            Status::parse(&value.to_string()).unwrap().rollback(),
+            json!({"permitted":false, "target":null, "reason":"candidate_pending",
+                "targetVersion":null, "targetGeneration":null, "confirmed":null,
+                "requiresReboot":true})
         );
     }
 

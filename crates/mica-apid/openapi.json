@@ -8833,7 +8833,7 @@
         "operationId": "api_v1_update_state",
         "responses": {
           "200": {
-            "description": "Authenticated native deployment state: `boot` (running deployment and kernel/root IDs, content verification and Secure Boot), `state` (current, fallback, candidate, failed deployment IDs and highestGeneration), `deployments` (version, generation, components and remaining trials), `rollback` (permitted, target and reason), `install`, `last_action`, and `lifecycle` (acquisition progress, workspace, policy and reboot gate). A failure carries a closed code beside its detail: `unknown`, `client-spawn-failed`, `client-exit-failure`, `client-output-unparseable`, `unverified-deployment-path`, `no-source-configured`, `policy-not-loaded`, `probe-failed`, `policy-invalid`, `network-offline`, `network-metered`, `client-unavailable`, `deployment-discarded`, `check-refused`, `no-newer-release`, `fetch-refused`, `clock-untrusted`, `outside-window`, `deployment-status-unknown`, `reboot-pending`, `workspace-unready`, `recheck-failed`, `recheck-refused`, `superseded`, `install-refused`, `waits-for-extension`, `reboot-gate-closed`, `install-in-flight`, `health-blocking`. Rollback reasons: `candidate_pending`, `running_not_confirmed`, `no_usable_fallback`. Failed deployment IDs and the generation floor are enforced by the native backend for every install.",
+            "description": "Authenticated native deployment state: `boot` (running deployment and kernel/root IDs, content verification and Secure Boot), `state` (current, fallback, candidate, failed deployment IDs and highestGeneration), `deployments` (version, generation, components and remaining trials), `rollback` (permitted, target and reason; the target's version, generation and whether it was confirmed, from its verified deployment, `null` when unknown; requiresReboot), `install`, `last_action`, and `lifecycle` (acquisition progress, workspace, policy and reboot gate). A failure carries a closed code beside its detail: `unknown`, `client-spawn-failed`, `client-exit-failure`, `client-output-unparseable`, `unverified-deployment-path`, `no-source-configured`, `policy-not-loaded`, `probe-failed`, `policy-invalid`, `network-offline`, `network-metered`, `client-unavailable`, `deployment-discarded`, `check-refused`, `no-newer-release`, `fetch-refused`, `clock-untrusted`, `outside-window`, `deployment-status-unknown`, `reboot-pending`, `workspace-unready`, `recheck-failed`, `recheck-refused`, `superseded`, `install-refused`, `waits-for-extension`, `reboot-gate-closed`, `install-in-flight`, `health-blocking`. Rollback reasons: `candidate_pending`, `running_not_confirmed`, `no_usable_fallback`. Failed deployment IDs and the generation floor are enforced by the native backend for every install.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9867,8 +9867,24 @@
         "tags": [
           "update"
         ],
-        "summary": "Reject the confirmed running deployment and select its retained fallback.\nThe native backend revalidates this operation under its transaction lock.\nReboot remains a separate action governed by the shared reboot gate.",
+        "summary": "Reject the confirmed running deployment and select its retained fallback.\nThe native backend revalidates this operation under its transaction lock.\nReboot remains a separate action governed by the shared reboot gate. The\nbody is optional: an `expectedTarget` that is no longer the verdict's\ntarget is refused (`target_changed`), and no body or `{}` rolls back to\nthe verdict's target.",
         "operationId": "api_v1_update_rollback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RollbackRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Rollback committed; reboot to run the retained fallback",
@@ -9876,6 +9892,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RollbackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or expected target (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -9911,7 +9937,7 @@
             }
           },
           "409": {
-            "description": "Native state refuses rollback: `candidate_pending`, `running_not_confirmed`, `no_usable_fallback`, or `rollback_refused`",
+            "description": "Native state refuses rollback: `candidate_pending`, `running_not_confirmed`, `no_usable_fallback`, or `rollback_refused`; or the target is no longer the expected one (`target_changed`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -13572,6 +13598,19 @@
       },
       "ResourceValue": {
         "description": "The body of a resource `GET`: the value at the dot-path, as micad holds it.\n\nAny JSON value: a dot-path can name a subtree, an array or a scalar.\n\nSecrets are replaced by the string `\"<redacted>\"`, which a client can\nreceive anywhere inside the body. Every field named `psk`, `passwordHash`,\n`password_hash`, `hash`, `privateKey` or `presharedKey` carries the\nsentinel instead of its value, at any depth and inside arrays, and so does the whole body when the\ndot-path names one of those fields directly.\n\nThe sentinel is read-only: writing it back is refused at **422** rather\nthan stored, because storing it would destroy the credential."
+      },
+      "RollbackRequest": {
+        "type": "object",
+        "description": "The target the caller confirmed; without one, the rollback goes to\nwhatever target the verdict names.",
+        "properties": {
+          "expectedTarget": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
       },
       "RollbackResponse": {
         "type": "object",

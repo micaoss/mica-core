@@ -176,6 +176,22 @@ pub(crate) struct RollbackResponse {
     pub(super) next_step: String,
 }
 
+/// The target the caller confirmed; without one, the rollback goes to
+/// whatever target the verdict names.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RollbackRequest {
+    #[serde(default, deserialize_with = "expected_target")]
+    #[schema(value_type = String, min_length = 64, max_length = 64, pattern = "^[0-9a-f]{64}$")]
+    pub(super) expected_target: Option<String>,
+}
+
+fn expected_target<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    deployment_id(deserializer).map(Some)
+}
+
 pub(super) fn rollback_reason_code(reason: Option<&str>) -> &'static str {
     reason
         .and_then(|reason| ROLLBACK_REASONS.into_iter().find(|known| *known == reason))
@@ -184,13 +200,18 @@ pub(super) fn rollback_reason_code(reason: Option<&str>) -> &'static str {
 
 /// Reject the confirmed running deployment and select its retained fallback.
 /// The native backend revalidates this operation under its transaction lock.
-/// Reboot remains a separate action governed by the shared reboot gate.
+/// Reboot remains a separate action governed by the shared reboot gate. The
+/// body is optional: an `expectedTarget` that is no longer the verdict's
+/// target is refused (`target_changed`), and no body or `{}` rolls back to
+/// the verdict's target.
 #[utoipa::path(post, path = V1_UPDATE_ROLLBACK_PATH, context_path = API, tag = "update",
+    request_body(content = Option<RollbackRequest>),
     responses(
         (status = 200, description = "Rollback committed; reboot to run the retained fallback", body = RollbackResponse),
+        (status = 400, description = "Invalid JSON or expected target (`request_invalid`)", body = ApiError),
         (status = 401, description = "Authentication required (`not_authenticated`)", body = ApiError),
         (status = 403, description = "Browser CSRF token required (`csrf_invalid`)", body = ApiError),
-        (status = 409, description = "Native state refuses rollback: `candidate_pending`, `running_not_confirmed`, `no_usable_fallback`, or `rollback_refused`", body = ApiError),
+        (status = 409, description = "Native state refuses rollback: `candidate_pending`, `running_not_confirmed`, `no_usable_fallback`, or `rollback_refused`; or the target is no longer the expected one (`target_changed`)", body = ApiError),
         (status = 500, description = "The native backend refused or failed rollback (`micad_failed`)", body = ApiError),
         (status = 503, description = "micad is unreachable (`micad_unreachable`)", body = ApiError),
         (status = 504, description = "micad timed out (`micad_timeout`)", body = ApiError),
@@ -200,7 +221,12 @@ pub(crate) async fn api_v1_update_rollback(
     _credential: ApiCredential,
     State(state): State<AppState>,
     Source(source): Source,
+    body: Result<Option<Json<RollbackRequest>>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
+    let expected = match body {
+        Ok(body) => body.and_then(|Json(request)| request.expected_target),
+        Err(rejection) => return body_rejection(rejection),
+    };
     let update = match state.api.get_update_state().await {
         Ok(update) => update,
         Err(error) => return update_bus_error(&error),
@@ -234,6 +260,21 @@ pub(crate) async fn api_v1_update_rollback(
             ),
         );
     };
+    if expected
+        .as_deref()
+        .is_some_and(|expected| expected != target)
+    {
+        state
+            .audit
+            .record("update-rollback", "refused: target_changed", &source);
+        return api_response(
+            StatusCode::CONFLICT,
+            ApiError::apid(
+                "target_changed",
+                format!("the rollback target is now {target}, not the expected one"),
+            ),
+        );
+    }
     match state.api.rollback_deployment(running).await {
         Ok(()) => {
             state.audit.record(
