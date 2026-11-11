@@ -1944,6 +1944,7 @@ make package-gate          # the package rules over both pools
 | `make boot-shutdown-test` | The boot and shutdown suites and the UAPI proof (`--arm-abi` adds aarch64) |
 | `make file-transaction-faults` | mica-deploy's transactions interrupted at every IO |
 | `make dbus-policy-test` | The micad bus policy against a real bus (root, host `dbus-daemon`) |
+| `make pool-guard` | Before a push: a fresh amd64 pool against the latest release (`mica-tools pool guard`, as CI's gate does), so a producer whose inputs changed since its version was published is caught until its version is bumped; amd64 alone, for the local arm64 build is a cross build |
 | `make package-gate` | Pool rules (names, architecture, no commit stamp, no path in two packages, copyright, no conffiles, POSIX maintainer scripts); the declared packages and core components at their versions and no other item, each core record an unsigned `mica/core/v1` naming its own image, exact dependency versions, enablement links, nothing outside `/usr` and `/etc` in a component, component hash trees that verify, and one producer per pool rebuilt on an empty-cache builder to the same bytes (the core components' on the first pool) |
 
 ### 7.3 Producers and versions

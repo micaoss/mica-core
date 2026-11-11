@@ -3,7 +3,7 @@
 
 MICA_ARCH ?= arm64
 
-.PHONY: help deps deps-check rust-gate dbus-policy-test apid-ui-build-contract-test boot-shutdown-test file-transaction-faults deb pool offline package-gate publish lint check
+.PHONY: help deps deps-check rust-gate dbus-policy-test apid-ui-build-contract-test boot-shutdown-test file-transaction-faults pool-guard deb pool offline package-gate publish lint check
 
 help:
 	@echo "  deps                check locks/ and verify every pinned lock against its release (anonymous)"
@@ -13,6 +13,7 @@ help:
 	@echo "  rust-gate           fmt, clippy (warnings denied by [workspace.lints]), nextest, doctests, cargo-deny, OpenAPI, in the mica-build-env rust image"
 	@echo "  boot-shutdown-test  the shutdown suite and the lifecycle UAPI unit (BOOT_SHUTDOWN_ARM_ABI=1 adds aarch64)"
 	@echo "  file-transaction-faults  mica-deploy transactions interrupted at every IO boundary"
+	@echo "  pool-guard          a fresh amd64 pool against the latest release: a changed producer has a new version (before a push)"
 	@echo "  dbus-policy-test    the micad D-Bus policy against a real dbus-daemon (root, host dbus-daemon)"
 	@echo "  check               lint, apid-ui-build-contract-test, rust-gate, boot-shutdown-test, file-transaction-faults"
 	@echo "  deb                 every producer for MICA_ARCH (amd64|arm64|armhf) into _out/debs/<arch>/pool"
@@ -37,6 +38,8 @@ boot-shutdown-test:
 	bash scripts/gate/boot-shutdown-test.sh $(if $(BOOT_SHUTDOWN_ARM_ABI),--arm-abi) $(if $(BOOT_SHUTDOWN_ARMHF_ABI),--armhf-abi)
 file-transaction-faults:
 	bash scripts/gate/file-ab-faults/run.sh
+pool-guard:
+	bash scripts/gate/pool-guard.sh
 dbus-policy-test:
 	bash scripts/gate/dbus-policy-test.sh
 
