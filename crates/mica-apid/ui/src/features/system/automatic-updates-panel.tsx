@@ -11,6 +11,7 @@ import { Panel } from '@/shared/components/panel'
 import { Input } from '@/shared/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select'
 import { Spinner } from '@/shared/components/ui/spinner'
+import { Toggle } from '@/shared/components/ui/toggle'
 import { failureDetail } from '@/shared/feedback/toast'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 
@@ -296,52 +297,71 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
   )
 }
 
-/// The maintenance windows, edited as the list the document holds.
+const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+
+/// The maintenance windows, edited as the list the document holds. Each
+/// window names its days; one ending at or before its start runs into the
+/// next day, and an equal start and end is a whole day.
 function WindowsPanel({ windows }: { windows?: MaintenanceWindow[] }) {
   const { t } = useTranslation()
   const write = useWriteConfig(t('system.update.automatic.windowsSaved'), t('system.update.automatic.saveWindows'))
-  const [draft, setDraft] = useState<{ days: string; start: string; end: string }[]>()
+  const [draft, setDraft] = useState<{ days: string[]; start: string; end: string }[]>()
+  const [dayless, setDayless] = useState(false)
   const rows = draft ?? (windows ?? []).map((window) => ({
-    days: (window.days ?? []).join(', '),
+    days: window.days ?? [],
     start: window.start ?? '',
     end: window.end ?? '',
   }))
-  const change = (index: number, key: 'days' | 'start' | 'end', value: string) =>
-    setDraft(rows.map((row, at) => at === index ? { ...row, [key]: value } : row))
+  const change = (index: number, patch: Partial<(typeof rows)[number]>) =>
+    setDraft(rows.map((row, at) => at === index ? { ...row, ...patch } : row))
+  const toggle = (index: number, day: string, on: boolean) =>
+    change(index, { days: DAYS.filter((known) => known === day ? on : rows[index].days.includes(known)) })
   return (
     <Panel title={t('system.update.automatic.windowsTitle')} description={t('system.update.automatic.windowsDescription')}>
       <form
         className="grid gap-4"
         onSubmit={(event: FormEvent) => {
           event.preventDefault()
+          const missing = rows.some((row) => row.days.length === 0)
+          setDayless(missing)
+          if (missing) return
           write.mutate({
             maintenance: {
-              windows: rows.map((row) => ({
-                days: row.days.split(',').map((day) => day.trim().toLowerCase()).filter(Boolean),
-                start: row.start.trim(),
-                end: row.end.trim(),
-              })),
+              windows: rows.map((row) => ({ days: row.days, start: row.start.trim(), end: row.end.trim() })),
             },
           })
         }}
       >
         {rows.length === 0 ? <p className="py-4 text-center text-sm text-muted-foreground">{t('system.update.automatic.noWindows')}</p> : null}
         {rows.map((row, index) => (
-          <div className="grid items-end gap-3 sm:grid-cols-[1fr_auto_auto_auto]" key={index}>
-            <FormField label={t('system.update.automatic.windowDays')} hint={t('system.update.automatic.windowDaysHint')}>
-              {(id) => <Input id={id} value={row.days} onChange={(event) => change(index, 'days', event.target.value)} placeholder="mon, thu" />}
-            </FormField>
-            <FormField label={t('system.update.automatic.windowStart')}>
-              {(id) => <Input id={id} className="sm:w-28" value={row.start} onChange={(event) => change(index, 'start', event.target.value)} placeholder="02:00" required />}
-            </FormField>
-            <FormField label={t('system.update.automatic.windowEnd')}>
-              {(id) => <Input id={id} className="sm:w-28" value={row.end} onChange={(event) => change(index, 'end', event.target.value)} placeholder="04:00" required />}
-            </FormField>
-            <Button type="button" variant="outline" onClick={() => setDraft(rows.filter((_, at) => at !== index))}>{t('system.update.automatic.removeWindow')}</Button>
+          <div role="group" aria-label={t('system.update.automatic.windowName', { number: index + 1 })} className="grid gap-3 rounded-lg border p-3" key={index}>
+            <div className="flex flex-wrap items-center gap-1">
+              {DAYS.map((day) => (
+                <Toggle key={day} variant="outline" size="sm" pressed={row.days.includes(day)} onPressedChange={(on) => toggle(index, day, on)}>
+                  {t(`system.update.automatic.days.${day}`)}
+                </Toggle>
+              ))}
+              <Button type="button" variant="ghost" size="sm" onClick={() => change(index, { days: [...DAYS] })}>{t('system.update.automatic.everyDay')}</Button>
+            </div>
+            <div className="grid items-end gap-3 sm:grid-cols-[auto_auto_1fr_auto]">
+              <FormField label={t('system.update.automatic.windowStart')}>
+                {(id) => <Input id={id} className="sm:w-28" type="time" value={row.start} onChange={(event) => change(index, { start: event.target.value })} required />}
+              </FormField>
+              <FormField label={t('system.update.automatic.windowEnd')}>
+                {(id) => <Input id={id} className="sm:w-28" type="time" value={row.end} onChange={(event) => change(index, { end: event.target.value })} required />}
+              </FormField>
+              <p className="self-center text-sm text-muted-foreground">
+                {row.start && row.end && row.end <= row.start
+                  ? t(row.end === row.start ? 'system.update.automatic.wholeDay' : 'system.update.automatic.nextDay', { end: row.end })
+                  : null}
+              </p>
+              <Button type="button" variant="outline" onClick={() => setDraft(rows.filter((_, at) => at !== index))}>{t('system.update.automatic.removeWindow')}</Button>
+            </div>
           </div>
         ))}
+        {dayless ? <Callout tone="danger" title={t('system.update.automatic.windowNeedsDays')} /> : null}
         <div className="flex flex-wrap justify-end gap-3">
-          <Button type="button" variant="secondary" onClick={() => setDraft([...rows, { days: '', start: '02:00', end: '04:00' }])}>{t('system.update.automatic.addWindow')}</Button>
+          <Button type="button" variant="secondary" onClick={() => setDraft([...rows, { days: [...DAYS], start: '02:00', end: '04:00' }])}>{t('system.update.automatic.addWindow')}</Button>
           <Button type="submit" disabled={write.isPending}>
             {write.isPending ? <Spinner /> : null}{t('system.update.automatic.saveWindows')}
           </Button>

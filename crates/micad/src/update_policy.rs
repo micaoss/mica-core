@@ -384,11 +384,11 @@ mod tests {
         let path = dir.path().join("updates.json");
         for (body, needle) in [
             (
-                r#"{"maintenance": {"windows": [{"start": "2:00", "end": "04:00"}]}}"#,
+                r#"{"maintenance": {"windows": [{"days": ["mon"], "start": "2:00", "end": "04:00"}]}}"#,
                 "not HH:MM",
             ),
             (
-                r#"{"maintenance": {"windows": [{"start": "02:00", "end": "24:00"}]}}"#,
+                r#"{"maintenance": {"windows": [{"days": ["mon"], "start": "02:00", "end": "24:00"}]}}"#,
                 "not HH:MM",
             ),
             (
@@ -500,9 +500,13 @@ mod tests {
     }
 
     #[test]
-    fn a_dayless_window_opens_every_day() {
+    fn a_window_on_every_day_opens_every_day() {
         let mut policy = effective();
-        policy.maintenance.windows = vec![window(&[], "02:00", "04:00")];
+        policy.maintenance.windows = vec![window(
+            &["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+            "02:00",
+            "04:00",
+        )];
         let loaded = loaded(policy);
         for day in 7..14 {
             let now = Utc

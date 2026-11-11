@@ -187,13 +187,13 @@ pub struct MaintenancePolicy {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct MaintenanceWindow {
-    /// Days the window opens on: `mon`..`sun`. Empty means every day.
+    /// Days the window opens on: `mon`..`sun`, at least one.
     #[serde(default)]
     pub days: Vec<String>,
     /// Opening time, `HH:MM` UTC.
     pub start: String,
-    /// Closing time, `HH:MM` UTC. A close at or before the open wraps past
-    /// midnight into the next day.
+    /// Closing time, `HH:MM` UTC. A close at or before the open continues
+    /// into the next day; a close equal to the open is 24 hours.
     pub end: String,
 }
 

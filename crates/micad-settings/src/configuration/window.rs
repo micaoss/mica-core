@@ -7,38 +7,34 @@ use super::*;
 impl MaintenanceWindow {
     /// Whether `now` (UTC) falls inside this window.
     ///
-    /// A window whose end is at or before its start wraps past midnight; a
-    /// window listing no days opens every day.
+    /// A window opens on each day it names; one whose end is at or before its
+    /// start continues into the next day.
     pub fn contains(&self, now: DateTime<Utc>) -> bool {
         // Validation ran at load; an unparseable window here (impossible via
         // `load_updates`) simply never matches, which is the closed side.
-        let Some(start) = minutes_of_day(&self.start) else {
-            return false;
-        };
-        let Some(end) = minutes_of_day(&self.end) else {
+        let (Some(start), Some(span)) = (minutes_of_day(&self.start), self.span()) else {
             return false;
         };
         let now_week = minutes_of_week(now);
-        let days: Vec<u32> = if self.days.is_empty() {
-            (0..7).collect()
+        self.days
+            .iter()
+            .filter_map(|day| day_index(day))
+            .any(|day| {
+                let open = day * 1440 + start;
+                (now_week + WEEK_MINUTES - open) % WEEK_MINUTES < span
+            })
+    }
+
+    /// How many minutes the window stays open: 23:00-01:00 is two hours into
+    /// the next day, and an equal start and end is a full 24 hours.
+    pub(super) fn span(&self) -> Option<u32> {
+        let start = minutes_of_day(&self.start)?;
+        let end = minutes_of_day(&self.end)?;
+        Some(if end > start {
+            end - start
         } else {
-            self.days.iter().filter_map(|day| day_index(day)).collect()
-        };
-        for day in days {
-            let open = day * 1440 + start;
-            let span = if end > start {
-                end - start
-            } else {
-                // Wrapping: 23:00–01:00 is two hours into the next day. Equal
-                // start and end reads as a full 24 hours.
-                1440 - start + end
-            };
-            let offset = (now_week + WEEK_MINUTES - open) % WEEK_MINUTES;
-            if offset < span {
-                return true;
-            }
-        }
-        false
+            1440 - start + end
+        })
     }
 }
 

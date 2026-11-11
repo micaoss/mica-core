@@ -438,7 +438,7 @@ fn auto_with_a_window_in_the_same_patch_is_accepted() {
     let saved = write_updates(
         &path,
         r#"{ "policy": "auto",
-             "maintenance": { "windows": [ { "start": "02:00", "end": "04:00" } ] } }"#,
+             "maintenance": { "windows": [ { "days": ["mon"], "start": "02:00", "end": "04:00" } ] } }"#,
     )
     .expect("the rule is about the resulting document, not about the order of two writes");
 
@@ -459,7 +459,7 @@ fn a_patch_naming_a_trust_anchor_is_refused_by_that_key() {
         r#"{ "signingKeyIds": ["abc"] }"#,
         r#"{ "source": { "rootPath": "/tmp/root.json" } }"#,
         r#"{ "source": { "keyring": "/tmp/keys" } }"#,
-        r#"{ "maintenance": { "windows": [ { "start": "02:00", "end": "04:00", "keyring": "x" } ] } }"#,
+        r#"{ "maintenance": { "windows": [ { "days": ["mon"], "start": "02:00", "end": "04:00", "keyring": "x" } ] } }"#,
     ];
     for patch in patches {
         let err = write_updates(&path, patch).expect_err("an anchor is not the operator's");
@@ -635,4 +635,92 @@ fn a_stored_http_source_is_kept_but_not_written_anew() {
         )
         .is_err()
     );
+}
+
+/// A window names its days: none is refused when the document is read and
+/// when it is written, rather than read as every day.
+#[test]
+fn a_window_without_days_is_refused_on_read_and_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("updates.json");
+    for window in [
+        json!({ "start": "02:00", "end": "04:00" }),
+        json!({ "days": [], "start": "02:00", "end": "04:00" }),
+    ] {
+        let document = json!({ "maintenance": { "windows": [window] } }).to_string();
+        std::fs::write(&path, &document).unwrap();
+        let error = load_updates(&path).unwrap_err().to_string();
+        assert!(error.contains("names no days"), "{error}");
+
+        std::fs::write(&path, r#"{ "policy": "off" }"#).unwrap();
+        let error = write_updates(&path, &document).unwrap_err().to_string();
+        assert!(error.contains("names no days"), "{error}");
+    }
+}
+
+/// Windows are compared as the week intervals their days make: an overlap
+/// is refused, a window ending where the next begins is not, and a window
+/// running past midnight -- or past Sunday into Monday -- covers the start
+/// of the next day.
+#[test]
+fn overlapping_windows_are_refused_and_adjacent_ones_are_not() {
+    let window =
+        |days: &[&str], start: &str, end: &str| json!({ "days": days, "start": start, "end": end });
+    let overlapping = [
+        vec![
+            window(&["mon"], "02:00", "04:00"),
+            window(&["mon"], "03:00", "05:00"),
+        ],
+        vec![
+            window(&["sun"], "23:00", "01:00"),
+            window(&["mon"], "00:30", "02:00"),
+        ],
+        vec![
+            window(&["mon"], "02:00", "02:00"),
+            window(&["tue"], "01:00", "01:30"),
+        ],
+        vec![window(&["mon", "mon"], "02:00", "03:00")],
+        vec![
+            window(&["mon", "wed"], "22:00", "23:00"),
+            window(&["wed"], "22:30", "23:30"),
+        ],
+    ];
+    let adjacent = [
+        vec![
+            window(&["mon"], "02:00", "04:00"),
+            window(&["mon"], "04:00", "06:00"),
+        ],
+        vec![
+            window(&["sun"], "23:00", "01:00"),
+            window(&["mon"], "01:00", "02:00"),
+        ],
+        vec![
+            window(&["mon"], "02:00", "02:00"),
+            window(&["tue"], "02:00", "03:00"),
+        ],
+        vec![window(
+            &["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+            "00:00",
+            "00:00",
+        )],
+    ];
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("updates.json");
+    for windows in overlapping {
+        std::fs::write(
+            &path,
+            json!({ "maintenance": { "windows": windows } }).to_string(),
+        )
+        .unwrap();
+        let error = load_updates(&path).unwrap_err().to_string();
+        assert!(error.contains("overlap"), "{windows:?}: {error}");
+    }
+    for windows in adjacent {
+        std::fs::write(
+            &path,
+            json!({ "maintenance": { "windows": windows } }).to_string(),
+        )
+        .unwrap();
+        assert!(load_updates(&path).is_ok(), "{windows:?}");
+    }
 }

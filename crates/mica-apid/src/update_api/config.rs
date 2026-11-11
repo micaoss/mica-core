@@ -132,7 +132,7 @@ pub(crate) struct UpdateConfigWrite(pub(super) Value);
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
         (status = 409, description = "The document already on the device does not load, so there is no base to change; nothing was written (`policy_refused`)", body = ApiError),
-        (status = 422, description = "The patch names a key this document does not have, a trust anchor, or a value the reader would refuse — `auto` with no maintenance window, a window that is not `HH:MM` (`validation_failed`)", body = ApiError),
+        (status = 422, description = "The patch names a key this document does not have, a trust anchor, or a value the reader would refuse — `auto` with no maintenance window, a window that is not `HH:MM`, names no days or overlaps another (`validation_failed`)", body = ApiError),
         (status = 500, description = "micad could not store it (`micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`)", body = ApiError),

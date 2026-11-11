@@ -218,7 +218,7 @@ fn clock_face(offset: Wall) -> String {
 /// one.
 fn open_window() -> String {
     format!(
-        r#"{{"start": "{}", "end": "{}"}}"#,
+        r#"{{"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "start": "{}", "end": "{}"}}"#,
         clock_face(-Wall::hours(2)),
         clock_face(Wall::hours(2))
     )
@@ -227,7 +227,7 @@ fn open_window() -> String {
 /// A window shut right now: it opens in two hours.
 fn shut_window() -> String {
     format!(
-        r#"{{"start": "{}", "end": "{}"}}"#,
+        r#"{{"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "start": "{}", "end": "{}"}}"#,
         clock_face(Wall::hours(2)),
         clock_face(Wall::hours(4))
     )

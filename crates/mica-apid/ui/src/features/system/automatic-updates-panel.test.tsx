@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { jsonResponse, renderPanel, stubFetch } from '@/shared/testing/panel'
@@ -256,14 +256,14 @@ describe('the automatic update policy', () => {
     })
   })
 
-  it('edits the window list the device holds rather than a single window', async () => {
+  it('edits the window list the device holds, by day, with an every-day shortcut', async () => {
     const twoWindows = {
       lifecycle: {
         policy: {
           ...policy.lifecycle.policy,
           maintenanceWindows: [
             { days: ['mon'], start: '02:00', end: '04:00' },
-            { days: [], start: '22:00', end: '23:00' },
+            { days: ['sat', 'sun'], start: '22:00', end: '01:00' },
           ],
         },
       },
@@ -275,18 +275,43 @@ describe('the automatic update policy', () => {
     })
     renderPanel(<AutomaticUpdatesPanel />)
 
-    expect(await screen.findAllByLabelText(/From \(UTC\)/)).toHaveLength(2)
+    const first = await screen.findByRole('group', { name: 'Window 1' })
+    const second = screen.getByRole('group', { name: 'Window 2' })
+    expect(within(first).getByRole('button', { name: 'Mon' }).getAttribute('aria-pressed')).toBe('true')
+    expect(within(first).getByRole('button', { name: 'Tue' }).getAttribute('aria-pressed')).toBe('false')
+    // A window ending at or before its start runs into the next day, and says so.
+    expect(within(second).getByText('Ends 01:00 the next day.')).toBeTruthy()
+    expect(within(first).queryByText(/the next day/)).toBeNull()
+
+    await userEvent.click(within(first).getByRole('button', { name: 'Every day' }))
     await userEvent.click(screen.getByRole('button', { name: 'Save windows' }))
 
+    await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/update/config')).toBe(true))
     const call = fetch.mock.calls.find(([input]) => String(input) === '/api/v1/update/config')
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
       maintenance: {
         windows: [
-          { days: ['mon'], start: '02:00', end: '04:00' },
-          { days: [], start: '22:00', end: '23:00' },
+          { days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], start: '02:00', end: '04:00' },
+          { days: ['sat', 'sun'], start: '22:00', end: '01:00' },
         ],
       },
     })
+  })
+
+  it('does not send a window that names no day', async () => {
+    const oneWindow = { lifecycle: { policy: { ...policy.lifecycle.policy, maintenanceWindows: [{ days: ['mon'], start: '02:00', end: '04:00' }] } } }
+    const fetch = stubFetch({
+      '/api/v1/update': oneWindow,
+      '/api/v1/provisioning/status': bakedOnly,
+      'POST /api/v1/update/config': () => jsonResponse({}),
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    await userEvent.click(within(await screen.findByRole('group', { name: 'Window 1' })).getByRole('button', { name: 'Mon' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save windows' }))
+
+    expect(await screen.findByText('Choose at least one day for each window.')).toBeTruthy()
+    expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/update/config')).toBe(false)
   })
 
   it('reports a refusal from the device verbatim, naming the rule it broke', async () => {

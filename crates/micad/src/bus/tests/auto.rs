@@ -249,7 +249,8 @@ pub(super) fn auto_document(open: bool, reboot_policy: &str) -> String {
         r#"{{"policy": "auto", "checkIntervalMinutes": 60,
              "rebootPolicy": "{reboot_policy}",
              "source": {{"url": "http://mirror/tuf"}},
-             "maintenance": {{"windows": [{{"start": "{start}", "end": "{end}"}}]}}}}"#
+             "maintenance": {{"windows": [{{"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                 "start": "{start}", "end": "{end}"}}]}}}}"#
     )
 }
 
@@ -262,7 +263,7 @@ pub(super) async fn the_automatic_and_manual_paths_meet_the_same_gate_set() {
     // The check, refused by network mode. Both routes call `admit_check`.
     let device = Device::new(
         r#"{"policy": "auto", "network": {"mode": "offline"},
-            "maintenance": {"windows": [{"start": "00:00", "end": "23:59"}]}}"#,
+            "maintenance": {"windows": [{"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "start": "00:00", "end": "00:00"}]}}"#,
     );
     let manual = device
         .lifecycle
@@ -298,7 +299,7 @@ pub(super) async fn the_automatic_and_manual_paths_meet_the_same_gate_set() {
     let device = Device::new(
         r#"{"policy": "auto", "source": {"url": "http://mirror/tuf"},
             "network": {"mode": "metered", "meteredAllowsFetch": false},
-            "maintenance": {"windows": [{"start": "00:00", "end": "23:59"}]}}"#,
+            "maintenance": {"windows": [{"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "start": "00:00", "end": "00:00"}]}}"#,
     );
     let manual = device
         .lifecycle

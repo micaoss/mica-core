@@ -9060,7 +9060,7 @@
             }
           },
           "422": {
-            "description": "The patch names a key this document does not have, a trust anchor, or a value the reader would refuse — `auto` with no maintenance window, a window that is not `HH:MM` (`validation_failed`)",
+            "description": "The patch names a key this document does not have, a trust anchor, or a value the reader would refuse — `auto` with no maintenance window, a window that is not `HH:MM`, names no days or overlaps another (`validation_failed`)",
             "content": {
               "application/json": {
                 "schema": {

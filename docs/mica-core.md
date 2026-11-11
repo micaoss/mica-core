@@ -1271,7 +1271,9 @@ the optional `channels`, the channel followed for each kind of set as `{"core": 
 not named following `general`; `http.credentialHosts`; `fleet`). The operator's document
 overrides `policy`, `checkIntervalMinutes`, `source.url` and `channels`, and alone carries
 `checkAt`, `source.maxBytes` (the fetch budget, 500 MB by default), `network` (`mode` `online`,
-`metered` or `offline`, and `meteredAllowsFetch`), `maintenance.windows` (UTC), `rebootPolicy` and
+`metered` or `offline`, and `meteredAllowsFetch`), `maintenance.windows` (UTC; each names its
+days, `mon`..`sun`, at least one; an end at or before the start continues into the next day and an
+equal one is 24 hours; no two windows overlap, a window ending where another begins is allowed), `rebootPolicy` and
 `rebootGate`. `/mica/config/fleet.json` is `mica/fleet-config/v1` (`enabled`, `reporting`, `url`)
 over the baked `fleet`; the provisioning status reports it, and nothing on the device acts on it
 yet.

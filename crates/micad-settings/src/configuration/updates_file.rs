@@ -71,8 +71,9 @@ pub(super) fn anchor_key(value: &Value) -> Option<String> {
 }
 
 /// Validate what serde cannot: the schema tag when the document names one,
-/// that window times parse and days are day names, and that a document
-/// *naming* `auto` names a window to install in.
+/// that window times parse, that each window names its days and no two
+/// windows overlap, and that a document *naming* `auto` names a window to
+/// install in.
 pub fn validate(document: &UpdatesDocument) -> Result<(), String> {
     if let Some(schema) = &document.schema
         && schema != UPDATES_SCHEMA_TAG
@@ -82,6 +83,12 @@ pub fn validate(document: &UpdatesDocument) -> Result<(), String> {
         ));
     }
     for window in &document.maintenance.windows {
+        if window.days.is_empty() {
+            return Err(format!(
+                "maintenance window {}-{} names no days",
+                window.start, window.end
+            ));
+        }
         minutes_of_day(&window.start)
             .ok_or_else(|| format!("maintenance window start `{}` is not HH:MM", window.start))?;
         minutes_of_day(&window.end)
@@ -91,6 +98,9 @@ pub fn validate(document: &UpdatesDocument) -> Result<(), String> {
                 format!("maintenance window day `{day}` is not mon/tue/wed/thu/fri/sat/sun")
             })?;
         }
+    }
+    if let Some(error) = overlap(&document.maintenance.windows) {
+        return Err(error);
     }
     if let Some(check_at) = document.check_at.as_ref().and_then(Option::as_ref) {
         minutes_of_day(check_at).ok_or_else(|| format!("checkAt `{check_at}` is not HH:MM"))?;
@@ -338,3 +348,43 @@ pub fn save_updates(path: &Path, document: &UpdatesDocument) -> Result<(), Confi
 // ---------------------------------------------------------------------------
 // The resolution
 // ---------------------------------------------------------------------------
+
+/// The first overlap between the windows, as week intervals: each day a
+/// window names opens one, and a window running past Sunday continues into
+/// Monday. A window ending where another begins does not overlap it. Runs
+/// after each window's times and days were checked.
+fn overlap(windows: &[MaintenanceWindow]) -> Option<String> {
+    let mut intervals = Vec::new();
+    for (index, window) in windows.iter().enumerate() {
+        let (Some(start), Some(span)) = (minutes_of_day(&window.start), window.span()) else {
+            continue;
+        };
+        for day in window.days.iter().filter_map(|day| day_index(day)) {
+            let open = day * 1440 + start;
+            let close = open + span;
+            intervals.push((open, close.min(WEEK_MINUTES), index));
+            if close > WEEK_MINUTES {
+                intervals.push((0, close - WEEK_MINUTES, index));
+            }
+        }
+    }
+    intervals.sort_unstable();
+    intervals.windows(2).find_map(|pair| {
+        let ((_, close, first), (open, _, second)) = (pair[0], pair[1]);
+        (open < close).then(|| {
+            let name = |index: usize| {
+                let window = &windows[index];
+                format!("{} {}-{}", window.days.join(","), window.start, window.end)
+            };
+            if first == second {
+                format!("maintenance window {} overlaps itself", name(first))
+            } else {
+                format!(
+                    "maintenance windows {} and {} overlap",
+                    name(first.min(second)),
+                    name(first.max(second))
+                )
+            }
+        })
+    })
+}
