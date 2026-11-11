@@ -314,11 +314,19 @@ impl MicadService {
             .await
             .map_err(|error| fdo::Error::Failed(format!("query deployments: {error:#}")))?;
         self.update.refresh(&status).await;
+        let last_rollback = self
+            .rollback_record
+            .as_ref()
+            .and_then(|record| record.outcome(&status));
         let mut inner = self.inner.write().await;
         let entry = update_entry(&mut inner.state);
         status
             .merge_into(entry)
             .map_err(|error| fdo::Error::Failed(error.to_string()))?;
+        match last_rollback {
+            Some(outcome) => entry.insert("lastRollback".into(), outcome),
+            None => entry.remove("lastRollback"),
+        };
         Ok(Value::Object(entry.clone()).to_string())
     }
 
@@ -360,6 +368,15 @@ impl MicadService {
             _ => unreachable!("validated action"),
         }
         .map_err(|error| fdo::Error::Failed(format!("{action}: {error:#}")))?;
+        // The target is the one the verdict named before the rollback; the
+        // next boot is compared with it.
+        if action == "rollback"
+            && let Some(record) = &self.rollback_record
+            && let Some(target) = status.rollback()["target"].as_str()
+            && let Err(error) = record.stage(&status, target)
+        {
+            tracing::warn!(error = %format!("{error:#}"), "the rollback target could not be recorded");
+        }
         update_entry(&mut self.inner.write().await.state).insert(
             "last_action".into(),
             serde_json::json!({"action":action,"deploymentId":id,"requested_by":sender}),

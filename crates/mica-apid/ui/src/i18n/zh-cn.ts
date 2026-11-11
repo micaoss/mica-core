@@ -1608,6 +1608,17 @@ export const zhCN: Translation = {
           targetNotConfirmed: '保留部署从未被确认，因此不提供回退。',
           targetChanged: '回退目标已变化，请重新查看并再次确认。',
         },
+        outcome: {
+          generation: '第 {{generation}} 代',
+          took: '已回退到{{target}}。',
+          didNotTake: '设备启动的是{{booted}}，回退到{{target}}未生效。',
+          didNotTakeBecause: '设备启动的是{{booted}}，回退到{{target}}未生效：{{reason}}。',
+          reasons: {
+            target_failed: '目标部署已被标记为失败',
+            target_exhausted: '目标部署的启动尝试次数已用尽',
+            target_missing: '目标部署已不在设备上',
+          },
+        },
       },
     },
   },

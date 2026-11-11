@@ -8,6 +8,8 @@ import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { Panel } from '@/shared/components/panel'
 import { StatusDot } from '@/shared/components/status-badge'
 import { failureDetail } from '@/shared/feedback/toast'
+import type { RollbackOutcome } from '@/lib/types'
+import { rollbackOutcomeText } from './rollback-outcome'
 
 /// The parts of the update state document this pane reads. `permitted` is
 /// derived from the absence of a reason, so "permitted with a reason" is not
@@ -25,6 +27,7 @@ interface RollbackStateDoc {
     targetGeneration?: number | null
     confirmed?: boolean | null
   }
+  lastRollback?: RollbackOutcome
 }
 
 /// The target changed between the confirmation and the action.
@@ -66,6 +69,10 @@ export function RollbackPanel() {
   const action = t('system.update.rollback.action')
   return (
     <Panel title={t('system.update.rollback.title')} description={t('system.update.rollback.description')} action={<Undo2 className="size-5 text-muted-foreground" />}>
+      {/* The boot after a rollback says whether it took. */}
+      {status.data?.lastRollback ? (
+        <Callout tone={status.data.lastRollback.outcome === 'rolled_back' ? 'success' : 'danger'} title={rollbackOutcomeText(status.data.lastRollback, t)} />
+      ) : null}
       {runningText || targetText ? (
         <div className="grid gap-1 text-sm text-muted-foreground">
           {runningText ? <p>{t('system.update.rollback.running', { description: runningText })}</p> : null}

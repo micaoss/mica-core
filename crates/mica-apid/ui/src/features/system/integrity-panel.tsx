@@ -9,6 +9,7 @@ import { Panel } from '@/shared/components/panel'
 import { StatusBadge, type StatusTone } from '@/shared/components/status-badge'
 import { Spinner } from '@/shared/components/ui/spinner'
 import { failureDetail } from '@/shared/feedback/toast'
+import { rollbackOutcomeText } from './rollback-outcome'
 
 const TONES: Record<IntegrityItem['state'], StatusTone> = {
   ok: 'success',
@@ -83,6 +84,7 @@ function detail(item: IntegrityItem, t: T) {
   if (item.key === 'deploymentConfirmed' && typeof item.value === 'number') {
     parts.push(t('system.information.integrity.generation', { generation: item.value }))
   }
+  if (item.rollback) parts.push(rollbackOutcomeText(item.rollback, t))
   if (item.checkedAt) parts.push(t('system.information.integrity.lastCheck', { at: utc(item.checkedAt) }))
   return parts.length ? <span>{parts.join(' · ')}</span> : null
 }

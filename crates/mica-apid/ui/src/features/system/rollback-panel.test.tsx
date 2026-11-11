@@ -144,6 +144,20 @@ describe('the guarded rollback', () => {
     }
   })
 
+  it('says in the boot after a rollback whether it took', async () => {
+    const took = { outcome: 'rolled_back', target: retained, targetGeneration: 1, targetVersion: '0.0.5' }
+    stubFetch({ '/api/v1/update': { ...updateState({ target: null, permitted: false, reason: 'no_usable_fallback' }), lastRollback: took } })
+    renderPanel(<RollbackPanel />)
+    expect(await screen.findByText('Rolled back to generation 1 (0.0.5).')).toBeTruthy()
+    cleanup()
+
+    const failed = { outcome: 'did_not_take', target: retained, targetGeneration: 1, targetVersion: '0.0.5',
+      booted: running, bootedGeneration: 2, bootedVersion: '0.0.6', reason: 'target_failed' }
+    stubFetch({ '/api/v1/update': { ...updateState(permitted), lastRollback: failed } })
+    renderPanel(<RollbackPanel />)
+    expect(await screen.findByText('The device booted generation 2 (0.0.6); the rollback to generation 1 (0.0.5) did not take: the target was marked failed.')).toBeTruthy()
+  })
+
   it('surfaces a read failure as an error', async () => {
     stubFetch({ '/api/v1/update': () => jsonResponse({ error: { message: 'micad is unavailable' } }, 503) })
     renderPanel(<RollbackPanel />)

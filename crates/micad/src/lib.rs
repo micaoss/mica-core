@@ -42,6 +42,7 @@ mod provisioning_doc;
 mod reconciler;
 mod recovery;
 mod reset;
+mod rollback_outcome;
 mod scan;
 pub mod ssdp_cli;
 mod storage_status;
@@ -400,6 +401,8 @@ async fn serve() -> anyhow::Result<()> {
             }
         }
         service = service.with_factory_reset(factory_reset);
+        service =
+            service.with_rollback_record(Arc::new(rollback_outcome::RollbackRecord::production()));
         service = service.with_drivers(Arc::new(drivers::Drivers::production()));
         // The adapter and the pairing agent. The agent's state is shared with
         // the `org.bluez.Agent1` object registered below: it blocks on a

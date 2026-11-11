@@ -212,6 +212,17 @@ impl MicadService {
         self
     }
 
+    /// Attach the record a staged rollback is compared with after the
+    /// reboot (`lastRollback` in the update state).
+    #[must_use]
+    pub fn with_rollback_record(
+        mut self,
+        record: Arc<crate::rollback_outcome::RollbackRecord>,
+    ) -> Self {
+        self.rollback_record = Some(record);
+        self
+    }
+
     /// Attach the owner certificates and driver extensions
     /// (`GetOwnerCerts`, `GetExtensions` and their changes).
     #[must_use]

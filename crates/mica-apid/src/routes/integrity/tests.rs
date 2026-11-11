@@ -264,3 +264,26 @@ fn a_failed_source_is_unknown_and_the_rest_stand() {
         json!([{ "key": "customUi", "value": false }])
     );
 }
+
+/// The boot after a rollback says whether it took, on the confirmation item,
+/// as micad decided it; the item's own state is unchanged.
+#[test]
+fn the_confirmation_item_carries_the_last_rollback() {
+    let outcome = json!({ "outcome": "did_not_take", "target": "b", "targetGeneration": 6,
+        "booted": "d1", "bootedGeneration": 7, "reason": "target_failed" });
+    let mut with = sources();
+    with.update = Some(
+        json!({ "lifecycle": update()["lifecycle"].clone(), "lastRollback": outcome.clone() }),
+    );
+    let report = integrity(with, NOW);
+    let confirmed = item(&report, "deploymentConfirmed");
+    assert_eq!(confirmed["state"], "ok");
+    assert_eq!(confirmed["rollback"], outcome);
+
+    let report = integrity(sources(), NOW);
+    assert!(
+        item(&report, "deploymentConfirmed")
+            .get("rollback")
+            .is_none()
+    );
+}

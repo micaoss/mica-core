@@ -909,7 +909,9 @@ update state and the storage status, read again on each request and never verifi
 before this one), network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
 fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback (refused when the target is no longer the
-`expectedTarget` the caller confirmed), reboot override,
+`expectedTarget` the caller confirmed; micad records the target in `/var/lib/mica/update/rollback.json`
+with the boot it was staged in, and the first update-state read of the next boot reports in
+`lastRollback`, for that boot only, whether the booted deployment is the target), reboot override,
 policy); provisioning status and claim; credential recovery and reset; the factory reset;
 diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
 `PUT /api/v1/settings/{path}` (and `PATCH /api/v1/settings`) writes `logging.persistent` (`true`,

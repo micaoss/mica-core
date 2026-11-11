@@ -29,6 +29,10 @@ function row(label: string) {
   return screen.getByText(label).closest('li') as HTMLElement
 }
 
+async function rowOf(label: string) {
+  return (await screen.findByText(label)).closest('li') as HTMLElement
+}
+
 describe('the integrity card', () => {
   it('lists every check with its state and what it rests on', async () => {
     stubFetch({ '/api/v1/system/integrity': report })
@@ -47,6 +51,17 @@ describe('the integrity card', () => {
     expect(screen.getByText('Read 2026-11-11 12:00 UTC.')).toBeTruthy()
     expect(screen.getByText('2 SSH authorized keys')).toBeTruthy()
     expect(screen.getByText('The built-in console')).toBeTruthy()
+  })
+
+  it('says on the confirmation check whether the last rollback took', async () => {
+    const rolledBack = { ...report, items: report.items.map((item) => item.key === 'deploymentConfirmed'
+      ? { ...item, rollback: { outcome: 'did_not_take', target: 'b'.repeat(64), targetGeneration: 6, targetVersion: null,
+        booted: 'a'.repeat(64), bootedGeneration: 7, bootedVersion: '0.0.6', reason: null } }
+      : item) }
+    stubFetch({ '/api/v1/system/integrity': rolledBack })
+    renderPanel(<IntegrityPanel />)
+
+    expect(await within(await rowOf('Deployment confirmed')).findByText(/The device booted generation 7 \(0.0.6\); the rollback to generation 6 did not take\./)).toBeTruthy()
   })
 
   it('reads again on Refresh', async () => {

@@ -173,6 +173,9 @@ pub struct MicadService {
     /// The factory reset (`FactoryReset`); `None` is a daemon that cannot
     /// stage one, on the same rule.
     factory_reset: Option<Arc<crate::factory_reset::FactoryReset>>,
+    /// The record of a staged rollback, compared with the next boot; `None`
+    /// records nothing, on the same rule.
+    rollback_record: Option<Arc<crate::rollback_outcome::RollbackRecord>>,
     /// The backoff on wrong administrator passwords, for every change that
     /// asks for the password again.
     password_backoff: Arc<crate::admin_password::PasswordBackoff>,
@@ -358,6 +361,7 @@ impl MicadService {
             telemetry: Arc::new(UnavailableTelemetry),
             device_root: None,
             factory_reset: None,
+            rollback_record: None,
             password_backoff: Arc::default(),
             drivers: None,
             failure_evidence: Arc::new(UnavailableFailureEvidence),

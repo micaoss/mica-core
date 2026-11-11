@@ -34,7 +34,13 @@ pub(super) fn integrity(sources: Sources, now: &str) -> Value {
         flag(deployment, "secureBoot", "disabled"),
         flag(deployment, "bootVerified", "not_verified"),
         flag(deployment, "contentVerified", "not_verified"),
-        confirmed(deployment),
+        confirmed(
+            deployment,
+            sources
+                .update
+                .as_ref()
+                .and_then(|update| update.get("lastRollback")),
+        ),
         update_status(sources.update.as_ref(), now),
         data_ready(sources.storage.as_ref()),
     ];
@@ -102,10 +108,11 @@ fn flag(deployment: Option<&Value>, key: &str, when_false: &str) -> Value {
 }
 
 /// Whether the running deployment is the confirmed one; the value is its
-/// generation.
-fn confirmed(deployment: Option<&Value>) -> Value {
+/// generation. In the boot after a rollback, `rollback` is whether it took,
+/// as micad decided it.
+fn confirmed(deployment: Option<&Value>, last_rollback: Option<&Value>) -> Value {
     const KEY: &str = "deploymentConfirmed";
-    match booted(deployment) {
+    let mut item = match booted(deployment) {
         Ok(deployment) => match deployment["confirmed"].as_bool() {
             Some(true) => json!({ "key": KEY, "state": "ok", "value": deployment["generation"] }),
             Some(false) => json!({
@@ -115,7 +122,11 @@ fn confirmed(deployment: Option<&Value>) -> Value {
             None => item(KEY, "unknown", Some("unavailable")),
         },
         Err(code) => json!({ "key": KEY, "state": "unknown", "detailCode": code }),
+    };
+    if let Some(outcome) = last_rollback {
+        item["rollback"] = outcome.clone();
     }
+    item
 }
 
 /// The last check of the update lifecycle: a failed or never-run check, a
@@ -199,7 +210,10 @@ fn data_ready(storage: Option<&Value>) -> Value {
 /// `core_check_failed`, `never_checked`, `stale`, `update_available`,
 /// `not_mounted`, `read_only`, `unavailable`, `source_failed`).
 /// `trustGrade` carries the development `domains`, `updateStatus` the
-/// check's own `checkedAt`. A source that cannot be read leaves its items
+/// check's own `checkedAt`, and `deploymentConfirmed`, in the boot after a
+/// rollback, `rollback`: whether it took (`outcome` `rolled_back` or
+/// `did_not_take`, the target and, when it did not take, what booted and
+/// the `reason` the deployment state gives). A source that cannot be read leaves its items
 /// `unknown` (`source_failed`) and the rest stand. `checkedAt` is when the
 /// sources were read: nothing is verified again. `extensions` lists, neutrally,
 /// the number of SSH authorized keys and whether a custom console is

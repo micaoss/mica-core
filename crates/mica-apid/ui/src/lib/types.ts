@@ -544,6 +544,21 @@ export interface IntegrityItem {
   domains?: string[]
   /// `updateStatus`: when the last check ran.
   checkedAt?: string
+  /// `deploymentConfirmed`, in the boot after a rollback: whether it took.
+  rollback?: RollbackOutcome
+}
+
+/// `lastRollback` in the update state, in the boot after a rollback: whether
+/// it took, as micad decided it.
+export interface RollbackOutcome {
+  outcome: string
+  target: string
+  targetGeneration?: number | null
+  targetVersion?: string | null
+  booted?: string
+  bootedGeneration?: number | null
+  bootedVersion?: string | null
+  reason?: string | null
 }
 
 /// `GET /api/v1/system/integrity`.

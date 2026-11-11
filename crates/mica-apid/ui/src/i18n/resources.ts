@@ -1926,6 +1926,17 @@ export const en = {
           targetNotConfirmed: 'The retained deployment was never confirmed, so it is not offered.',
           targetChanged: 'The rollback target changed. Review it and confirm again.',
         },
+        outcome: {
+          generation: 'generation {{generation}}',
+          took: 'Rolled back to {{target}}.',
+          didNotTake: 'The device booted {{booted}}; the rollback to {{target}} did not take.',
+          didNotTakeBecause: 'The device booted {{booted}}; the rollback to {{target}} did not take: {{reason}}.',
+          reasons: {
+            target_failed: 'the target was marked failed',
+            target_exhausted: 'the target used up its boot attempts',
+            target_missing: 'the target is no longer on the device',
+          },
+        },
       },
     },
   },

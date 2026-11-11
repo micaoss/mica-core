@@ -246,3 +246,33 @@ pub(super) async fn native_actions_validate_identity_and_record_the_operator() {
     assert_eq!(status["last_action"]["requested_by"], ":1.4");
     assert_eq!(status["last_action"]["action"], "rollback");
 }
+
+/// A rollback records its target; the first refresh in the next boot reports
+/// what that boot ran against it, and the boot it was staged in reports
+/// nothing.
+#[tokio::test]
+pub(super) async fn a_rollback_is_compared_with_the_next_boot() {
+    let (service, _, _, dir) = service_with_deployments(MockDeployments::default());
+    let boot = dir.path().join("boot_id");
+    std::fs::write(&boot, "boot-1").unwrap();
+    let service =
+        service.with_rollback_record(Arc::new(crate::rollback_outcome::RollbackRecord::new(
+            dir.path().join("rollback.json"),
+            boot.clone(),
+        )));
+    service
+        .request_deployment_action(":1.4", "rollback", &"a".repeat(64))
+        .await
+        .unwrap();
+    let value: Value =
+        serde_json::from_str(&service.refresh_update_state().await.unwrap()).unwrap();
+    assert!(value.get("lastRollback").is_none(), "{value}");
+
+    // The mock boots `a` again: the rollback to `b` did not take.
+    std::fs::write(&boot, "boot-2").unwrap();
+    let value: Value =
+        serde_json::from_str(&service.refresh_update_state().await.unwrap()).unwrap();
+    assert_eq!(value["lastRollback"]["outcome"], "did_not_take");
+    assert_eq!(value["lastRollback"]["target"], "b".repeat(64));
+    assert_eq!(value["lastRollback"]["booted"], "a".repeat(64));
+}
