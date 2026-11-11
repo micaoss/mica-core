@@ -253,12 +253,11 @@ fn tier_two_clears_the_application_layer_and_keeps_the_platform() {
         Outcome::Applied(ResetTier::ApplicationData)
     );
 
-    // CLEARED: the application subtrees of `/mica`, all of `/srv`, and the
-    // enrolment records on STATE.
+    // CLEARED: the application subtrees of `/mica` and the enrolment records
+    // on STATE.
     assert!(!exists(&roots.system().join("apps/inventory")));
     assert!(!exists(&roots.system().join("volumes/app")));
     assert!(!exists(&roots.containers().join("overlay")));
-    assert!(!exists(&roots.user().join("operator")));
     assert!(!exists(&roots.state.join("containerd/web.json")));
     assert!(!exists(&roots.state.join("systemd-units/vendor.service")));
     assert!(!exists(&roots.state.join("openrc-local/init.d")));
@@ -274,7 +273,11 @@ fn tier_two_clears_the_application_layer_and_keeps_the_platform() {
     for relative in APPLICATION_DIRS {
         assert!(roots.system().join(relative).is_dir(), "{relative}");
     }
-    assert!(roots.user().is_dir(), "the /srv mount point was removed");
+    // PRESERVED: `/srv` is the user's, and no reset tier opens it.
+    assert!(
+        exists(&roots.user().join("operator/report.csv")),
+        "tier 2 cleared the user's /srv"
+    );
 
     // PRESERVED: `/mica` is the system-owned namespace and tier 2 does not
     // empty it — a verified bundle is not application data.
@@ -455,7 +458,7 @@ fn a_tier_applied_over_its_own_output_is_a_no_op() {
 fn reset_refuses_excessive_depth_before_removing_any_payload() {
     let (dir, roots) = populated_roots();
     let store = store_at(&dir, &roots);
-    let mut deep = roots.user();
+    let mut deep = roots.system().join("volumes");
     for _ in 0..65 {
         deep = deep.join("nested");
     }
@@ -477,13 +480,14 @@ fn a_symlink_in_a_cleared_tree_is_unlinked_rather_than_followed() {
     let outside = dir.path().join("outside");
     fs::create_dir_all(&outside).unwrap();
     fs::write(outside.join("meta"), "not this tier's").unwrap();
-    std::os::unix::fs::symlink(&outside, roots.user().join("escape")).unwrap();
+    let volumes = roots.system().join("volumes");
+    std::os::unix::fs::symlink(&outside, volumes.join("escape")).unwrap();
 
     let mut settings = fielded_settings();
     stage(&mut settings, ResetTier::ApplicationData);
     apply_pending(&store, &mut settings, &roots).unwrap();
 
-    assert!(!exists(&roots.user().join("escape")));
+    assert!(!exists(&volumes.join("escape")));
     assert_eq!(
         fs::read_to_string(outside.join("meta")).unwrap(),
         "not this tier's",

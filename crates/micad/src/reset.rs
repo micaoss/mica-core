@@ -172,7 +172,7 @@ fn preflight_reset(roots: &Roots, tier: ResetTier) -> Result<()> {
                     .iter()
                     .map(|dir| roots.state.join(dir)),
             )
-            .chain([roots.user(), roots.containers()])
+            .chain([roots.containers()])
             .collect(),
     };
     let mut traversal = Traversal::new();
@@ -329,7 +329,8 @@ fn reseeded_settings(before: &Settings) -> Settings {
 }
 
 /// Tier 2's whole scope: the application layer's
-/// enrolment records on STATE, its subtrees under `/mica`, and `/srv`.
+/// enrolment records on STATE, its subtrees under `/mica`, and the container
+/// store. `/srv` is the user's and stays.
 fn clear_application_state(roots: &Roots) -> Result<()> {
     for dir in STATE_APPLICATION_DIRS {
         let path = roots.state.join(dir);
@@ -339,13 +340,8 @@ fn clear_application_state(roots: &Roots) -> Result<()> {
         let path = roots.system().join(dir);
         clear_contents(&path).with_context(|| format!("clear {}", path.display()))?;
     }
-    reseed_tree(&roots.containers(), &["networks", "tmp"])?;
-    // `/srv` is `cleared` and not `re-seeded`:
-    // the product gives that namespace to the operator, so mica recreates the
-    // mount point and never its contents. Clearing the contents and keeping
-    // the directory is exactly that.
-    let user = roots.user();
-    clear_contents(&user).with_context(|| format!("clear {}", user.display()))
+    // `/srv` is the user's: no tier opens it.
+    reseed_tree(&roots.containers(), &["networks", "tmp"])
 }
 
 /// Validate physical namespaces before the first removal. A same-device check

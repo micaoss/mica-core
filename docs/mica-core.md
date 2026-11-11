@@ -361,7 +361,8 @@ absence is reported with its reason rather than as a healthy reading:
   `accounts` (the apps' accounts, then `mica-accounts build`), remove
   the record of the image's app seeds (section 3.11), and
   refuses to run while `/run/docker.pid` names a live dockerd, whose storage it would clear
-  under it. A board-declared physical recovery action at boot maps to a tier. A
+  under it. No tier opens `/srv`: it is the user's, and only a factory reset, which makes DATA
+  again, takes DATA's `/srv` with it. A board-declared physical recovery action at boot maps to a tier. A
   transient root password lives in `/etc/shadow` until the next boot and in no setting.
 - **Factory reset.** The software stays at its current version; everything configured is
   erased. `FactoryReset` checks the administrator password, has mica-deploy stage the reset
@@ -869,8 +870,7 @@ and asks about first) or
 /api/v1/apps/{name}/logs` is the log, each line scrubbed of secrets. The console lists the apps
 on its services page, with the upload, and gives each its own page.
 
-**A reset** of application data clears `/mica/apps` and `/srv`, with the
-apps' data, and removes the seed record, so the image's seeds are installed again at the next
+**A reset** of application data clears `/mica/apps` and removes the seed record, so the image's seeds are installed again at the next
 boot.
 
 ### 3.12 The board's interfaces
