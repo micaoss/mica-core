@@ -533,6 +533,27 @@ export interface WatchdogDevice {
   bootstatus: AvailableFact & { raw?: number; flags?: string[] }
 }
 
+/// One check of the integrity card; `detailCode` is a closed code the
+/// console translates.
+export interface IntegrityItem {
+  key: 'trustGrade' | 'secureBoot' | 'bootVerified' | 'contentVerified' | 'deploymentConfirmed' | 'updateStatus' | 'dataReady'
+  state: 'ok' | 'attention' | 'unknown' | 'not_supported'
+  value: string | number | boolean | null
+  detailCode: string | null
+  /// `trustGrade`: the development domains.
+  domains?: string[]
+  /// `updateStatus`: when the last check ran.
+  checkedAt?: string
+}
+
+/// `GET /api/v1/system/integrity`.
+export interface SystemIntegrity {
+  /// When the sources were read, not when anything was verified.
+  checkedAt: string
+  items: IntegrityItem[]
+  extensions: { key: 'sshAuthorizedKeys' | 'customUi'; value: number | boolean }[]
+}
+
 export interface SystemTelemetry {
   thermal: AvailableFact & { zones?: ThermalReading[]; hwmon?: ThermalReading[] }
   watchdog: AvailableFact & { devices?: WatchdogDevice[] }

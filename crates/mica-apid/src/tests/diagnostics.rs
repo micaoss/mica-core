@@ -526,3 +526,56 @@ fn the_openapi_document_covers_the_diagnostics_routes() {
         );
     }
 }
+
+// The integrity card: derived here from the reads micad already answers,
+// read-only, and carrying no secret of the tree it reads the key count from.
+#[tokio::test]
+async fn the_integrity_route_derives_its_items_and_carries_no_secret() {
+    let (mut tree, token) = with_token(secret_tree("hunter2secret"));
+    tree["access"]["ssh"]["authorizedKeys"] = json!(["ssh-ed25519 AAAAC3Nza operator"]);
+    let (router, fake, _dir) = diagnostics_app(tree);
+    fake.set_system_info(json!({
+        "trust": { "available": true, "grade": "production" },
+        "deployment": { "available": true, "id": "d1", "version": "0.0.6", "generation": 3,
+            "confirmed": true, "contentVerified": true, "secureBoot": false, "bootVerified": true },
+    }));
+
+    let response = bearer(&router, "GET", "/api/v1/system/integrity", &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_api_headers(&response, "/api/v1/system/integrity");
+    let text = body_string(response).await;
+    assert!(!text.contains("hunter2secret"), "{text}");
+    assert!(!text.contains("plaintext-marker"), "{text}");
+    assert!(!text.contains("AAAAC3Nza"), "{text}");
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let state = |key: &str| {
+        report["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["key"] == key)
+            .map(|item| item["state"].clone())
+    };
+    assert_eq!(state("trustGrade"), Some(json!("ok")));
+    assert_eq!(state("secureBoot"), Some(json!("attention")));
+    // The fake seeds no update state and no data tier.
+    assert_eq!(state("updateStatus"), Some(json!("unknown")));
+    assert_eq!(state("dataReady"), Some(json!("unknown")));
+    assert_eq!(
+        report["extensions"][0],
+        json!({ "key": "sshAuthorizedKeys", "value": 1 })
+    );
+
+    assert_eq!(
+        unauthenticated(&router, "GET", "/api/v1/system/integrity").await,
+        StatusCode::UNAUTHORIZED
+    );
+    for method in ["PUT", "POST", "DELETE", "PATCH"] {
+        let response = bearer_json(&router, method, "/api/v1/system/integrity", &token, "{}").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method}"
+        );
+    }
+}

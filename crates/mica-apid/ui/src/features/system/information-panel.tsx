@@ -10,6 +10,7 @@ import { Panel } from '@/shared/components/panel'
 import { Spinner } from '@/shared/components/ui/spinner'
 import { failureDetail } from '@/shared/feedback/toast'
 import { Unavailable, join } from '@/shared/components/fact'
+import { IntegrityPanel } from './integrity-panel'
 
 type PackageEntry = NonNullable<SystemInformation['packages']['entries']>[number]
 
@@ -51,6 +52,7 @@ export function InformationPanel() {
               ]} />
             </Panel>
           </div>
+          <IntegrityPanel />
           <TelemetryPanel />
           <Panel title={t('system.information.packages.title')} description={t('system.information.packages.description')} action={<PackageOpen className="size-5 text-muted-foreground" />} contentClassName="gap-3">
             {!value.packages.available ? <Callout tone="warning"><Unavailable fact={value.packages} /></Callout> : (

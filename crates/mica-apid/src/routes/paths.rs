@@ -108,6 +108,7 @@ pub(super) const V1_STORAGE_STATUS_PATH: &str = "/v1/storage/status";
 /// read. A fixed path on the time status's reasoning: observed at request
 /// time, no dot-path, no write counterpart.
 pub(super) const V1_SYSTEM_INFO_PATH: &str = "/v1/system/info";
+pub(super) const V1_SYSTEM_INTEGRITY_PATH: &str = "/v1/system/integrity";
 
 /// The device code printed on the label, and its source.
 pub(super) const V1_DEVICE_CODE_PATH: &str = "/v1/device/code";

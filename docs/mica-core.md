@@ -904,7 +904,8 @@ redirect to `/_ui/`.
 
 **The API**, by group: session, setup and password; API tokens; settings, state and tasks;
 network, Wi-Fi, containers, the user's services (`/units`, section 3.10), Bluetooth, MQTT, SSH keys and LAN discovery (`/mdns`, `/ssdp`); observation (time, storage, system
-information, telemetry, service logs at `/system/logs/{source}` (`?boot=previous` for the boot
+information, the integrity card at `/system/integrity` (checks derived from the system information, the
+update state and the storage status, read again on each request and never verified again), telemetry, service logs at `/system/logs/{source}` (`?boot=previous` for the boot
 before this one), network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
 fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback, reboot override,
