@@ -261,7 +261,7 @@ export interface MdnsService {
   type: string
   port: number
   txt: Record<string, string>
-  /// `built-in`, `image:<name>`, `runtime:<name>` or `app:<name>`.
+  /// `built-in`, `image:<name>` or `runtime:<name>`.
   source: string
   published: boolean
 }
@@ -776,44 +776,4 @@ export interface UnitLog {
   lines?: string[]
   truncated?: boolean
   detail?: string
-}
-
-/// Every app micad keeps.
-export interface AppsOverview {
-  /// Whether this daemon keeps apps at all.
-  available: boolean
-  arch: string
-  apps: AppEntry[]
-}
-
-/// One installed app.
-export interface AppEntry {
-  name: string
-  version: string
-  description: string
-  arch: string[]
-  sha256: string
-  /// `upload`, `cli`, `url` or `seed`.
-  source: string
-  installedAt: string
-  /// The version a rollback returns to.
-  previous: string | null
-  units: { name: string; enabled: boolean; active: string | null }[]
-  /// Root has the whole device; an app's own user only what it declares.
-  privileges: { user: 'app' | 'root'; account: string | null; uid: number | null; capabilities: string[]; devices: string[] } | null
-  last: { action: string; outcome: string; message?: string; at: string } | null
-  /// `privileges`: what the available version asks for beyond the installed
-  /// one's, once an update fetched it; it is taken only when accepted.
-  update: {
-    url: string; auto: boolean; available: string | null; checkedAt: string | null; error: string | null
-    privileges?: { root: boolean; capabilities: string[]; devices: string[] } | null
-  } | null
-  seed: { version: string; policy: string | null } | null
-}
-
-/// An app's newest lines: each unit's log and the first-run output.
-export interface AppLog {
-  name: string
-  units: (UnitLog & { unit: string })[]
-  firstRun: string[] | null
 }

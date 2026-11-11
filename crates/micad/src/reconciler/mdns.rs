@@ -1,11 +1,11 @@
 //! mDNS reconciler: the device announces itself on the LAN (docs/mica-core.md
-//! section 3.13).
+//! section 3.12).
 //!
 //! A responder on mdns-sd, on either init, answers `<hostname>.local` with the
 //! addresses of the interface a query arrives on, on every interface but the
 //! loopback, the container engines' links, WireGuard and CAN, and publishes
 //! DNS-SD services: `_mica._tcp` always and the console while apid serves the
-//! network, then what the drop-in files and the running apps ask for
+//! network, then what the drop-in files ask for
 //! ([`entries`]); SSH is never announced. A query from off the link is not answered.
 //! Switched off (`access.mdns.enabled`, else the product's `MDNS=` line),
 //! there is no socket at all.
@@ -14,7 +14,7 @@ pub mod entries;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use anyhow::{Context, Result, anyhow};
 use micad_settings::Settings;
@@ -44,8 +44,7 @@ pub(crate) struct Service {
     pub kind: String,
     pub port: u16,
     pub txt: BTreeMap<String, String>,
-    /// Who asked for it: `built-in`, `image:<name>`, `runtime:<name>` or
-    /// `app:<name>`.
+    /// Who asked for it: `built-in`, `image:<name>` or `runtime:<name>`.
     pub source: String,
 }
 
@@ -76,13 +75,6 @@ impl Service {
             "published": published,
         })
     }
-}
-
-/// The entries of the installed apps whose units run.
-#[async_trait::async_trait]
-pub trait AppEntries: Send + Sync {
-    /// By app name, each app's entries that are published now.
-    async fn running(&self) -> Vec<(String, Vec<entries::Entry>)>;
 }
 
 /// A running responder: publishes and withdraws services for one hostname.
@@ -179,7 +171,6 @@ pub(crate) struct Sources {
     pub runtime_dir: PathBuf,
     /// Who must own a runtime drop-in: root on a device.
     pub owner: u32,
-    pub apps: Option<Arc<dyn AppEntries>>,
 }
 
 /// Reconciler for the `access.mdns` settings subtree.
@@ -204,22 +195,21 @@ impl MdnsReconciler {
     }
 
     /// The responder on this device's interfaces, for this root's product,
-    /// with the drop-ins and the entries of `apps`.
-    pub fn production(apps: Option<Arc<dyn AppEntries>>) -> Self {
+    /// with the drop-ins.
+    pub fn production() -> Self {
         Self::new(
             Product::production(),
             Sources {
                 image_dir: PathBuf::from(entries::IMAGE_DIR),
                 runtime_dir: PathBuf::from(entries::RUNTIME_DIR),
                 owner: 0,
-                apps,
             },
             Box::new(MdnsSd),
         )
     }
 
     /// Every service `settings` and the sources ask for, in order: the
-    /// built-in ones, the drop-ins, the apps'. One whose name is taken
+    /// built-in ones, then the drop-ins. One whose name is taken
     /// already, or past [`entries::MAX_PUBLISHED`], is refused, as is a
     /// broken file; the refusals are returned by source.
     async fn wanted(&self, settings: &Settings) -> (Vec<Service>, BTreeMap<String, String>) {
@@ -242,11 +232,6 @@ impl MdnsReconciler {
                 Err(err) => {
                     refused.insert(source, err);
                 }
-            }
-        }
-        if let Some(apps) = &self.sources.apps {
-            for (app, found) in apps.running().await {
-                asked.push((format!("app:{app}"), found));
             }
         }
         for (source, found) in asked {

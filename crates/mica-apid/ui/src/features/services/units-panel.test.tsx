@@ -9,7 +9,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const unit = '[Unit]\nDescription=app\n\n[Service]\nExecStart=/mica/apps/app/run\n\n[Install]\nWantedBy=multi-user.target\n'
+const unit = '[Unit]\nDescription=app\n\n[Service]\nExecStart=/srv/app/run\n\n[Install]\nWantedBy=multi-user.target\n'
 
 const routes = {
   '/api/v1/units': {

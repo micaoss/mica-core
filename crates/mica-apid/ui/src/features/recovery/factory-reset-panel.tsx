@@ -18,7 +18,7 @@ interface FactoryResetStatus {
   last: { requested: number; completed: number; by: string; source: string; unremoved: number } | null
 }
 
-const ERASED = ['claim', 'settings', 'apps', 'data'] as const
+const ERASED = ['claim', 'settings', 'services', 'data'] as const
 const KEPT = ['software', 'deviceCode'] as const
 
 /// The factory reset: what it erases and keeps, and the administrator

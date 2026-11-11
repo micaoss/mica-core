@@ -46,29 +46,16 @@ fn product(default_on: bool) -> Product {
     }
 }
 
-/// Apps' entries as a test sets them.
-#[derive(Default)]
-struct FakeApps(Mutex<Vec<(String, Vec<entries::Entry>)>>);
-
-#[async_trait::async_trait]
-impl AppEntries for FakeApps {
-    async fn running(&self) -> Vec<(String, Vec<entries::Entry>)> {
-        self.0.lock().unwrap().clone()
-    }
-}
-
 /// A reconciler with empty drop-in directories, and the directories.
 struct Rig {
     reconciler: MdnsReconciler,
     calls: Calls,
-    apps: Arc<FakeApps>,
     image: tempfile::TempDir,
     runtime: tempfile::TempDir,
 }
 
 fn rig(default_on: bool) -> Rig {
     let calls = Calls::default();
-    let apps = Arc::new(FakeApps::default());
     let (image, runtime) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let reconciler = MdnsReconciler::new(
         product(default_on),
@@ -76,14 +63,12 @@ fn rig(default_on: bool) -> Rig {
             image_dir: image.path().to_path_buf(),
             runtime_dir: runtime.path().to_path_buf(),
             owner: rustix::process::geteuid().as_raw(),
-            apps: Some(Arc::clone(&apps) as Arc<dyn AppEntries>),
         },
         Box::new(StartRecorder(Arc::clone(&calls))),
     );
     Rig {
         reconciler,
         calls,
-        apps,
         image,
         runtime,
     }
@@ -92,16 +77,6 @@ fn rig(default_on: bool) -> Rig {
 fn reconciler(default_on: bool) -> (MdnsReconciler, Calls) {
     let rig = rig(default_on);
     (rig.reconciler, rig.calls)
-}
-
-fn entry(kind: &str, port: u16) -> entries::Entry {
-    entries::Entry {
-        instance: None,
-        kind: kind.to_string(),
-        port,
-        txt: BTreeMap::new(),
-        service: None,
-    }
 }
 
 fn taken(calls: &Calls) -> Vec<String> {
@@ -339,11 +314,11 @@ fn the_silent_prefixes_cover_loopback_containers_wireguard_and_can() {
     }
 }
 
-/// The drop-ins of the image and of the running system and the running
-/// apps' entries are published after the built-in services, each with its
-/// source; a broken file is refused by name and the rest goes on.
+/// The drop-ins of the image and of the running system are published after
+/// the built-in services, each with its source; a broken file is refused by
+/// name and the rest goes on.
 #[tokio::test]
-async fn drop_ins_and_apps_are_published_with_their_source() {
+async fn drop_ins_are_published_with_their_source() {
     let rig = rig(true);
     std::fs::write(
         rig.image.path().join("grafana.json"),
@@ -351,7 +326,11 @@ async fn drop_ins_and_apps_are_published_with_their_source() {
     )
     .unwrap();
     std::fs::write(rig.runtime.path().join("broken.json"), "{").unwrap();
-    *rig.apps.0.lock().unwrap() = vec![("printer".to_string(), vec![entry("_ipp._tcp", 631)])];
+    std::fs::write(
+        rig.runtime.path().join("printer.json"),
+        r#"{"version":1,"services":[{"type":"_ipp._tcp","port":631}]}"#,
+    )
+    .unwrap();
 
     let state = rig.reconciler.apply(&settings()).await.unwrap();
 
@@ -373,13 +352,13 @@ async fn drop_ins_and_apps_are_published_with_their_source() {
         .collect();
     assert_eq!(
         sources,
-        ["built-in", "built-in", "image:grafana", "app:printer"]
+        ["built-in", "built-in", "image:grafana", "runtime:printer"]
     );
     assert_eq!(state["refused"][0]["source"], json!("runtime:broken"));
 
-    // The app stops and the file goes: both are withdrawn.
-    rig.apps.0.lock().unwrap().clear();
+    // Both files go: both are withdrawn.
     std::fs::remove_file(rig.image.path().join("grafana.json")).unwrap();
+    std::fs::remove_file(rig.runtime.path().join("printer.json")).unwrap();
     rig.reconciler.apply(&settings()).await.unwrap();
     assert_eq!(
         taken(&rig.calls),
@@ -395,20 +374,22 @@ async fn drop_ins_and_apps_are_published_with_their_source() {
 #[tokio::test]
 async fn a_taken_name_or_one_past_the_limit_is_refused() {
     let rig = rig(true);
-    let many = |app: usize| -> Vec<_> {
-        (0..entries::MAX_SERVICES)
-            .map(|i| entries::Entry {
-                instance: Some(format!("a{app}-s{i}")),
-                ..entry("_x._tcp", 1)
-            })
-            .collect()
-    };
-    // The console's own name first, then 8 apps of 8: 2 past the limit.
-    let apps: Vec<_> = [("console".to_string(), vec![entry("_http._tcp", 80)])]
-        .into_iter()
-        .chain((0..8).map(|app| (format!("a{app}"), many(app))))
-        .collect();
-    *rig.apps.0.lock().unwrap() = apps;
+    // 8 files of 8 services: 2 past the limit; then the console's own name.
+    for file in 0..8 {
+        let services: Vec<String> = (0..entries::MAX_SERVICES)
+            .map(|i| format!(r#"{{"instance":"a{file}-s{i}","type":"_x._tcp","port":1}}"#))
+            .collect();
+        std::fs::write(
+            rig.runtime.path().join(format!("a{file}.json")),
+            format!(r#"{{"version":1,"services":[{}]}}"#, services.join(",")),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        rig.runtime.path().join("console.json"),
+        r#"{"version":1,"services":[{"type":"_http._tcp","port":80}]}"#,
+    )
+    .unwrap();
 
     let state = rig.reconciler.apply(&settings()).await.unwrap();
 
@@ -422,5 +403,5 @@ async fn a_taken_name_or_one_past_the_limit_is_refused() {
         .iter()
         .map(|r| r["source"].as_str().unwrap())
         .collect();
-    assert_eq!(refused, ["app:a7", "app:console"]);
+    assert_eq!(refused, ["runtime:a7", "runtime:console"]);
 }

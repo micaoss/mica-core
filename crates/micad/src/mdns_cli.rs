@@ -88,7 +88,6 @@ fn add(name: &str, words: &[&str]) -> Result<Command, String> {
         kind: kind.ok_or("--type is needed")?,
         port: port.ok_or("--port is needed")?,
         txt,
-        service: None,
     };
     entries::check(&entry)?;
     Ok(Command::Add(name.to_string(), entry))
@@ -266,7 +265,6 @@ mod tests {
                         ("path".into(), "/d".into()),
                         ("a".into(), String::new())
                     ]),
-                    service: None,
                 }
             ))
         );

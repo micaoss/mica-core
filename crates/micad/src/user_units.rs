@@ -80,11 +80,6 @@ impl UserUnits {
         self.init
     }
 
-    /// The init's control the units are driven through.
-    pub(crate) fn control(&self) -> &dyn UnitControl {
-        self.control.as_ref()
-    }
-
     fn path(&self, absolute: &str) -> PathBuf {
         self.root.join(absolute.trim_start_matches('/'))
     }

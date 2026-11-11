@@ -83,11 +83,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 rustix = { version = "1", features = ["fs"] }
 zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
-# App bundles are gzip tars: the reader, without xattrs, on the zlib-rs
-# backend the zip reader already resolves.
-tar = { version = "0.4", default-features = false }
-flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
-# The mDNS responder (section 3.13): its own thread on mio, no async runtime
+# The mDNS responder (section 3.12): its own thread on mio, no async runtime
 # and no D-Bus. Without `logging`, which would only feed the `log` facade.
 mdns-sd = { version = "0.21", default-features = false }
 

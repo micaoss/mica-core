@@ -47,9 +47,6 @@ pub(crate) struct ApiErrorDetail {
     /// `code`, `message` and `params` above are the first one's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) details: Option<Vec<ErrorDetail>>,
-    /// Every rule a refused app bundle breaks (`app_invalid`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) rules: Option<Vec<super::apps::AppRule>>,
 }
 
 /// One rule a refused write breaks.
@@ -101,7 +98,6 @@ impl ApiError {
                 params: None,
                 problems: None,
                 details: None,
-                rules: None,
             },
         }
     }
@@ -118,11 +114,6 @@ impl ApiError {
 
     pub(super) fn with_details(mut self, details: Vec<ErrorDetail>) -> Self {
         self.error.details = Some(details);
-        self
-    }
-
-    pub(super) fn with_rules(mut self, rules: Vec<super::apps::AppRule>) -> Self {
-        self.error.rules = Some(rules);
         self
     }
 

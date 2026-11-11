@@ -1,5 +1,5 @@
 //! The board's physical network interfaces: `/usr/share/mica/board/interfaces.json`,
-//! shipped by the board package (`docs/mica-core.md` section 3.12).
+//! shipped by the board package (`docs/mica-core.md` section 3.11).
 //!
 //! A board that declares its ports names each one with its kind, its label,
 //! its role and what it is known to do; a generic board says `discover`, and a

@@ -9,7 +9,7 @@ micad. Every value below is part of protocol 1; a change to any of them is a new
 
 BLE configures the device's network and nothing else: `getStatus`, `scanWifi`, `setWifi`,
 `setNetwork` and `finish`. No operation sets a password, an access-point key or the hostname,
-claims the device, resets it, or touches its services or apps, and none will. The hostname is set
+claims the device, resets it, or touches its services, and none will. The hostname is set
 with the claim (`POST /api/v1/setup`) or later in the console.
 
 A device stays unclaimed after BLE provisioning. It is claimed afterwards in the console, on the

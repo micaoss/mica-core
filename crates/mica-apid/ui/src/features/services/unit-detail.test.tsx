@@ -10,7 +10,7 @@ afterEach(() => {
 })
 
 const ROUTE = '/services_/units/$name'
-const script = '#!/sbin/openrc-run\ncommand=/mica/apps/app/run\n'
+const script = '#!/sbin/openrc-run\ncommand=/srv/app/run\n'
 
 const routes = {
   '/api/v1/units': {

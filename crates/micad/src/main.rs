@@ -1,8 +1,7 @@
 //! `micad`, the settings and reconciliation daemon; `micad apid`, the HTTPS
 //! API daemon; `micad update`, the operator's update command; `micad ctr`, the
 //! operator's containers command; `micad unit`, the operator's command for
-//! their own services; `micad app`, the operator's command for their apps;
-//! `micad web`, who reaches the API; `micad mdns` and `micad ssdp`, what the
+//! their own services; `micad web`, who reaches the API; `micad mdns` and `micad ssdp`, what the
 //! device announces on the LAN; `micad factory-reset`, the factory reset;
 //! `micad diag`, a diagnostic snapshot; `micad board check`, whether a
 //! board's interface declaration is one this build takes.
@@ -17,7 +16,7 @@
 
 #![forbid(unsafe_code)]
 
-const USAGE: &str = "usage: micad [--version]\n       micad apid\n       micad update [status|check|install|rollback] [--reboot]\n       micad ctr <command> (micad ctr help)\n       micad unit <command> (micad unit help)\n       micad app <command> (micad app help)\n       micad web status|network|local|off\n       micad mdns <command> (micad mdns help)\n       micad ssdp status|on|off\n       micad factory-reset [--password-file FILE]\n       micad diag\n       micad device-code\n       micad derive-ap-key --secret FILE CODE\n       micad board check FILE";
+const USAGE: &str = "usage: micad [--version]\n       micad apid\n       micad update [status|check|install|rollback] [--reboot]\n       micad ctr <command> (micad ctr help)\n       micad unit <command> (micad unit help)\n       micad web status|network|local|off\n       micad mdns <command> (micad mdns help)\n       micad ssdp status|on|off\n       micad factory-reset [--password-file FILE]\n       micad diag\n       micad device-code\n       micad derive-ap-key --secret FILE CODE\n       micad board check FILE";
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -37,7 +36,6 @@ fn main() -> anyhow::Result<()> {
         Some("update") => micad::update_cli::main(&args[2..]),
         Some("ctr") => micad::ctr_cli::main(&args[2..]),
         Some("unit") => micad::unit_cli::main(&args[2..]),
-        Some("app") => micad::app_cli::main(&args[2..]),
         Some("web") => micad::web_cli::main(&args[2..]),
         Some("mdns") => micad::mdns_cli::main(&args[2..]),
         Some("ssdp") => micad::ssdp_cli::main(&args[2..]),

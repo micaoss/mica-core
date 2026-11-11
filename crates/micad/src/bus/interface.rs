@@ -507,24 +507,15 @@ impl MicadService {
     }
 
     /// JSON: the user's services, every one declared or in `mica-unit`'s
-    /// directory, with whether micad manages it, whether it is enabled, what
-    /// the init says of it and the app it is part of: `{init, available,
-    /// units}`.
+    /// directory, with whether micad manages it, whether it is enabled and
+    /// what the init says of it: `{init, available, units}`.
     pub(super) async fn get_units(&self) -> fdo::Result<String> {
         let services = self.inner.read().await.settings.services.clone();
-        let mut live = self
+        let live = self
             .user_units
             .live(&services)
             .await
             .map_err(|err| fdo::Error::Failed(format!("{err:#}")))?;
-        let owners = self.apps.unit_owners();
-        if let Some(units) = live["units"].as_array_mut() {
-            for unit in units {
-                if let Some(app) = unit["name"].as_str().and_then(|name| owners.get(name)) {
-                    unit["app"] = Value::from(app.clone());
-                }
-            }
-        }
         Ok(live.to_string())
     }
 
@@ -555,149 +546,6 @@ impl MicadService {
         Ok(crate::logs::log_json(self.logs.as_ref(), &source)
             .await
             .to_string())
-    }
-
-    /// JSON: every installed app, `{available, arch, apps}`.
-    pub(super) async fn get_apps(&self) -> Result<String, AppFault> {
-        Ok(self.apps.view(None).await?.to_string())
-    }
-
-    /// JSON: one installed app.
-    pub(super) async fn get_app(&self, name: &str) -> Result<String, AppFault> {
-        Ok(self.apps.view(Some(name)).await?.to_string())
-    }
-
-    /// Install or upgrade the bundle at `path`; answers the task's id.
-    /// `reinstall` installs the installed version again, `upgrade` refuses
-    /// an app that is not installed. Unless `accept_privileges`, a bundle
-    /// that asks for privileges beyond the installed version's (any, on a
-    /// first install) is refused with them. The bundle's manifest is checked
-    /// before the answer.
-    pub(super) async fn install_app(
-        &self,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-        #[zbus(header)] header: Header<'_>,
-        path: &str,
-        reinstall: bool,
-        upgrade: bool,
-        accept_privileges: bool,
-    ) -> Result<String, AppFault> {
-        let options = crate::apps::InstallOptions {
-            reinstall,
-            upgrade,
-            unattended: false,
-            ask_privileges: !accept_privileges,
-        };
-        Ok(self
-            .install_app_now(&emitter, sender_of(&header), path, options)
-            .await?)
-    }
-
-    /// Switch an app to its previous version; answers the task's id.
-    pub(super) async fn rollback_app(
-        &self,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-        #[zbus(header)] header: Header<'_>,
-        name: &str,
-    ) -> Result<String, AppFault> {
-        let owned = name.to_string();
-        Ok(self
-            .app_flow_now(
-                &emitter,
-                sender_of(&header),
-                "app.rollback",
-                name,
-                |apps, _| async move { apps.rollback(&owned).await },
-            )
-            .await?)
-    }
-
-    /// Remove an app; `purge` deletes its data too. Answers the task's id.
-    pub(super) async fn remove_app(
-        &self,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-        #[zbus(header)] header: Header<'_>,
-        name: &str,
-        purge: bool,
-    ) -> Result<String, AppFault> {
-        let owned = name.to_string();
-        Ok(self
-            .app_flow_now(
-                &emitter,
-                sender_of(&header),
-                "app.remove",
-                name,
-                |apps, _| async move { apps.remove(&owned, purge).await },
-            )
-            .await?)
-    }
-
-    /// Read an app's version file now; answers the task's id.
-    pub(super) async fn check_app_update(
-        &self,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-        #[zbus(header)] header: Header<'_>,
-        name: &str,
-    ) -> Result<String, AppFault> {
-        let owned = name.to_string();
-        Ok(self
-            .app_flow_now(
-                &emitter,
-                sender_of(&header),
-                "app.check",
-                name,
-                |apps, _| async move { apps.check_update(&owned).await },
-            )
-            .await?)
-    }
-
-    /// Fetch and install the newer version an app's version file offers;
-    /// answers the task's id. A version that asks for privileges beyond the
-    /// installed one's fails the task and is kept with what it asks for
-    /// (`update.privileges` in `GetApp`), unless it is `accept`: the version
-    /// asked about, with the same bundle and nothing more asked. `""`
-    /// accepts nothing.
-    pub(super) async fn update_app(
-        &self,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-        #[zbus(header)] header: Header<'_>,
-        name: &str,
-        accept: &str,
-    ) -> Result<String, AppFault> {
-        let owned = name.to_string();
-        let accept = accept.to_string();
-        Ok(self
-            .app_flow_now(
-                &emitter,
-                sender_of(&header),
-                "app.update",
-                name,
-                |apps, services| async move { apps.update(&owned, &services, &accept).await },
-            )
-            .await?)
-    }
-
-    /// Start every unit of an app.
-    pub(super) async fn start_app(&self, name: &str) -> Result<(), AppFault> {
-        Ok(self.apps.act(name, crate::user_units::Verb::Start).await?)
-    }
-
-    /// Stop them.
-    pub(super) async fn stop_app(&self, name: &str) -> Result<(), AppFault> {
-        Ok(self.apps.act(name, crate::user_units::Verb::Stop).await?)
-    }
-
-    /// Restart them.
-    pub(super) async fn restart_app(&self, name: &str) -> Result<(), AppFault> {
-        Ok(self
-            .apps
-            .act(name, crate::user_units::Verb::Restart)
-            .await?)
-    }
-
-    /// JSON: an app's units' newest log lines and its last first-run output.
-    pub(super) async fn get_app_log(&self, name: &str) -> Result<String, AppFault> {
-        Ok(self.apps.logs(name, self.logs.as_ref()).await?.to_string())
     }
 
     /// Scan for WiFi networks on the station's radio and answer what it found.

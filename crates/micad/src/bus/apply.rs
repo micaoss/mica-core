@@ -143,19 +143,6 @@ impl MicadService {
                     message,
                 })?;
             }
-            let owners = self.apps.unit_owners();
-            if let Some((unit, app)) = candidate
-                .services
-                .units
-                .keys()
-                .filter(|name| !inner.settings.services.units.contains_key(*name))
-                .find_map(|name| owners.get_key_value(name))
-            {
-                return Err(SettingsError::Validation {
-                    path: path.to_string(),
-                    message: format!("unit_taken: {unit} is app {app}'s"),
-                });
-            }
             if changed_projects(&inner.settings, &candidate).any(|(name, written)| {
                 checked.get(name).map(|(text, dir)| (text, dir.as_deref())) != Some(written)
             }) {

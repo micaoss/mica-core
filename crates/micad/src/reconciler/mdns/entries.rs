@@ -1,6 +1,6 @@
-//! What scripts and apps ask the responder to publish: the drop-in files of
-//! the image and of the running system, apps' `mdns` entries, and the rules
-//! they are held to (docs/mica-core.md section 3.13).
+//! What scripts ask the responder to publish: the drop-in files of the image
+//! and of the running system, and the rules they are held to
+//! (docs/mica-core.md section 3.12).
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::MetadataExt;
@@ -12,7 +12,7 @@ pub const IMAGE_DIR: &str = "/usr/share/mica/mdns.d";
 pub const RUNTIME_DIR: &str = "/run/mica/mdns.d";
 /// The drop-in format this build reads.
 const FILE_VERSION: u32 = 1;
-/// The most services one drop-in file or one app declares.
+/// The most services one drop-in file declares.
 pub const MAX_SERVICES: usize = 8;
 /// The most services published at once, the built-in ones included.
 pub const MAX_PUBLISHED: usize = 64;
@@ -29,7 +29,7 @@ const MAX_FILE_BYTES: u64 = 64 * 1024;
 /// The longest drop-in name, before `.json`.
 const MAX_NAME: usize = 32;
 
-/// One service a drop-in file or an app asks for.
+/// One service a drop-in file asks for.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
@@ -42,10 +42,6 @@ pub struct Entry {
     pub port: u16,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub txt: BTreeMap<String, String>,
-    /// An app's entry only: the service or unit of the app whose running it
-    /// follows; any of its units when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service: Option<String>,
 }
 
 /// A drop-in file.
@@ -131,7 +127,7 @@ pub fn check(entry: &Entry) -> Result<(), String> {
     Ok(())
 }
 
-/// Every rule `entries`, an app's or a file's, break.
+/// Every rule a file's `entries` break.
 pub fn check_all(entries: &[Entry]) -> Result<(), String> {
     if entries.len() > MAX_SERVICES {
         return Err(format!("more than {MAX_SERVICES} services"));
@@ -191,9 +187,6 @@ fn read_file(path: &Path, owner: Option<u32>) -> Result<Vec<Entry>, String> {
     let file: File = serde_json::from_str(&text).map_err(|err| err.to_string())?;
     if file.version != FILE_VERSION {
         return Err(format!("version {} is not {FILE_VERSION}", file.version));
-    }
-    if file.services.iter().any(|entry| entry.service.is_some()) {
-        return Err("service is an app's key".to_string());
     }
     check_all(&file.services)?;
     Ok(file.services)

@@ -10,7 +10,6 @@ const UNIT: &str = include_str!("../../dist/apid.service");
 fn written() -> Vec<PathBuf> {
     vec![
         PathBuf::from(super::paths::UPDATE_UPLOADS_DIR),
-        PathBuf::from(super::paths::APP_UPLOADS_DIR),
         PathBuf::from(crate::bundle::DEFAULT_ROOT),
         PathBuf::from(crate::diagnostics::DEFAULT_ROOT),
         PathBuf::from(crate::config::DEFAULT_STATE_DIR),

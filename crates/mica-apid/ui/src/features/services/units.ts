@@ -34,6 +34,6 @@ export function unitTone(entry: UnitEntry | undefined) {
 /// A starting text for a new service of each init: one that `mica-unit`
 /// accepts and that starts at boot when enabled.
 export const TEMPLATES: Record<UserUnit['kind'], string> = {
-  systemd: '[Unit]\nDescription=My service\n\n[Service]\nExecStart=/mica/apps/my-service/run\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n',
-  openrc: '#!/sbin/openrc-run\n\ndescription="My service"\ncommand="/mica/apps/my-service/run"\ncommand_background=true\npidfile="/run/$RC_SVCNAME.pid"\n',
+  systemd: '[Unit]\nDescription=My service\n\n[Service]\nExecStart=/srv/my-service/run\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n',
+  openrc: '#!/sbin/openrc-run\n\ndescription="My service"\ncommand="/srv/my-service/run"\ncommand_background=true\npidfile="/run/$RC_SVCNAME.pid"\n',
 }

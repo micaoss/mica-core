@@ -211,8 +211,8 @@ impl ApplyQueue {
         }
     }
 
-    /// Record a task the caller runs itself, outside the queue: an app flow.
-    /// It is `queued` until [`Self::start`].
+    /// Record a task the caller runs itself, outside the queue: a drivers
+    /// flow. It is `queued` until [`Self::start`].
     pub async fn open(
         &self,
         operation: &str,
@@ -355,17 +355,17 @@ mod tests {
     #[tokio::test]
     async fn an_opened_task_is_recorded_but_never_queued() {
         let queue = ApplyQueue::new();
-        let app = queue
-            .open("app.install", "app.apply", "apps.demo", ":1.7")
+        let opened = queue
+            .open("drivers.install", "drivers.apply", "drivers", ":1.7")
             .await;
         let settings = queue.enqueue("settings-write", "hostname", ":1.7").await;
         assert_eq!(queue.next().await.id, settings.record.id);
-        assert_eq!(queue.snapshot().await, [app.clone(), settings.record]);
+        assert_eq!(queue.snapshot().await, [opened.clone(), settings.record]);
         assert_eq!(
-            (app.kind.as_str(), app.status.as_str()),
-            ("app.apply", "queued")
+            (opened.kind.as_str(), opened.status.as_str()),
+            ("drivers.apply", "queued")
         );
-        let started = queue.start(&app.id).await.unwrap();
+        let started = queue.start(&opened.id).await.unwrap();
         assert_eq!(started.status, "running");
     }
 

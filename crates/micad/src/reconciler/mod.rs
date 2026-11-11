@@ -12,8 +12,7 @@ mod enabled;
 mod hostname;
 mod logging;
 pub use hostname::HostnameExecutor;
-/// Visible to the daemon: apps' manifests and `micad mdns` hold their
-/// entries to its rules, and the apps feed it theirs.
+/// Visible to the daemon: `micad mdns` holds its entries to its rules.
 pub mod mdns;
 mod mqtt;
 /// Visible to the daemon rather than to this module alone: the WireGuard key
@@ -53,15 +52,13 @@ pub trait Reconciler: Send + Sync {
 
 /// The reconcilers of the features the product carries: one whose subtree
 /// belongs to a feature it does not carry is not registered, so nothing renders
-/// that feature's files or drives its units. `apps` feeds the mDNS responder
-/// the running apps' entries.
+/// that feature's files or drives its units.
 pub fn for_features(
     features: &micad_settings::Features,
     init: micad_settings::Init,
     engine: micad_settings::ContainerEngine,
-    apps: Option<std::sync::Arc<dyn mdns::AppEntries>>,
 ) -> Vec<Box<dyn Reconciler>> {
-    all(init, engine, apps)
+    all(init, engine)
         .into_iter()
         .filter(|reconciler| {
             micad_settings::Feature::owning(reconciler.subtree())
@@ -79,11 +76,10 @@ pub fn for_features(
 pub fn all(
     init: micad_settings::Init,
     engine: micad_settings::ContainerEngine,
-    apps: Option<std::sync::Arc<dyn mdns::AppEntries>>,
 ) -> Vec<Box<dyn Reconciler>> {
     match init {
-        micad_settings::Init::Systemd => systemd_reconcilers(engine, apps),
-        micad_settings::Init::Openrc => openrc_reconcilers(engine, apps),
+        micad_settings::Init::Systemd => systemd_reconcilers(engine),
+        micad_settings::Init::Openrc => openrc_reconcilers(engine),
     }
 }
 
@@ -92,10 +88,7 @@ use enabled::Saved;
 /// An OpenRC root's: the same subtrees, through `rc-service`,
 /// ifupdown, busybox ntpd and the OpenRC services of the option packages
 /// (mica-ssh, mica-wifi, mica-wifi-ap, Bluetooth), which ship them.
-fn openrc_reconcilers(
-    engine: micad_settings::ContainerEngine,
-    apps: Option<std::sync::Arc<dyn mdns::AppEntries>>,
-) -> Vec<Box<dyn Reconciler>> {
+fn openrc_reconcilers(engine: micad_settings::ContainerEngine) -> Vec<Box<dyn Reconciler>> {
     use crate::openrc::{EtcHostname, OpenrcUnits};
     vec![
         Box::new(hostname::HostnameReconciler::new(EtcHostname::production())),
@@ -118,7 +111,7 @@ fn openrc_reconcilers(
         Box::new(time::TimeReconciler::openrc()),
         Box::new(logging::LoggingReconciler::openrc()),
         Box::new(web::WebReconciler::production(OpenrcUnits::production())),
-        Box::new(mdns::MdnsReconciler::production(apps)),
+        Box::new(mdns::MdnsReconciler::production()),
         Box::new(ssdp::SsdpReconciler::production()),
         Box::new(admins::CloudAdminsReconciler::production()),
         Box::new(services::ServicesReconciler::production(
@@ -131,10 +124,7 @@ fn openrc_reconcilers(
     ]
 }
 
-fn systemd_reconcilers(
-    engine: micad_settings::ContainerEngine,
-    apps: Option<std::sync::Arc<dyn mdns::AppEntries>>,
-) -> Vec<Box<dyn Reconciler>> {
+fn systemd_reconcilers(engine: micad_settings::ContainerEngine) -> Vec<Box<dyn Reconciler>> {
     vec![
         Box::new(hostname::HostnameReconciler::new(
             hostname::Hostnamed::production(),
@@ -154,7 +144,7 @@ fn systemd_reconcilers(
         Box::new(time::TimeReconciler::production()),
         Box::new(logging::LoggingReconciler::production()),
         Box::new(web::WebReconciler::production(systemd::Systemd::new())),
-        Box::new(mdns::MdnsReconciler::production(apps)),
+        Box::new(mdns::MdnsReconciler::production()),
         Box::new(ssdp::SsdpReconciler::production()),
         Box::new(admins::CloudAdminsReconciler::production()),
         Box::new(services::ServicesReconciler::production(
@@ -182,7 +172,6 @@ mod feature_tests {
                 features,
                 micad_settings::Init::Systemd,
                 micad_settings::ContainerEngine::Podman,
-                None,
             )
             .iter()
             .map(|r| r.subtree())
@@ -227,7 +216,6 @@ mod feature_tests {
             &Features::all(),
             micad_settings::Init::Openrc,
             micad_settings::ContainerEngine::Podman,
-            None,
         )
         .iter()
         .map(|r| r.subtree())

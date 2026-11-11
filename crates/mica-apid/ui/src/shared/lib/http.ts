@@ -15,11 +15,8 @@ export interface ApiProblem { service: string; field: string; detail: string }
 /// One rule a refused network write broke, by interface and field.
 export interface ApiErrorDetail { interface: string; field: string; code: string; params?: Record<string, unknown> }
 
-/// One rule a refused app bundle breaks.
-export interface ApiRule { rule: string; detail: string }
-
 interface ApiErrorBody {
-  error?: { code?: string; message?: string; path?: string; problems?: ApiProblem[]; params?: Record<string, unknown>; details?: ApiErrorDetail[]; rules?: ApiRule[] }
+  error?: { code?: string; message?: string; path?: string; problems?: ApiProblem[]; params?: Record<string, unknown>; details?: ApiErrorDetail[] }
 }
 
 export class ApiError extends Error {
@@ -31,7 +28,6 @@ export class ApiError extends Error {
     readonly problems?: ApiProblem[],
     readonly params?: Record<string, unknown>,
     readonly details?: ApiErrorDetail[],
-    readonly rules?: ApiRule[],
   ) {
     super(message)
   }
@@ -67,7 +63,6 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       body.error?.problems,
       body.error?.params,
       body.error?.details,
-      body.error?.rules,
     )
   }
   if (response.status === 204) return undefined as T

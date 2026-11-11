@@ -21,13 +21,13 @@ pub(crate) struct MdnsService {
     pub(super) kind: String,
     pub(super) port: u16,
     pub(super) txt: BTreeMap<String, String>,
-    /// `built-in`, `image:<name>`, `runtime:<name>` or `app:<name>`.
+    /// `built-in`, `image:<name>` or `runtime:<name>`.
     pub(super) source: String,
     /// Whether it is on the wire now: false while the responder is off.
     pub(super) published: bool,
 }
 
-/// A drop-in file or an app entry the responder refused.
+/// A drop-in file the responder refused.
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub(crate) struct MdnsRefusal {
     pub(super) source: String,
@@ -65,8 +65,7 @@ pub(crate) struct MdnsOverview {
 /// What the device announces on the LAN over mDNS.
 ///
 /// Read-only: the switch is `access.mdns.enabled`; services come from the
-/// device, the image's and the running system's drop-in files and the
-/// running apps.
+/// device and the image's and the running system's drop-in files.
 #[utoipa::path(
     get,
     path = V1_MDNS_PATH,

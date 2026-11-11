@@ -1,5 +1,5 @@
 //! SSDP reconciler: the device answers UPnP discovery on the LAN
-//! (docs/mica-core.md section 3.14).
+//! (docs/mica-core.md section 3.13).
 //!
 //! A responder of micad's own, on either init, on 239.255.255.250:1900 over
 //! IPv4: NOTIFY `ssdp:alive` at start, on a new hostname and every 900 s,

@@ -102,10 +102,9 @@ fn dry_run_plus_micad_scan_one_constructs_the_scan() {
 }
 
 #[test]
-fn both_upload_directories_are_made_for_apid() {
+fn the_upload_directory_is_made_for_apid() {
     let root = tempfile::tempdir().unwrap();
     make_upload_dirs(root.path());
-    for dir in ["mica/apps/.incoming", "mica/updates/uploads"] {
-        assert!(root.path().join(dir).is_dir(), "{dir} was not made");
-    }
+    assert!(root.path().join("mica/updates/uploads").is_dir());
+    assert!(!root.path().join("mica/apps").exists());
 }

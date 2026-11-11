@@ -8,7 +8,6 @@ fn entry(kind: &str, port: u16) -> Entry {
         kind: kind.to_string(),
         port,
         txt: BTreeMap::new(),
-        service: None,
     }
 }
 
@@ -131,10 +130,6 @@ fn a_broken_or_unsafe_file_is_refused_whole_and_named() {
         ("version.json", r#"{"version":2,"services":[]}"#),
         ("unknown.json", r#"{"version":1,"services":[],"extra":1}"#),
         (
-            "app-key.json",
-            r#"{"version":1,"services":[{"type":"_x._tcp","port":1,"service":"x"}]}"#,
-        ),
-        (
             "one-bad.json",
             r#"{"version":1,"services":[{"type":"_x._tcp","port":1},{"type":"_mica._tcp","port":1}]}"#,
         ),
@@ -163,7 +158,7 @@ fn a_broken_or_unsafe_file_is_refused_whole_and_named() {
             assert!(read.is_err(), "{source}: {read:?}");
         }
     }
-    assert_eq!(found.len(), 8);
+    assert_eq!(found.len(), 7);
 
     // Owned by someone else, the same file is refused.
     let found = drop_ins(image.path(), runtime.path(), owner() + 1);

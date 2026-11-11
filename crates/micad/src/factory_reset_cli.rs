@@ -16,7 +16,7 @@ macro_rules! what {
     () => {
         "\
   Erase everything configured on this device: the administrator and the
-  claim, settings, networks, keys, apps, containers and all data on DATA.
+  claim, settings, networks, keys, containers and all data on DATA.
   The software stays at its current version. The device reboots and erases
   before anything else runs; it then starts as it did on its first boot.
   It is not a certified wipe."

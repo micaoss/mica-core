@@ -36,7 +36,6 @@ const SYSTEM_SKELETON: &[&str] = &[
     "diagnostics",
     "home",
     "root",
-    "apps",
     "updates",
     "updates/downloads",
     "updates/verified",
@@ -48,14 +47,13 @@ const CONFIG_DIR: &str = "config";
 
 /// The `/mica` subtrees the application layer owns, which tier 2 clears.
 ///
-/// footnote `[^apps-mica]`: `/mica` is the system-owned namespace and tier
-/// 2 does not empty it. `ui/`, `updates/` — an acquired deployment is not
+/// `/mica` is the system-owned namespace and tier 2 does not empty it. `ui/`, `updates/` — an acquired deployment is not
 /// application data — and the `home/`/`root/` backing directories are not
 /// opened.
 ///
 /// `volumes` holds each Compose project's directory, its named volumes and
 /// relative paths, which mica-containerd makes.
-const APPLICATION_DIRS: &[&str] = &["apps", "volumes"];
+const APPLICATION_DIRS: &[&str] = &["volumes"];
 
 /// The console's TLS identity on STATE, relative to it. The configuration
 /// tiers remove it: an uploaded key or a certificate issued to the operator's
@@ -66,9 +64,6 @@ const APID_IDENTITY: &str = "apid/identity.pem";
 /// configuration tiers remove it with the settings, so the board's defaults
 /// come back.
 const BOARD_DEFAULTS_RECORD: &str = "mica/seeded-defaults.json";
-/// micad's record of the image's app seeds it took, relative to STATE. The
-/// application tiers remove it with the apps, so the seeds come back.
-const APP_SEEDS_RECORD: &str = "mica/seeded-apps.json";
 
 /// The STATE directories holding application enrolment records.
 ///
@@ -77,7 +72,8 @@ const APP_SEEDS_RECORD: &str = "mica/seeded-apps.json";
 /// back at boot before micad declares none. `systemd-units` and `openrc-local`
 /// hold the user's services (`services.units`), bound to
 /// `/usr/local/lib/systemd/system` and `/usr/local/etc`. `accounts` holds the
-/// apps' accounts mica-accounts names, rebuilt after the reset.
+/// service accounts mica-accounts keeps for those services, rebuilt after the
+/// reset.
 const STATE_APPLICATION_DIRS: &[&str] =
     &["containerd", "systemd-units", "openrc-local", "accounts"];
 /// dockerd's pid file, written while it runs.
@@ -182,6 +178,31 @@ fn preflight_reset(roots: &Roots, tier: ResetTier) -> Result<()> {
     Ok(())
 }
 
+/// Base's tool that builds `/etc/passwd` and `/etc/group` from the image's
+/// accounts and those kept on STATE.
+const ACCOUNTS_TOOL: &str = "/usr/lib/mica/mica-accounts";
+
+/// Have mica-accounts bind `/etc/passwd` and `/etc/group` again from what
+/// STATE holds, after tier 2 cleared the service accounts there. A root
+/// without it has nothing to rebuild.
+pub fn rebuild_accounts() {
+    if !Path::new(ACCOUNTS_TOOL).exists() {
+        return;
+    }
+    match std::process::Command::new(ACCOUNTS_TOOL)
+        .arg("build")
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => tracing::warn!(
+            stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+            "mica-accounts build"
+        ),
+        Err(err) => tracing::warn!(%err, "mica-accounts build"),
+    }
+}
+
 /// What [`apply_pending`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -228,23 +249,13 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
             // What was expensive at a file granularity -- teaching this
             // module to reach one document inside a transactional workspace --
             // is ordinary at a directory granularity, and it is the same
-            // operation tier 2 already performs on `apps/` and `containers/`.
+            // operation tier 2 already performs on `volumes/` and `containers/`.
             let config = roots.system().join(CONFIG_DIR);
             clear_contents(&config).with_context(|| format!("clear {}", config.display()))?;
         }
         ResetTier::ApplicationData => clear_application_state(roots)?,
     }
 
-    if intent.tier == ResetTier::ApplicationData {
-        let path = roots.state.join(APP_SEEDS_RECORD);
-        match fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(error).with_context(|| format!("remove {}", path.display()));
-            }
-        }
-    }
     if intent.tier == ResetTier::Configuration {
         for file in [APID_IDENTITY, BOARD_DEFAULTS_RECORD] {
             let path = roots.state.join(file);

@@ -80,7 +80,6 @@ fn populated_roots() -> (TempDir, Roots) {
     // no tier may reach them.
     fs::create_dir_all(roots.state.join("mica/secrets")).unwrap();
 
-    write(&roots.system().join("apps/inventory/db.sqlite"), "app data");
     write(&roots.system().join("volumes/app/data/db"), "volume data");
     write(&roots.containers().join("overlay/layer"), "layer");
     write(&roots.system().join("ui/active/index.html"), "custom ui");
@@ -96,7 +95,7 @@ fn populated_roots() -> (TempDir, Roots) {
     write(&roots.state.join("openrc-local/init.d/vendor"), "service");
     write(
         &roots.state.join("accounts/passwd"),
-        "mica-app-demo:x:30000:30000::/srv/apps/demo:/usr/sbin/nologin\n",
+        "modem:x:30000:30000::/:/usr/sbin/nologin\n",
     );
     write(&roots.state.join("mica/secrets/device-password"), "secret");
     write(&roots.state.join(APID_IDENTITY), "uploaded identity");
@@ -104,7 +103,6 @@ fn populated_roots() -> (TempDir, Roots) {
         &roots.state.join(BOARD_DEFAULTS_RECORD),
         r#"{"network":["can0"]}"#,
     );
-    write(&roots.state.join(APP_SEEDS_RECORD), "{}");
     (dir, roots)
 }
 
@@ -171,7 +169,7 @@ fn a_boot_with_no_intent_staged_changes_nothing() {
 
     assert_eq!(settings, before);
     assert!(!dir.path().join("settings.toml").exists(), "it saved");
-    assert!(exists(&roots.system().join("apps/inventory/db.sqlite")));
+    assert!(exists(&roots.system().join("volumes/app/data/db")));
     assert!(exists(&roots.user().join("operator/report.csv")));
 }
 
@@ -214,7 +212,7 @@ fn tier_one_reseeds_the_settings_and_keeps_the_management_credential() {
 
     // UNAFFECTED: tier 1 opens no DATA store and no STATE directory but
     // the settings file.
-    assert!(exists(&roots.system().join("apps/inventory/db.sqlite")));
+    assert!(exists(&roots.system().join("volumes/app/data/db")));
     assert!(exists(&roots.containers().join("overlay/layer")));
     assert!(exists(&roots.user().join("operator/report.csv")));
     assert!(exists(&roots.state.join("containerd/web.json")));
@@ -227,7 +225,6 @@ fn tier_one_reseeds_the_settings_and_keeps_the_management_credential() {
         !exists(&roots.state.join(BOARD_DEFAULTS_RECORD)),
         "the board's defaults come back with the settings"
     );
-    assert!(exists(&roots.state.join(APP_SEEDS_RECORD)), "the apps stay");
 
     // The record is gone, and the tree on STATE is the tree in hand.
     assert_eq!(settings.reset, None);
@@ -255,17 +252,12 @@ fn tier_two_clears_the_application_layer_and_keeps_the_platform() {
 
     // CLEARED: the application subtrees of `/mica` and the enrolment records
     // on STATE.
-    assert!(!exists(&roots.system().join("apps/inventory")));
     assert!(!exists(&roots.system().join("volumes/app")));
     assert!(!exists(&roots.containers().join("overlay")));
     assert!(!exists(&roots.state.join("containerd/web.json")));
     assert!(!exists(&roots.state.join("systemd-units/vendor.service")));
     assert!(!exists(&roots.state.join("openrc-local/init.d")));
     assert!(!exists(&roots.state.join("accounts/passwd")));
-    assert!(
-        !exists(&roots.state.join(APP_SEEDS_RECORD)),
-        "the image's app seeds come back with the apps"
-    );
 
     // RE-SEEDED and not deleted: the directories are still there at the
     // modes `mica-data-layout` gave them, so nothing that writes into them
@@ -468,7 +460,7 @@ fn reset_refuses_excessive_depth_before_removing_any_payload() {
     stage(&mut settings, ResetTier::ApplicationData);
     let error = apply_pending(&store, &mut settings, &roots).unwrap_err();
     assert!(format!("{error:#}").contains("depth"));
-    assert!(roots.system().join("apps/inventory/db.sqlite").is_file());
+    assert!(roots.system().join("volumes/app/data/db").is_file());
     assert!(deep.join("retained").is_file());
     assert!(settings.reset.is_some());
 }
@@ -540,7 +532,7 @@ fn reset_refuses_a_namespace_symlink_before_removing_any_payload() {
         fs::read_to_string(outside.join("retained")).unwrap(),
         "identity"
     );
-    assert!(roots.system().join("apps/inventory/db.sqlite").exists());
+    assert!(roots.system().join("volumes/app/data/db").exists());
     assert!(settings.reset.is_some());
 }
 
@@ -554,7 +546,7 @@ fn reset_and_installer_share_one_data_transaction_lock() {
     let mut settings = fielded_settings();
     stage(&mut settings, ResetTier::ApplicationData);
     assert!(apply_pending(&store, &mut settings, &roots).is_err());
-    assert!(roots.system().join("apps/inventory/db.sqlite").exists());
+    assert!(roots.system().join("volumes/app/data/db").exists());
     drop(lock);
     apply_pending(&store, &mut settings, &roots).unwrap();
     assert!(roots.data.join("meta/transaction.lock").exists());

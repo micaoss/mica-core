@@ -176,7 +176,7 @@ fn render_records(dns: &DnsSettings) -> String {
 
 /// resolved's drop-in: the global servers when they are on, never a
 /// fallback server, so a lookup goes only where the settings say, and no
-/// mDNS, whose port micad's own responder holds (section 3.13).
+/// mDNS, whose port micad's own responder holds (section 3.12).
 fn render_resolved(global: &micad_settings::GlobalDns) -> String {
     let mut out = "# Managed by micad from dns.global. Do not edit.\n[Resolve]\n".to_string();
     if global.enabled {

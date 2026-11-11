@@ -12,9 +12,7 @@
 #![forbid(unsafe_code)]
 
 mod admin_password;
-pub mod app_cli;
 mod apply_queue;
-mod apps;
 pub mod ble_provisioning;
 mod bluetooth;
 pub mod board;
@@ -184,7 +182,7 @@ async fn serve() -> anyhow::Result<()> {
             Ok(outcome) => {
                 tracing::info!(?outcome, "staged reset checked");
                 if outcome == reset::Outcome::Applied(micad_settings::ResetTier::ApplicationData) {
-                    apps::rebuild_accounts();
+                    reset::rebuild_accounts();
                 }
             }
             Err(error) => {
@@ -273,20 +271,11 @@ async fn serve() -> anyhow::Result<()> {
         container_engine = container_engine.as_str(),
         "product container engine"
     );
-    // The user's services and apps, made before the reconcilers: the mDNS
-    // responder publishes the running apps' entries.
-    let units_and_apps = (!dry_run).then(|| {
-        let units = Arc::new(user_units::UserUnits::production(init));
-        let apps = Arc::new(apps::Apps::production(Arc::clone(&units)));
-        (units, apps)
-    });
+    let units = (!dry_run).then(|| Arc::new(user_units::UserUnits::production(init)));
     let reconcilers = if dry_run {
         Vec::new()
     } else {
-        let apps = units_and_apps
-            .as_ref()
-            .map(|(_, apps)| Arc::clone(apps) as Arc<dyn reconciler::mdns::AppEntries>);
-        reconciler::for_features(&features, init, container_engine, apps)
+        reconciler::for_features(&features, init, container_engine)
     };
     // Under dry-run the production control is never constructed, so a daemon
     // started by a test cannot reach systemd's manager at all.
@@ -379,9 +368,9 @@ async fn serve() -> anyhow::Result<()> {
             service = service.with_dns_probe(Arc::clone(probe));
         }
         service = service.with_logs(Arc::new(logs::HostLogs::production(init)));
-        if let Some((units, apps)) = units_and_apps {
+        if let Some(units) = units {
             make_upload_dirs(Path::new("/"));
-            service = service.with_user_units(units).with_apps(apps);
+            service = service.with_user_units(units);
         }
         service = service.with_storage_status(Arc::new(storage_status::HostStorage::production()));
         // The diagnostic observers, on the same rule: each reads the host
@@ -573,15 +562,13 @@ async fn serve() -> anyhow::Result<()> {
         .with_context(|| format!("request name {}", bus::BUS_NAME))?;
     tracing::info!(bus = bus_kind, name = bus::BUS_NAME, "serving");
     tokio::spawn(deferred.run());
-    // The image's app seeds, then the daily update check, and the mDNS
-    // upkeep. Never under dry-run, whose daemon keeps no apps.
+    // The mDNS upkeep and the login prompt's issue. Never under dry-run.
     if !dry_run {
         let service_ref = connection
             .object_server()
             .interface::<_, bus::MicadService>(bus::OBJECT_PATH)
             .await
             .context("look up served MicadService")?;
-        tokio::spawn(bus::app_upkeep(service_ref.clone()));
         tokio::spawn(bus::mdns_upkeep(service_ref.clone()));
         tokio::spawn(bus::issue_upkeep(service_ref, printed_code));
     }
@@ -633,19 +620,16 @@ fn product_features(path: &std::path::Path) -> micad_settings::Features {
     })
 }
 
-/// The directories apid takes uploads into, under `root`: app bundles and
-/// update archives. apid's unit binds them writable at start
+/// The directory apid takes uploads into, under `root`: update archives. apid's unit binds them writable at start
 /// (`ReadWritePaths=` under `ProtectSystem=strict`) and cannot make them
 /// itself, so they are made before the web reconciler starts apid. A failure
 /// is logged; apid then refuses uploads.
 fn make_upload_dirs(root: &Path) {
     let updates =
         Path::new(update_lifecycle::DEFAULT_WORKSPACE_ROOT).join(update_lifecycle::UPLOADS);
-    for dir in [Path::new(apps::INCOMING), updates.as_path()] {
-        let path = root.join(dir.strip_prefix("/").unwrap_or(dir));
-        if let Err(err) = std::fs::create_dir_all(&path) {
-            tracing::warn!(dir = %path.display(), %err, "an upload directory could not be made");
-        }
+    let path = root.join(updates.strip_prefix("/").unwrap_or(&updates));
+    if let Err(err) = std::fs::create_dir_all(&path) {
+        tracing::warn!(dir = %path.display(), %err, "the upload directory could not be made");
     }
 }
 

@@ -120,10 +120,10 @@ The tests relocate the rest of what micad writes the same way: the reconcilers' 
   `off` keeps it. `off` changes only the claim: the code is still derived, logged, put on the login
   prompt and read by `GET /api/v1/device/code`, whose answer carries the effective `gate`.
 - `MDNS` is `on` (the default) or `off`: whether the device announces itself over mDNS while
-  `access.mdns.enabled` is unset (section 3.13). Any word but `off` is on.
-- `SSDP` is the same for UPnP discovery while `access.ssdp.enabled` is unset (section 3.14).
+  `access.mdns.enabled` is unset (section 3.12). Any word but `off` is on.
+- `SSDP` is the same for UPnP discovery while `access.ssdp.enabled` is unset (section 3.13).
 - `CLOUD_ADMINS` is `on` or `off` (the default): whether the cloud's SSH users are administrators
-  while `access.cloudAdmins.enabled` is unset (section 3.15). Only `on` grants.
+  while `access.cloudAdmins.enabled` is unset (section 3.14). Only `on` grants.
 - `SSH_SERVER` is `dropbear` (the default) or `openssh`: Base's choice of SSH server. micad does
   not read it; both servers take the same environment and unit (section 3.8).
 
@@ -134,9 +134,9 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | Subtree | Contents |
 | --- | --- |
 | `hostname` | The hostname |
-| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`, or `false` on a port the board declares internal, section 3.12): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
+| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`, or `false` on a port the board declares internal, section 3.11): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
 | `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
-| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), LAN discovery (`mdns.enabled` and `ssdp.enabled`, sections 3.13 and 3.14; absent is the product's choice, and each is written only once set), whether the cloud's SSH users are administrators (`cloudAdmins.enabled`, section 3.15, on the same rule), the admin password hash, the device credential, API tokens, claim state |
+| `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), LAN discovery (`mdns.enabled` and `ssdp.enabled`, sections 3.12 and 3.13; absent is the product's choice, and each is written only once set), whether the cloud's SSH users are administrators (`cloudAdmins.enabled`, section 3.14, on the same rule), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
 | `container` | The engine switch (`enabled`) and the declared Compose projects (`projects`, section 3.9) |
 | `bluetooth` | The switch (on by default), the trust list, and `provisioning.autoWhenOffline` (BLE provisioning, `docs/ble-provisioning.md`; on by default). Documents that still carry `discoverable`, `alias` or `pin` load, and the keys are dropped at the next save |
@@ -174,7 +174,7 @@ smaller than Ethernet's (GCE's 1460), arrives; networkd ignores it on a link who
 `[Link] MTUBytes=` is set. A wired port (`eth*`, not a VLAN) the map
 does not declare gets `60-mica-auto-<iface>.network`, the image's DHCP with its metric, which
 sorts before the image's `80-dhcp.network`; declaring the port removes it, and a port the board
-hides gets none (section 3.12). The Wi-Fi client's
+hides gets none (section 3.11). The Wi-Fi client's
 lease has metric 600. A static gateway keeps networkd's metric 0. On OpenRC the same numbers go
 into each DHCP stanza as `metric <n>` and into `/var/lib/mica/wifi/client.env` as `metric=600`, for
 Base's `mica-udhcpc` to give the lease's default route (section 3.8). An interface with
@@ -230,7 +230,7 @@ live-state tree under its name.
 | --- | --- | --- |
 | `hostname` | `/etc/hostname`, hostnamed | `/etc/hostname`, `sethostname(2)` |
 | `network` | networkd `.network`/`.netdev` under `/run/systemd/network`, which Base links to `/var/lib/mica/network/networkd` on DATA, for every kind; WireGuard keys generated on the device, named by file and removed with the tunnel; a tunnel's netdev sets `RouteTable=off` and its `.network` carries one `[Route]` (`Destination=`, `PreferredSource=` the tunnel's address) per distinct peer prefix, except a default route, a prefix of a family the tunnel has no address in, one its own subnet reaches on-link and one the entry declares as its own route, so networkd adds and removes the peers' routes; a `can` entry is a `.network` of `[Match]` and `[CAN]` alone, with `BitRate=`, `RestartSec=<restartMs>ms` and `DataBitRate=` for the fields it declares and `FDMode=yes` or, otherwise, `FDMode=no` | `/var/lib/mica/network/interfaces` for busybox ifupdown (`ifdown -a` on the old file, `ifup -a` on the new): DHCP (with `dns`, the lease is asked for no DNS option and the servers go into `/run/mica/resolv.d/00-<iface>`), static IPv4/IPv6 with DNS into `/run/mica/resolv.d/<iface>`, or no addressing; undeclared `eth*` get DHCP. Each DHCP stanza carries `metric <n>`, the networkd numbers, and asks for the lease's MTU (`udhcpc_opts … -O mtu`), which Base's `mica-udhcpc` sets on the link. A `can` entry is an `inet manual` stanza that sets the link with iproute2's `ip`, by its path (the first of `/usr/sbin/ip`, `/usr/bin/ip`, `/sbin/ip`, `/bin/ip`): `pre-up <ip> link set dev <iface> type can bitrate <b>` with `restart-ms <ms>` when declared and `fd on dbitrate <d>` or, otherwise, `fd off`, then `<ip> link set dev <iface> up` (and `down`); a root whose `ip` is absent or BusyBox's (which cannot set CAN parameters) refuses a CAN entry by name and writes nothing. On a static or manual stanza each static route is an `up ip route add <destination> [via <gateway>] dev <iface> [metric <m>]` line with the matching `down ip route del … \|\| :`; on a DHCP stanza, whose link is up before its lease, each is a `route_<n>` option (`<destination> [via <gateway>] [metric <m>]`, numbered from 1) for Base's `mica-udhcpc` (section 3.8). VLAN, bridge and WireGuard are refused by name |
-| `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes; the records alone are saved in `/var/lib/mica/dns/hosts`, which Base's `mica-hosts` adds at boot. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf`, a directory Base links to DATA (resolved restarted when it changes) always empties `FallbackDNS=` and sets `MulticastDNS=no` (micad's own responder holds the port, section 3.13) and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file and records. Global servers: `/var/lib/mica/dns/resolv.global` on DATA, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
+| `dns` | `/run/mica/hosts` (where `/etc/hosts` links): localhost, `127.0.1.1` for the hostname and the static records, rewritten when the hostname changes; the records alone are saved in `/var/lib/mica/dns/hosts`, which Base's `mica-hosts` adds at boot. resolved's `/run/systemd/resolved.conf.d/60-mica-dns.conf`, a directory Base links to DATA (resolved restarted when it changes) always empties `FallbackDNS=` and sets `MulticastDNS=no` (micad's own responder holds the port, section 3.12) and, with global servers on, names them in `DNS=`; with them on, beside every `.network`, the image's included, a drop-in clears its `DNS=` and sets `UseDNS=no` and `UseDomains=no` for DHCPv4, DHCPv6 and router advertisements (networkd reloaded) | the same hosts file and records. Global servers: `/var/lib/mica/dns/resolv.global` on DATA, which Base's `mica-resolv` makes the whole of `resolv.conf`, then `mica-resolv` |
 | `sshd` | `/var/lib/mica/ssh/sshd.env`, the authorized keys of `root` and `mica`, `mica-sshd.service` (restarted or stopped, never enabled or disabled) | the same files, `mica-sshd` |
 | `wifi_client` | wpa_supplicant configuration in `/etc/wpa_supplicant`, `wpa_supplicant@<if>`, networkd DHCP | configuration in `/var/lib/mica/wpa_supplicant`, `/var/lib/mica/wifi/client.env`, `mica-wifi-client` |
 | `wifi_ap` | hostapd configuration in `/etc/hostapd`, `hostapd@<if>`, networkd address and DHCP server, which hands out the global DNS servers while they are on and the uplink's otherwise | configuration in `/var/lib/mica/hostapd`, `/var/lib/mica/wifi/ap.env`, busybox udhcpd on the same pool (`/var/lib/mica/wifi/ap-udhcpd.conf`) with the global DNS servers while they are on, `mica-wifi-ap` |
@@ -239,8 +239,8 @@ live-state tree under its name.
 | `time` | `/var/lib/mica/time/timesyncd.conf`, the target of the image's timesyncd drop-in link, `/run/mica/timezone` | `ntp_servers` in `/var/lib/mica/time/ntpd.conf`, `mica-ntpd` restarted |
 | `logging` | `/var/lib/mica/log/log.env` (`LOG_PERSISTENT` and `LOG_MAX_KIB` only while set, `LOG_REMOTE`, `LOG_REMOTE_PROTOCOL`), staged and checked with Base's `mica-log-env` before it replaces the live file: a file Base refuses is never written, and the refusal quotes Base's reason. `mica-log-settings.service` restarted when the file changed. The live state is the effective values `mica-log-env` reports, with `persistentSource` and `maxSizeKiBSource` `setting` or `default`; a root without `mica-log-env` reports `supported: false` and writes nothing | the same file and check, `mica-syslogd` restarted |
 | `web` | `access.web` into `/run/mica/apid.json`; `apid.service` started for `mode` `network` or `local` (restarted when the file changed) and stopped for `off` | the same, `apid` |
-| `mdns` | micad's own mDNS responder (section 3.13), from `access.mdns`, the hostname and `access.web` | the same |
-| `ssdp` | micad's own SSDP responder (section 3.14), from `access.ssdp`, the hostname and `access.web` | the same |
+| `mdns` | micad's own mDNS responder (section 3.12), from `access.mdns`, the hostname and `access.web` | the same |
+| `ssdp` | micad's own SSDP responder (section 3.13), from `access.ssdp`, the hostname and `access.web` | the same |
 | `services` | The user's units through `mica-unit`, in `/usr/local/lib/systemd/system` (section 3.10) | the same, scripts in `/usr/local/etc` |
 | `bluetooth` | `bluetooth.service`, the adapter's power and name (the hostname), each declared device's trust; a paired device nobody declares is removed. micad registers its pairing agent each time `org.bluez` appears on the bus, and then closes the adapter to pairing: it is discoverable and pairable only during a pairing window (`OpenBluetoothPairWindow`, 180 s, BlueZ's own timeouts set to the same and a timer of micad's closing it), in which a numeric comparison waits for the console and a fixed PIN or passkey is refused; closing the window refuses what still waits. A BLE provisioning window keeps the adapter powered while Bluetooth is switched off | the same through `mica-bluetoothd` |
 
@@ -278,7 +278,6 @@ directions, because `SettingsChanged` carries setting values.
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
 | Owner certificates and driver extensions | `GetOwnerCerts`, `AddOwnerCert`, `RemoveOwnerCert`, `GetExtensions`, `InstallExtension`, `InstallExtensionFiles`, `RemoveExtension`, `DropExtension` (section 3.7) |
-| Apps | `GetApps`, `GetApp`, `InstallApp`, `RollbackApp`, `RemoveApp`, `CheckAppUpdate`, `UpdateApp`, `StartApp`, `StopApp`, `RestartApp`, `GetAppLog` (section 3.11) |
 | Containers and Bluetooth | `CheckContainerProject`, `CheckContainerProjectIn`, `StartContainer`, `StopContainer`, `RestartContainer`, `SetBluetoothDiscovery` (no API route serves it), `OpenBluetoothPairWindow`, `CloseBluetoothPairWindow`, `PairBluetoothDevice`, `ConfirmBluetoothPairing` (an accepted pairing is declared untrusted), `SetBluetoothDeviceFlag` (a declared device's `trusted` or `blocked`), `RemoveBluetoothDevice` |
 
 A value the tree refuses is `org.freedesktop.DBus.Error.InvalidArgs`.
@@ -309,7 +308,7 @@ absence is reported with its reason rather than as a healthy reading:
 - **Failure evidence**: failed services, and warnings of this boot (`journal`) and of the
   previous boot (`previousBoot`, absent with the reason when the log keeps none), from
   `journalctl`, or Base's `logread -b 0` / `-b -1` and `mica-init failed`.
-- **The board's ports** (section 3.12): the observed network carries `board` (`declared` or
+- **The board's ports** (section 3.11): the observed network carries `board` (`declared` or
   `discover`), each listed interface its `declared` (or `null`), and each declared port the
   device lacks as `{name, present: false, declared}`.
 - **Logs** (`GetLog`): the newest 200 lines of one allowlisted service (`micad`, `apid`, `time`,
@@ -358,8 +357,7 @@ absence is reported with its reason rather than as a healthy reading:
   run. A staged reset applies one tier: `configuration` or `application-data`.
   `application-data` also clears DATA/state
   `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10) and
-  `accounts` (the apps' accounts, then `mica-accounts build`), remove
-  the record of the image's app seeds (section 3.11), and
+  `accounts` (the service accounts, then `mica-accounts build`), and
   refuses to run while `/run/docker.pid` names a live dockerd, whose storage it would clear
   under it. No tier opens `/srv`: it is the user's, and only a factory reset, which makes DATA
   again, takes DATA's `/srv` with it. A board-declared physical recovery action at boot maps to a tier. A
@@ -368,7 +366,7 @@ absence is reported with its reason rather than as a healthy reading:
   erased. `FactoryReset` checks the administrator password, has mica-deploy stage the reset
   (6.3), then reboots after 3 s; the runkit carries it out at the next boot (6.5). Everything
   on DATA goes: STATE with the settings, the claim, the API tokens, the keys, the SSH host keys
-  and the machine-id, the containers, the apps, `/srv`, `/mica` and the logs kept there. The
+  and the machine-id, the containers, `/srv`, `/mica` and the logs kept there. The
   device code, derived from the hardware, is unchanged, so the device comes back unclaimed, on
   its factory access point; a `random` code, whose seed is on DATA, is drawn again.
 
@@ -663,7 +661,7 @@ The applied state is `available`, each applied service's `enabled` (and `error`)
 **Bus.** `GetUnits` answers `init`, `available` (the root has `mica-unit`) and `units`: each
 service declared or in `mica-unit`'s directory, with `declared`, `managed` (declared for this
 init), `installed`, `enabled` (linked), the init's `active` state and, for one of the other init,
-`refused`, and `app`, the app it is part of (section 3.11). `StartUnit`, `StopUnit` and `RestartUnit` take an installed service, managed or not,
+`refused`. `StartUnit`, `StopUnit` and `RestartUnit` take an installed service, managed or not,
 through systemd's manager or `rc-service`; what they do lasts until the next boot or the next
 change of `enabled`. `GetUnitLog` answers its newest lines as `GetLog` answers a service's: the
 journal of the unit under systemd, and under OpenRC the RAM log's lines tagged with the script's
@@ -688,192 +686,16 @@ report it; exit 0 done, 1 failed, 2 misused.
 `POST /api/v1/units/{name}/{action}` (`start`, `stop`, `restart`) is a verb, and
 `GET /api/v1/units/{name}/logs` the log, each line scrubbed of secrets.
 
+**Service accounts.** A service may run as an account of its own. Base's
+`/usr/lib/mica/mica-accounts add <name> <uid> [<gid>]` (uids and gids 30000 to 39999) names one;
+the accounts are kept in DATA/state `accounts` and bound over `/etc/passwd` and `/etc/group`, and
+the unit names its account (`User=`, `command_user`). micad neither adds nor removes one.
+
 **A reset** of application data empties `services.units` and clears the directories
-`mica-unit` keeps them in, DATA/state `systemd-units` and `openrc-local`.
+`mica-unit` keeps them in, DATA/state `systemd-units` and `openrc-local`, and the service
+accounts in `accounts`, which `mica-accounts build` then rebuilds without them.
 
-### 3.11 Apps
-
-An app is software the user installs as one bundle: its files, what it runs, a first-run hook
-and where its newer versions are announced. micad unpacks it under `/mica/apps/<name>/<version>`,
-keeps its units through `mica-unit` as it keeps the user's services (3.10), and gives it
-`/srv/apps/<name>` (`0700`) for its data, which stays across versions. `docs/apps/tailscale.md`
-builds one.
-
-**Who an app runs as.** By default an app runs as its own user, and declares its services in its
-manifest: micad writes their units itself, so nothing the bundle ships runs as root. An app may
-instead declare `"user": "root"` and ship its own units: it then has full control of the device,
-and the console and `micad app status` say so. An app has no management interface: the bus and
-the API's local socket answer root alone, so an app of its own user reaches neither, and only
-micad fetches its updates. With the API off (section 4) and no root app, the device is a closed
-appliance: what it runs is what the image and the operator installed, and an app cannot change
-it.
-
-**The bundle** is a gzip tar of at most 256 MiB, unpacking to at most 1 GiB and 20 000 members:
-`mica-app.json` at its top, and `files/`, `hooks/` and, for a root app, `units/systemd/` and
-`units/openrc/`. Each
-member is checked as it is unpacked: a path that leaves the bundle or lies elsewhere, a member
-under a link, a link pointing outside, a setuid or setgid mode, a member that is not a file, a
-directory or a symbolic link, or one there twice refuses it. The manifest:
-
-| Field | Meaning |
-| --- | --- |
-| `schemaVersion` | `1` |
-| `name` | 1 to 23 of `[a-z0-9-]`, not starting with `-`, so its account `mica-app-<name>` is at most 32 |
-| `version` | A version in dpkg's order, at most 64 characters |
-| `arch` | Some of `amd64`, `arm64`, `armhf`, or `all`; the device's must be among them |
-| `description` | Optional |
-| `privileges` | `{"user", "capabilities", "devices"}`: `user` is `app` (default) or `root`; an app of its own user lists the `CAP_*` its services keep and the devices under `/dev` they may open, by node, stable path or pattern (Devices, below). It may keep only `CAP_NET_ADMIN`, `CAP_NET_RAW`, `CAP_NET_BIND_SERVICE`, `CAP_NET_BROADCAST`, `CAP_IPC_LOCK`, `CAP_WAKE_ALARM` and `CAP_BLOCK_SUSPEND`; every other capability reaches past the app and is refused: an app that needs one runs as root. A root app lists neither |
-| `services` | An app of its own user's: at most 16 `{"name", "exec", "enable"}`. `name` is 1 to 32 of `[a-z0-9-]`, its unit `<name>.service` or the OpenRC script `<name>`; `exec` a file in `files/`, then its arguments, where `${VAR}` names an `APP_*` or `env` variable and no quote, backslash, backquote or control character appears; `enable` starts it at boot and at install |
-| `units` | A root app's: at most 16 `{"systemd"?, "openrc"?, "enable"}`, each naming its file in `units/<init>/`; a bundle with units has one for the device's init |
-| `env` | At most 64 upper-case variables outside `APP_`, without quotes, backslashes, `$`, backquotes or control characters. Every process on the device can read them, as it can the manifest, so they hold no secret |
-| `firstRun` | Optional, an executable file in `hooks/` |
-| `update` | Optional `{"url", "auto"}`: an `https` version file, and whether a newer version installs on its own |
-| `seedPolicy` | `follow-image` (default) or `once`, below |
-| `mdns` | Optional, at most 8 services the mDNS responder publishes while the app runs, as in a drop-in file (section 3.13), each with an optional `service`: one of the app's `services` or units, by either init's name, whose running it follows; without it, any of the app's units running publishes the entry |
-
-A unit is refused when the root ships its name, `services.units` declares it, another app has it,
-or a hand installed it with `mica-unit`. At most 16 apps are installed.
-
-**An app's own user.** micad gives the app a uid, the same as its gid, from 30000 to 39999, one no
-account or group of the root has, and keeps it in `/mica/apps/apps.json` through a remove until a
-purge. Base's `/usr/lib/mica/mica-accounts` names it `mica-app-<name>`: micad runs `add
-mica-app-<name> <uid> <uid>` at each install of the app (a refusal fails the install) and `remove`
-at the purge, and the tool keeps the accounts on DATA/state `accounts` and binds them over
-`/etc/passwd` and `/etc/group` before micad starts. On a root without the tool the uid has no
-name: micad still shows it as `mica-app-<name>`, and `ps` the number. `/srv/apps/<name>` is the app's, and is given back to root
-should a later version run as root. Each service runs through `setpriv` as that uid, with no
-supplementary groups but those its devices grant (below), its bounding, inheritable and ambient
-capabilities only the ones it declares, and no new privileges. Under systemd its unit runs it in a
-sandbox besides: `ProtectSystem=strict` with `/srv/apps/<name>` alone writable, `PrivateTmp`,
-`ProtectHome`, `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectControlGroups`,
-`RestrictSUIDSGID`, `NoNewPrivileges`, `DevicePolicy=closed` with `DeviceAllow=` what its devices
-grant, and `CapabilityBoundingSet=` the declared capabilities with the three `setpriv` drops
-before it runs the service (`CAP_SETUID`, `CAP_SETGID`, `CAP_SETPCAP`). Under OpenRC the script
-runs it under `supervise-daemon` through the same `setpriv`; OpenRC has no namespaces, so there
-the uid, the capabilities and the files' own permissions are all that confine it: it writes only
-its data, its own processes' files and what is world-writable (`/tmp`), reads what is
-world-readable, and opens a device whose node lets its uid or group, so a device's group gives it
-every node of that group. The first-run hook of an app
-of its own user runs as it too, with no capabilities. `setpriv` runs as root, so it gets none of
-the app's variables: for a service and for the hook it runs `/usr/bin/env -i` as the app, which
-sets `PATH`, `HOME` (the app's data), the `APP_*` variables and the manifest's `env`, and then runs
-the app's file.
-
-**Devices.** Serial adapters, GPIO chips and buses come and go, so a device is granted by its
-class, never by the node present at install. A serial port (`/dev/tty<name><n>` such as
-`/dev/ttyS1` or `/dev/ttyACM0`, a pattern such as `/dev/ttyUSB*`, or a stable path under
-`/dev/serial/by-id/` or `/dev/serial/by-path/`) grants its driver's nodes (`char-ttyS`,
-`char-ttyUSB`, ...; `char-ttyUSB` and `char-ttyACM` for a stable path) and the group `dialout`; a
-GPIO chip (`/dev/gpiochip*`) `char-gpiochip` and `gpio`; an I2C bus (`/dev/i2c-*`) `char-i2c` and
-`i2c`; an SPI device (`/dev/spidev*`) `char-spi` and `spi`. The groups are read by name from the
-root's `/etc/group` (Base gives these nodes `root:<group>` 0660); a pattern is only of these
-classes. The app opens the path it declared itself, so nothing is resolved when it starts, and a
-port plugged in later opens too. Any other device grants its node, and the node's group when it is
-present and is one of those four. A device that is not there never refuses the bundle; a node
-present at install that is not a character device, or whose group is not `dialout`, `gpio`, `i2c`,
-`spi` or 0, does: an app that needs it runs as root. A device's group gives the app every node of
-that group, and `DeviceAllow=char-<driver>` every node of that driver.
-
-A CAN bus needs no declaration: an `AF_CAN` raw or broadcast-manager socket needs no device node
-and no capability, and the sandbox restricts no address family and no network, so netlink, packet
-and Bluetooth sockets stay open too. The interface stays micad's: its bit rate and state are set
-in the network settings (`kind: "can"`, section 3.3), and the app declares nothing to use it.
-
-**Install and upgrade.** A bundle is checked before it is taken: its manifest, its units and what
-is installed, so a broken one is refused with every rule it breaks and nothing changes. The
-version installed is refused unless asked again (`reinstall`); any other version of an installed
-app upgrades it. It is then unpacked into a hidden directory beside its place, after a check
-that the filesystem has room for what it unpacks to, flushed and renamed into place. The switch
-stops the units the running version has, installs the new version's (and an OpenRC script's `conf.d`, `units/openrc/conf.d/<name>`),
-removes those it no longer ships, points `/mica/apps/<name>/current` at the version in one
-rename, and writes `/mica/apps/<name>/app.env`: `APP_NAME`, `APP_VERSION`, `APP_DIR` (`current`),
-`APP_DATA` and the manifest's `env`, which a root app's units read; the services of an app of its
-own user get the same variables through `env -i` instead. The first-run hook runs once per version, in the version's directory as
-the app runs, with only `PATH` and that environment, for at most 300 s; its output is kept in `first-run.log` beside `app.env` and sent to syslog tagged
-`mica-app-<name>`. Then each unit is enabled or disabled as the manifest says and the enabled ones
-are started; one left `failed` fails the install. A failed upgrade switches back to the version
-that ran; a failed first install leaves nothing. micad keeps the current and the previous
-version, and deletes older ones.
-
-**Rollback** switches to the previous version, which becomes the kept one. **Remove** stops and
-removes the units and every version; `purge` deletes `/srv/apps/<name>` too. Start, stop and
-restart act on the app's units until the next boot.
-
-**Seeds.** An image may carry apps in `/usr/share/mica/apps/<name>.tar.gz`. At every boot each
-seed is taken by one rule, recorded in `/var/lib/mica/seeded-apps.json`:
-
-- not recorded: installed, or recorded `skipped` when the user installed that app already;
-- recorded with its sha256: nothing, so what the user did with the app since stays;
-- recorded with another sha256: under `once`, nothing; under `follow-image`, installed only while
-  the app is exactly the version that was seeded and the seed is newer;
-- a seed that fails is recorded `failed` and tried at one more boot.
-
-**Updates.** The version file is `{"name", "version", "bundles": {"<arch>": {"url", "sha256",
-"size"}}}`, `url` relative to the file or absolute and `https`. micad reads it every 24 h and on
-demand, and records what it offers; an update fetches the bundle for the device's arch, checks its
-size and sha256, and upgrades. A version that failed is not offered again. With `auto` the daily
-check updates on its own, except to a version that asks for more than the installed one of its own
-user: root, a capability or a device it did not have. That version fails the update, and only an
-install or update by hand takes it.
-
-**Bus.** Each change is a task of kind `app.apply` (`GetTask`), one at a time:
-
-| Member | Does |
-| --- | --- |
-| `GetApps`, `GetApp(name)` | `{available, arch, apps}`, and one of them: each app's `name`, `version`, `description`, `arch`, `sha256`, `source` (`upload`, `cli`, `url`, `seed`), `installedAt`, `previous`, `units` (`name`, `enabled`, `active`), `privileges` (`user`, `account` and `uid` of its own user, `capabilities`, `devices`), `last` (the last flow's `action`, `outcome` `ok` or `failed`, `message`, `at`), `update` (`url`, `auto`, `available`, `checkedAt`, `error`, and `privileges`, what the available version asks for beyond the installed one's once an update fetched it) and `seed` |
-| `InstallApp(path, reinstall, upgrade, acceptPrivileges)` | Install the bundle at `path`; `upgrade` refuses an app not installed. Unless `acceptPrivileges`, a bundle that asks for privileges beyond the installed version's is refused with them (`AppPrivileges`) |
-| `RollbackApp(name)`, `RemoveApp(name, purge)`, `CheckAppUpdate(name)` | The flows above |
-| `UpdateApp(name, accept)` | The update above. A version that asks for privileges beyond the installed one's fails the task and stays offered, with what it asks for in `GetApp`'s `update.privileges`; it is not marked failed. It is taken only when `accept` is that version and the bundle fetched is the one asked about, asking nothing more; any other is asked about again. `""` accepts nothing |
-| `StartApp`, `StopApp`, `RestartApp(name)` | The verb on its units, at once |
-| `GetAppLog(name)` | Each unit's newest lines, as `GetUnitLog`, and the first-run output |
-
-A broken bundle is `com.mica.micad1.Error.AppInvalid`, its description JSON `{"message",
-"details": [{"rule", "detail"}]}`; a flow while another runs is `AppBusy`; the installed version
-again is `AppInstalled`; an unknown app is `NotFound`. A bundle asking for privileges not accepted
-is `AppPrivileges`, its description JSON `{"message", "privileges": {"root", "capabilities",
-"devices"}}`: what it asks for beyond the installed version (`root` when it runs as root and the
-installed one does not), or on a first install everything it asks for, nothing for an app of its
-own user that keeps no capability and opens no device. An app already running as root asks for
-nothing more. Seeds are not asked; an update by hand is asked through its task, as `UpdateApp` says, and an unattended one is refused (above). `GetUnits` names the app a unit is part
-of as `app`, and a `services.units` write naming an app's unit is refused (`unit_taken`).
-
-**On the device: `micad app`.**
-
-| Command | Does |
-| --- | --- |
-| `install <file> [--reinstall] [--yes]` | Install or upgrade the app in a bundle. A bundle that asks for privileges beyond the installed version's prints them and asks at the terminal; `--yes` accepts them, and without a terminal nothing is installed |
-| `upgrade <file> [--yes]` | The same, refused when the app is not installed |
-| `update <name> [--yes]` | Fetch the newer version its update URL offers, and upgrade; one asking for more privileges prints them and asks at the terminal, unless `--yes`. Either accepts that version and bundle only: another one offered meanwhile is asked about again |
-| `check [name]` | Read its update URL now; every app with one, without a name |
-| `rollback <name>` | Switch to the previous version |
-| `remove <name> [--purge]` | Stop it and delete it; `--purge` its data too |
-| `list`, `status <name>` | Every app, and whom it runs as; one, with its privileges |
-| `logs <name> [--tail N]` | Its units' newest lines and its first-run output (200 unless asked) |
-
-The changes wait for their task unless `--detach`; exit 0 done, 1 failed, 2 misused. `micad unit`
-lists an app's units as the app's and refuses to change them.
-
-**API.** `GET /api/v1/apps` is `GetApps` and `GET /api/v1/apps/{name}` `GetApp`.
-`POST /api/v1/apps` takes a bundle as `application/octet-stream` (`?reinstall=true`), written to
-`/mica/apps/.incoming` and installed as a task: a broken bundle is 422 `app_invalid` with each
-rule in `rules`, one that cannot be installed here 422 `app_refused`, a flow running or the
-installed version 409 `app_busy` or `app_installed`, above 256 MiB 413 `app_too_large`. A bundle
-asking for privileges beyond the installed version's is 409 `app_privileges`, with `params`
-`{root, capabilities, devices}` (`AppPrivileges` above) and nothing installed;
-`?acceptPrivileges=true` takes it. The console then shows what the bundle asks for and uploads it
-again with `acceptPrivileges` once the user accepts.
-`DELETE /api/v1/apps/{name}` (`?purge=true`) removes; `POST /api/v1/apps/{name}/{action}`
-is `rollback`, `check` or `update` (a task; `update?acceptPrivileges=<version>` takes that version
-asking for more privileges, as `UpdateApp` does, which the console shows from `update.privileges`
-and asks about first) or
-`start`, `stop` or `restart`; `GET
-/api/v1/apps/{name}/logs` is the log, each line scrubbed of secrets. The console lists the apps
-on its services page, with the upload, and gives each its own page.
-
-**A reset** of application data clears `/mica/apps` and removes the seed record, so the image's seeds are installed again at the next
-boot.
-
-### 3.12 The board's interfaces
+### 3.11 The board's interfaces
 
 The board package may ship `/usr/share/mica/board/interfaces.json`, the physical ports the
 product has:
@@ -916,7 +738,7 @@ first, in order and with their label, an absent one as 未检测到, and tags a 
 board does not declare 未声明; it is still managed. `micad board check <file>` reads a file with
 the same parser, for a build to verify the file it ships.
 
-### 3.13 LAN discovery: mDNS
+### 3.12 LAN discovery: mDNS
 
 micad answers mDNS itself, on either init, with no avahi and no D-Bus: a responder on mdns-sd
 (its own thread). It publishes on every interface that has an address, the access point's
@@ -933,7 +755,7 @@ engines' links (`veth`, `podman`, `cni-`, `docker`, `dummy`), WireGuard (`wg`) o
 
 SSH is never announced, over mDNS or SSDP.
 
-**Scripts and apps** add services of their own, after the built-in ones. A drop-in file
+**Scripts** add services of their own, after the built-in ones. A drop-in file
 `<name>.json`, `<name>` 1 to 32 of `[a-z0-9-]` starting with a letter or digit, lies in
 `/usr/share/mica/mdns.d/` (the image's) or `/run/mica/mdns.d/` (the running system's, gone at
 reboot); a runtime file replaces the image's of the same name, and must be root's regular file
@@ -950,15 +772,13 @@ and writable by root alone, else it is refused:
 characters, never `_mica._tcp`; `port` is 1 to 65535; `txt` has at most 16 keys of printable
 ASCII without `=`, each `key=value` at most 255 bytes and the record at most 1300. A file has at
 most 8 services, 64 KiB, and no other key; one that breaks a rule is refused whole and named in
-the live state and the log, and the others stay. An app's manifest carries the same services in
-`mdns` (section 3.11), published while the app's unit runs: micad looks after each app task and
-every 10 s. A service whose name (`<instance>.<type>`) is published already, by the device or
-an earlier source, is refused, as is any past 64 published services in all. micad watches
+the live state and the log, and the others stay. A service whose name (`<instance>.<type>`) is
+published already, by the device or an earlier source, is refused, as is any past 64 published services in all. micad watches
 `/run/mica/mdns.d` with inotify and re-applies within a second of a change, at most once a
-second.
+second, and reads the drop-ins again every 10 s.
 
 `micad mdns status|list` show the switch, its source, the `.local` name and every service with its
-source (`built-in`, `image:<name>`, `runtime:<name>`, `app:<name>`), and what is refused; `micad
+source (`built-in`, `image:<name>`, `runtime:<name>`), and what is refused; `micad
 mdns on|off` write `access.mdns.enabled` and wait for it; `micad mdns add <name> --type <type>
 --port <port> [--instance <label>] [--txt KEY=VALUE]...` writes the runtime file `<name>.json`
 whole, and `micad mdns remove <name>` removes it.
@@ -973,15 +793,15 @@ source check and the cap until a release carries them (keepsimple1/mdns-sd#532).
 
 `access.mdns.enabled` switches it; absent, the product's `MDNS=` line decides (section 3.2), on
 when the product says nothing. Off, there is no socket at all: nothing is announced and nothing
-answered; drop-ins and apps' entries are kept, and listed as not published. resolved's mDNS stays
+answered; drop-ins are kept, and listed as not published. resolved's mDNS stays
 off on systemd (section 3.4), so one responder holds the port. The live state (`mdns`) names
 whether it runs, why (`setting` or `product`), the `.local` name, every service with its source
 and whether it is published, and the refused sources with the reason.
 
-### 3.14 LAN discovery: SSDP
+### 3.13 LAN discovery: SSDP
 
 micad also answers UPnP discovery, so the device shows in a computer's network view: a responder
-of its own on `239.255.255.250:1900`, IPv4 only, on the interfaces mDNS serves (section 3.13).
+of its own on `239.255.255.250:1900`, IPv4 only, on the interfaces mDNS serves (section 3.12).
 It announces one root device, type `urn:micaos:device:mica:1`, under three targets
 (`upnp:rootdevice`, its UUID, its type): `ssdp:alive` twice at start, on each new address, on a
 new hostname or HTTP port (after a `ssdp:byebye` for the old one, with the next `BOOTID.UPNP.ORG`)
@@ -1005,7 +825,7 @@ status` shows the switch, its source, whether it runs and why not, and what it a
 ssdp on|off` write the switch and wait for it. The live state (`ssdp`) carries the same, and the
 description's fields.
 
-### 3.15 Cloud administrators
+### 3.14 Cloud administrators
 
 On a cloud product, `mica-gce-agent` makes an account for each SSH user the cloud's metadata
 names (Base's `mica-accounts add-login`) and adds it to Base's group `mica-admins` with
@@ -1037,8 +857,8 @@ no configuration of its own; every read and change goes through micad.
 
 Out of `network` there is no console, no HTTP API, no setup page on the access point and no
 bearer token in use; micad and what it drives (the health gate, updates, SSH, MQTT, BLE
-provisioning, the `micad` commands, the user's services, the apps) are unchanged. A device may
-run with no API at all, managed by its apps or its fleet. The way back is `micad web network` as
+provisioning, the `micad` commands, the user's services) are unchanged. A device may
+run with no API at all, managed by its own services or its fleet. The way back is `micad web network` as
 root on the device (over SSH when it is on), a provisioning document, or a reset. The console's
 access page sets the mode: it asks once, naming that command, and once the write is accepted it gives way to a screen that says the API has left the network and
 how to bring it back, and makes no further request.
@@ -1078,13 +898,12 @@ with no restart. A configuration reset removes it.
 the handlers) and `--healthcheck` (for the boot health gate) answer without starting a daemon.
 
 **URL space.** `/api/v1/...` is the API; `/api/versions` lists the versions served; `/healthz` is
-liveness; `/ssdp/device.xml` the UPnP description (section 3.14); `/_ui/` is the built-in console
+liveness; `/ssdp/device.xml` the UPnP description (section 3.13); `/_ui/` is the built-in console
 from `mica-apid-ui` (404 without the package); `/` is the active custom console bundle or a
 redirect to `/_ui/`.
 
 **The API**, by group: session, setup and password; API tokens; settings, state and tasks;
-network, Wi-Fi, containers, the user's services (`/units`, section 3.10), apps (`/apps`, section
-3.11), Bluetooth, MQTT, SSH keys and LAN discovery (`/mdns`, `/ssdp`); observation (time, storage, system
+network, Wi-Fi, containers, the user's services (`/units`, section 3.10), Bluetooth, MQTT, SSH keys and LAN discovery (`/mdns`, `/ssdp`); observation (time, storage, system
 information, telemetry, service logs at `/system/logs/{source}` (`?boot=previous` for the boot
 before this one), network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
@@ -1129,7 +948,7 @@ listing's `ETag` is the network version: an add or an edit names it as `baseVers
 removal as `If-Match`, and a map changed since is refused `version_conflict`; a write naming no
 version writes whatever is stored.
 
-**LAN discovery** (sections 3.13 and 3.14). `GET /api/v1/mdns` answers the `mdns` live state as
+**LAN discovery** (sections 3.12 and 3.13). `GET /api/v1/mdns` answers the `mdns` live state as
 `{available, state?, error?}`: the switch, its source, the `.local` name, every service with its
 source and whether it is published, and the refused files and entries; `available` is false, with
 the reason, while micad has reported none or its last apply failed. `GET /api/v1/ssdp` answers

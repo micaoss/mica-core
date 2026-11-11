@@ -225,7 +225,7 @@ pub(crate) async fn api_v1_factory_reset_status(
 }
 
 /// Erase everything configured on the device: the administrator and the
-/// claim, settings, networks, keys, apps, containers and all data. The
+/// claim, settings, networks, keys, containers and all data. The
 /// software stays at its current version. The device reboots a few seconds
 /// after the answer and erases before anything else runs; it then starts as
 /// on its first boot, unclaimed. It is not a certified wipe: the files are

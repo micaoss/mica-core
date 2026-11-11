@@ -1,5 +1,5 @@
-//! The mDNS responder's upkeep: it follows the runtime drop-ins and the apps
-//! between settings writes.
+//! The mDNS responder's upkeep: it follows the runtime drop-ins between
+//! settings writes.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,24 +10,24 @@ use super::MicadService;
 use super::apply::reconcile_subtree;
 use crate::reconciler::mdns::entries::RUNTIME_DIR;
 
-/// How often the apps' units are looked at, for one that stopped on its own.
+/// How often the drop-ins are read again, for when the watch is missing.
 const CHECK_EVERY: Duration = Duration::from_secs(10);
 /// The least time between two re-applies: changes in a burst are one.
 const COALESCE: Duration = Duration::from_secs(1);
 
-/// Re-apply `access.mdns` when a runtime drop-in changes, when an app task
-/// ends, and every [`CHECK_EVERY`].
+/// Re-apply `access.mdns` when a runtime drop-in changes, and every
+/// [`CHECK_EVERY`].
 pub async fn mdns_upkeep(service: InterfaceRef<MicadService>) {
-    let (reconcilers, inner, refusals, apply_lock, kick) = {
+    let (reconcilers, inner, refusals, apply_lock) = {
         let service = service.get().await;
         (
             Arc::clone(&service.reconcilers),
             Arc::clone(&service.inner),
             Arc::clone(&service.refusals),
             Arc::clone(&service.apply_lock),
-            Arc::clone(&service.mdns_kick),
         )
     };
+    let kick = Arc::new(tokio::sync::Notify::new());
     if let Err(err) = watch(RUNTIME_DIR, Arc::clone(&kick)) {
         tracing::warn!(
             dir = RUNTIME_DIR,
