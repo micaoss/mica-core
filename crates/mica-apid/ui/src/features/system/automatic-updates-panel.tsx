@@ -227,15 +227,23 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
   const currentCheckAt = checkAt ?? policy?.checkAt ?? ''
   const knownMode = POLICIES.find((known) => known === currentMode)
   const knownReboot = REBOOT_POLICIES.find((known) => known === currentReboot)
+  // A check time takes precedence over the interval, which keeps its value
+  // for when the time is cleared.
+  const anchored = currentCheckAt.trim() !== ''
+  const [invalidInterval, setInvalidInterval] = useState(false)
   return (
     <Panel title={t('system.update.automatic.policyTitle')} description={t('system.update.automatic.policyDescription')} action={<Timer className="size-5 text-muted-foreground" />}>
       <form
         className="grid gap-4"
         onSubmit={(event: FormEvent) => {
           event.preventDefault()
+          const minutes = Number(currentInterval) * CADENCE_UNITS[currentUnit]
+          const valid = currentInterval.trim() !== '' && Number.isSafeInteger(minutes) && minutes >= 0
+          setInvalidInterval(!valid)
+          if (!valid) return
           write.mutate({
             policy: currentMode,
-            checkIntervalMinutes: Number(currentInterval) * CADENCE_UNITS[currentUnit],
+            checkIntervalMinutes: minutes,
             // An empty box is `null`, which is the device back on its
             // interval -- sending an empty string would store one.
             checkAt: currentCheckAt.trim() ? currentCheckAt.trim() : null,
@@ -252,11 +260,11 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
               </Select>
             )}
           </FormField>
-          <FormField label={t('system.update.automatic.interval')} hint={t('system.update.automatic.intervalHint')}>
+          <FormField label={t('system.update.automatic.interval')} hint={t(anchored ? 'system.update.automatic.intervalAnchored' : 'system.update.automatic.intervalHint')}>
             {(id) => (
               <div className="flex gap-2">
-                <Input id={id} type="number" min={0} value={currentInterval} onChange={(event) => setInterval(event.target.value)} required />
-                <Select value={currentUnit} onValueChange={(value) => setUnit(String(value) as CadenceUnit)}>
+                <Input id={id} type="number" min={0} step="any" value={currentInterval} onChange={(event) => setInterval(event.target.value)} disabled={anchored} required />
+                <Select value={currentUnit} onValueChange={(value) => setUnit(String(value) as CadenceUnit)} disabled={anchored}>
                   <SelectTrigger className="w-32" aria-label={t('system.update.automatic.intervalUnit')}><SelectValue>{t(`system.update.automatic.intervalUnits.${currentUnit}`)}</SelectValue></SelectTrigger>
                   <SelectContent>
                     {(Object.keys(CADENCE_UNITS) as CadenceUnit[]).map((option) => (
@@ -279,6 +287,7 @@ function PolicyPanel({ policy }: { policy?: ResolvedPolicy }) {
             )}
           </FormField>
         </div>
+        {invalidInterval ? <Callout tone="danger" title={t('system.update.automatic.intervalInvalid')} /> : null}
         <Button className="justify-self-end" type="submit" disabled={write.isPending}>
           {write.isPending ? <Spinner /> : null}{t('system.update.automatic.save')}
         </Button>

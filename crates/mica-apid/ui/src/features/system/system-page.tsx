@@ -33,6 +33,7 @@ import { CredentialRecoveryPanel } from '@/features/recovery/credential-recovery
 import { FactoryResetPanel } from '@/features/recovery/factory-reset-panel'
 import { ResetPanel } from '@/features/recovery/reset-panel'
 import { DriversPanel } from '@/features/system/drivers-panel'
+import { updateView } from '@/features/system/update-view'
 
 // The prototype has six tabs: recovery is folded into update, general and
 // diagnostics. A `#recovery` anchor resolves to update rather than dropping
@@ -256,6 +257,12 @@ export function UpdateOverview() {
           lifecycle?.last_check && t('system.update.overview.lastCheck', { at: lifecycle.last_check }),
         ].filter(Boolean).join(' · ')}
       </p>
+      {doc ? (
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          <span>{t('system.update.overview.availabilityLine', { value: t(`system.update.overview.availability.${updateView(doc).availability}`) })}</span>
+          <span>{t('system.update.overview.operationLine', { value: t(`system.update.overview.operation.${updateView(doc).operation}`) })}</span>
+        </p>
+      ) : null}
       {failed && lifecycle?.reason ? <Callout tone="danger" title={lifecycle.reason} /> : null}
       {lifecycle?.coreCheckFailed ? <Callout tone="warning" title={`${t('system.update.coreCheckFailed')}: ${lifecycle.coreCheckFailed.reason}`} /> : null}
       {doc?.install?.status === 'failed' && doc.install.error ? <Callout tone="danger" title={doc.install.error} /> : null}

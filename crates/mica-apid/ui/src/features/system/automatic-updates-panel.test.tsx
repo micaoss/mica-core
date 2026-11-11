@@ -195,9 +195,12 @@ describe('the automatic update policy', () => {
     })
     renderPanel(<AutomaticUpdatesPanel />)
 
-    // The device's anchor is what the field holds, once the read lands.
+    // The device's anchor is what the field holds, once the read lands, and
+    // it takes precedence: the interval is not editable under it.
     const at = await screen.findByLabelText(/Check at/)
     await waitFor(() => expect((at as HTMLInputElement).value).toBe('03:00'))
+    expect((screen.getByLabelText(/Check every/) as HTMLInputElement).disabled).toBe(true)
+    expect(screen.getByText(/A check time takes precedence over the interval/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Save policy' }))
     expect(JSON.parse(String(fetch.mock.calls.find(([input]) => String(input) === '/api/v1/update/config')?.[1]?.body)).checkAt).toBe('03:00')
 
@@ -206,7 +209,27 @@ describe('the automatic update policy', () => {
     await userEvent.clear(screen.getByLabelText(/Check at/))
     await userEvent.click(screen.getByRole('button', { name: 'Save policy' }))
     const calls = fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/update/config')
-    expect(JSON.parse(String(calls[calls.length - 1]?.[1]?.body)).checkAt).toBe(null)
+    expect(JSON.parse(String(calls[calls.length - 1]?.[1]?.body))).toMatchObject({ checkAt: null, checkIntervalMinutes: 1440 })
+    expect((screen.getByLabelText(/Check every/) as HTMLInputElement).disabled).toBe(false)
+  })
+
+  it('refuses a cadence that is not a whole number of minutes, and sends nothing', async () => {
+    const fetch = stubFetch({
+      '/api/v1/update': policy,
+      '/api/v1/provisioning/status': bakedOnly,
+      'POST /api/v1/update/config': () => jsonResponse({ policy: 'check' }),
+    })
+    renderPanel(<AutomaticUpdatesPanel />)
+
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Cadence unit' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Minutes' }))
+    const every = screen.getByLabelText(/Check every/)
+    await userEvent.clear(every)
+    await userEvent.type(every, '0.5')
+    await userEvent.click(screen.getByRole('button', { name: 'Save policy' }))
+
+    expect(await screen.findByText('The interval must be a whole number of minutes, 0 or more.')).toBeTruthy()
+    expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/update/config')).toBe(false)
   })
 
   it('writes the cadence in minutes whatever unit it was entered in', async () => {

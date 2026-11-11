@@ -77,6 +77,16 @@ describe('the update overview', () => {
     expect(await screen.findByText('The update check failed.')).toBeTruthy()
     expect(screen.queryByText('The last update did not complete.')).toBeNull()
     expect(screen.getByText('Invalid component contract: untrusted metadata key')).toBeTruthy()
+    expect(screen.getByText('Updates: check failed')).toBeTruthy()
+    expect(screen.getByText('Operation: nothing in progress')).toBeTruthy()
+  })
+
+  it('names what is on offer and what the device is doing as two answers', async () => {
+    stubFetch({ '/api/v1/update': { lifecycle: { state: 'failed', failedDuring: 'fetch', last_check: '2026-11-11T06:00:00Z',
+      available: { deploymentId: 'a'.repeat(64), version: '0.0.7', kind: 'deployment' } } } })
+    renderPanel(<UpdateOverview />)
+    expect(await screen.findByText('Updates: update available')).toBeTruthy()
+    expect(screen.getByText('Operation: install failed')).toBeTruthy()
   })
 
   it('keeps the product result when only the core line could not be checked', async () => {
