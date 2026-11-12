@@ -11,7 +11,7 @@
 //! always-running base service enabled by the image, so convergence only ever
 //! means "running against the current render", never "off".
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use micad_settings::{Settings, TimeSettings};
@@ -35,29 +35,8 @@ const NTPD_SERVERS_PATH: &str = "/var/lib/mica/time/ntpd.conf";
 const DEFAULT_SERVERS_PATH: &str = "/var/lib/mica/time/timesyncd.conf";
 /// Where the presentation timezone is published for on-device consumers.
 const DEFAULT_TIMEZONE_PATH: &str = "/run/mica/timezone";
-/// Where zone files live, for the existence check at write and at reconcile.
-pub(crate) const DEFAULT_ZONEINFO_DIR: &str = "/usr/share/zoneinfo";
+pub(crate) use micad_settings::timezones::{DEFAULT_ZONEINFO_DIR, zone_installed};
 
-/// Whether `zone` is a zone the tzdata under `zoneinfo_dir` carries.
-///
-/// The grammar first ([`micad_settings::validate_timezone_name`] admits no
-/// empty, `.` or `..` component), so a name never climbs out of the tree.
-/// `UTC` needs no file: it is what every consumer falls back to. Any other
-/// name is a zone only when its file is a TZif file, so the tzdata's own
-/// metadata (`zone.tab`, `tzdata.zi`, `leapseconds`) is not one.
-pub(crate) fn zone_installed(zoneinfo_dir: &Path, zone: &str) -> bool {
-    use std::io::Read;
-    if micad_settings::validate_timezone_name(zone).is_err() {
-        return false;
-    }
-    if zone == "UTC" {
-        return true;
-    }
-    let mut magic = [0u8; 4];
-    std::fs::File::open(zoneinfo_dir.join(zone))
-        .and_then(|mut file| file.read_exact(&mut magic))
-        .is_ok_and(|()| &magic == b"TZif")
-}
 /// Mode of both renders: world-readable, owner-writable. Neither carries a
 /// secret — a server name and a zone name are published to every
 /// authenticated API reader anyway.

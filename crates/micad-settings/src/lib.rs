@@ -25,6 +25,7 @@ mod path;
 mod recovery;
 mod secret;
 mod store;
+pub mod timezones;
 mod transaction;
 mod wireguard_routes;
 

@@ -80,6 +80,7 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
         // GET only: the status is observed, and pausing synchronization is a
         // control this API deliberately does not have.
         .route(V1_TIME_STATUS_PATH, get(api_v1_time_status))
+        .route(V1_TIME_ZONES_PATH, get(api_v1_time_zones))
         // GET only, and alone: the layout is fixed, so there is no verb here
         // that could format or repartition anything.
         .route(V1_STORAGE_STATUS_PATH, get(api_v1_storage_status))

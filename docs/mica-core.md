@@ -914,6 +914,10 @@ with the boot it was staged in, and the first update-state read of the next boot
 `lastRollback`, for that boot only, whether the booted deployment is the target), reboot override,
 policy); provisioning status and claim; credential recovery and reset; the factory reset;
 diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
+`GET /api/v1/time/zones` lists the zones the device's tzdata offers (`UTC`, then `zone1970.tab`'s
+installed zones, with the tzdata release) and whether the stored `time.timezone` is installed and
+listed; the console's timezone picker searches it by city, region, IANA name or the offset the
+browser computes for now, and still writes the zone as the setting.
 `PUT /api/v1/settings/{path}` (and `PATCH /api/v1/settings`) writes `logging.persistent` (`true`,
 `false`, or `null` for the product's default), `logging.maxSizeKiB` (a number of KiB or `null`)
 and `logging.remote` (the collector object), each checked as micad checks it before the write.

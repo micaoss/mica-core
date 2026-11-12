@@ -63,6 +63,7 @@ mod setup;
 mod snapshots;
 mod ssdp;
 mod ssh;
+mod time_zones;
 mod tokens;
 mod ui;
 mod ui_upload;
@@ -102,6 +103,7 @@ pub(crate) use setup::*;
 pub(crate) use snapshots::*;
 pub(crate) use ssdp::*;
 pub(crate) use ssh::*;
+pub(crate) use time_zones::*;
 pub(crate) use tokens::*;
 pub(crate) use ui::*;
 pub(crate) use ui_upload::*;
@@ -161,6 +163,9 @@ pub struct AppState {
     /// Where the kernel lists its sockets (`/proc/net`), for the UDP ports
     /// services on the device hold.
     pub(crate) proc_net: Arc<std::path::PathBuf>,
+    /// The tzdata tree the zone catalog is read from: `/usr/share/zoneinfo`
+    /// on a device, a temporary tree in tests.
+    pub(crate) zoneinfo: Arc<std::path::PathBuf>,
     /// The desired fleet document: `/mica/config/fleet.json` on a device, an
     /// isolated path in route tests.
     pub(crate) fleet_path: Arc<std::path::PathBuf>,
@@ -258,6 +263,9 @@ impl AppState {
                 micad_settings::configuration::DEFAULT_UPDATES_PATH,
             )),
             proc_net: Arc::new(std::path::PathBuf::from("/proc/net")),
+            zoneinfo: Arc::new(std::path::PathBuf::from(
+                micad_settings::timezones::DEFAULT_ZONEINFO_DIR,
+            )),
             fleet_path: Arc::new(std::path::PathBuf::from(
                 micad_settings::configuration::DEFAULT_FLEET_PATH,
             )),
@@ -476,6 +484,13 @@ impl AppState {
     #[cfg(test)]
     pub fn with_proc_net(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
         self.proc_net = Arc::new(dir.into());
+        self
+    }
+
+    /// Read the zone catalog from another tzdata tree, for tests.
+    #[cfg(test)]
+    pub fn with_zoneinfo(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.zoneinfo = Arc::new(dir.into());
         self
     }
 

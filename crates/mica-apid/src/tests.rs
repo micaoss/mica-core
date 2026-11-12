@@ -60,6 +60,7 @@ mod settings_write;
 mod setup;
 mod ssdp;
 mod tasks;
+mod time_zones;
 mod tokens;
 mod ui_bundles;
 mod ui_console;

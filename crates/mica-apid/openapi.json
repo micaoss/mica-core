@@ -7663,6 +7663,61 @@
         }
       }
     },
+    "/api/v1/time/zones": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read the zone catalog.",
+        "description": "`UTC` first, then the canonical zones of the device's tzdata\n(`zone1970.tab`), each `{id, region, city}` split from its IANA name, with\nthe tzdata release as `tzdataVersion`. `current` is the stored\n`time.timezone`: whether the device's tzdata carries it (`installed`) and\nwhether it is one of the listed zones (`listed`); an installed zone that\nis not listed is a backward-compatible name the device still accepts.\nOffsets are not part of the answer: they depend on the date, and a client\ncomputes them. Carries an `ETag`; a request whose `If-None-Match` names it\nis answered 304.",
+        "operationId": "api_v1_time_zones",
+        "responses": {
+          "200": {
+            "description": "`tzdataVersion`, `zones` and `current`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged since the `ETag` the request names"
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The device's tzdata has no zone table (`tzdata_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tokens": {
       "get": {
         "tags": [

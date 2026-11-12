@@ -93,6 +93,7 @@ pub(super) const V1_TASK_ROUTE: &str = "/v1/tasks/{id}";
 /// write counterpart — there is deliberately no route beside it that could
 /// pause or stop synchronization.
 pub(super) const V1_TIME_STATUS_PATH: &str = "/v1/time/status";
+pub(super) const V1_TIME_ZONES_PATH: &str = "/v1/time/zones";
 
 /// The read-only storage status.
 ///

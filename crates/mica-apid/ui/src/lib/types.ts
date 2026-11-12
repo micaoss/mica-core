@@ -366,6 +366,14 @@ export interface AvailableFact {
 /// `GET /api/v1/device/code`: the code printed on the label, or why there is none.
 export type DeviceCode = { code: string, source: string } | { code: null, reason: string }
 
+/// `GET /api/v1/time/zones`: the zones this device's tzdata offers, `UTC`
+/// first, and where the stored `time.timezone` stands against them.
+export interface TimeZoneCatalog {
+  tzdataVersion: string | null
+  zones: { id: string, region: string | null, city: string | null }[]
+  current: { id: string, installed: boolean, listed: boolean } | null
+}
+
 export interface TimeStatus {
   status: 'synchronized' | 'polling' | 'offline-degraded' | 'invalid-source' | 'unknown'
   synchronized?: boolean
