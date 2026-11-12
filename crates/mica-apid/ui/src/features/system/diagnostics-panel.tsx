@@ -13,6 +13,7 @@ import { Spinner } from '@/shared/components/ui/spinner'
 import { useMutationFeedback } from '@/shared/feedback/use-mutation-feedback'
 import { failureDetail } from '@/shared/feedback/toast'
 import { formatBytes } from '@/shared/components/fact'
+import { SupportInfoPanel } from './support-info-panel'
 
 const snapshotsKey = ['diagnostic-snapshots'] as const
 
@@ -62,6 +63,7 @@ export function DiagnosticsPanel() {
           ] : []} />
         </Panel>
       </div>
+      <SupportInfoPanel />
       <Panel title={t('system.diagnostics.snapshots.title')} description={t('system.diagnostics.snapshots.description')} action={<Download className="size-5 text-muted-foreground" />} contentClassName="gap-0">
         {snapshots.isPending ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{t('system.diagnostics.snapshots.loading')}</p> : null}
         {snapshots.error ? <Callout tone="danger" title={failureDetail(snapshots.error, t('common.requestFailed'))} /> : null}

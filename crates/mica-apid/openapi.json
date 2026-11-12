@@ -7353,6 +7353,48 @@
         }
       }
     },
+    "/api/v1/system/support-info": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read the support summary.",
+        "description": "The facts a support case opens with, from what micad already answers:\n`device` (board model, kernel release), `software` (product and its\nversion, OS, core and daemon versions), `deployment` (id, version,\ngeneration, confirmed), `uptimeSeconds`, `time` (the stored zone and the\nsynchronization status), `integrity` (each item's `key`, `state` and\n`detailCode`, as `GET /api/v1/system/integrity` derives them), `data`\n(DATA's readiness and space) and `lastUpdateError` (the failed update\nstep's `code` and `during`). Each member is picked by name: the machine\nid, the host name, network names and addresses, device and claim codes,\ncredentials, logs and settings are not among them. A section whose source\nfailed is `{available: false, reason}`. Text values are single lines.\nServed as an attachment named `mica-support-<UTC time>.json`, never\ncached; nothing is sent anywhere.",
+        "operationId": "api_v1_system_support_info",
+        "responses": {
+          "200": {
+            "description": "The summary (`schemaVersion` names its shape); `Content-Disposition: attachment`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/system/telemetry": {
       "get": {
         "tags": [

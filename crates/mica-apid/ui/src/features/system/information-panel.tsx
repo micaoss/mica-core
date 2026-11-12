@@ -11,6 +11,7 @@ import { Spinner } from '@/shared/components/ui/spinner'
 import { failureDetail } from '@/shared/feedback/toast'
 import { Unavailable, join } from '@/shared/components/fact'
 import { IntegrityPanel } from './integrity-panel'
+import { SupportInfoPanel } from './support-info-panel'
 
 type PackageEntry = NonNullable<SystemInformation['packages']['entries']>[number]
 
@@ -75,6 +76,7 @@ export function InformationPanel() {
           </Panel>
         </>
       ) : null}
+      <SupportInfoPanel />
     </div>
   )
 }

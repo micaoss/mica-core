@@ -86,6 +86,7 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
         .route(V1_STORAGE_STATUS_PATH, get(api_v1_storage_status))
         .route(V1_SYSTEM_INFO_PATH, get(api_v1_system_info))
         .route(V1_SYSTEM_INTEGRITY_PATH, get(api_v1_system_integrity))
+        .route(V1_SYSTEM_SUPPORT_INFO_PATH, get(api_v1_system_support_info))
         .route(V1_DEVICE_CODE_PATH, get(api_v1_device_code))
         .route(V1_SYSTEM_TELEMETRY_PATH, get(api_v1_system_telemetry))
         .route(V1_SYSTEM_LOG_ROUTE, get(api_v1_system_log))

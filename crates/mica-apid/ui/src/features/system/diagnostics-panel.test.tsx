@@ -46,7 +46,8 @@ describe('diagnostic snapshots', () => {
     expect(download.getAttribute('href')).toBe('/api/v1/diagnostics/snapshots/1')
     expect(download.hasAttribute('download')).toBe(true)
     expect(screen.getByText(/Exports are already redacted by a fail-closed allowlist/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /copy/i })).toBeNull()
+    // The one copy action is the support summary's; a snapshot has none.
+    expect(screen.queryAllByRole('button', { name: /copy/i }).map((button) => button.textContent)).toEqual(['Copy device information'])
   })
 
   it('states an empty store as empty', async () => {

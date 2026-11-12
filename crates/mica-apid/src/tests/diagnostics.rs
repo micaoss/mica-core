@@ -579,3 +579,50 @@ async fn the_integrity_route_derives_its_items_and_carries_no_secret() {
         );
     }
 }
+
+// The support summary: an attachment of named facts, carrying none of the
+// tree's secrets nor the machine id the system information holds.
+#[tokio::test]
+async fn the_support_summary_is_an_attachment_of_named_facts_only() {
+    let (tree, token) = with_token(secret_tree("hunter2secret"));
+    let (router, fake, _dir) = diagnostics_app(tree);
+    fake.set_system_info(json!({
+        "machineId": { "available": true, "id": "0123456789abcdef0123456789abcdef" },
+        "board": { "available": true, "model": "CX3576" },
+        "deployment": { "available": true, "id": "d1", "version": "0.0.6", "generation": 3,
+            "confirmed": true },
+    }));
+
+    let response = bearer(&router, "GET", "/api/v1/system/support-info", &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_api_headers(&response, "/api/v1/system/support-info");
+    let disposition = response.headers()["content-disposition"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        disposition.starts_with("attachment; filename=\"mica-support-")
+            && disposition.ends_with("Z.json\""),
+        "{disposition}"
+    );
+    let text = body_string(response).await;
+    for secret in [
+        "hunter2secret",
+        "plaintext-marker",
+        "0123456789abcdef",
+        "DFN4-L34C-T8N",
+    ] {
+        assert!(!text.contains(secret), "{secret} in {text}");
+    }
+    let summary: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(summary["schemaVersion"], json!(1));
+    assert_eq!(summary["device"]["board"], json!("CX3576"));
+    assert_eq!(summary["deployment"]["generation"], json!(3));
+
+    assert_eq!(
+        unauthenticated(&router, "GET", "/api/v1/system/support-info").await,
+        StatusCode::UNAUTHORIZED
+    );
+    let response = bearer_json(&router, "POST", "/api/v1/system/support-info", &token, "{}").await;
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+}

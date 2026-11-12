@@ -918,6 +918,14 @@ diagnostic snapshots; console bundles. `GET /meta` lists the product's features,
 installed zones, with the tzdata release) and whether the stored `time.timezone` is installed and
 listed; the console's timezone picker searches it by city, region, IANA name or the offset the
 browser computes for now, and still writes the zone as the setting.
+`GET /api/v1/system/support-info` is the support summary: board, kernel, product and component
+versions, the running deployment, uptime, the stored zone and synchronization, the integrity
+items' states, DATA's readiness and space, and the last update failure's code. Every member is
+picked by name from micad's answers, so the machine id, host name, network names and addresses,
+device and claim codes, credentials, logs and settings are not in it; a section whose source
+failed is `{available: false, reason}`, and text values are single lines. It is served as the
+attachment `mica-support-<UTC time>.json`; the console's Information and Diagnostics tabs copy it
+as labelled lines or download it, and the device sends it nowhere.
 `PUT /api/v1/settings/{path}` (and `PATCH /api/v1/settings`) writes `logging.persistent` (`true`,
 `false`, or `null` for the product's default), `logging.maxSizeKiB` (a number of KiB or `null`)
 and `logging.remote` (the collector object), each checked as micad checks it before the write.

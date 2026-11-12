@@ -374,6 +374,23 @@ export interface TimeZoneCatalog {
   current: { id: string, installed: boolean, listed: boolean } | null
 }
 
+type Absent = { available: false, reason: string }
+
+/// `GET /api/v1/system/support-info`: the named facts a support case opens
+/// with; a section whose source failed is `{available: false, reason}`.
+export interface SupportInfo {
+  schemaVersion: number
+  generatedAt: string
+  device: { available: true, board: string | null, kernel: string | null } | Absent
+  software: { available: true, product: string | null, productVersion: string | null, osVersion: string | null, core: string | null, daemon: string | null } | Absent
+  deployment: { available: true, id: string | null, version: string | null, generation: number | null, confirmed: boolean | null } | Absent
+  uptimeSeconds: number | null
+  time: { available: true, timezone: string | null, status: string | null, synchronized: boolean | null } | Absent
+  integrity: { available: true, items: { key: string, state: string, detailCode: string | null }[] } | Absent
+  data: { available: true, state: string | null, totalBytes: number | null, usedBytes: number | null, freeBytes: number | null, usedPercent: number | null } | Absent
+  lastUpdateError: { available: true, code: string | null, during: string | null } | Absent
+}
+
 export interface TimeStatus {
   status: 'synchronized' | 'polling' | 'offline-degraded' | 'invalid-source' | 'unknown'
   synchronized?: boolean
