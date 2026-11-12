@@ -1413,6 +1413,7 @@ name = "mica-deploy"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "argon2",
  "aws-lc-rs",
  "base64",
  "hex",
@@ -1426,6 +1427,7 @@ dependencies = [
  "tempfile",
  "url",
  "x509-parser",
+ "zeroize",
 ]
 
 [[package]]

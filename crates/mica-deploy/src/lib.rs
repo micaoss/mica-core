@@ -8,6 +8,7 @@ pub mod catalog;
 pub mod chunks;
 pub mod components;
 pub mod core_set;
+pub mod data_crypt;
 pub mod debian_version;
 pub mod defaults;
 pub mod deployments;
