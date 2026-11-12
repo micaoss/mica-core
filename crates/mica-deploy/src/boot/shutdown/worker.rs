@@ -142,7 +142,7 @@ pub(super) fn perform(op: &Operation) -> Result<()> {
         }
         Operation::RemoveMapping(expected) => {
             ensure!(
-                crate::boot::mica_mapping(&expected.name),
+                crate::boot::owned_mapping(&expected.name),
                 "foreign mapping removal refused"
             );
             let state = snapshot()?;

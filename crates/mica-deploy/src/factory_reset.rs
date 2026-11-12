@@ -262,7 +262,7 @@ pub fn erase_in_place(
 }
 
 /// Make the factory DATA layout, `meta/` among it, as the image makes it.
-fn skeleton(data: &Path) -> Result<()> {
+pub fn skeleton(data: &Path) -> Result<()> {
     for (name, mode) in SKELETON.into_iter().chain([(KEPT, 0o700)]) {
         let path = data.join(name);
         if path.symlink_metadata().is_err() {

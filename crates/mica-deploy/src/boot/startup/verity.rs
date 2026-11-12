@@ -66,7 +66,8 @@ pub fn verify_table(expected: &DmTarget, targets: &[DmTarget]) -> Result<()> {
     Ok(())
 }
 
-fn control() -> Result<File> {
+/// The device-mapper control node, its identity checked.
+pub(crate) fn control() -> Result<File> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)

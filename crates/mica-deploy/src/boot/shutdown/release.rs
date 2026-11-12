@@ -95,10 +95,10 @@ pub struct Released {
 /// No requested action can be authorized by a tool status or a shell marker.
 pub fn release(io: &mut impl LifecycleIo, budget: Budget, owner: &Ownership) -> Result<Released> {
     // A deployment's mappings: the root, the kernel support image, one per
-    // core component and one per driver extension.
+    // core component, one per driver extension and the DATA crypt mapping.
     ensure!(
         owner.mappings.len()
-            <= 2 + crate::components::MAX_CORE_COMPONENTS + crate::extensions::MAX_EXTENSIONS
+            <= 3 + crate::components::MAX_CORE_COMPONENTS + crate::extensions::MAX_EXTENSIONS
             && owner.loops.len() <= 128
             && owner.mounts.len() <= 4096,
         "excessive ownership record"
@@ -123,7 +123,7 @@ pub fn release(io: &mut impl LifecycleIo, budget: Budget, owner: &Ownership) -> 
         owner
             .mappings
             .iter()
-            .all(|m| crate::boot::mica_mapping(&m.name) && names.insert(&m.name)),
+            .all(|m| crate::boot::owned_mapping(&m.name) && names.insert(&m.name)),
         "invalid owned mapping name"
     );
     io.execute(&Operation::Private, budget.operation_deadline(io.now_ms())?)?;

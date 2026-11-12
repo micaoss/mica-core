@@ -38,7 +38,8 @@ pub trait KeyProvider {
 
 /// What an encrypted product does when no listed provider enrols at the first
 /// format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NoProvider {
     /// Leave DATA unformatted and boot locked.
     Refuse,
@@ -52,6 +53,9 @@ pub struct Format {
     pub no_provider: NoProvider,
     /// The recovery keyslot's argon2id costs.
     pub recovery: Kdf,
+    /// Whether the kernel has the cipher, or why not: checked before anything
+    /// is enrolled or written.
+    pub cipher_ready: Result<(), String>,
 }
 
 /// A provider's failure, by token type.
@@ -82,6 +86,8 @@ pub enum Opened {
     /// No listed provider enrolled, and the product refuses plain DATA:
     /// DATA left untouched.
     NoProvider { failures: Failures },
+    /// The kernel lacks the cipher: DATA left untouched, never plain.
+    CipherUnavailable { why: String },
     /// A header, and no provider's token opens it.
     Locked { failures: Failures },
 }
@@ -137,6 +143,9 @@ fn open_or_format(
     let Some(format) = format else {
         return Ok(Opened::Plain);
     };
+    if let Err(why) = &format.cipher_ready {
+        return Ok(Opened::CipherUnavailable { why: why.clone() });
+    }
     let mut failures = Failures::new();
     let mut enrolled = Vec::new();
     for provider in providers.iter_mut() {

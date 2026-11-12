@@ -74,6 +74,16 @@ pub enum Operation {
         arch: String,
         format: crate::board::DataFormat,
     },
+    /// Open the `gpt` board's DATA at the block device `device` as the
+    /// product's `encryption` says (`data_crypt::runkit::open_data`): map
+    /// an encrypted one, format a fresh one with the `mke2fs` of the verified
+    /// root at `/newroot`, seal every key provider off, and print the report.
+    OpenData {
+        device: String,
+        arch: String,
+        format: crate::board::DataFormat,
+        encryption: Option<crate::data_crypt::runkit::Encryption>,
+    },
     /// Mount and unmount the ext4 on the block device `device` at `target`
     /// with `options` when it is smaller than the device
     /// (`replay::replay_data`), and print what was done.
@@ -288,6 +298,21 @@ fn perform(operation: Operation) -> Result<()> {
         } => println!(
             "{}",
             format::format_data(Path::new("/newroot"), &arch, &device, &data_format)?
+        ),
+        Operation::OpenData {
+            device,
+            arch,
+            format: data_format,
+            encryption,
+        } => println!(
+            "{}",
+            serde_json::to_string(&crate::data_crypt::runkit::open_data(
+                Path::new("/newroot"),
+                &arch,
+                &device,
+                encryption.as_ref(),
+                &data_format,
+            )?)?
         ),
         Operation::ReplayData {
             device,

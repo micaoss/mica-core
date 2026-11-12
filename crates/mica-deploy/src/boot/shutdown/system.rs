@@ -151,6 +151,57 @@ pub(super) fn known_providers(slaves: &BTreeSet<Device>, providers: &[u32]) -> R
     Ok(())
 }
 
+/// The DATA crypt mapping's table: writable, one `crypt` target covering the
+/// mapping, its key a `logon` keyring reference (never key bytes), on the one
+/// partition below it, past the LUKS2 header.
+pub(super) fn checked_crypt_table(
+    status: &lifecycle_sys::DmStatus,
+    targets: &[lifecycle_sys::DmTarget],
+    device: Device,
+    uuid: &str,
+    slaves: &BTreeSet<Device>,
+    sectors: u64,
+) -> Result<String> {
+    ensure!(
+        Device::from_raw(status.device) == device
+            && status.name == crate::data_crypt::runkit::MAPPING
+            && status.uuid == uuid
+            && !uuid.is_empty()
+            && status.writable
+            && status.targets == 1
+            && targets.len() == 1,
+        "DM device/name/UUID/target identity mismatch"
+    );
+    let target = &targets[0];
+    ensure!(
+        target.kind == "crypt" && target.sector == 0 && target.length == sectors && sectors > 0,
+        "DM table does not completely cover the DATA mapping"
+    );
+    let parameters: Vec<_> = target.parameters.split_whitespace().collect();
+    ensure!(
+        parameters.len() >= 5
+            && parameters[1]
+                .strip_prefix(':')
+                .and_then(|key| key.split_once(':'))
+                .is_some_and(|(size, rest)| {
+                    size.parse::<u32>().is_ok() && rest == "logon:mica:data"
+                })
+            && parameters[4] == (crate::data_crypt::DATA_OFFSET / 512).to_string(),
+        "unsupported MICA crypt table"
+    );
+    ensure!(
+        *slaves == BTreeSet::from([Device::parse(parameters[3])?]),
+        "DM table device differs from the live DATA partition"
+    );
+    Ok(format!(
+        "{} {} {} {}",
+        target.sector,
+        target.length,
+        target.kind,
+        parameters.join(" ")
+    ))
+}
+
 pub(super) fn read_mica_table(
     control: &File,
     device: Device,
@@ -160,14 +211,32 @@ pub(super) fn read_mica_table(
     slaves: &BTreeSet<Device>,
     providers: &[u32],
 ) -> Result<(String, lifecycle_sys::DmStatus)> {
-    let status =
-        lifecycle_sys::dm_status(control, rustix::fs::makedev(device.major, device.minor))?;
+    let crypt = name == crate::data_crypt::runkit::MAPPING;
+    let status_of = |device: u64| {
+        if crypt {
+            lifecycle_sys::dm_status_writable(control, device)
+        } else {
+            lifecycle_sys::dm_status(control, device)
+        }
+    };
+    let status = status_of(rustix::fs::makedev(device.major, device.minor))?;
     let targets = lifecycle_sys::dm_table(control, &status)?;
     let sectors = read_text(path.join("size"), 64)?.trim().parse::<u64>()?;
-    known_providers(slaves, providers)?;
-    let table = checked_verity_table(&status, &targets, device, name, uuid, slaves, sectors)?;
+    let table = if crypt {
+        // DATA is a partition of the system disk, never a loop or ubiblock.
+        ensure!(
+            list(&path.join("slaves"), 2)?
+                .iter()
+                .all(|slave| slave.join("partition").exists()),
+            "the DATA mapping is not on a partition"
+        );
+        checked_crypt_table(&status, &targets, device, uuid, slaves, sectors)?
+    } else {
+        known_providers(slaves, providers)?;
+        checked_verity_table(&status, &targets, device, name, uuid, slaves, sectors)?
+    };
     ensure!(
-        lifecycle_sys::dm_status(control, status.device)? == status,
+        status_of(status.device)? == status,
         "DM identity changed while reading its table"
     );
     Ok((table, status))
@@ -326,7 +395,7 @@ pub(super) fn snapshot() -> Result<Snapshot> {
             let uuid = read_text(path.join("dm/uuid"), 256)?.trim().to_owned();
             // Only MICA tables need content identity. Foreign holders remain
             // visible but are never passed to a removal command.
-            let table = if crate::boot::mica_mapping(&dm_name) {
+            let table = if crate::boot::owned_mapping(&dm_name) {
                 let control = dm_control()?;
                 let (table, _) = read_mica_table(
                     &control, device, &path, &dm_name, &uuid, &slaves, &providers,

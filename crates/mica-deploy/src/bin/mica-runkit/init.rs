@@ -18,9 +18,11 @@ use std::{
 };
 
 mod boot;
+mod data;
 mod extensions;
 mod mounts;
 use boot::*;
+use data::*;
 use mounts::*;
 
 #[derive(Deserialize)]
@@ -37,6 +39,9 @@ struct Config {
     /// What the product asks of the system; absent asks nothing.
     #[serde(default)]
     product: mica_deploy::boot::trust::ProductPolicy,
+    /// DATA encryption; absent is off.
+    #[serde(default)]
+    data_encryption: Option<mica_deploy::data_crypt::runkit::Encryption>,
 }
 
 #[derive(Debug)]

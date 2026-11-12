@@ -49,6 +49,13 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     // the signed initramfs, and nothing of deployment storage is touched yet.
     let config: Config = serde_json::from_slice(&bounded_file("/etc/mica/boot.json", 4096)?)?;
     config.board.validate(&config.identity.arch)?;
+    if let Some(encryption) = &config.data_encryption {
+        encryption.validate()?;
+        ensure!(
+            config.board.storage == Storage::Gpt,
+            "DATA encryption needs a gpt board"
+        );
+    }
     // Arming is synchronous and precedes access to deployment storage. The
     // signed cmdline fixes the timeout; NOWAYOUT keeps it armed across exec.
     let watchdog = shutdown::resolve_watchdog(
@@ -244,6 +251,14 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
             None
         }
     };
+    // This runkit has no crypto-erase: it never resets an encrypted DATA,
+    // and says so to the system (`factoryReset` false below).
+    let reset = if reset.is_some() && config.data_encryption.is_some() {
+        eprintln!("mica-init: factory reset of an encrypted DATA is not supported; not resetting");
+        None
+    } else {
+        reset
+    };
     // Whether DATA was made again; `false`, its format failed and it is
     // erased in place once mounted.
     let mut formatted = None;
@@ -287,7 +302,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
             Err(error) => eprintln!("mica-init: DATA not grown: {error:#}"),
         }
     }
-    let quotas = (|| -> Result<bool> {
+    let (quotas, opened) = (|| -> Result<(bool, Option<DataReport>)> {
         if let Some(ubi) = &ubi {
             // UBIFS has no project quotas: the policy turns them off.
             mount(
@@ -297,7 +312,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
                 "ubifs",
                 "rw,noatime",
             )?;
-            return Ok(false);
+            return Ok((false, None));
         }
         let data = run(
             control,
@@ -352,6 +367,31 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
                 },
             );
         }
+        // DATA is opened as the product says, whatever it is: an encrypted
+        // one is never mounted or formatted as plain, and a fresh one of an
+        // encrypted product is formatted here. Every key provider is sealed
+        // off in the same worker, before the root starts.
+        let result = run(
+            control,
+            Startup::OpenData {
+                device: data.clone(),
+                arch: config.identity.arch.clone(),
+                format: config.board.data_format(),
+                encryption: config.data_encryption.clone(),
+            },
+        );
+        adopt_data_mapping(control, &data)?;
+        let opened: DataReport = serde_json::from_str(result?.trim())?;
+        eprintln!("{}", data_line(&opened));
+        ensure!(
+            opened.state != DataState::Locked,
+            "DATA is locked: {}",
+            opened
+                .reason
+                .as_deref()
+                .unwrap_or("no provider unlocked it")
+        );
+        let data = opened.device.clone().context("no DATA device to mount")?;
         // `prjquota` is applied HERE, at mount time, every boot, as the signed
         // policy's `board.dataQuotas` says (on unless the board turns it off);
         // nothing from the product, profile or command line can change it.
@@ -385,9 +425,17 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
             Err(error) => eprintln!("mica-init: DATA journal not replayed: {error:#}"),
         }
         mount(control, &data, "/newroot/mnt/data", "ext4", options)?;
-        Ok(quotas)
+        Ok((quotas, Some(opened)))
     })()
     .context(mica_deploy::deployments::SharedDataFailure)?;
+    if let Some(opened) = &opened {
+        seed_data(Path::new("/system"), Path::new("/newroot/mnt/data"), opened)
+            .context(mica_deploy::deployments::SharedDataFailure)?;
+    }
+    let data_encrypted = opened
+        .as_ref()
+        .is_some_and(|opened| opened.state == DataState::On);
+    drop(opened);
     // A staged factory reset is carried out here, before the projects, the
     // core composition or the machine identity read DATA, and before any
     // process of the root exists. An erase the runkit cannot finish leaves
@@ -598,7 +646,9 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     // receipt, whose readers refuse fields they do not know.
     fs::write(
         factory_reset::CAPABILITIES,
-        serde_json::to_vec(&serde_json::json!({ "factoryReset": true, "factoryResetVersion": 2 }))?,
+        serde_json::to_vec(
+            &serde_json::json!({ "factoryReset": !data_encrypted, "factoryResetVersion": 2 }),
+        )?,
     )?;
     fs::write("/run/mica/deployment.json", &envelope)?;
     fs::write(core_set::BOOT_FILE, serde_json::to_vec(&core_boot)?)?;

@@ -394,7 +394,8 @@ absence is reported with its reason rather than as a healthy reading:
   staged, mica-deploy refuses everything that would change what it keeps. A runkit that says
   only `{"factoryReset": true}` erases DATA in place and keeps `meta/` (6.5); micad then stages
   the request in `meta/` itself. It is refused, with a `code`, when the booted runkit does not
-  carry it out (`factory_reset_unsupported`: it writes no `/run/mica/runkit.json`), on an
+  carry it out (`factory_reset_unsupported`: it writes no `/run/mica/runkit.json`, or says
+`false`, as on an encrypted DATA), on an
   unclaimed device (`not_claimed`), while an update is installing, holds the transaction lock or
   waits for its reboot (`update_in_progress`), while a deployment or set is on trial
   (`trial_pending`), and on a wrong password (`password_incorrect`). After 3 wrong passwords
@@ -1483,7 +1484,8 @@ read one format.
 
 - **`init`**, PID 1 of the signed initramfs: requires dm-verity signature enforcement, arms the
   watchdog, reads the policy, authenticates the selected deployment, opens root and support as
-  signed dm-verity mappings, composes the core components (below), mounts DATA (with `prjquota` and the project directories unless the
+  signed dm-verity mappings, composes the core components (below), opens DATA as the product's
+  `dataEncryption` says (below) and mounts it (with `prjquota` and the project directories unless the
   board turns quotas off), carries out a staged factory reset, seals the owner keyring, maps the
   driver extensions and composes or binds modules and firmware (below), seeds the persistent
   machine identity, and hands over to the root's init. No network and no shell exist at this stage.
@@ -1535,6 +1537,47 @@ read one format.
   An OpenRC root gets no exit ramdisk: `openrc-init` reboots by itself once the shutdown runlevel
   has left DATA read-only. The exit ramdisk exists on x86-64 and aarch64 only, so a 32-bit
   board runs an OpenRC root.
+
+**DATA encryption.** The signed boot policy's top-level `dataEncryption` (beside `identity` and
+`board`; absent is off) is `{"mode": "on", "keyProviders": ["tpm2"], "noProvider": "refuse" |
+"plain", "cipher": "aes-xts-plain64" | "xchacha12,aes-adiantum-plain64"}`, every field required,
+valid only on a `gpt` board. On a `gpt` board the runkit opens DATA in one startup worker before it
+mounts it, whatever the policy says:
+
+- A LUKS2 header (either copy) is always honoured. The tokens of the listed providers are tried in
+  their order, and the first secret that opens a keyslot gives the volume key. The key goes into
+  the worker's keyring as the `logon` key `mica:data`, the writable dm-crypt mapping `mica-data`
+  is loaded with it (`:<size>:logon:mica:data`, `allow_discards`, 4096-byte sectors, the payload
+  at 16 MiB), and the key is invalidated once the table holds it. DATA is then mounted from
+  `/dev/mapper/mica-data`. A header that no provider unlocks, encryption off included, refuses
+  the boot (`DATA is locked`); it is never formatted again.
+- With encryption on, no header and a fresh DATA (neither a LUKS2 header nor an ext4 superblock),
+  the runkit first checks that the kernel maps the cipher: a table with a throwaway key is loaded
+  and discarded unresumed. Then every listed provider that is ready enrols a keyslot with its
+  token, a recovery passphrase (8 groups of 5 base32 characters) enrols an argon2id keyslot, the
+  header is written, and DATA is mapped, formatted inside the mapping and given the factory
+  layout. When no provider enrols, `noProvider` decides: `refuse` leaves DATA untouched and
+  refuses the boot, `plain` formats plain DATA. A kernel without the cipher refuses, whatever
+  `noProvider` says.
+- Otherwise DATA is plain, as before.
+
+Every listed provider is then sealed off, on every path, and a failure to do so is logged. The
+console gets `MICA_DATA stage=on|off|locked formatted=… [reason=…] [cipher=…] tpm2=…`. After the
+mount the runkit copies SYSTEM's `firmware.json` into DATA's `meta/` when it has none, and keeps a
+first format's recovery passphrase in `meta/data-recovery-key` (mode 0600); the passphrase is
+never written to the console or a log. An encrypted DATA has no factory reset yet: its boot
+writes `"factoryReset": false` to `/run/mica/runkit.json` and leaves a staged reset unapplied.
+The exit ramdisk owns `mica-data` as it owns the verity mappings, and removes it once DATA is
+unmounted. The volume is standard LUKS2: `cryptsetup open` with the recovery passphrase opens it.
+
+The `tpm2` provider seals 32 random bytes under the TPM's ECC P-256 storage key (recreated from
+the standard SRK template at every boot) to PCR 7 and PCR 15 = 0. The session is salted to that
+key, with parameter encryption both ways; every response HMAC is checked before the response is
+used, and the storage key's name is checked against the token's `mica-srk-name` before a session
+is salted to it. The keyslot passphrase is the secret's base64, and the token is a `systemd-tpm2`
+one (`tpm2-blob`, `tpm2-pcrs` [7, 15], `tpm2-pcr-bank`, `tpm2-primary-alg` `ecc`,
+`tpm2-policy-hash`, `mica-srk-name`). Sealing off extends PCR 15 with the SHA-256 of
+`mica-data-unsealed`, so the booted system cannot unseal again.
 
 **Core components at boot.** Each component the device selects from its core set is opened like
 the root, a

@@ -16,6 +16,7 @@
 
 mod af;
 pub mod provider;
+pub mod runkit;
 pub mod tpm2;
 mod xts;
 

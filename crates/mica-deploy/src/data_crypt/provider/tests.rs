@@ -101,6 +101,7 @@ const FORMAT: Format = Format {
         memory_kib: 64,
         cpus: 1,
     },
+    cipher_ready: Ok(()),
 };
 
 fn calls(log: &Log) -> Vec<String> {
@@ -217,6 +218,25 @@ fn no_provider_refuse_leaves_data_untouched() {
             .count(),
         2
     );
+}
+
+#[test]
+fn a_kernel_without_the_cipher_refuses_before_any_enrolment_even_with_plain_allowed() {
+    let (_dir, device) = device();
+    let log = Log::default();
+    let mut a = Fake::new("a", &log);
+    let format = Format {
+        no_provider: NoProvider::Plain,
+        cipher_ready: Err("no xts(aes)".into()),
+        ..FORMAT
+    };
+    let outcome = open(&device, &mut [&mut a], Some(&format));
+    assert!(matches!(
+        outcome.opened,
+        Ok(Opened::CipherUnavailable { ref why }) if why == "no xts(aes)"
+    ));
+    assert!(!has_header(&device).unwrap());
+    assert_eq!(calls(&log), ["a seal_off"]);
 }
 
 #[test]

@@ -27,6 +27,7 @@ use std::{
 };
 
 mod capacity;
+mod data_crypt;
 mod transactions;
 mod trials;
 

@@ -26,7 +26,7 @@ pub(super) fn run(control: &mut BootControl, operation: Startup) -> Result<Strin
     // as the medium needs, and indexing the modules runs the root's depmod
     // over the whole tree; the watchdog is fed meanwhile.
     let limit = match operation {
-        Startup::FormatData { .. } => 600_000,
+        Startup::FormatData { .. } | Startup::OpenData { .. } => 600_000,
         Startup::ModuleIndex { .. } => 120_000,
         _ => 30_000,
     };

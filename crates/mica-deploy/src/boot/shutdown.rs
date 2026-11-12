@@ -268,3 +268,9 @@ pub fn parse_mountinfo(text: &str) -> Result<Vec<Mount>> {
 
 #[cfg(test)]
 mod tests;
+
+/// The live graph as the exitrd scans it, for the VM checks.
+#[cfg(test)]
+pub(crate) fn scan() -> Result<Snapshot> {
+    system::snapshot()
+}

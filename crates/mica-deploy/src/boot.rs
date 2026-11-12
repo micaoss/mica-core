@@ -23,6 +23,13 @@ pub const CORE_MAPPING_PREFIX: &str = "mica-core-";
 /// The prefix of a driver extension's verity mapping: `mica-ext-<name>`.
 pub const EXTENSION_MAPPING_PREFIX: &str = "mica-ext-";
 
+/// Whether `name` is a mapping MICA's startup creates and its shutdown
+/// releases: a verity mapping ([`mica_mapping`]) or the DATA crypt mapping.
+/// Every other mapping is foreign and is never touched.
+pub fn owned_mapping(name: &str) -> bool {
+    mica_mapping(name) || name == crate::data_crypt::runkit::MAPPING
+}
+
 /// Whether `name` is a verity mapping MICA's startup creates and its shutdown
 /// releases: the root, the kernel support image, a core component or a
 /// driver extension. Every other mapping is foreign and is never touched.

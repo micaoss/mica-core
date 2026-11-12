@@ -7,6 +7,75 @@ use std::{
 };
 
 #[test]
+fn the_data_crypt_table_is_writable_keyed_by_reference_and_on_its_partition() {
+    let device = Device {
+        major: 253,
+        minor: 4,
+    };
+    let partition = Device {
+        major: 259,
+        minor: 3,
+    };
+    let status = lifecycle_sys::DmStatus {
+        device: rustix::fs::makedev(253, 4),
+        name: "mica-data".into(),
+        uuid: "CRYPT-LUKS2-0123-mica-data".into(),
+        targets: 1,
+        open_count: 0,
+        event: 0,
+        writable: true,
+    };
+    let target = crate::data_crypt::runkit::table(
+        crate::data_crypt::Cipher::AesXts,
+        259,
+        3,
+        crate::data_crypt::DATA_OFFSET + 80 * 512,
+    )
+    .unwrap();
+    let slaves = BTreeSet::from([partition]);
+    let check = |status: &lifecycle_sys::DmStatus,
+                 target: &lifecycle_sys::DmTarget,
+                 slaves: &BTreeSet<Device>| {
+        checked_crypt_table(
+            status,
+            std::slice::from_ref(target),
+            device,
+            "CRYPT-LUKS2-0123-mica-data",
+            slaves,
+            80,
+        )
+    };
+    assert_eq!(
+        check(&status, &target, &slaves).unwrap(),
+        format!("0 80 crypt {}", target.parameters)
+    );
+    for case in 0..10 {
+        let mut status = status.clone();
+        let mut target = target.clone();
+        let mut slaves = slaves.clone();
+        match case {
+            0 => status.writable = false,
+            1 => status.name = "mica-root".into(),
+            2 => status.uuid = "reused".into(),
+            3 => target.length = 72,
+            4 => target.kind = "verity".into(),
+            5 => {
+                target.parameters = target
+                    .parameters
+                    .replace(":64:logon:mica:data", &"ab".repeat(64));
+            }
+            6 => target.parameters = target.parameters.replace(":64:logon:", ":64:user:"),
+            7 => target.parameters = target.parameters.replace(" 32768 ", " 0 "),
+            8 => target.parameters = target.parameters.replace("259:3", "259:4"),
+            _ => {
+                slaves.insert(Device { major: 7, minor: 1 });
+            }
+        }
+        assert!(check(&status, &target, &slaves).is_err(), "case={case}");
+    }
+}
+
+#[test]
 fn typed_verity_table_preserves_live_device_provider_and_complete_coverage() {
     let device = Device {
         major: 253,
