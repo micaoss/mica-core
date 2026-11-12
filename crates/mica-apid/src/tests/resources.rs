@@ -395,6 +395,68 @@ pub(super) async fn a_media_volume_is_unmounted_by_id() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+// Ejecting a device: 200 with its volumes, 409 with them while one is in
+// use, 404 for an id no device has.
+#[tokio::test]
+pub(super) async fn a_media_device_is_ejected_by_id() {
+    let (tree, token) = with_token(secret_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+    let item = |id: &str, device: &str, label: &str| {
+        json!({
+            "id": id, "deviceId": device, "label": label, "transport": "usb",
+            "filesystem": "vfat", "sizeBytes": 1, "availableBytes": 1,
+            "state": "mounted_readonly", "busy": false, "reason": null,
+        })
+    };
+    fake.set_storage_media(json!({
+        "generation": "g",
+        "items": [item("a1", "d1", "UPDATE"), item("a2", "d1", "MAPS"), item("b1", "d2", "BUSY")],
+    }));
+
+    let response = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/storage/media/devices/d1/eject",
+        &token,
+        "{}",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let items = body_json(response).await["items"].clone();
+    assert_eq!(items.as_array().unwrap().len(), 2);
+    assert!(
+        items
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["state"] == "ejected")
+    );
+
+    let response = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/storage/media/devices/d2/eject",
+        &token,
+        "{}",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let refusal = envelope(response).await;
+    assert_eq!(refusal["code"], "media_device_busy");
+    assert_eq!(refusal["params"]["items"][0]["reason"], "open_by_process");
+
+    let response = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/storage/media/devices/zz/eject",
+        &token,
+        "{}",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(envelope(response).await["code"], "media_device_not_found");
+}
+
 // The last acceptance bullet, as a gate rather than a promise: normal
 // apid exposes NO generic format or repartition action.
 #[tokio::test]

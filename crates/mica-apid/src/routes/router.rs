@@ -89,6 +89,10 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
             V1_STORAGE_MEDIA_UNMOUNT_PATH,
             post(api_v1_storage_media_unmount),
         )
+        .route(
+            V1_STORAGE_MEDIA_EJECT_PATH,
+            post(api_v1_storage_media_eject),
+        )
         .route(V1_SYSTEM_INFO_PATH, get(api_v1_system_info))
         .route(V1_SYSTEM_INTEGRITY_PATH, get(api_v1_system_integrity))
         .route(V1_SYSTEM_SUPPORT_INFO_PATH, get(api_v1_system_support_info))

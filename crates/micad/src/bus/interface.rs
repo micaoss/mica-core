@@ -345,6 +345,18 @@ impl MicadService {
             .map_err(|err| SettingsFault::Fdo(fdo::Error::Failed(format!("media JSON: {err}"))))
     }
 
+    /// Eject the media device `device_id`: nothing else may use it, every
+    /// volume is unmounted without forcing, and the usage is looked for
+    /// again. JSON `{outcome, items}`, `outcome` `ejected` (safe to unplug),
+    /// `not_found` (no items) or `busy` (the volumes in use say why).
+    pub(super) async fn eject_media(&self, device_id: &str) -> Result<String, SettingsFault> {
+        let outcome = self.media.eject(device_id).await.map_err(|err| {
+            SettingsFault::Fdo(fdo::Error::Failed(format!("eject media: {err:#}")))
+        })?;
+        serde_json::to_string(&outcome)
+            .map_err(|err| SettingsFault::Fdo(fdo::Error::Failed(format!("media JSON: {err}"))))
+    }
+
     /// JSON snapshot returned by systemd-networkd's live `Describe` method.
     pub(super) async fn get_network_state(&self) -> Result<String, SettingsFault> {
         self.network_state

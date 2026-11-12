@@ -281,7 +281,7 @@ directions, because `SettingsChanged` carries setting values.
 | --- | --- |
 | Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
 | Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetStorageMedia`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetLogOfBoot`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
-| Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `UnmountMedia`, `FactoryReset` (the administrator password, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
+| Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `UnmountMedia`, `EjectMedia`, `FactoryReset` (the administrator password, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so two claims cannot both land), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
@@ -944,8 +944,15 @@ mount of a volume that is gone is detached. The other states are `unmounted`, `d
 driver), `failed` (`unreadable`) and `removed` (gone since the last read, listed once).
 `POST /api/v1/storage/media/{id}/unmount` unmounts that volume only, without forcing (409
 `media_busy` while a file is open on it, 404 `media_not_found` for an id no volume has now), and
-it stays unmounted while it is plugged in; it does not make the device safe to unplug. Nothing on
-a medium is checked or written.
+it stays unmounted while it is plugged in; it does not make the device safe to unplug.
+`POST /api/v1/storage/media/devices/{deviceId}/eject` prepares the whole device for unplugging:
+it refuses (409 `media_device_busy`, `params.items` the device's volumes with each `reason`) while
+a volume or the disk is mounted outside `/run/mica/media` (`mounted_outside_mica`), mounted in
+another mount namespace (`mounted_in_other_namespace`), held by a mapping (`used_by_mapping`),
+open as a device node (`open_by_process`) or has a file open (`open_files`); otherwise it
+unmounts MICA's mounts without forcing, checks again that no namespace keeps a copy, and reports
+every volume `ejected` until the device is unplugged (404 `media_device_not_found` for a device id
+no device has now). The device is not powered off. Nothing on a medium is checked or written.
 `GET /api/v1/time/zones` lists the zones the device's tzdata offers (`UTC`, then `zone1970.tab`'s
 installed zones, with the tzdata release) and whether the stored `time.timezone` is installed and
 listed; the console's timezone picker searches it by city, region, IANA name or the offset the

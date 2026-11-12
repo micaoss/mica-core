@@ -190,6 +190,7 @@ impl Host {
             dir: tempfile::tempdir().unwrap(),
         };
         host.write("proc/sys/kernel/random/boot_id", BOOT);
+        host.link("proc/self/ns/mnt", "mnt:[4026531841]");
         host.write(
             "proc/filesystems",
             "nodev\tsysfs\n\text4\n\tvfat\n\texfat\n",
@@ -538,6 +539,109 @@ fn a_busy_volume_stays_mounted() {
     );
 }
 
+#[test]
+fn an_unused_device_is_ejected_whole_and_stays_so() {
+    let host = Host::new();
+    let media = host.media();
+    let first = media.inner.reconcile().unwrap();
+    let stick = first.items[0].device_id.clone();
+    let Eject::Ejected { items } = media.inner.eject(&stick).unwrap() else {
+        panic!("not ejected");
+    };
+    assert_eq!(items.len(), 2);
+    assert!(
+        items
+            .iter()
+            .all(|v| v.state == "ejected" && v.device_id == stick)
+    );
+    let info = fs::read_to_string(host.path("proc/self/mountinfo")).unwrap();
+    assert!(!info.contains(&first.items[0].id), "{info}");
+    assert!(
+        info.contains(&first.items[2].id),
+        "the SD card stays mounted"
+    );
+    let again = media.inner.reconcile().unwrap();
+    assert_eq!(
+        (again.items[0].state, again.items[1].state),
+        ("ejected", "ejected")
+    );
+    assert_eq!(again.items[2].state, "mounted_readonly");
+    assert!(
+        matches!(media.inner.eject(&stick).unwrap(), Eject::Ejected { .. }),
+        "again"
+    );
+    assert_eq!(
+        media.inner.eject("feedfacefeedfacefeed").unwrap(),
+        Eject::NotFound
+    );
+}
+
+/// Every way a device can be in use refuses its eject and unmounts nothing.
+#[test]
+fn a_device_in_use_is_not_ejected() {
+    for (case, reason) in [
+        ("other namespace", "mounted_in_other_namespace"),
+        ("open", "open_by_process"),
+        ("mapping", "used_by_mapping"),
+        ("this namespace", "mounted_outside_mica"),
+    ] {
+        let host = Host::new();
+        let media = host.media();
+        let first = media.inner.reconcile().unwrap();
+        let usb = "sys/devices/pci0000:00/0000:00:14.0/usb1/1-2/1-2:1.0/host0/target0:0:0/0:0:0:0/block/sda";
+        match case {
+            "other namespace" => {
+                host.link("proc/77/ns/mnt", "mnt:[4026532999]");
+                host.write(
+                    "proc/77/mountinfo",
+                    "90 80 8:2 / /media/x rw - ntfs3 /dev/sda2 rw\n",
+                );
+            }
+            "open" => host.link("proc/88/fd/3", "/dev/sda"),
+            "mapping" => host.write(&format!("{usb}/sda2/holders/dm-3/.keep"), ""),
+            _ => {
+                let mut info = fs::read_to_string(host.path("proc/self/mountinfo")).unwrap();
+                info.push_str("70 1 8:2 / /mnt/data/srv/x rw - ntfs3 /dev/sda2 rw\n");
+                host.write("proc/self/mountinfo", &info);
+            }
+        }
+        let Eject::Busy { items } = media.inner.eject(&first.items[0].device_id).unwrap() else {
+            panic!("{case}: ejected");
+        };
+        let used: Vec<_> = items.iter().filter(|v| v.busy).map(|v| v.reason).collect();
+        assert!(used.contains(&Some(reason)), "{case}: {items:?}");
+        assert_eq!(
+            items[0].state, "mounted_readonly",
+            "{case}: nothing unmounted"
+        );
+        let info = fs::read_to_string(host.path("proc/self/mountinfo")).unwrap();
+        assert!(info.contains(&first.items[0].id), "{case}");
+    }
+}
+
+/// A copy of MICA's mount left in another namespace after MICA's own is
+/// gone keeps the device from being safe to unplug.
+#[test]
+fn a_copy_left_in_another_namespace_keeps_the_device_unsafe() {
+    let host = Host::new();
+    let media = host.media();
+    let first = media.inner.reconcile().unwrap();
+    host.link("proc/77/ns/mnt", "mnt:[4026532999]");
+    host.write(
+        "proc/77/mountinfo",
+        &format!(
+            "90 80 8:1 / /run/mica/media/{} ro - vfat /dev/sda1 ro\n",
+            first.items[0].id
+        ),
+    );
+    let Eject::Busy { items } = media.inner.eject(&first.items[0].device_id).unwrap() else {
+        panic!("ejected");
+    };
+    assert_eq!(items[0].state, "unmounted");
+    assert_eq!(items[0].reason, Some("mounted_in_other_namespace"));
+    assert_eq!(media.inner.reconcile().unwrap().items[0].state, "unmounted");
+}
+
 /// Volumes `mkfs` made, in `MICA_PROBE_DIR`, recognised with their labels.
 #[test]
 #[ignore = "cross-check against mkfs, run by hand"]
@@ -581,20 +685,37 @@ fn vm_media() {
     let summary: Vec<_> = inventory
         .items
         .iter()
-        .map(|v| (v.transport, v.filesystem, v.label.as_deref(), v.state, v.reason))
+        .map(|v| {
+            (
+                v.transport,
+                v.filesystem,
+                v.label.as_deref(),
+                v.state,
+                v.reason,
+            )
+        })
         .collect();
     assert_eq!(
         summary,
         [
             ("usb", "vfat", Some("UPDATE"), "mounted_readonly", None),
             ("usb", "ext4", Some("dirty"), "failed", Some("needs_repair")),
-            ("usb", "exfat", Some("CHARTS"), "unsupported", Some("filesystem_not_in_kernel")),
+            (
+                "usb",
+                "exfat",
+                Some("CHARTS"),
+                "unsupported",
+                Some("filesystem_not_in_kernel")
+            ),
             ("usb", "ext4", Some("logs"), "mounted_readonly", None),
         ]
     );
     let update = &inventory.items[0];
     let place = Path::new(MEDIA_ROOT).join(&update.id);
-    assert_eq!(fs::read_to_string(place.join("hello.txt")).unwrap(), "mica\n");
+    assert_eq!(
+        fs::read_to_string(place.join("hello.txt")).unwrap(),
+        "mica\n"
+    );
     let info = fs::read_to_string("/proc/self/mountinfo").unwrap();
     let line = info
         .lines()
@@ -602,7 +723,14 @@ fn vm_media() {
         .unwrap()
         .to_string();
     for option in ["ro", "nosuid", "nodev", "noexec"] {
-        assert!(line.split_whitespace().nth(5).unwrap().split(',').any(|o| o == option), "{line}");
+        assert!(
+            line.split_whitespace()
+                .nth(5)
+                .unwrap()
+                .split(',')
+                .any(|o| o == option),
+            "{line}"
+        );
     }
     println!("VM media: {line}");
     let written = fs::File::create(place.join("new.txt"));
@@ -612,13 +740,64 @@ fn vm_media() {
     );
     // Busy while a file is open, then unmounted alone.
     let open = fs::File::open(place.join("hello.txt")).unwrap();
-    assert!(matches!(media.inner.unmount(&update.id).unwrap(), Unmount::Busy { .. }));
+    assert!(matches!(
+        media.inner.unmount(&update.id).unwrap(),
+        Unmount::Busy { .. }
+    ));
     drop(open);
-    assert!(matches!(media.inner.unmount(&update.id).unwrap(), Unmount::Unmounted { .. }));
+    assert!(matches!(
+        media.inner.unmount(&update.id).unwrap(),
+        Unmount::Unmounted { .. }
+    ));
     let again = media.inner.reconcile().unwrap();
     assert_eq!(again.items[0].state, "unmounted");
-    assert_eq!(again.items[3].state, "mounted_readonly", "the other stick stays");
-    assert!(!fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&update.id));
+    assert_eq!(
+        again.items[3].state, "mounted_readonly",
+        "the other stick stays"
+    );
+    assert!(
+        !fs::read_to_string("/proc/self/mountinfo")
+            .unwrap()
+            .contains(&update.id)
+    );
+    // Eject: a file open on the mounted stick refuses at its unmount; the
+    // other stick's device node held open refuses before anything moves.
+    let logs = &again.items[3];
+    let place = Path::new(MEDIA_ROOT).join(&logs.id);
+    let file = fs::File::open(place.join("lost+found")).unwrap();
+    let Eject::Busy { items } = media.inner.eject(&logs.device_id).unwrap() else {
+        panic!("ejected with a file open");
+    };
+    assert_eq!(items[0].reason, Some("open_files"));
+    drop(file);
+    let node = fs::File::open("/dev/sda").unwrap();
+    let Eject::Busy { items } = media.inner.eject(&update.device_id).unwrap() else {
+        panic!("ejected with its node open");
+    };
+    assert!(
+        items.iter().all(|v| v.reason == Some("open_by_process")),
+        "{items:?}"
+    );
+    drop(node);
+    for device in [&update.device_id, &logs.device_id] {
+        let Eject::Ejected { items } = media.inner.eject(device).unwrap() else {
+            panic!("not ejected");
+        };
+        println!(
+            "VM media: ejected {}",
+            serde_json::to_string(&items).unwrap()
+        );
+    }
+    let after = media.inner.reconcile().unwrap();
+    assert!(
+        after.items.iter().all(|v| v.state == "ejected"),
+        "{after:?}"
+    );
+    assert!(
+        !fs::read_to_string("/proc/self/mountinfo")
+            .unwrap()
+            .contains(MEDIA_ROOT)
+    );
     std::io::stdout().flush().unwrap();
     println!("VM_MEDIA PASS");
 }

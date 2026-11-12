@@ -22,6 +22,14 @@
 //! is left alone; a volume the user unmounted stays unmounted while it is
 //! plugged in; and the mount of a device that is gone is detached. Nothing
 //! is ever checked or written.
+//!
+//! Ejecting a device, under the same lock, first looks for anything else
+//! using it: a mount in this or any other mount namespace, a mapping over
+//! it, or a process holding its device node open. Any of those refuses the
+//! eject and unmounts nothing. Otherwise MICA's mounts of its volumes are
+//! unmounted without forcing, stopping at the first refusal; the usage is
+//! looked for again; and only then is the device `ejected`, safe to unplug.
+//! Nothing powers the device off.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -75,9 +83,9 @@ pub struct Volume {
     /// Free space, once mounted.
     pub available_bytes: Option<u64>,
     /// `mounted_readonly`, `unmounted` (by the user, until it is plugged
-    /// again), `detected` (supported but not mounted: something else uses
-    /// it), `unsupported`, `failed`, or `removed` (unplugged since the last
-    /// read, listed once).
+    /// again), `ejected` (its device, likewise), `detected` (supported but
+    /// not mounted: something else uses it), `unsupported`, `failed`, or
+    /// `removed` (unplugged since the last read, listed once).
     pub state: &'static str,
     /// Whether something outside MICA's media mounts uses it.
     pub busy: bool,
@@ -104,6 +112,26 @@ pub enum Unmount {
     },
 }
 
+/// What ejecting one device came to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum Eject {
+    /// Every volume is unmounted and nothing else uses the device: it is
+    /// safe to unplug. Its volumes, each `ejected`.
+    Ejected {
+        /// The device's volumes as they are now.
+        items: Vec<Volume>,
+    },
+    /// No device has this id now.
+    NotFound,
+    /// Something uses the device: the volumes it uses are `busy` with a
+    /// reason. What MICA had unmounted before the refusal stays unmounted.
+    Busy {
+        /// The device's volumes as they are now.
+        items: Vec<Volume>,
+    },
+}
+
 /// The media inventory and MICA's mounts of it.
 #[async_trait::async_trait]
 pub trait MediaSource: Send + Sync {
@@ -122,6 +150,14 @@ pub trait MediaSource: Send + Sync {
     ///
     /// As [`Self::inventory`], or an unmount error other than busy.
     async fn unmount(&self, id: &str) -> Result<Unmount>;
+
+    /// Eject the device `device_id`: every volume unmounted, and nothing
+    /// else using it, before it is said to be safe to unplug.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::unmount`].
+    async fn eject(&self, device_id: &str) -> Result<Eject>;
 }
 
 /// The source a daemon without host access has: none.
@@ -134,6 +170,10 @@ impl MediaSource for UnavailableMedia {
     }
 
     async fn unmount(&self, _id: &str) -> Result<Unmount> {
+        Err(anyhow::anyhow!("this daemon observes no media"))
+    }
+
+    async fn eject(&self, _device_id: &str) -> Result<Eject> {
         Err(anyhow::anyhow!("this daemon observes no media"))
     }
 }
@@ -156,6 +196,8 @@ struct State {
     unmounted: BTreeSet<String>,
     /// Volumes whose mount failed, and why, while plugged in.
     failed: BTreeMap<String, &'static str>,
+    /// Devices ejected, while plugged in.
+    ejected: BTreeSet<String>,
     /// The volumes of the last read, to list once what has gone since.
     last: Vec<Volume>,
 }
@@ -165,6 +207,8 @@ struct Found {
     volume: Volume,
     /// Its kernel name.
     name: String,
+    /// The kernel name of its disk.
+    disk: String,
     /// Whether it is mounted at its place under [`MEDIA_ROOT`].
     mounted: bool,
 }
@@ -189,6 +233,13 @@ impl MediaSource for HostMedia {
         tokio::task::spawn_blocking(move || inner.unmount(&id))
             .await
             .context("media unmount")?
+    }
+
+    async fn eject(&self, device_id: &str) -> Result<Eject> {
+        let (inner, id) = (Arc::clone(&self.inner), device_id.to_string());
+        tokio::task::spawn_blocking(move || inner.eject(&id))
+            .await
+            .context("media eject")?
     }
 }
 
@@ -443,6 +494,7 @@ impl Inner {
                         },
                     },
                     name,
+                    disk: disk.clone(),
                     mounted,
                 });
             }
@@ -500,6 +552,8 @@ impl Inner {
             let mut volume = found.volume.clone();
             if found.mounted {
                 volume.state = "mounted_readonly";
+            } else if state.ejected.contains(&volume.device_id) {
+                volume.state = "ejected";
             } else if state.unmounted.contains(&volume.id) {
                 volume.state = "unmounted";
             } else if let Some(reason) = state.failed.get(&volume.id) {
@@ -523,6 +577,8 @@ impl Inner {
         }
         let now: BTreeSet<String> = items.iter().map(|v| v.id.clone()).collect();
         state.unmounted.retain(|id| now.contains(id));
+        let devices: BTreeSet<&String> = items.iter().map(|v| &v.device_id).collect();
+        state.ejected.retain(|id| devices.contains(id));
         state.failed.retain(|id, _| now.contains(id));
         let removed: Vec<Volume> = state
             .last
@@ -568,5 +624,151 @@ impl Inner {
         state.unmounted.insert(id.to_string());
         volume.state = "unmounted";
         Ok(Unmount::Unmounted { item: volume })
+    }
+
+    /// Who, besides MICA's media mounts in this namespace, uses the disk
+    /// `disk` or its volumes `names`: by kernel name, the first reason found.
+    /// `media_too` counts mounts at MICA's media places in other namespaces
+    /// as well, for the check after MICA's own are gone.
+    fn users(&self, disk: &str, names: &[&str], media_too: bool) -> BTreeMap<String, &'static str> {
+        let mut users = BTreeMap::new();
+        let mut all: Vec<&str> = names.to_vec();
+        all.push(disk);
+        let devnums: BTreeMap<String, &str> = all
+            .iter()
+            .filter_map(|name| Some((self.read(&format!("sys/class/block/{name}/dev"))?, *name)))
+            .collect();
+        for name in &all {
+            let holders = self.path(&format!("sys/class/block/{name}/holders"));
+            if std::fs::read_dir(holders).is_ok_and(|mut entries| entries.next().is_some()) {
+                users
+                    .entry((*name).to_string())
+                    .or_insert("used_by_mapping");
+            }
+        }
+        let own = std::fs::read_link(self.path("proc/self/ns/mnt")).ok();
+        let mut seen = BTreeSet::new();
+        let pids = std::fs::read_dir(self.path("proc"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()))
+            });
+        for pid in pids {
+            let dir = pid.path();
+            if let Ok(namespace) = std::fs::read_link(dir.join("ns/mnt"))
+                && Some(&namespace) != own.as_ref()
+                && seen.insert(namespace)
+            {
+                let text = std::fs::read_to_string(dir.join("mountinfo")).unwrap_or_default();
+                for mount in parse_mounts(&text) {
+                    let at_media = Path::new(&mount.point).parent() == Some(Path::new(MEDIA_ROOT));
+                    if let Some(name) = devnums.get(&mount.device)
+                        && (media_too || !at_media)
+                    {
+                        users
+                            .entry((*name).to_string())
+                            .or_insert("mounted_in_other_namespace");
+                    }
+                }
+            }
+            for fd in std::fs::read_dir(dir.join("fd"))
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                if let Ok(target) = std::fs::read_link(fd.path())
+                    && let Some(name) = target.to_str().and_then(|t| t.strip_prefix("/dev/"))
+                    && all.contains(&name)
+                {
+                    users.entry(name.to_string()).or_insert("open_by_process");
+                }
+            }
+        }
+        users
+    }
+
+    fn eject(&self, device_id: &str) -> Result<Eject> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let found: Vec<Found> = self
+            .scan()?
+            .found
+            .into_iter()
+            .filter(|f| f.volume.device_id == device_id)
+            .collect();
+        let Some(disk) = found.first().map(|f| f.disk.clone()) else {
+            return Ok(Eject::NotFound);
+        };
+        let names: Vec<&str> = found.iter().map(|f| f.name.as_str()).collect();
+        let current = |found: &Found, state: &State| {
+            let mut volume = found.volume.clone();
+            if found.mounted {
+                volume.state = "mounted_readonly";
+                volume.available_bytes = self.mounter.available(&self.place(&volume.id));
+            } else if state.unmounted.contains(&volume.id) {
+                volume.state = "unmounted";
+            }
+            // For an eject, what uses a volume is the reason that matters.
+            if volume.busy {
+                volume.reason = Some("mounted_outside_mica");
+            }
+            volume
+        };
+        let busy = |items: &mut Vec<Volume>, users: &BTreeMap<String, &'static str>| {
+            let disk_user = users.get(&disk).copied();
+            for (volume, found) in items.iter_mut().zip(&found) {
+                if let Some(reason) = users.get(&found.name).copied().or(disk_user) {
+                    volume.busy = true;
+                    volume.reason = Some(reason);
+                }
+            }
+        };
+        let users = self.users(&disk, &names, false);
+        let mut items: Vec<Volume> = found.iter().map(|f| current(f, &state)).collect();
+        if !users.is_empty() || items.iter().any(|v| v.busy) {
+            busy(&mut items, &users);
+            return Ok(Eject::Busy { items });
+        }
+        for (volume, found) in items.iter_mut().zip(&found) {
+            if !found.mounted {
+                continue;
+            }
+            match self.mounter.unmount(&self.place(&volume.id), false) {
+                Ok(()) => {
+                    let _ = std::fs::remove_dir(self.place(&volume.id));
+                    state.unmounted.insert(volume.id.clone());
+                    volume.state = "unmounted";
+                    volume.available_bytes = None;
+                }
+                Err(error)
+                    if error.raw_os_error() == Some(rustix::io::Errno::BUSY.raw_os_error()) =>
+                {
+                    volume.busy = true;
+                    volume.reason = Some("open_files");
+                    return Ok(Eject::Busy { items });
+                }
+                Err(error) => return Err(error).context("unmount"),
+            }
+        }
+        for volume in &items {
+            state.unmounted.insert(volume.id.clone());
+        }
+        let users = self.users(&disk, &names, true);
+        if !users.is_empty() {
+            busy(&mut items, &users);
+            return Ok(Eject::Busy { items });
+        }
+        state.ejected.insert(device_id.to_string());
+        for volume in &mut items {
+            volume.state = "ejected";
+        }
+        Ok(Eject::Ejected { items })
     }
 }

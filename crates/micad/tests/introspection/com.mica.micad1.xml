@@ -124,6 +124,16 @@ keep it unmounted while it is plugged in: JSON `{outcome, item}`,
 <arg type="s" direction="out"/>
 </method>
 <!--
+Eject the media device `device_id`: nothing else may use it, every
+volume is unmounted without forcing, and the usage is looked for
+again. JSON `{outcome, items}`, `outcome` `ejected` (safe to unplug),
+`not_found` (no items) or `busy` (the volumes in use say why).
+-->
+<method name="EjectMedia">
+<arg name="device_id" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
 JSON snapshot returned by systemd-networkd's live `Describe` method.
 -->
 <method name="GetNetworkState">

@@ -6105,7 +6105,7 @@
           "resources"
         ],
         "summary": "Read the external media inventory.",
-        "description": "The USB mass storage and removable SD cards plugged in now, one item per\nvolume: every partition of each device, supported or not, grouped by\n`deviceId`. `id` and `deviceId` are opaque and belong to one attachment:\na device unplugged and plugged again gets new ones. The device's own disk\n(SYSTEM, DATA and the boot partition) is never listed, nor soldered eMMC.\n`filesystem` is `vfat`, `exfat`, `ext2`, `ext3`, `ext4`, `ntfs` or\n`unknown`. Each read mounts a supported, clean volume nothing else uses\nread-only (`state` `mounted_readonly`, with `availableBytes`); the other\nstates are `unmounted` (by `POST .../unmount`, while it stays plugged\nin), `detected` (`busy`: a mount outside MICA's media mounts uses it,\n`reason` `mounted_outside_mica`), `unsupported` (`filesystem_unsupported`\nor `filesystem_not_in_kernel`), `failed` (`unreadable`, `needs_repair`\nwhen the filesystem says so, `mount_failed`) and `removed` (unplugged\nsince the last read, listed once). `label` is the filesystem's, for\ndisplay only. `generation` changes whenever anything listed changes.\nNothing is checked or written.",
+        "description": "The USB mass storage and removable SD cards plugged in now, one item per\nvolume: every partition of each device, supported or not, grouped by\n`deviceId`. `id` and `deviceId` are opaque and belong to one attachment:\na device unplugged and plugged again gets new ones. The device's own disk\n(SYSTEM, DATA and the boot partition) is never listed, nor soldered eMMC.\n`filesystem` is `vfat`, `exfat`, `ext2`, `ext3`, `ext4`, `ntfs` or\n`unknown`. Each read mounts a supported, clean volume nothing else uses\nread-only (`state` `mounted_readonly`, with `availableBytes`); the other\nstates are `unmounted` (by `POST .../unmount`, while it stays plugged\nin), `detected` (`busy`: a mount outside MICA's media mounts uses it,\n`reason` `mounted_outside_mica`), `unsupported` (`filesystem_unsupported`\nor `filesystem_not_in_kernel`), `failed` (`unreadable`, `needs_repair`\nwhen the filesystem says so, `mount_failed`), `ejected` (by\n`POST .../eject`, until unplugged) and `removed` (unplugged since the\nlast read, listed once). `label` is the filesystem's, for\ndisplay only. `generation` changes whenever anything listed changes.\nNothing is checked or written.",
         "operationId": "api_v1_storage_media",
         "responses": {
           "200": {
@@ -6140,6 +6140,119 @@
           },
           "500": {
             "description": "micad failed to observe (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/storage/media/devices/{deviceId}/eject": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Eject one external media device.",
+        "description": "Nothing else may use the device: a mount of any of its volumes outside\nMICA's media mounts, in any mount namespace, a mapping over it, or a\nprocess holding its device node open refuses the eject and unmounts\nnothing. Otherwise every volume MICA mounted is unmounted without\nforcing, stopping at the first refusal, the usage is looked for again,\nand only then is the device `ejected`: safe to unplug. Nothing powers it\noff; its volumes stay unmounted while it is plugged in. Asking again for\nan ejected device answers the same.",
+        "operationId": "api_v1_storage_media_eject",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "description": "The device's `deviceId` from `GET /api/v1/storage/media`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ejected, safe to unplug: `{items}`, each volume `ejected`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session without its CSRF token (`csrf_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No device has this id now (`media_device_not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something uses the device (`media_device_busy`); `params.items` are its volumes as they are now, those in use `busy` with a `reason`: `mounted_outside_mica`, `mounted_in_other_namespace`, `used_by_mapping`, `open_by_process`, `open_files`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed to eject (`micad_failed`)",
             "content": {
               "application/json": {
                 "schema": {

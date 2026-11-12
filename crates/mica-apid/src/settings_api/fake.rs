@@ -611,6 +611,37 @@ impl SettingsApi for FakeSettings {
         Ok(self.storage_media.lock().unwrap().clone())
     }
 
+    /// Ejects a device of the stored inventory; `busy` when one of its
+    /// volumes is labelled `BUSY`.
+    async fn eject_media(&self, device_id: &str) -> anyhow::Result<Value> {
+        let mut media = self.storage_media.lock().unwrap();
+        let mut items: Vec<&mut Value> = media["items"]
+            .as_array_mut()
+            .map(|items| {
+                items
+                    .iter_mut()
+                    .filter(|item| item["deviceId"] == device_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if items.is_empty() {
+            return Ok(serde_json::json!({ "outcome": "not_found" }));
+        }
+        if items.iter().any(|item| item["label"] == "BUSY") {
+            for item in &mut items {
+                if item["label"] == "BUSY" {
+                    item["busy"] = true.into();
+                    item["reason"] = "open_by_process".into();
+                }
+            }
+            return Ok(serde_json::json!({ "outcome": "busy", "items": items }));
+        }
+        for item in &mut items {
+            item["state"] = "ejected".into();
+        }
+        Ok(serde_json::json!({ "outcome": "ejected", "items": items }))
+    }
+
     /// Unmounts an item of the stored inventory; `busy` when its label is
     /// `BUSY`.
     async fn unmount_media(&self, id: &str) -> anyhow::Result<Value> {

@@ -108,8 +108,9 @@ pub(crate) async fn api_v1_storage_status(
 /// in), `detected` (`busy`: a mount outside MICA's media mounts uses it,
 /// `reason` `mounted_outside_mica`), `unsupported` (`filesystem_unsupported`
 /// or `filesystem_not_in_kernel`), `failed` (`unreadable`, `needs_repair`
-/// when the filesystem says so, `mount_failed`) and `removed` (unplugged
-/// since the last read, listed once). `label` is the filesystem's, for
+/// when the filesystem says so, `mount_failed`), `ejected` (by
+/// `POST .../eject`, until unplugged) and `removed` (unplugged since the
+/// last read, listed once). `label` is the filesystem's, for
 /// display only. `generation` changes whenever anything listed changes.
 /// Nothing is checked or written.
 #[utoipa::path(
@@ -185,6 +186,66 @@ pub(crate) async fn api_v1_storage_media_unmount(
         _ => api_response(
             StatusCode::NOT_FOUND,
             ApiError::apid("media_not_found", "no media volume has this id".to_string()),
+        ),
+    }
+}
+
+/// Eject one external media device.
+///
+/// Nothing else may use the device: a mount of any of its volumes outside
+/// MICA's media mounts, in any mount namespace, a mapping over it, or a
+/// process holding its device node open refuses the eject and unmounts
+/// nothing. Otherwise every volume MICA mounted is unmounted without
+/// forcing, stopping at the first refusal, the usage is looked for again,
+/// and only then is the device `ejected`: safe to unplug. Nothing powers it
+/// off; its volumes stay unmounted while it is plugged in. Asking again for
+/// an ejected device answers the same.
+#[utoipa::path(
+    post,
+    path = V1_STORAGE_MEDIA_EJECT_PATH,
+    context_path = API,
+    tag = "actions",
+    params(("deviceId" = String, Path, description = "The device's `deviceId` from `GET /api/v1/storage/media`")),
+    responses(
+        (status = 200, description = "Ejected, safe to unplug: `{items}`, each volume `ejected`", body = ResourceValue),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session without its CSRF token (`csrf_failed`)", body = ApiError),
+        (status = 404, description = "No device has this id now (`media_device_not_found`)", body = ApiError),
+        (status = 409, description = "Something uses the device (`media_device_busy`); `params.items` are its volumes as they are now, those in use `busy` with a `reason`: `mounted_outside_mica`, `mounted_in_other_namespace`, `used_by_mapping`, `open_by_process`, `open_files`", body = ApiError),
+        (status = 500, description = "micad failed to eject (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_storage_media_eject(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+) -> Response {
+    let answer = match state.api.eject_media(&device_id).await {
+        Ok(answer) => answer,
+        Err(err) => return bus_api_error(&err, None),
+    };
+    match answer["outcome"].as_str() {
+        Some("ejected") => api_response(
+            StatusCode::OK,
+            ResourceValue(serde_json::json!({ "items": answer["items"] })),
+        ),
+        Some("busy") => api_response(
+            StatusCode::CONFLICT,
+            ApiError::apid(
+                "media_device_busy",
+                "the device is in use; it is not safe to unplug".to_string(),
+            )
+            .with_params(serde_json::json!({ "items": answer["items"] })),
+        ),
+        _ => api_response(
+            StatusCode::NOT_FOUND,
+            ApiError::apid(
+                "media_device_not_found",
+                "no media device has this id".to_string(),
+            ),
         ),
     }
 }

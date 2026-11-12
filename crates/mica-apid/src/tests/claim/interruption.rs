@@ -91,6 +91,10 @@ impl SettingsApi for InterruptOnce {
         self.inner.unmount_media(id).await
     }
 
+    async fn eject_media(&self, device_id: &str) -> anyhow::Result<serde_json::Value> {
+        self.inner.eject_media(device_id).await
+    }
+
     async fn get_system_info(&self) -> anyhow::Result<serde_json::Value> {
         self.inner.get_system_info().await
     }

@@ -106,6 +106,9 @@ pub trait SettingsApi: Send + Sync {
     /// Unmount the media volume `id` MICA mounted: micad's answer
     /// `{outcome, item}`, `outcome` `unmounted`, `not_found` or `busy`.
     async fn unmount_media(&self, id: &str) -> anyhow::Result<Value>;
+    /// Eject the media device `device_id`: micad's answer `{outcome,
+    /// items}`, `outcome` `ejected`, `not_found` or `busy`.
+    async fn eject_media(&self, device_id: &str) -> anyhow::Result<Value>;
     /// The system-information surface micad assembles: machine id,
     /// board, kernel, release, image version with git stamp and build date,
     /// installed packages, booted slot and uptime. Read-only.
