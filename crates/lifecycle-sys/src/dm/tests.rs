@@ -8,6 +8,7 @@ fn status() -> DmStatus {
         targets: 2,
         open_count: 0,
         event: 7,
+        writable: false,
     }
 }
 fn reply(table: bool) -> DmBuffer {
@@ -38,7 +39,7 @@ fn targets(b: &mut DmBuffer) {
 #[test]
 fn dm_status_and_table_use_kernel_lengths_and_absolute_next_offsets() {
     let mut b = reply(false);
-    assert_eq!(parse_dm_status(&b, 4096, false).unwrap(), status());
+    assert_eq!(parse_dm_status(&b, 4096, false, false).unwrap(), status());
     b = reply(true);
     targets(&mut b);
     let t = parse_dm_table(&b, 4096, &status()).unwrap();
@@ -52,12 +53,27 @@ fn dm_status_and_table_use_kernel_lengths_and_absolute_next_offsets() {
 fn dm_readonly_flag_is_required_in_status_and_table() {
     for table in [false, true] {
         let mut b = reply(table);
-        assert!(parse_dm_status(&b, 4096, table).is_ok());
+        assert!(parse_dm_status(&b, 4096, table, false).is_ok());
         b.header.flags &= !DM_READONLY;
         assert_eq!(
-            parse_dm_status(&b, 4096, table).unwrap_err(),
+            parse_dm_status(&b, 4096, table, false).unwrap_err(),
             io::Errno::PROTO
         );
+    }
+}
+
+#[test]
+fn a_writable_status_is_only_what_was_asked_for() {
+    for table in [false, true] {
+        let mut b = reply(table);
+        assert_eq!(
+            parse_dm_status(&b, 4096, table, true).unwrap_err(),
+            io::Errno::PROTO,
+            "a read-only mapping is not a writable one"
+        );
+        b.header.flags &= !DM_READONLY;
+        let status = parse_dm_status(&b, 4096, table, true).unwrap();
+        assert!(status.writable);
     }
 }
 
@@ -66,7 +82,10 @@ fn dm_status_rejects_non_kernel_reply_lengths() {
     for size in [304, 306, 312, 313] {
         let mut b = reply(false);
         b.header.data_size = size;
-        assert!(parse_dm_status(&b, 312, false).is_err(), "size={size}");
+        assert!(
+            parse_dm_status(&b, 312, false, false).is_err(),
+            "size={size}"
+        );
     }
 }
 
@@ -148,7 +167,7 @@ fn dm_buffer_growth_and_interruptions_are_bounded() {
     assert_eq!(calls, [1024, 4096, 16384, 65536]);
     let mut count = 0;
     assert_eq!(
-        read_dm_status(0xfd00, &mut |_, _| {
+        read_dm_status(0xfd00, false, &mut |_, _| {
             count += 1;
             Err(io::Errno::INTR)
         })

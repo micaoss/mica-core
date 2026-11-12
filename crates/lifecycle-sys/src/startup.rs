@@ -51,10 +51,16 @@ pub fn dm_create(fd: impl AsFd, name: &str, uuid: &str) -> io::Result<DmCreated>
     })
 }
 
+/// The one target a mapping may load: read-only `verity`, or writable
+/// `crypt` (the DATA mapping, its key referenced from the kernel keyring).
 fn load_request(created: &DmCreated, target: &DmTarget) -> io::Result<DmBuffer> {
+    let flags = match target.kind.as_str() {
+        "verity" => DM_READONLY,
+        "crypt" => 0,
+        _ => return Err(io::Errno::INVAL),
+    };
     if target.sector != 0
         || target.length == 0
-        || target.kind != "verity"
         || target.parameters.is_empty()
         || target.parameters.len() > 4096
         || target
@@ -66,18 +72,51 @@ fn load_request(created: &DmCreated, target: &DmTarget) -> io::Result<DmBuffer> 
     }
     let next = (40 + target.parameters.len() + 1).next_multiple_of(8);
     let mut b = DmBuffer::request(312 + next, 0, Some(&created.uuid), false)?;
-    b.header.flags = DM_READONLY;
+    b.header.flags = flags;
     b.header.target_count = 1;
     b.data[8..16].copy_from_slice(&target.length.to_ne_bytes());
     // TABLE_LOAD offsets are relative to this spec (only one is permitted).
     b.data[20..24].copy_from_slice(&(next as u32).to_ne_bytes());
-    b.data[24..31].copy_from_slice(b"verity\0");
+    b.data[24..24 + target.kind.len()].copy_from_slice(target.kind.as_bytes());
     b.data[40..40 + target.parameters.len()].copy_from_slice(target.parameters.as_bytes());
     Ok(b)
 }
 
 /// Load a single read-only verity target. No generic target or writable flag.
 pub fn dm_load_verity(fd: impl AsFd, created: &DmCreated, target: &DmTarget) -> io::Result<()> {
+    if target.kind != "verity" {
+        return Err(io::Errno::INVAL);
+    }
+    load(fd, created, target)
+}
+
+/// Load a single writable crypt target: the DATA mapping. Its key is a
+/// keyring reference in the parameters, never key bytes.
+pub fn dm_load_crypt(fd: impl AsFd, created: &DmCreated, target: &DmTarget) -> io::Result<()> {
+    if target.kind != "crypt" || !crypt_key_is_a_reference(&target.parameters) {
+        return Err(io::Errno::INVAL);
+    }
+    load(fd, created, target)
+}
+
+/// Whether the key field (the second) of crypt `parameters` names a kernel
+/// keyring key, `:<size>:logon:<description>`.
+fn crypt_key_is_a_reference(parameters: &str) -> bool {
+    parameters
+        .split(' ')
+        .nth(1)
+        .and_then(|key| key.strip_prefix(':'))
+        .and_then(|key| key.split_once(':'))
+        .is_some_and(|(size, rest)| {
+            !size.is_empty()
+                && size.bytes().all(|b| b.is_ascii_digit())
+                && rest
+                    .strip_prefix("logon:")
+                    .is_some_and(|description| !description.is_empty())
+        })
+}
+
+fn load(fd: impl AsFd, created: &DmCreated, target: &DmTarget) -> io::Result<()> {
     let mut b = load_request(created, target)?;
     dm_exchange(fd, DmCommand::Load, &mut b)?;
     creation_status(&b, &created.name, &created.uuid)?;
@@ -90,16 +129,29 @@ pub fn dm_load_verity(fd: impl AsFd, created: &DmCreated, target: &DmTarget) -> 
 
 /// Activate the loaded table, then use the existing strict read-only status API.
 pub fn dm_resume(fd: impl AsFd, created: &DmCreated) -> io::Result<DmStatus> {
+    resume(fd, created, false)
+}
+
+/// Activate a loaded writable table (the DATA crypt mapping); a read-only
+/// one is refused.
+pub fn dm_resume_writable(fd: impl AsFd, created: &DmCreated) -> io::Result<DmStatus> {
+    resume(fd, created, true)
+}
+
+fn resume(fd: impl AsFd, created: &DmCreated, writable: bool) -> io::Result<DmStatus> {
+    let access = if writable { 0 } else { DM_READONLY };
     let mut b = DmBuffer::request(312, 0, Some(&created.uuid), false)?;
     dm_exchange(fd.as_fd(), DmCommand::Resume, &mut b)?;
     creation_status(&b, &created.name, &created.uuid)?;
     if b.header.dev != created.device
-        || b.header.flags & !DM_UEVENT != DM_READONLY | DM_ACTIVE
+        || b.header.flags & !DM_UEVENT != access | DM_ACTIVE
         || b.header.target_count != 1
     {
         return Err(io::Errno::PROTO);
     }
-    let status = dm_status(fd, created.device)?;
+    let status = read_dm_status(created.device, writable, &mut |command, buffer| {
+        dm_exchange(fd.as_fd(), command, buffer)
+    })?;
     if status.name != created.name || status.uuid != created.uuid {
         return Err(io::Errno::PROTO);
     }
@@ -125,7 +177,9 @@ pub fn dm_discard_created(fd: impl AsFd, created: &DmCreated) -> io::Result<()> 
         || b.header.dev != 0
         || b.header.target_count != 0
         || b.header.open_count != 0
-        || b.header.flags & !DM_UEVENT != 0
+        // A device removed with its loaded table still inactive answers
+        // with that table's flag.
+        || b.header.flags & !(DM_UEVENT | DM_INACTIVE) != 0
         || dm_string(&b.header.name)? != created.name
         || dm_string(&b.header.uuid)? != created.uuid
     {
@@ -415,5 +469,50 @@ mod tests {
         target.parameters = "1".into();
         target.kind = "linear".into();
         assert!(load_request(&created, &target).is_err());
+    }
+
+    #[test]
+    fn a_crypt_load_is_writable_and_takes_only_a_keyring_reference() {
+        let created = DmCreated {
+            device: 1,
+            name: "mica-data".into(),
+            uuid: "MICA-test".into(),
+        };
+        let mut target = DmTarget {
+            sector: 0,
+            length: 8,
+            kind: "crypt".into(),
+            parameters: "aes-xts-plain64 :64:logon:mica:data 0 259:2 32768 2 allow_discards sector_size:4096".into(),
+        };
+        let b = load_request(&created, &target).unwrap();
+        assert_eq!(b.header.flags, 0, "writable");
+        assert_eq!(&b.data[24..30], b"crypt\0");
+        assert!(crypt_key_is_a_reference(&target.parameters));
+        for parameters in [
+            "aes-xts-plain64 00112233 0 259:2 32768",
+            "aes-xts-plain64 :64:user:mica:data 0 259:2 32768",
+            "aes-xts-plain64 :x:logon:mica:data 0 259:2 32768",
+            "aes-xts-plain64 :64:logon: 0 259:2 32768",
+            "aes-xts-plain64",
+        ] {
+            target.parameters = parameters.into();
+            assert!(
+                !crypt_key_is_a_reference(&target.parameters),
+                "{parameters}"
+            );
+        }
+        // A verity target is never loaded through the crypt call, nor a crypt
+        // one through the verity call.
+        let file = tempfile::tempfile().unwrap();
+        target.kind = "verity".into();
+        assert_eq!(
+            dm_load_crypt(&file, &created, &target),
+            Err(io::Errno::INVAL)
+        );
+        target.kind = "crypt".into();
+        assert_eq!(
+            dm_load_verity(&file, &created, &target),
+            Err(io::Errno::INVAL)
+        );
     }
 }

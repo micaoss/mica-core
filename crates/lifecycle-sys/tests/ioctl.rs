@@ -44,6 +44,7 @@ fn device_mapper_requests_refuse_unrelated_descriptors() {
         targets: 1,
         open_count: 0,
         event: 0,
+        writable: false,
     };
     assert_eq!(
         lifecycle_sys::dm_table(&file, &status).unwrap_err(),

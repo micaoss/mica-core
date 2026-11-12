@@ -53,8 +53,9 @@ const _: () = {
     assert!(DM_REMOVE_REQUEST == ioctl::opcode::read_write::<DmHeader>(0xfd, 4));
 };
 
-/// Checked active, read-only DM identity. Event/count comparisons detect table
-/// changes between status and table/removal requests; this is not a release token.
+/// Checked active DM identity: read-only unless asked for as writable (the
+/// DATA crypt mapping alone). Event/count comparisons detect table changes
+/// between status and table/removal requests; this is not a release token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DmStatus {
     pub device: u64,
@@ -63,6 +64,7 @@ pub struct DmStatus {
     pub targets: u32,
     pub open_count: i32,
     pub event: u32,
+    pub writable: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DmTarget {
@@ -137,14 +139,18 @@ pub(super) fn valid_header(buffer: &DmBuffer, capacity: usize) -> io::Result<()>
     }
     Ok(())
 }
+/// The status in `buffer`, read-only unless `writable`: the flag must be
+/// exactly the one asked for.
 pub(super) fn parse_dm_status(
     buffer: &DmBuffer,
     capacity: usize,
     table: bool,
+    writable: bool,
 ) -> io::Result<DmStatus> {
     valid_header(buffer, capacity)?;
     let h = &buffer.header;
-    let required = DM_READONLY | DM_ACTIVE | if table { DM_TABLE } else { 0 };
+    let access = if writable { 0 } else { DM_READONLY };
+    let required = access | DM_ACTIVE | if table { DM_TABLE } else { 0 };
     let allowed = required | if table { DM_FULL } else { 0 };
     if h.flags & required != required
         || h.flags & !allowed != 0
@@ -162,6 +168,7 @@ pub(super) fn parse_dm_status(
         targets: h.target_count,
         open_count: h.open_count,
         event: h.event_nr,
+        writable,
     })
 }
 pub(super) fn parse_dm_table(
@@ -169,7 +176,9 @@ pub(super) fn parse_dm_table(
     capacity: usize,
     expected: &DmStatus,
 ) -> io::Result<Vec<DmTarget>> {
-    if &parse_dm_status(buffer, capacity, true)? != expected || buffer.header.flags & DM_FULL != 0 {
+    if &parse_dm_status(buffer, capacity, true, expected.writable)? != expected
+        || buffer.header.flags & DM_FULL != 0
+    {
         return Err(io::Errno::PROTO);
     }
     let end = (buffer.header.data_size as usize)
@@ -274,6 +283,7 @@ pub(super) fn dm_exchange(
 }
 pub(super) fn read_dm_status(
     device: u64,
+    writable: bool,
     exchange: &mut impl FnMut(DmCommand, &mut DmBuffer) -> io::Result<()>,
 ) -> io::Result<DmStatus> {
     for _ in 0..4 {
@@ -282,7 +292,7 @@ pub(super) fn read_dm_status(
             Err(io::Errno::INTR) => continue,
             result => result?,
         }
-        let status = parse_dm_status(&buffer, 312, false)?;
+        let status = parse_dm_status(&buffer, 312, false, writable)?;
         if status.device != device {
             return Err(io::Errno::PROTO);
         }
@@ -306,7 +316,7 @@ pub(super) fn read_dm_table(
             result => result?,
         }
         failure = io::Errno::OVERFLOW;
-        if &parse_dm_status(&buffer, capacity, true)? != expected {
+        if &parse_dm_status(&buffer, capacity, true, expected.writable)? != expected {
             return Err(io::Errno::PROTO);
         }
         if buffer.header.flags & DM_FULL == 0 {
@@ -320,7 +330,7 @@ pub(super) fn remove_dm(
     expected: &DmStatus,
     exchange: &mut impl FnMut(DmCommand, &mut DmBuffer) -> io::Result<()>,
 ) -> io::Result<()> {
-    let current = read_dm_status(expected.device, exchange)?;
+    let current = read_dm_status(expected.device, expected.writable, exchange)?;
     if current.open_count != 0 {
         return Err(io::Errno::BUSY);
     }
@@ -350,7 +360,14 @@ pub(super) fn remove_dm(
 
 /// Inspect active read-only DM state using its current encoded device identity.
 pub fn dm_status(fd: impl AsFd, device: u64) -> io::Result<DmStatus> {
-    read_dm_status(device, &mut |command, buffer| {
+    read_dm_status(device, false, &mut |command, buffer| {
+        dm_exchange(fd.as_fd(), command, buffer)
+    })
+}
+/// Inspect an active writable mapping (the DATA crypt mapping); a read-only
+/// one is refused, as a writable one is by [`dm_status`].
+pub fn dm_status_writable(fd: impl AsFd, device: u64) -> io::Result<DmStatus> {
+    read_dm_status(device, true, &mut |command, buffer| {
         dm_exchange(fd.as_fd(), command, buffer)
     })
 }

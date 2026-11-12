@@ -20,6 +20,7 @@ fn typed_verity_table_preserves_live_device_provider_and_complete_coverage() {
         targets: 1,
         open_count: 0,
         event: 7,
+        writable: false,
     };
     let target = lifecycle_sys::DmTarget {
         sector: 0,

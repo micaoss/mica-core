@@ -17,11 +17,15 @@ mod trim;
 mod ubi;
 pub use clock::clock_synchronized;
 use dm::*;
-pub use dm::{DmStatus, DmTarget, dm_remove, dm_status, dm_table};
-pub use keyring::{add_asymmetric_key, keyring_named, restrict_keyring};
+pub use dm::{DmStatus, DmTarget, dm_remove, dm_status, dm_status_writable, dm_table};
+pub use keyring::{
+    PROCESS_KEYRING, add_asymmetric_key, add_logon_key, invalidate_key, keyring_named,
+    restrict_keyring,
+};
 pub use quota::{ProjectQuota, project_of, project_quota, set_project_inherit, set_project_limits};
 pub use startup::{
-    DmCreated, dm_create, dm_discard_created, dm_load_verity, dm_resume, loop_attach, loop_free,
+    DmCreated, dm_create, dm_discard_created, dm_load_crypt, dm_load_verity, dm_resume,
+    dm_resume_writable, loop_attach, loop_free,
 };
 pub use trim::{secure_discard, trim_free_space};
 pub use ubi::{

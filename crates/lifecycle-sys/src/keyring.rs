@@ -55,6 +55,45 @@ pub fn add_asymmetric_key(keyring: i32, der: &[u8]) -> io::Result<i32> {
     i32::try_from(serial).map_err(|_| io::Errno::RANGE)
 }
 
+/// `KEY_SPEC_PROCESS_KEYRING`: the calling process's keyring, made on first
+/// use and gone with the process.
+pub const PROCESS_KEYRING: i32 = -2;
+/// `KEYCTL_INVALIDATE` of `<linux/keyctl.h>`.
+const KEYCTL_INVALIDATE: libc::c_int = 21;
+
+/// Add `payload` to the keyring `keyring` as a `logon` key named
+/// `description` (`<prefix>:<name>`), which the kernel uses (a dm-crypt
+/// table's `:<size>:logon:<description>`) and userspace cannot read back.
+#[allow(unsafe_code)]
+pub fn add_logon_key(
+    keyring: i32,
+    description: &std::ffi::CStr,
+    payload: &[u8],
+) -> io::Result<i32> {
+    // SAFETY: add_key(2) reads the NUL-terminated type and description and
+    // `payload.len()` bytes at `payload.as_ptr()`, all borrowed for the
+    // synchronous call, and writes nothing of ours.
+    let serial = result(unsafe {
+        libc::syscall(
+            libc::SYS_add_key,
+            c"logon".as_ptr(),
+            description.as_ptr(),
+            payload.as_ptr(),
+            payload.len(),
+            keyring,
+        )
+    })?;
+    i32::try_from(serial).map_err(|_| io::Errno::RANGE)
+}
+
+/// Invalidate the key `key`: it is gone from every keyring at once.
+#[allow(unsafe_code)]
+pub fn invalidate_key(key: i32) -> io::Result<()> {
+    // SAFETY: keyctl(KEYCTL_INVALIDATE) takes only the key serial.
+    result(unsafe { libc::syscall(libc::SYS_keyctl, KEYCTL_INVALIDATE, key) })?;
+    Ok(())
+}
+
 /// Seal the keyring `keyring`: a restriction with no type rejects every key
 /// added or linked from now on. A keyring sealed already answers `EEXIST`.
 #[allow(unsafe_code)]
