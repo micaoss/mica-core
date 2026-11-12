@@ -116,6 +116,17 @@ pub(crate) use wifi::*;
 pub(crate) use wifi_ap::*;
 pub(crate) use wireguard_defaults::*;
 
+/// The product's online documentation: the root of its default tree
+/// (`DOCS_URL`) and of its English tree (`DOCS_URL_EN`), each when the product
+/// file names it.
+#[derive(Clone, Debug, Default)]
+pub struct Docs {
+    /// The default tree's root.
+    pub url: Option<String>,
+    /// The English tree's root.
+    pub url_en: Option<String>,
+}
+
 /// Shared handler state.
 #[derive(Clone)]
 pub struct AppState {
@@ -202,6 +213,8 @@ pub struct AppState {
     pub(crate) features: micad_settings::Features,
     /// The init system the product runs.
     pub(crate) init: micad_settings::Init,
+    /// The product's documentation roots, from its product file.
+    pub(crate) docs: Docs,
     /// Who reaches the API, as micad rendered it when apid started.
     pub(crate) web_mode: micad_settings::WebMode,
     /// The bytes an extracted UI bundle leaves free on DATA: the signed boot
@@ -284,6 +297,7 @@ impl AppState {
             builtin: Arc::new(None),
             features: micad_settings::Features::all(),
             init: micad_settings::Init::Systemd,
+            docs: Docs::default(),
             web_mode: micad_settings::WebMode::Network,
             data_reserve: DEFAULT_DATA_RESERVE,
             secure_cookies: true,
@@ -330,6 +344,13 @@ impl AppState {
     #[must_use]
     pub fn with_init(mut self, init: micad_settings::Init) -> Self {
         self.init = init;
+        self
+    }
+
+    /// Report `docs` as the product's documentation roots.
+    #[must_use]
+    pub fn with_docs(mut self, docs: Docs) -> Self {
+        self.docs = docs;
         self
     }
 

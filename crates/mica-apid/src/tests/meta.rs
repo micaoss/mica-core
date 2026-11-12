@@ -89,6 +89,27 @@ pub(super) async fn api_v1_meta_names_the_init_system() {
     assert_eq!(meta["webMode"], "local");
 }
 
+// The product's documentation roots are reported when the product names
+// them, and absent otherwise (the plain meta document above has none).
+#[tokio::test]
+pub(super) async fn api_v1_meta_names_the_product_docs_when_it_has_them() {
+    let (tree, token) = with_token(configured_tree("hunter2secret"));
+    let router = app(
+        AppState::new(Arc::new(FakeSettings::new(tree)), SIGNING_KEY).with_docs(
+            crate::routes::Docs {
+                url: Some("https://micaos.dev/docs/".to_string()),
+                url_en: Some("https://micaos.dev/en/docs/".to_string()),
+            },
+        ),
+    );
+
+    let response = bearer(&router, "GET", "/api/v1/meta", &token).await;
+    let meta: serde_json::Value =
+        serde_json::from_str(&body_string(response).await).expect("meta JSON");
+    assert_eq!(meta["docsUrl"], "https://micaos.dev/docs/");
+    assert_eq!(meta["docsUrlEn"], "https://micaos.dev/en/docs/");
+}
+
 // The trap, refused: a client that follows the gate's redirect lands on
 // `GET /login`, which answers **200 with HTML**, so a script reads the whole
 // exchange as success. The answer is the error envelope with the status that

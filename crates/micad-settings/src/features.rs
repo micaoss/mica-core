@@ -11,7 +11,9 @@
 //! for the device code ([`ClaimDeviceCode`]), and `MDNS=on|off` and
 //! `SSDP=on|off` whether each kind of LAN discovery runs while its setting is
 //! unset ([`product_switch`]). `SSH=on|off` says whether SSH is on at first
-//! boot ([`product_ssh`]).
+//! boot ([`product_ssh`]). `DOCS_URL=https://.../` is the root of the product's
+//! online documentation, and `DOCS_URL_EN=` its English tree when that has its
+//! own root ([`product_docs_url`]).
 //!
 //! The same file states the product's init (`INIT=systemd|openrc`, systemd when
 //! absent), and its container engine (`CONTAINER_ENGINE=podman|docker`, podman
@@ -189,6 +191,26 @@ pub fn product_name(product_conf: &str) -> Option<&str> {
     line_value(product_conf, "PRODUCT=").filter(|name| !name.is_empty())
 }
 
+/// The `DOCS_URL` line, the product's documentation root.
+pub const DOCS_URL: &str = "DOCS_URL=";
+/// The `DOCS_URL_EN` line, the root of its English documentation.
+pub const DOCS_URL_EN: &str = "DOCS_URL_EN=";
+
+/// A documentation root of the product file, its `key` line ([`DOCS_URL`] or
+/// [`DOCS_URL_EN`]): an `https://` address ending in `/`, of at most 512
+/// characters, with no space, control character, quote, backslash or angle
+/// bracket; anything else is no address.
+#[must_use]
+pub fn product_docs_url<'a>(product_conf: &'a str, key: &str) -> Option<&'a str> {
+    let url = line_value(product_conf, key)?;
+    let path = url.strip_prefix("https://")?;
+    let clean = url.chars().all(|c| {
+        !c.is_whitespace() && !c.is_control() && !matches!(c, '"' | '\'' | '<' | '>' | '\\')
+    });
+    let host = path.find('/').is_some_and(|end| end > 0);
+    (clean && host && url.len() <= 512 && url.ends_with('/')).then_some(url)
+}
+
 /// The value of the first `<key>` line, unquoted.
 fn line_value<'a>(product_conf: &'a str, key: &str) -> Option<&'a str> {
     let value = product_conf
@@ -353,6 +375,38 @@ impl Features {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_docs_root_is_an_https_directory_or_nothing() {
+        let conf = "PRODUCT=x\nDOCS_URL=https://micaos.dev/docs/\nDOCS_URL_EN=\"https://micaos.dev/en/docs/\"\n";
+        assert_eq!(
+            product_docs_url(conf, DOCS_URL),
+            Some("https://micaos.dev/docs/")
+        );
+        assert_eq!(
+            product_docs_url(conf, DOCS_URL_EN),
+            Some("https://micaos.dev/en/docs/")
+        );
+        assert_eq!(
+            product_docs_url("DOCS_URL=https://micaos.dev/docs/\n", DOCS_URL_EN),
+            None
+        );
+        for refused in [
+            "PRODUCT=x\n",
+            "DOCS_URL=\n",
+            "DOCS_URL=http://micaos.dev/docs/\n",
+            "DOCS_URL=javascript:alert(1)/\n",
+            "DOCS_URL=https://\n",
+            "DOCS_URL=https:///\n",
+            "DOCS_URL=https://micaos.dev/docs\n",
+            "DOCS_URL=https://micaos.dev/a b/\n",
+            "DOCS_URL=https://micaos.dev/\"><script>/\n",
+        ] {
+            assert_eq!(product_docs_url(refused, DOCS_URL), None, "{refused}");
+        }
+        let long = format!("DOCS_URL=https://micaos.dev/{}/\n", "a".repeat(600));
+        assert_eq!(product_docs_url(&long, DOCS_URL), None);
+    }
 
     #[test]
     fn the_features_line_names_what_is_served() {

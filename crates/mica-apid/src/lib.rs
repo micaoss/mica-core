@@ -51,6 +51,18 @@ fn product_init() -> micad_settings::Init {
     })
 }
 
+/// The product's documentation roots from its product file, the default
+/// (`DOCS_URL`) and the English one (`DOCS_URL_EN`); none when the file cannot
+/// be read.
+fn product_docs() -> routes::Docs {
+    let text = std::fs::read_to_string(micad_settings::PRODUCT_FILE).unwrap_or_default();
+    let url = |key| micad_settings::product_docs_url(&text, key).map(str::to_string);
+    routes::Docs {
+        url: url(micad_settings::DOCS_URL),
+        url_en: url(micad_settings::DOCS_URL_EN),
+    }
+}
+
 #[cfg(test)]
 mod tests;
 mod tls;
@@ -220,6 +232,7 @@ async fn serve() -> anyhow::Result<()> {
         .with_builtin_ui(&config.ui_dir)
         .with_features(product_features())
         .with_init(product_init())
+        .with_docs(product_docs())
         .with_web_mode(config.listeners.mode)
         .with_secure_cookies(config.listeners.https_addr.is_some())
         .with_data_reserve(routes::data_reserve(

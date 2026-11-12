@@ -1517,6 +1517,10 @@ export const en = {
       documentation: {
         title: 'Documentation',
         none: 'Online documentation is not configured for this version.',
+        open: 'Open the documentation (opens a new tab)',
+        troubleshooting: 'Troubleshooting (opens a new tab)',
+        recovery: 'Recovery (opens a new tab)',
+        updates: 'Updates (opens a new tab)',
       },
       troubleshooting: {
         title: 'Troubleshooting',

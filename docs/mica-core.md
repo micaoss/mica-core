@@ -113,6 +113,14 @@ The tests relocate the rest of what micad writes the same way: the reconcilers' 
   the core set of a root without it.
 - `INIT` is `systemd` (the default) or `openrc`, and decides every backend below. An unknown
   init stops micad.
+- `DOCS_URL` is the root of the product's online documentation, and `DOCS_URL_EN` the root of its
+  English tree when that has its own: each an `https://` address ending in `/`, of at most 512
+  characters, with no space, quote, backslash or angle bracket; any other value counts as absent.
+  apid reports them as `docsUrl` and `docsUrlEn` in `GET /api/v1/meta`. The console's Help tab
+  uses `DOCS_URL` in Chinese and `DOCS_URL_EN` in any other language (`DOCS_URL` when there is no
+  `DOCS_URL_EN`), and links that root and its pages `operate/troubleshooting/`,
+  `operate/recovery/` and `operate/updates/`, each in a new tab. Without a root for the language
+  there is no link and Help says no online documentation is configured.
 - `CONTAINER_ENGINE` is `podman` (the default) or `docker`, and decides the container backend
   (3.9). An unknown engine stops micad.
 - `CLAIM_DEVICE_CODE` is `required` or `off`: whether the console's claim asks for the device code
@@ -928,7 +936,8 @@ attachment `mica-support-<UTC time>.json`; the console's Information, Diagnostic
 as labelled lines or download it, and the device sends it nowhere. System → Help also carries
 local troubleshooting guides (a failed update check, a failed offline import, an
 unsynchronized clock, a WireGuard tunnel with a handshake and no traffic), each linking to where
-the fix is made; it links to no online documentation, since the image names none.
+the fix is made, and links the product's online documentation in the console's language when the product names it
+(`DOCS_URL`, `DOCS_URL_EN`, 3.2).
 `PUT /api/v1/settings/{path}` (and `PATCH /api/v1/settings`) writes `logging.persistent` (`true`,
 `false`, or `null` for the product's default), `logging.maxSizeKiB` (a number of KiB or `null`)
 and `logging.remote` (the collector object), each checked as micad checks it before the write.

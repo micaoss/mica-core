@@ -1303,6 +1303,10 @@ export const zhCN: Translation = {
       documentation: {
         title: '使用文档',
         none: '此版本暂未配置在线文档。',
+        open: '打开使用文档（在新标签页中打开）',
+        troubleshooting: '故障排查（在新标签页中打开）',
+        recovery: '系统恢复（在新标签页中打开）',
+        updates: '系统更新（在新标签页中打开）',
       },
       troubleshooting: {
         title: '故障排查',

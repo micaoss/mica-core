@@ -7,6 +7,8 @@ export type Feature = 'wifi' | 'bluetooth' | 'ssh' | 'containers' | 'mqtt'
 interface ApiMeta {
   features?: Feature[]
   init?: 'systemd' | 'openrc'
+  docsUrl?: string
+  docsUrlEn?: string
 }
 
 /// The features this device serves, from `GET /api/v1/meta`.
@@ -33,4 +35,13 @@ function useMeta() {
 /// is taken not to.
 export function useOpenrc(): boolean {
   return useMeta().data?.init === 'openrc'
+}
+
+/// The root of the product's online documentation in `language`, when the
+/// device names one: its default tree in Chinese, its English tree (or the
+/// default one when it has none apart) in any other language.
+export function useDocsRoot(language: string): string | undefined {
+  const meta = useMeta().data
+  const url = language === 'zh-CN' ? meta?.docsUrl : (meta?.docsUrlEn ?? meta?.docsUrl)
+  return url?.startsWith('https://') && url.endsWith('/') ? url : undefined
 }

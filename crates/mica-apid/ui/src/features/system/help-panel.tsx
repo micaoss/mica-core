@@ -1,8 +1,9 @@
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { BookOpen, Wrench } from 'lucide-react'
+import { BookOpen, ExternalLink, Wrench } from 'lucide-react'
 import { buttonVariants } from '@/shared/components/ui/button'
 import { Panel } from '@/shared/components/panel'
+import { useDocsRoot } from '@/shared/lib/features'
 import { SupportInfoPanel } from './support-info-panel'
 
 /// The local guides: each names its steps and where the fix is made.
@@ -13,15 +14,33 @@ const GUIDES = [
   { id: 'wireguard', steps: 4, link: { to: '/network', search: { tab: 'wireguard' } } },
 ] as const
 
-/// Help: documentation (none is configured for this version yet), the local
-/// troubleshooting guides, and the support summary to send with a request.
-/// Everything here works without a connection.
+/// The documentation pages Help links under the root, beside its entry.
+const DOCS_PAGES = [
+  { id: 'troubleshooting', path: 'operate/troubleshooting/' },
+  { id: 'recovery', path: 'operate/recovery/' },
+  { id: 'updates', path: 'operate/updates/' },
+] as const
+
+/// Help: the product's online documentation when the device names it, the
+/// local troubleshooting guides, and the support summary to send with a
+/// request. Everything but the documentation works without a connection.
 export function HelpPanel() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const docsRoot = useDocsRoot(i18n.language)
   return (
     <div className="grid gap-3">
       <Panel title={t('system.help.documentation.title')} action={<BookOpen className="size-5 text-muted-foreground" />}>
-        <p className="text-sm text-muted-foreground">{t('system.help.documentation.none')}</p>
+        {docsRoot ? (
+          <div className="flex flex-wrap gap-2">
+            {[{ id: 'open', path: '' }, ...DOCS_PAGES].map((page) => (
+              <a key={page.id} href={docsRoot + page.path} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                <ExternalLink />{t(`system.help.documentation.${page.id}`)}
+              </a>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t('system.help.documentation.none')}</p>
+        )}
       </Panel>
       <Panel title={t('system.help.troubleshooting.title')} description={t('system.help.troubleshooting.description')} action={<Wrench className="size-5 text-muted-foreground" />} contentClassName="gap-5">
         {GUIDES.map((guide) => (

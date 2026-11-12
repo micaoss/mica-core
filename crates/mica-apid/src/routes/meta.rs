@@ -29,6 +29,15 @@ pub(crate) struct ApiMeta {
     /// Who reaches the API (`access.web.mode`): `network`, or `local`, when
     /// only root on the device does, through apid's local socket.
     pub(super) web_mode: &'static str,
+    /// The root of the product's online documentation, an `https://` address
+    /// ending in `/`, when its product file names one (`DOCS_URL`); absent
+    /// otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) docs_url: Option<String>,
+    /// The root of its English documentation, when the product file names
+    /// one apart (`DOCS_URL_EN`); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) docs_url_en: Option<String>,
 }
 
 /// List the API major versions this build serves.
@@ -56,8 +65,10 @@ pub(crate) async fn api_versions() -> Response {
 ///
 /// Answers the API major version, the daemon name,
 /// `settingsSchemaVersion` — a settings document format version, which moves
-/// independently of the API version — and `features`, the parts of the API
-/// this product serves. Authenticated.
+/// independently of the API version — `features`, the parts of the API
+/// this product serves, and `docsUrl` and `docsUrlEn`, the roots of the
+/// product's online documentation and of its English tree when it names
+/// them. Authenticated.
 ///
 /// **The settings tree has no single version.** Storage
 /// is one document per reconciler in `/mica/config/` plus the remainder on
@@ -91,6 +102,8 @@ pub(crate) async fn api_v1_meta(
             features: state.features.words(),
             init: state.init.as_str(),
             web_mode: state.web_mode.as_str(),
+            docs_url: state.docs.url.clone(),
+            docs_url_en: state.docs.url_en.clone(),
         },
     )
 }

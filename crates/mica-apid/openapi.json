@@ -3412,7 +3412,7 @@
           "discovery"
         ],
         "summary": "Report what the caller is talking to.",
-        "description": "Answers the API major version, the daemon name,\n`settingsSchemaVersion` — a settings document format version, which moves\nindependently of the API version — and `features`, the parts of the API\nthis product serves. Authenticated.\n\n**The settings tree has no single version.** Storage\nis one document per reconciler in `/mica/config/` plus the remainder on\nSTATE, and each carries its own `schema_version` starting at v1, because a\nnamespace-wide version could not be bumped without rewriting every document\nacross renames with no transaction between them. This member therefore\nreports the STATE document's version — the one document that is still one\ndocument — and it is read live from `micad_settings` rather than copied,\nwhich is the property a version read needs.",
+        "description": "Answers the API major version, the daemon name,\n`settingsSchemaVersion` — a settings document format version, which moves\nindependently of the API version — `features`, the parts of the API\nthis product serves, and `docsUrl` and `docsUrlEn`, the roots of the\nproduct's online documentation and of its English tree when it names\nthem. Authenticated.\n\n**The settings tree has no single version.** Storage\nis one document per reconciler in `/mica/config/` plus the remainder on\nSTATE, and each carries its own `schema_version` starting at v1, because a\nnamespace-wide version could not be bumped without rewriting every document\nacross renames with no transaction between them. This member therefore\nreports the STATE document's version — the one document that is still one\ndocument — and it is read live from `micad_settings` rather than copied,\nwhich is the property a version read needs.",
         "operationId": "api_v1_meta",
         "responses": {
           "200": {
@@ -11793,6 +11793,20 @@
           },
           "daemon": {
             "type": "string"
+          },
+          "docsUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The root of the product's online documentation, an `https://` address\nending in `/`, when its product file names one (`DOCS_URL`); absent\notherwise."
+          },
+          "docsUrlEn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The root of its English documentation, when the product file names\none apart (`DOCS_URL_EN`); absent otherwise."
           },
           "features": {
             "type": "array",
