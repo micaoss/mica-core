@@ -221,13 +221,13 @@ pub(super) async fn the_reboot_gate_blocks_lifts_and_expires() {
     let (lifecycle, installing) = lifecycle(client, policy, Arc::clone(&host));
 
     // Open by default.
-    assert_eq!(lifecycle.reboot_refusal().await, None);
+    assert_eq!(lifecycle.reboot_refusal(false).await, None);
 
     // A blocking health report closes it.
     host.set_health(json!({
         "exporter": { "status": "blocking", "detail": "mid-transaction" }
     }));
-    let refusal = lifecycle.reboot_refusal().await.expect("closed");
+    let refusal = lifecycle.reboot_refusal(false).await.expect("closed");
     assert!(refusal.contains("exporter"), "got: {refusal}");
     assert!(refusal.contains("SetRebootOverride"), "got: {refusal}");
 
@@ -250,7 +250,7 @@ pub(super) async fn the_reboot_gate_blocks_lifts_and_expires() {
         .await
         .expect("armed");
     assert_eq!(rendered["requestedBy"], ":1.42");
-    assert_eq!(lifecycle.reboot_refusal().await, None);
+    assert_eq!(lifecycle.reboot_refusal(false).await, None);
     let recorded = host.last();
     assert_eq!(recorded["reboot_gate"]["safe"], true);
     assert_eq!(recorded["reboot_gate"]["overridden"], true);
@@ -258,7 +258,10 @@ pub(super) async fn the_reboot_gate_blocks_lifts_and_expires() {
 
     // …but never an install in flight.
     installing.store(true, Ordering::Release);
-    let refusal = lifecycle.reboot_refusal().await.expect("install blocks");
+    let refusal = lifecycle
+        .reboot_refusal(false)
+        .await
+        .expect("install blocks");
     assert!(refusal.contains("install"), "got: {refusal}");
     installing.store(false, Ordering::Release);
 
@@ -267,7 +270,7 @@ pub(super) async fn the_reboot_gate_blocks_lifts_and_expires() {
         expires_at: Utc::now() - chrono::Duration::seconds(1),
         requested_by: "op".to_string(),
     });
-    assert!(lifecycle.reboot_refusal().await.is_some());
+    assert!(lifecycle.reboot_refusal(false).await.is_some());
 }
 
 #[tokio::test]

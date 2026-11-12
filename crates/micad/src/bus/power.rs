@@ -60,6 +60,30 @@ impl MicadService {
         }
     }
 
+    /// Whether the install in flight has already recorded its deployment as
+    /// the candidate. The backend writes the candidate last, once every byte
+    /// of the other slot is durable, so from then on the install no longer
+    /// holds the reboot gate, though its own return may still be on its way.
+    async fn install_candidate_recorded(&self) -> bool {
+        if !self.installing.load(Ordering::Acquire) {
+            return false;
+        }
+        let in_flight = {
+            let inner = self.inner.read().await;
+            let install = &inner.state["update"]["install"];
+            if install["status"] != "running" {
+                return false;
+            }
+            install["deploymentId"].as_str().map(str::to_owned)
+        };
+        let Some(in_flight) = in_flight else {
+            return false;
+        };
+        self.deployment_evidence()
+            .await
+            .is_some_and(|status| status.state.candidate.as_deref() == Some(in_flight.as_str()))
+    }
+
     pub(super) async fn reboot_update_warning(&self) -> Option<String> {
         let status = self.deployment_evidence().await?;
         let (phase, reason) = status.phase();
@@ -75,7 +99,8 @@ impl MicadService {
         // or through an install mid-write — is what nobody wants. The gate
         // opens by the reporter clearing its status, the install finishing,
         // or a bounded audited override (`SetRebootOverride`).
-        if let Some(refusal) = self.update.reboot_refusal().await {
+        let candidate_recorded = self.install_candidate_recorded().await;
+        if let Some(refusal) = self.update.reboot_refusal(candidate_recorded).await {
             tracing::warn!(sender, refusal, "reboot refused by the safe-to-reboot gate");
             return Err(fdo::Error::AccessDenied(refusal));
         }

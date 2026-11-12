@@ -100,6 +100,48 @@ pub(super) async fn a_failed_install_records_the_error_and_releases_the_flag() {
 // there, `error_code` would read `Compatible mismatch: …` and a consumer
 // matching on codes would be back to matching on text without being told.
 
+// The backend records the candidate as its last write, and a client that
+// sees it reboots; the install's own return may still be on its way. Once the
+// in-flight deployment is the recorded candidate, the install no longer
+// holds the gate. Another deployment as candidate does not open it.
+#[tokio::test]
+pub(super) async fn an_install_whose_candidate_is_recorded_no_longer_holds_the_reboot() {
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let (service, power_calls, _deployment_calls, dir) =
+        service_with_deployments(MockDeployments {
+            status: pending_status(),
+            install_gate: Some(Arc::clone(&gate)),
+            ..MockDeployments::default()
+        });
+    let other = verified_descriptor(&dir, &format!("{}.json", "a".repeat(64)));
+    service
+        .request_install(":1.6", &other)
+        .await
+        .expect("install");
+    wait_for_install_status(&service, "running").await;
+    let refused = service
+        .request_reboot(":1.7")
+        .await
+        .expect_err("another deployment as candidate leaves the install holding the gate");
+    assert!(refused.to_string().contains("install"), "{refused}");
+    gate.notify_one();
+    wait_for_install_status(&service, "done").await;
+
+    let recorded = verified_descriptor(&dir, &format!("{}.json", "e".repeat(64)));
+    service
+        .request_install(":1.6", &recorded)
+        .await
+        .expect("install");
+    wait_for_install_status(&service, "running").await;
+    service
+        .request_reboot(":1.7")
+        .await
+        .expect("the install's candidate is recorded: the reboot may proceed");
+    assert_eq!(power_calls.lock().expect("lock").len(), 1);
+    gate.notify_one();
+    wait_for_install_status(&service, "done").await;
+}
+
 #[tokio::test]
 pub(super) async fn an_install_mid_flight_refuses_a_reboot_until_it_finishes() {
     let gate = Arc::new(tokio::sync::Notify::new());

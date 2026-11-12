@@ -163,7 +163,8 @@ pub fn deferral_code(reason: &str) -> &'static str {
 // not reboot right now, one code per reason, same order.
 // ---------------------------------------------------------------------------
 
-/// The deployment installer is writing artifacts. No override lifts this one.
+/// The deployment installer is writing artifacts and has not yet recorded its
+/// deployment as the candidate. No override lifts this one.
 pub const GATE_INSTALL_IN_FLIGHT: &str = "install-in-flight";
 
 /// A component reported a status the policy's `blockingStatuses` names.

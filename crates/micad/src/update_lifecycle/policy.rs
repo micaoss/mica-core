@@ -109,9 +109,11 @@ impl UpdateLifecycle {
     }
 
     /// Why the machine must not reboot right now, or `None` when it may.
-    /// The bus layer's `Reboot` asks this before it asks systemd.
-    pub async fn reboot_refusal(&self) -> Option<String> {
-        let verdict = self.gate_verdict().await;
+    /// The bus layer's `Reboot` asks this before it asks systemd, saying
+    /// whether the install in flight has already recorded its candidate: such
+    /// an install no longer holds the gate.
+    pub async fn reboot_refusal(&self, candidate_recorded: bool) -> Option<String> {
+        let verdict = self.gate_verdict(candidate_recorded).await;
         if verdict.safe {
             return None;
         }
@@ -165,12 +167,12 @@ impl UpdateLifecycle {
         Ok(rendered)
     }
 
-    /// The gate verdict with the current health tree, install flag and
-    /// (expired-pruned) override.
-    pub(super) async fn gate_verdict(&self) -> GateVerdict {
+    /// The gate verdict with the current health tree, install flag (unless
+    /// the install has recorded its candidate) and (expired-pruned) override.
+    pub(super) async fn gate_verdict(&self, candidate_recorded: bool) -> GateVerdict {
         let loaded = self.policy.load();
         let health = self.host.health().await;
-        let installing = self.installing.load(Ordering::Acquire);
+        let installing = self.installing.load(Ordering::Acquire) && !candidate_recorded;
         let override_active = {
             let mut machine = self.machine.lock().await;
             prune_override(&mut machine.override_record);
