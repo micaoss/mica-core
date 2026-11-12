@@ -7,8 +7,9 @@
 //! 512-bit key, or `xchacha12,aes-adiantum-plain64` with a 256-bit key), one
 //! pbkdf2-sha256 digest, and keyslots whose area is `aes-xts-plain64` with the
 //! `luks1` sha256 anti-forensic split at 4000 stripes, derived with pbkdf2-sha256
-//! or argon2id. Tokens are kept as given; this layer reads only their `type`
-//! and `keyslots`. `cryptsetup open` opens such a volume, and this layer opens
+//! or argon2id. A keyslot of another profile is kept as given and not opened
+//! here, and so is a token of any type; this layer reads only a token's
+//! `type` and `keyslots`. `cryptsetup open` opens such a volume, and this layer opens
 //! one `cryptsetup luksFormat` made with the same profile.
 //!
 //! It does not know where a keyslot's secret comes from: it takes a secret and
@@ -405,27 +406,39 @@ impl Volume {
             digest.kind == "pbkdf2" && digest.hash == "sha256" && digest.segments == ["0"],
             "digest outside the profile"
         );
-        let key_size = self.cipher().key_size();
         for (id, slot) in &m.keyslots {
             let offset = number(&slot.area.offset)?;
             let size = number(&slot.area.size)?;
             ensure!(
-                slot.kind == "luks2"
-                    && slot.key_size == key_size
-                    && slot.af.kind == "luks1"
-                    && slot.af.hash == "sha256"
-                    && slot.af.stripes >= 1
-                    && slot.area.kind == "raw"
-                    && slot.area.encryption == AREA_CIPHER
-                    && slot.area.key_size == AREA_KEY_SIZE
-                    && offset >= KEYSLOTS_OFFSET
-                    && size >= (key_size * slot.af.stripes) as u64
+                offset >= KEYSLOTS_OFFSET
                     && offset
                         .checked_add(size)
                         .is_some_and(|end| end <= DATA_OFFSET),
-                "keyslot {id} outside the profile"
+                "keyslot {id} area outside the keyslots area"
             );
         }
+        Ok(())
+    }
+
+    /// Check that `slot` is one this layer opens: a `luks2` keyslot of the
+    /// segment's key size, a `luks1` sha256 split, and an `aes-xts-plain64`
+    /// 512-bit area holding the split. A keyslot of another profile (one
+    /// cryptsetup or Clevis added with other settings) stays in the header,
+    /// with its token, and is not opened here.
+    fn check_keyslot(&self, id: usize, slot: &Keyslot) -> Result<()> {
+        let key_size = self.cipher().key_size();
+        ensure!(
+            slot.kind == "luks2"
+                && slot.key_size == key_size
+                && slot.af.kind == "luks1"
+                && slot.af.hash == "sha256"
+                && slot.af.stripes >= 1
+                && slot.area.kind == "raw"
+                && slot.area.encryption == AREA_CIPHER
+                && slot.area.key_size == AREA_KEY_SIZE
+                && number(&slot.area.size)? >= (key_size * slot.af.stripes) as u64,
+            "keyslot {id} outside the profile"
+        );
         Ok(())
     }
 
@@ -539,6 +552,7 @@ impl Volume {
             .keyslots
             .get(&keyslot.to_string())
             .with_context(|| format!("no keyslot {keyslot}"))?;
+        self.check_keyslot(keyslot, slot)?;
         let mut area_key = Zeroizing::new(vec![0u8; slot.area.key_size]);
         derive(&slot.kdf, secret, &mut area_key)?;
         let length = (slot.key_size * slot.af.stripes).div_ceil(512) * 512;

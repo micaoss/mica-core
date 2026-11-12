@@ -1572,6 +1572,8 @@ never written to the console or a log. An encrypted DATA has no factory reset ye
 writes `"factoryReset": false` to `/run/mica/runkit.json` and leaves a staged reset unapplied.
 The exit ramdisk owns `mica-data` as it owns the verity mappings, and removes it once DATA is
 unmounted. The volume is standard LUKS2: `cryptsetup open` with the recovery passphrase opens it.
+A keyslot and token another tool adds (`clevis luks bind`, say) stay in the header untouched; the
+runkit tries only its providers' token types.
 
 The `tpm2` provider seals 32 random bytes under the TPM's ECC P-256 storage key (recreated from
 the standard SRK template at every boot) to PCR 7 and PCR 15 = 0. The session is salted to that

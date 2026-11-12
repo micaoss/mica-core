@@ -300,6 +300,78 @@ fn a_header_outside_the_profile_is_refused() {
     assert!(Volume::read(&file).is_err());
 }
 
+/// A keyslot another tool added with other settings (a Clevis one, say) and
+/// its token stay in the header and keep their area; the volume still opens
+/// with its own keyslots, and adding or removing those leaves them alone.
+#[test]
+fn a_keyslot_of_another_profile_and_its_token_are_kept() {
+    let (_dir, file) = device();
+    let (mut volume, key) = Volume::format(
+        &file,
+        Cipher::AesXts,
+        "u",
+        &[
+            NewKeyslot {
+                secret: b"one",
+                kdf: Kdf::Pbkdf2 { iterations: 1000 },
+                token: Some(token()),
+            },
+            NewKeyslot {
+                secret: b"two",
+                kdf: ARGON,
+                token: None,
+            },
+        ],
+    )
+    .unwrap();
+    let foreign = volume.metadata.keyslots.get_mut("1").unwrap();
+    foreign.kdf.kind = "argon2i".into();
+    foreign.area.encryption = "aes-cbc-essiv:sha256".into();
+    let foreign_area = (
+        number(&foreign.area.offset).unwrap(),
+        number(&foreign.area.size).unwrap(),
+    );
+    let Value::Object(clevis) = serde_json::json!({
+        "type": "clevis",
+        "keyslots": ["1"],
+        "jwe": { "ciphertext": "x", "encrypted_key": "", "iv": "y", "protected": "z", "tag": "t" }
+    }) else {
+        unreachable!()
+    };
+    volume.metadata.tokens.insert("5".into(), clevis.clone());
+    volume.write(&file).unwrap();
+
+    let mut volume = Volume::read(&file).unwrap();
+    assert_eq!(volume.keyslots(), [0, 1]);
+    let refused = volume.unlock(&file, 1, b"two").unwrap_err();
+    assert!(
+        format!("{refused:#}").contains("outside the profile"),
+        "{refused:#}"
+    );
+    assert_eq!(*volume.unlock_any(&file, b"one").unwrap(), *key);
+
+    let added = volume
+        .add_keyslot(
+            &file,
+            &key,
+            &NewKeyslot {
+                secret: b"three",
+                kdf: Kdf::Pbkdf2 { iterations: 1000 },
+                token: None,
+            },
+        )
+        .unwrap();
+    let area = &volume.metadata.keyslots[&added.to_string()].area;
+    let (offset, size) = (number(&area.offset).unwrap(), number(&area.size).unwrap());
+    assert!(offset + size <= foreign_area.0 || offset >= foreign_area.0 + foreign_area.1);
+    volume.kill_keyslot(&file, 0).unwrap();
+
+    let volume = Volume::read(&file).unwrap();
+    assert_eq!(volume.keyslots(), [1, added]);
+    assert_eq!(volume.metadata.tokens.get("5"), Some(&clevis));
+    assert_eq!(*volume.unlock_any(&file, b"three").unwrap(), *key);
+}
+
 // Cross-checks with cryptsetup, run by hand in a container that has it (not in
 // CI): `MICA_XCHECK_DIR` is shared with the cryptsetup side.
 
@@ -363,4 +435,77 @@ fn cross_check_read() {
             assert_eq!(hex::encode(&*key), expected.trim(), "{name}");
         }
     }
+}
+
+/// After `clevis luks bind` on the volume `cross_check_write` made (`aes.img`,
+/// its Clevis passphrase in `clevis.pass`): the Clevis keyslot opens here to
+/// the same volume key, the own keyslots still open, and removing one keeps
+/// the Clevis token. Then a fresh volume (`own.img`) gets a keyslot and
+/// token written here from that passphrase and token, for Clevis to open.
+#[test]
+#[ignore = "clevis cross-check"]
+fn clevis_cross_check() {
+    let dir = xcheck_dir();
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dir.join("aes.img"))
+        .unwrap();
+    let expected = std::fs::read_to_string(dir.join("aes.key")).unwrap();
+    let pass = std::fs::read(dir.join("clevis.pass")).unwrap();
+    let mut volume = Volume::read(&file).unwrap();
+    let (clevis, slots) = volume
+        .tokens()
+        .into_iter()
+        .find(|(token, _)| token["type"] == "clevis")
+        .map(|(token, slots)| (token.clone(), slots))
+        .expect("a clevis token");
+    assert_eq!(slots.len(), 1);
+    let key = volume.unlock(&file, slots[0], &pass).unwrap();
+    assert_eq!(hex::encode(&*key), expected.trim());
+    for secret in [&b"recovery passphrase"[..], b"tpm-secret"] {
+        assert_eq!(*volume.unlock_any(&file, secret).unwrap(), *key);
+    }
+    volume.kill_keyslot(&file, 0).unwrap();
+    let volume = Volume::read(&file).unwrap();
+    assert!(
+        volume
+            .tokens()
+            .iter()
+            .any(|(token, s)| token["type"] == "clevis" && *s == slots)
+    );
+
+    let own = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dir.join("own.img"))
+        .unwrap();
+    own.set_len(20 * 1024 * 1024).unwrap();
+    let mut token = clevis.clone();
+    token.remove("keyslots");
+    let (_volume, own_key) = Volume::format(
+        &own,
+        Cipher::AesXts,
+        "6f1d0c5e-0000-4000-8000-000000000002",
+        &[
+            NewKeyslot {
+                secret: b"recovery passphrase",
+                kdf: Kdf::Argon2id {
+                    time: 4,
+                    memory_kib: 65536,
+                    cpus: 1,
+                },
+                token: None,
+            },
+            NewKeyslot {
+                secret: &pass,
+                kdf: Kdf::Pbkdf2 { iterations: 1000 },
+                token: Some(token),
+            },
+        ],
+    )
+    .unwrap();
+    std::fs::write(dir.join("own.key"), hex::encode(&*own_key)).unwrap();
 }
