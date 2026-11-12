@@ -1571,7 +1571,12 @@ first format's recovery passphrase in `meta/data-recovery-key` (mode 0600); the 
 never written to the console or a log. An encrypted DATA has no factory reset yet: its boot
 writes `"factoryReset": false` to `/run/mica/runkit.json` and leaves a staged reset unapplied.
 The exit ramdisk owns `mica-data` as it owns the verity mappings, and removes it once DATA is
-unmounted. The volume is standard LUKS2: `cryptsetup open` with the recovery passphrase opens it.
+unmounted. The root's own mount of DATA is the one the runkit made: an encrypted product's
+`/etc/fstab` names no DATA line, since the root has no device-mapper udev rules and systemd keeps
+a `dm-*` device without a name unready, so a line on `/dev/mapper/mica-data` would wait on, or be
+stopped with, a device that never appears; the root runs no check on DATA either. The mapping
+covers the whole partition at each boot (the segment size is `dynamic`), so a partition grown by
+`systemd-repart` is mapped whole at the next boot, but the ext4 inside is not grown yet. The volume is standard LUKS2: `cryptsetup open` with the recovery passphrase opens it.
 A keyslot and token another tool adds (`clevis luks bind`, say) stay in the header untouched; the
 runkit tries only its providers' token types.
 
