@@ -10,14 +10,22 @@ fn encryption(json: &str) -> Result<Encryption> {
 #[test]
 fn the_boot_policy_field_is_the_contracts_spelling() {
     let parsed = encryption(
-        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64"}"#,
+        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#,
     )
     .unwrap();
     assert_eq!(parsed.key_providers, [ProviderKind::Tpm2]);
     assert_eq!(parsed.no_provider, NoProvider::Refuse);
     assert_eq!(parsed.validate().unwrap(), Cipher::AesXts);
+    assert_eq!(
+        parsed.recovery(),
+        Kdf::Argon2id {
+            time: 4,
+            memory_kib: 262_144,
+            cpus: 1
+        }
+    );
     let adiantum = encryption(
-        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"plain","cipher":"xchacha12,aes-adiantum-plain64"}"#,
+        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"plain","cipher":"xchacha12,aes-adiantum-plain64","recoveryMemoryKib":65536}"#,
     )
     .unwrap();
     assert_eq!(adiantum.validate().unwrap(), Cipher::Adiantum);
@@ -27,18 +35,19 @@ fn the_boot_policy_field_is_the_contracts_spelling() {
 #[test]
 fn a_boot_policy_field_outside_the_contract_is_refused() {
     for json in [
-        r#"{"mode":"off","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64"}"#,
-        r#"{"mode":"on","keyProviders":["tee"],"noProvider":"refuse","cipher":"aes-xts-plain64"}"#,
-        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"maybe","cipher":"aes-xts-plain64"}"#,
-        r#"{"mode":"on","keyProviders":["tpm2"],"cipher":"aes-xts-plain64"}"#,
-        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64","extra":1}"#,
+        r#"{"mode":"off","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#,
+        r#"{"mode":"on","keyProviders":["tee"],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#,
+        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"maybe","cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#,
+        r#"{"mode":"on","keyProviders":["tpm2"],"cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#,
+        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":262144,"extra":1}"#,
     ] {
         assert!(encryption(json).is_err(), "{json}");
     }
     for json in [
-        r#"{"mode":"on","keyProviders":[],"noProvider":"refuse","cipher":"aes-xts-plain64"}"#,
-        r#"{"mode":"on","keyProviders":["tpm2","tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64"}"#,
-        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-cbc-essiv:sha256"}"#,
+        r#"{"mode":"on","keyProviders":[],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#,
+        r#"{"mode":"on","keyProviders":["tpm2","tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#,
+        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-cbc-essiv:sha256","recoveryMemoryKib":262144}"#,
+        r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":1024}"#,
     ] {
         assert!(encryption(json).unwrap().validate().is_err(), "{json}");
     }
@@ -137,9 +146,8 @@ fn unmount_data() {
     rustix::mount::unmount("/mnt", rustix::mount::UnmountFlags::empty()).unwrap();
 }
 
-const ON: &str =
-    r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64"}"#;
-const ADIANTUM: &str = r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"plain","cipher":"xchacha12,aes-adiantum-plain64"}"#;
+const ON: &str = r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#;
+const ADIANTUM: &str = r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"plain","cipher":"xchacha12,aes-adiantum-plain64","recoveryMemoryKib":65536}"#;
 
 /// One boot of the W1 VM check (a uefi-x64 kernel, swtpm as its TPM,
 /// `/dev/vdb` the DATA under test, `/dev/vdc` a second fresh disk, `/dev/vdd`

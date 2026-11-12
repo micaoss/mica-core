@@ -243,6 +243,149 @@
     "kernelRelease": "6.12.107",
     "supportId": "4b667330fb3b5b1701191406853acd959c4046abbdc330f8e4d8fc8525ce0924"
   },
+  "dataEncryption": {
+    "accepted": [
+      {
+        "cipher": "aes-xts-plain64",
+        "keyProviders": [
+          "tpm2"
+        ],
+        "mode": "on",
+        "noProvider": "refuse",
+        "recoveryMemoryKib": 262144
+      },
+      {
+        "cipher": "xchacha12,aes-adiantum-plain64",
+        "keyProviders": [
+          "tpm2"
+        ],
+        "mode": "on",
+        "noProvider": "plain",
+        "recoveryMemoryKib": 65536
+      }
+    ],
+    "refused": [
+      {
+        "name": "mode-off",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "keyProviders": [
+            "tpm2"
+          ],
+          "mode": "off",
+          "noProvider": "refuse",
+          "recoveryMemoryKib": 262144
+        }
+      },
+      {
+        "name": "no-providers",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "keyProviders": [],
+          "mode": "on",
+          "noProvider": "refuse",
+          "recoveryMemoryKib": 262144
+        }
+      },
+      {
+        "name": "repeated-provider",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "keyProviders": [
+            "tpm2",
+            "tpm2"
+          ],
+          "mode": "on",
+          "noProvider": "refuse",
+          "recoveryMemoryKib": 262144
+        }
+      },
+      {
+        "name": "unknown-provider",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "keyProviders": [
+            "tee"
+          ],
+          "mode": "on",
+          "noProvider": "refuse",
+          "recoveryMemoryKib": 262144
+        }
+      },
+      {
+        "name": "unknown-no-provider-rule",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "keyProviders": [
+            "tpm2"
+          ],
+          "mode": "on",
+          "noProvider": "maybe",
+          "recoveryMemoryKib": 262144
+        }
+      },
+      {
+        "name": "unknown-cipher",
+        "value": {
+          "cipher": "aes-cbc-essiv:sha256",
+          "keyProviders": [
+            "tpm2"
+          ],
+          "mode": "on",
+          "noProvider": "refuse",
+          "recoveryMemoryKib": 262144
+        }
+      },
+      {
+        "name": "recovery-memory-below-64-mib",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "keyProviders": [
+            "tpm2"
+          ],
+          "mode": "on",
+          "noProvider": "refuse",
+          "recoveryMemoryKib": 32768
+        }
+      },
+      {
+        "name": "recovery-memory-above-1-gib",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "keyProviders": [
+            "tpm2"
+          ],
+          "mode": "on",
+          "noProvider": "refuse",
+          "recoveryMemoryKib": 2097152
+        }
+      },
+      {
+        "name": "missing-field",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "keyProviders": [
+            "tpm2"
+          ],
+          "mode": "on",
+          "recoveryMemoryKib": 262144
+        }
+      },
+      {
+        "name": "unknown-field",
+        "value": {
+          "cipher": "aes-xts-plain64",
+          "instanceOptIn": true,
+          "keyProviders": [
+            "tpm2"
+          ],
+          "mode": "on",
+          "noProvider": "refuse",
+          "recoveryMemoryKib": 262144
+        }
+      }
+    ]
+  },
   "deploymentId": "8a1b766db5d18653a8db34a9ac17ef522c428e145a1bdd88d6b75500a50e9156",
   "invalid": [
     {

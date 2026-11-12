@@ -27,12 +27,12 @@ const PROBE: &str = "mica-data-probe";
 /// The volume key's `logon` description.
 const KEY: &std::ffi::CStr = c"mica:data";
 const KEY_DESCRIPTION: &str = "mica:data";
-/// The recovery keyslot's argon2id costs.
-const RECOVERY: Kdf = Kdf::Argon2id {
-    time: 4,
-    memory_kib: 262_144,
-    cpus: 1,
-};
+/// The recovery keyslot's argon2id time cost and parallelism; its memory is
+/// the product's.
+const RECOVERY_TIME: u32 = 4;
+const RECOVERY_CPUS: u32 = 1;
+/// The bounds of the product's recovery memory cost, in KiB.
+const RECOVERY_MEMORY_KIB: std::ops::RangeInclusive<u32> = 65_536..=1_048_576;
 
 /// boot.json `dataEncryption`: absent is off.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +44,8 @@ pub struct Encryption {
     pub no_provider: NoProvider,
     /// `aes-xts-plain64` or `xchacha12,aes-adiantum-plain64`.
     pub cipher: String,
+    /// The recovery keyslot's argon2id memory, set per board at build time.
+    pub recovery_memory_kib: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,8 +79,9 @@ impl ProviderKind {
 }
 
 impl Encryption {
-    /// The payload cipher; the field held to the two the profile has, and
-    /// the provider list to one non-empty list without repeats.
+    /// The payload cipher; the field held to the two the profile has, the
+    /// provider list to one non-empty list without repeats, and the recovery
+    /// memory to 64 MiB..1 GiB.
     pub fn validate(&self) -> Result<Cipher> {
         let mut seen = std::collections::BTreeSet::new();
         ensure!(
@@ -86,7 +89,21 @@ impl Encryption {
                 && self.key_providers.iter().all(|kind| seen.insert(*kind)),
             "dataEncryption needs providers, each once"
         );
+        ensure!(
+            RECOVERY_MEMORY_KIB.contains(&self.recovery_memory_kib),
+            "dataEncryption recoveryMemoryKib outside 65536..=1048576"
+        );
         Cipher::parse(&self.cipher).context("dataEncryption cipher outside the profile")
+    }
+
+    /// The recovery keyslot's KDF.
+    #[must_use]
+    pub const fn recovery(&self) -> Kdf {
+        Kdf::Argon2id {
+            time: RECOVERY_TIME,
+            memory_kib: self.recovery_memory_kib,
+            cpus: RECOVERY_CPUS,
+        }
     }
 }
 
@@ -193,7 +210,7 @@ pub fn open_data(
         (Some(encryption), Some(cipher)) if fresh(&device)? => Some(Format {
             cipher,
             no_provider: encryption.no_provider,
-            recovery: RECOVERY,
+            recovery: encryption.recovery(),
             cipher_ready: cipher_ready(&device, cipher).map_err(|err| format!("{err:#}")),
         }),
         _ => None,

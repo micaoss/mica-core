@@ -276,3 +276,31 @@ fn board_policies() {
             .unwrap_or_else(|e| panic!("{name}: {e:#}"));
     }
 }
+
+/// The DATA ENCRYPTION cases of `cases.json`: boot policy `dataEncryption`
+/// values the device accepts, each round-tripping unchanged, and values it
+/// refuses. The assembly writes the field only for products whose core carries
+/// these cases, and holds what it writes to them.
+#[test]
+fn data_encryption() {
+    use mica_deploy::data_crypt::runkit::Encryption;
+    let cases = cases();
+    let section = &cases["dataEncryption"];
+    let accepted = section["accepted"].as_array().unwrap();
+    let refused = section["refused"].as_array().unwrap();
+    assert!(!accepted.is_empty() && !refused.is_empty());
+    for value in accepted {
+        let parsed: Encryption =
+            serde_json::from_value(value.clone()).unwrap_or_else(|e| panic!("{value}: {e:#}"));
+        parsed
+            .validate()
+            .unwrap_or_else(|e| panic!("{value}: {e:#}"));
+        assert_eq!(&serde_json::to_value(&parsed).unwrap(), value);
+    }
+    for case in refused {
+        let refused = serde_json::from_value::<Encryption>(case["value"].clone())
+            .map_err(anyhow::Error::from)
+            .and_then(|parsed| parsed.validate());
+        assert!(refused.is_err(), "{} was accepted", case["name"]);
+    }
+}

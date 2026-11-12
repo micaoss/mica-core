@@ -1540,9 +1540,11 @@ read one format.
 
 **DATA encryption.** The signed boot policy's top-level `dataEncryption` (beside `identity` and
 `board`; absent is off) is `{"mode": "on", "keyProviders": ["tpm2"], "noProvider": "refuse" |
-"plain", "cipher": "aes-xts-plain64" | "xchacha12,aes-adiantum-plain64"}`, every field required,
-valid only on a `gpt` board. On a `gpt` board the runkit opens DATA in one startup worker before it
-mounts it, whatever the policy says:
+"plain", "cipher": "aes-xts-plain64" | "xchacha12,aes-adiantum-plain64", "recoveryMemoryKib":
+65536..1048576}`, every field required, valid only on a `gpt` board. `cases.json`
+`dataEncryption` holds values the device accepts and values it refuses; the assembly checks what it
+writes against them. On a `gpt` board the runkit opens DATA in one startup worker before it mounts
+it, whatever the policy says:
 
 - A LUKS2 header (either copy) is always honoured. The tokens of the listed providers are tried in
   their order, and the first secret that opens a keyslot gives the volume key. The key goes into
@@ -1554,7 +1556,8 @@ mounts it, whatever the policy says:
 - With encryption on, no header and a fresh DATA (neither a LUKS2 header nor an ext4 superblock),
   the runkit first checks that the kernel maps the cipher: a table with a throwaway key is loaded
   and discarded unresumed. Then every listed provider that is ready enrols a keyslot with its
-  token, a recovery passphrase (8 groups of 5 base32 characters) enrols an argon2id keyslot, the
+  token, a recovery passphrase (8 groups of 5 base32 characters) enrols an argon2id keyslot (time
+cost 4, one lane, `recoveryMemoryKib` of memory), the
   header is written, and DATA is mapped, formatted inside the mapping and given the factory
   layout. When no provider enrols, `noProvider` decides: `refuse` leaves DATA untouched and
   refuses the boot, `plain` formats plain DATA. A kernel without the cipher refuses, whatever
