@@ -265,6 +265,67 @@ fn response_parsers_survive_mutation() {
     }
 }
 
+/// Every response recorded from swtpm in step 0 (`MICA_TPM_CORPUS`),
+/// mutated `MICA_TPM_FUZZ` times (2,000,000 by default) through every
+/// parser: none may panic. Not in CI.
+#[test]
+#[ignore = "needs the step 0 response corpus at MICA_TPM_CORPUS"]
+fn the_recorded_corpus_never_panics_a_parser() {
+    let dir = std::env::var("MICA_TPM_CORPUS").expect("MICA_TPM_CORPUS");
+    let iterations: u64 = std::env::var("MICA_TPM_FUZZ").map_or(2_000_000, |n| n.parse().unwrap());
+    let corpus: Vec<Vec<u8>> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| std::fs::read(entry.unwrap().path()).unwrap())
+        .collect();
+    assert!(!corpus.is_empty());
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut parsed = 0u64;
+    for _ in 0..iterations {
+        let mut b = corpus[(next() % corpus.len() as u64) as usize].clone();
+        for _ in 0..=(next() % 4) {
+            if b.is_empty() {
+                b.push(0);
+            }
+            let at = (next() % b.len() as u64) as usize;
+            match next() % 6 {
+                0 => b[at] ^= 1 << (next() % 8),
+                1 => b[at] = next() as u8,
+                2 => b.truncate(at),
+                3 => b.extend((0..next() % 64).map(|_| next() as u8)),
+                4 if b.len() >= 6 => {
+                    let size = (b.len() as u32).to_be_bytes();
+                    b[2..6].copy_from_slice(&size);
+                }
+                _ => {
+                    if at + 1 < b.len() {
+                        let v: u16 = if next() % 2 == 0 { 0xFFFF } else { 0 };
+                        b[at..at + 2].copy_from_slice(&v.to_be_bytes());
+                    }
+                }
+            }
+        }
+        for handles in 0..=2 {
+            if let Ok(r) = parse_response(&b, handles) {
+                parsed += 1;
+                let _ = parse_create_primary(&r.params).map(|(area, _)| parse_ecc_public(&area));
+                let _ = parse_create(&r.params);
+                let _ = parse_pcr_read(&r.params);
+                let _ = split_blob(&r.params);
+            }
+        }
+    }
+    println!(
+        "TPM corpus: {iterations} mutated responses from {} seeds, 0 panics, {parsed} parsed as a response",
+        corpus.len()
+    );
+}
+
 /// swtpm over TCP, with every byte kept and one response byte flipped on
 /// demand.
 struct Swtpm {
