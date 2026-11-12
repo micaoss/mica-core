@@ -953,6 +953,8 @@ open as a device node (`open_by_process`) or has a file open (`open_files`); oth
 unmounts MICA's mounts without forcing, checks again that no namespace keeps a copy, and reports
 every volume `ejected` until the device is unplugged (404 `media_device_not_found` for a device id
 no device has now). The device is not powered off. Nothing on a medium is checked or written.
+The console's storage page lists the media by device, reading the list every 5 s while it is open,
+with an unmount action per mounted volume and an eject action per device.
 `GET /api/v1/time/zones` lists the zones the device's tzdata offers (`UTC`, then `zone1970.tab`'s
 installed zones, with the tzdata release) and whether the stored `time.timezone` is installed and
 listed; the console's timezone picker searches it by city, region, IANA name or the offset the

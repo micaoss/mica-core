@@ -479,6 +479,26 @@ export interface StorageBind {
     | { attempted: false; reason: string }
 }
 
+/// One volume of `GET /api/v1/storage/media`.
+export interface ExternalVolume {
+  id: string
+  deviceId: string
+  label: string | null
+  transport: 'usb' | 'sd'
+  filesystem: string
+  sizeBytes: number
+  availableBytes: number | null
+  state: 'mounted_readonly' | 'unmounted' | 'detected' | 'unsupported' | 'failed' | 'removed' | 'ejected'
+  busy: boolean
+  reason: string | null
+}
+
+/// `GET /api/v1/storage/media`.
+export interface ExternalMedia {
+  generation: string
+  items: ExternalVolume[]
+}
+
 export interface StorageStatus {
   tiers: StorageTier[]
   namespaces: {
