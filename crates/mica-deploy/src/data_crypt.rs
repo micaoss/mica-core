@@ -15,6 +15,8 @@
 //! gives back the volume key.
 
 mod af;
+pub mod provider;
+pub mod tpm2;
 mod xts;
 
 use std::collections::BTreeMap;
