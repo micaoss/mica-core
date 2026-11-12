@@ -324,6 +324,16 @@ impl MicadService {
         Ok(status.to_string())
     }
 
+    /// JSON inventory of the external media plugged in now
+    /// ([`crate::media`]): `{generation, items}`.
+    pub(super) async fn get_storage_media(&self) -> Result<String, SettingsFault> {
+        let inventory = self.media.inventory().await.map_err(|err| {
+            SettingsFault::Fdo(fdo::Error::Failed(format!("observe media: {err:#}")))
+        })?;
+        serde_json::to_string(&inventory)
+            .map_err(|err| SettingsFault::Fdo(fdo::Error::Failed(format!("media JSON: {err}"))))
+    }
+
     /// JSON snapshot returned by systemd-networkd's live `Describe` method.
     pub(super) async fn get_network_state(&self) -> Result<String, SettingsFault> {
         self.network_state

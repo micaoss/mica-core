@@ -36,6 +36,9 @@ pub struct FakeSettings {
     /// What `get_storage_status` answers; the shape micad's storage
     /// `status_json` serves.
     pub(super) storage_status: std::sync::Mutex<Value>,
+    /// What `get_storage_media` answers; the shape micad's media inventory
+    /// serves.
+    pub(super) storage_media: std::sync::Mutex<Value>,
     /// What `get_system_info` answers; the shape micad's `info_json` serves.
     pub(super) system_info: std::sync::Mutex<Value>,
     /// When the Bluetooth pairing window closes, while it is open.
@@ -124,6 +127,10 @@ impl FakeSettings {
             time_status: std::sync::Mutex::new(serde_json::json!({
                 "status": "synchronized",
                 "synchronized": true,
+            })),
+            storage_media: std::sync::Mutex::new(serde_json::json!({
+                "generation": "0000000000000000",
+                "items": [],
             })),
             storage_status: std::sync::Mutex::new(serde_json::json!({
                 "tiers": [],
@@ -271,6 +278,11 @@ impl FakeSettings {
     /// Replace what `get_storage_status` answers.
     pub fn set_storage_status(&self, value: Value) {
         *self.storage_status.lock().unwrap() = value;
+    }
+
+    /// Replace what `get_storage_media` answers.
+    pub fn set_storage_media(&self, value: Value) {
+        *self.storage_media.lock().unwrap() = value;
     }
 
     /// Replace what `get_system_info` answers.
@@ -593,6 +605,10 @@ impl SettingsApi for FakeSettings {
     async fn get_storage_status(&self) -> anyhow::Result<Value> {
         self.diagnostic_pause().await;
         Ok(self.storage_status.lock().unwrap().clone())
+    }
+
+    async fn get_storage_media(&self) -> anyhow::Result<Value> {
+        Ok(self.storage_media.lock().unwrap().clone())
     }
 
     async fn get_system_info(&self) -> anyhow::Result<Value> {

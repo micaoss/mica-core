@@ -280,7 +280,7 @@ directions, because `SettingsChanged` carries setting values.
 | Group | Members |
 | --- | --- |
 | Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
-| Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetLogOfBoot`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
+| Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetStorageMedia`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetLogOfBoot`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
 | Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `FactoryReset` (the administrator password, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so two claims cannot both land), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
@@ -923,6 +923,18 @@ with the boot it was staged in, and the first update-state read of the next boot
 `lastRollback`, for that boot only, whether the booted deployment is the target), reboot override,
 policy); provisioning status and claim; credential recovery and reset; the factory reset;
 diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
+`GET /api/v1/storage/media` lists the external media plugged in now, one item per volume (every
+partition of each device, supported or not, grouped by `deviceId`): USB mass storage, and SD cards
+(an MMC card of type `SD`; soldered eMMC is never listed). The disks under the devices mounted at
+`/`, `/mnt/system`, `/mnt/data` and `/boot` (through any device-mapper mapping) are the device's
+own and never listed, whatever their labels. micad reads sysfs and mountinfo on each request, so
+hotplug needs no udev or mdev. `id` and `deviceId` are hashes of the boot id and the kernel's
+`diskseq` for the attachment, so a device plugged again gets new ones. The filesystem (`vfat`,
+`exfat`, `ext2`, `ext3`, `ext4`, `ntfs`, `unknown`) and label come from the superblock, read only;
+the label is display text (control characters dropped, at most 64 characters). `state` is
+`detected`, `unsupported` (`filesystem_unsupported`, or `filesystem_not_in_kernel` when
+`/proc/filesystems` lacks its driver) or `failed` (`unreadable`); `busy` is a mount of the volume
+outside `/run/mica/media` (`mounted_outside_mica`). Nothing is mounted, checked or written.
 `GET /api/v1/time/zones` lists the zones the device's tzdata offers (`UTC`, then `zone1970.tab`'s
 installed zones, with the tzdata release) and whether the stored `time.timezone` is installed and
 listed; the console's timezone picker searches it by city, region, IANA name or the offset the

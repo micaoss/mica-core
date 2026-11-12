@@ -4,6 +4,7 @@ use crate::bluetooth::{Agent as BluetoothAgent, BluetoothControl};
 use crate::containers::ContainerEngine;
 use crate::deployment::NativeClient;
 use crate::diagnostics::FailureEvidenceSource;
+use crate::media::MediaSource;
 use crate::network_state::NetworkState;
 use crate::reconciler::network::WireguardRotate;
 use crate::scan::Registry;
@@ -92,6 +93,14 @@ impl MicadService {
     #[must_use]
     pub fn with_storage_status(mut self, storage_status: Arc<dyn StorageStatusSource>) -> Self {
         self.storage_status = storage_status;
+        self
+    }
+
+    /// Attach the external media observer (`GetStorageMedia`); the default
+    /// observes none, for the reason [`Self::with_storage_status`] gives.
+    #[must_use]
+    pub fn with_media(mut self, media: Arc<dyn MediaSource>) -> Self {
+        self.media = media;
         self
     }
 

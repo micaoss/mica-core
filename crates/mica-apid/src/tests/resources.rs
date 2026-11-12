@@ -283,6 +283,55 @@ pub(super) async fn the_storage_status_route_answers_micads_observation_read_onl
     }
 }
 
+// The media inventory: authenticated, read-only, micad's inventory passed
+// through as it is.
+#[tokio::test]
+pub(super) async fn the_storage_media_route_answers_micads_inventory_read_only() {
+    let (tree, token) = with_token(secret_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+    let inventory = json!({
+        "generation": "5be0c3b1a2d4e6f7",
+        "items": [{
+            "id": "66e7bd492dff9b4740b2",
+            "deviceId": "bbbd5998eb453641c1f8",
+            "label": "UPDATE",
+            "transport": "usb",
+            "filesystem": "vfat",
+            "sizeBytes": 16_000_000_000_u64,
+            "availableBytes": null,
+            "state": "detected",
+            "busy": false,
+            "reason": null,
+        }],
+    });
+    fake.set_storage_media(inventory.clone());
+
+    let response = bearer(&router, "GET", "/api/v1/storage/media", &token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_api_headers(&response, "/api/v1/storage/media");
+    assert_eq!(body_json(response).await, inventory);
+
+    let response = send(
+        &router,
+        Request::builder()
+            .method("GET")
+            .uri("/api/v1/storage/media")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    for method in ["PUT", "POST", "DELETE", "PATCH"] {
+        let response = bearer_json(&router, method, "/api/v1/storage/media", &token, "{}").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method}"
+        );
+    }
+}
+
 // The last acceptance bullet, as a gate rather than a promise: normal
 // apid exposes NO generic format or repartition action.
 #[tokio::test]

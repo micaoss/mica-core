@@ -55,7 +55,7 @@ pub fn parse_mountinfo(text: &str) -> Vec<MountEvidence> {
 
 /// Decode the octal escapes the kernel writes into mountinfo paths (space,
 /// tab, newline and backslash).
-pub(super) fn unescape_octal(raw: &str) -> String {
+pub(crate) fn unescape_octal(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut chars = raw.chars();
     while let Some(c) = chars.next() {

@@ -17,6 +17,7 @@ use crate::bluetooth::{Agent as BluetoothAgent, BluetoothControl};
 use crate::containers::ContainerEngine;
 use crate::deployment::{DeploymentClient, NativeClient};
 use crate::diagnostics::{FailureEvidenceSource, UnavailableFailureEvidence};
+use crate::media::{MediaSource, UnavailableMedia};
 use crate::network_state::{NetworkState, UnavailableNetworkState};
 use crate::power::PowerControl;
 use crate::reconciler::Reconciler;
@@ -158,6 +159,8 @@ pub struct MicadService {
     time_status: Arc<dyn TimeStatusSource>,
     /// Read-only storage observation, on the same default again.
     storage_status: Arc<dyn StorageStatusSource>,
+    /// The external media observer (`GetStorageMedia`).
+    media: Arc<dyn MediaSource>,
     /// The low-space hysteresis state the storage surface classifies against.
     /// Lives with the service rather than with the observer because it is the
     /// REPORTED state, and it has to survive an observer being reattached.
@@ -357,6 +360,7 @@ impl MicadService {
             dns_probe: None,
             time_status: Arc::new(UnavailableTimeStatus),
             storage_status: Arc::new(UnavailableStorageStatus),
+            media: Arc::new(UnavailableMedia),
             system_info: Arc::new(UnavailableSystemInfo),
             telemetry: Arc::new(UnavailableTelemetry),
             device_root: None,

@@ -97,6 +97,10 @@ impl SettingsApi for FailingSettings {
         Err(self.error())
     }
 
+    async fn get_storage_media(&self) -> anyhow::Result<serde_json::Value> {
+        Err(self.error())
+    }
+
     async fn get_system_info(&self) -> anyhow::Result<serde_json::Value> {
         Err(self.error())
     }

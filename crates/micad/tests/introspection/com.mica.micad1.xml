@@ -108,6 +108,13 @@ out.
 <arg type="s" direction="out"/>
 </method>
 <!--
+JSON inventory of the external media plugged in now
+([`crate::media`]): `{generation, items}`.
+-->
+<method name="GetStorageMedia">
+<arg type="s" direction="out"/>
+</method>
+<!--
 JSON snapshot returned by systemd-networkd's live `Describe` method.
 -->
 <method name="GetNetworkState">

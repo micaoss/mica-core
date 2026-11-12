@@ -74,6 +74,7 @@ trait Micad {
     fn get_network_state(&self) -> zbus::Result<String>;
     fn get_time_status(&self) -> zbus::Result<String>;
     fn get_storage_status(&self) -> zbus::Result<String>;
+    fn get_storage_media(&self) -> zbus::Result<String>;
     fn get_system_info(&self) -> zbus::Result<String>;
     fn get_telemetry(&self) -> zbus::Result<String>;
     fn get_device_code(&self) -> zbus::Result<String>;
@@ -451,6 +452,14 @@ impl SettingsApi for BusSettings {
         let proxy = self.proxy().await?;
         let json = self
             .call("GetStorageStatus", proxy.get_storage_status())
+            .await?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    async fn get_storage_media(&self) -> anyhow::Result<Value> {
+        let proxy = self.proxy().await?;
+        let json = self
+            .call("GetStorageMedia", proxy.get_storage_media())
             .await?;
         Ok(serde_json::from_str(&json)?)
     }

@@ -104,6 +104,7 @@ pub(super) const V1_TIME_ZONES_PATH: &str = "/v1/time/zones";
 /// layout is fixed by the image assembler, and an API that could rewrite it
 /// would be a remote destructive surface with no product use.
 pub(super) const V1_STORAGE_STATUS_PATH: &str = "/v1/storage/status";
+pub(super) const V1_STORAGE_MEDIA_PATH: &str = "/v1/storage/media";
 
 /// The system-information surface: what this device is, in one
 /// read. A fixed path on the time status's reasoning: observed at request

@@ -94,6 +94,44 @@ pub(crate) async fn api_v1_storage_status(
     }
 }
 
+/// Read the external media inventory.
+///
+/// The USB mass storage and removable SD cards plugged in now, one item per
+/// volume: every partition of each device, supported or not, grouped by
+/// `deviceId`. `id` and `deviceId` are opaque and belong to one attachment:
+/// a device unplugged and plugged again gets new ones. The device's own disk
+/// (SYSTEM, DATA and the boot partition) is never listed, nor soldered eMMC.
+/// `filesystem` is `vfat`, `exfat`, `ext2`, `ext3`, `ext4`, `ntfs` or
+/// `unknown`; `state` is `detected`, `unsupported` (`reason`
+/// `filesystem_unsupported` or `filesystem_not_in_kernel`) or `failed`
+/// (`unreadable`); `busy` says a mount outside MICA's media mounts uses the
+/// volume (`reason` `mounted_outside_mica`). `label` is the filesystem's,
+/// for display only. `generation` changes whenever anything listed changes.
+/// Read-only: nothing is mounted, checked or written.
+#[utoipa::path(
+    get,
+    path = V1_STORAGE_MEDIA_PATH,
+    context_path = API,
+    tag = "resources",
+    responses(
+        (status = 200, description = "The external media volumes plugged in now, grouped by device, with a generation that changes with them", body = ResourceValue),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 500, description = "micad failed to observe (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_storage_media(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+) -> Response {
+    match state.api.get_storage_media().await {
+        Ok(value) => api_response(StatusCode::OK, ResourceValue(value)),
+        Err(err) => bus_api_error(&err, None),
+    }
+}
+
 /// Read the system-information surface.
 ///
 /// One read answers what this device is: the machine id, the board, the

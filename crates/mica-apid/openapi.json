@@ -6099,6 +6099,78 @@
         }
       }
     },
+    "/api/v1/storage/media": {
+      "get": {
+        "tags": [
+          "resources"
+        ],
+        "summary": "Read the external media inventory.",
+        "description": "The USB mass storage and removable SD cards plugged in now, one item per\nvolume: every partition of each device, supported or not, grouped by\n`deviceId`. `id` and `deviceId` are opaque and belong to one attachment:\na device unplugged and plugged again gets new ones. The device's own disk\n(SYSTEM, DATA and the boot partition) is never listed, nor soldered eMMC.\n`filesystem` is `vfat`, `exfat`, `ext2`, `ext3`, `ext4`, `ntfs` or\n`unknown`; `state` is `detected`, `unsupported` (`reason`\n`filesystem_unsupported` or `filesystem_not_in_kernel`) or `failed`\n(`unreadable`); `busy` says a mount outside MICA's media mounts uses the\nvolume (`reason` `mounted_outside_mica`). `label` is the filesystem's,\nfor display only. `generation` changes whenever anything listed changes.\nRead-only: nothing is mounted, checked or written.",
+        "operationId": "api_v1_storage_media",
+        "responses": {
+          "200": {
+            "description": "The external media volumes plugged in now, grouped by device, with a generation that changes with them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceValue"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "micad failed to observe (`micad_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`); the operation may still be running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/storage/status": {
       "get": {
         "tags": [

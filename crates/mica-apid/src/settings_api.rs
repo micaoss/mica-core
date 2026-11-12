@@ -100,6 +100,9 @@ pub trait SettingsApi: Send + Sync {
     /// by the image assembler and a management API that could rewrite it
     /// would be a remote destructive surface with no product use.
     async fn get_storage_status(&self) -> anyhow::Result<Value>;
+    /// The external media plugged in now, as micad's inventory
+    /// `{generation, items}`. Read-only.
+    async fn get_storage_media(&self) -> anyhow::Result<Value>;
     /// The system-information surface micad assembles: machine id,
     /// board, kernel, release, image version with git stamp and build date,
     /// installed packages, booted slot and uptime. Read-only.
