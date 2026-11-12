@@ -159,6 +159,10 @@ pub(super) async fn an_erroring_source_is_unavailable_not_fatal() {
         async fn get_storage_media(&self) -> anyhow::Result<Value> {
             self.0.get_storage_media().await
         }
+
+        async fn unmount_media(&self, id: &str) -> anyhow::Result<Value> {
+            self.0.unmount_media(id).await
+        }
         async fn get_system_info(&self) -> anyhow::Result<Value> {
             self.0.get_system_info().await
         }

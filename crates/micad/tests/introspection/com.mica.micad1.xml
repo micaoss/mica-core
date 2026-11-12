@@ -115,6 +115,15 @@ JSON inventory of the external media plugged in now
 <arg type="s" direction="out"/>
 </method>
 <!--
+Unmount the media volume `id` MICA mounted, without forcing, and
+keep it unmounted while it is plugged in: JSON `{outcome, item}`,
+`outcome` `unmounted`, `not_found` (no item) or `busy`.
+-->
+<method name="UnmountMedia">
+<arg name="id" type="s" direction="in"/>
+<arg type="s" direction="out"/>
+</method>
+<!--
 JSON snapshot returned by systemd-networkd's live `Describe` method.
 -->
 <method name="GetNetworkState">

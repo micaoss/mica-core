@@ -105,6 +105,7 @@ pub(super) const V1_TIME_ZONES_PATH: &str = "/v1/time/zones";
 /// would be a remote destructive surface with no product use.
 pub(super) const V1_STORAGE_STATUS_PATH: &str = "/v1/storage/status";
 pub(super) const V1_STORAGE_MEDIA_PATH: &str = "/v1/storage/media";
+pub(super) const V1_STORAGE_MEDIA_UNMOUNT_PATH: &str = "/v1/storage/media/{id}/unmount";
 
 /// The system-information surface: what this device is, in one
 /// read. A fixed path on the time status's reasoning: observed at request

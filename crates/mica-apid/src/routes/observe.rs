@@ -1,7 +1,7 @@
 //! The observation endpoints: time, storage, system, telemetry and network.
 
 use crate::redact;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 
@@ -102,12 +102,16 @@ pub(crate) async fn api_v1_storage_status(
 /// a device unplugged and plugged again gets new ones. The device's own disk
 /// (SYSTEM, DATA and the boot partition) is never listed, nor soldered eMMC.
 /// `filesystem` is `vfat`, `exfat`, `ext2`, `ext3`, `ext4`, `ntfs` or
-/// `unknown`; `state` is `detected`, `unsupported` (`reason`
-/// `filesystem_unsupported` or `filesystem_not_in_kernel`) or `failed`
-/// (`unreadable`); `busy` says a mount outside MICA's media mounts uses the
-/// volume (`reason` `mounted_outside_mica`). `label` is the filesystem's,
-/// for display only. `generation` changes whenever anything listed changes.
-/// Read-only: nothing is mounted, checked or written.
+/// `unknown`. Each read mounts a supported, clean volume nothing else uses
+/// read-only (`state` `mounted_readonly`, with `availableBytes`); the other
+/// states are `unmounted` (by `POST .../unmount`, while it stays plugged
+/// in), `detected` (`busy`: a mount outside MICA's media mounts uses it,
+/// `reason` `mounted_outside_mica`), `unsupported` (`filesystem_unsupported`
+/// or `filesystem_not_in_kernel`), `failed` (`unreadable`, `needs_repair`
+/// when the filesystem says so, `mount_failed`) and `removed` (unplugged
+/// since the last read, listed once). `label` is the filesystem's, for
+/// display only. `generation` changes whenever anything listed changes.
+/// Nothing is checked or written.
 #[utoipa::path(
     get,
     path = V1_STORAGE_MEDIA_PATH,
@@ -129,6 +133,59 @@ pub(crate) async fn api_v1_storage_media(
     match state.api.get_storage_media().await {
         Ok(value) => api_response(StatusCode::OK, ResourceValue(value)),
         Err(err) => bus_api_error(&err, None),
+    }
+}
+
+/// Unmount one external media volume.
+///
+/// Unmounts the volume `id` that MICA mounted, without forcing, and keeps it
+/// unmounted while it stays plugged in. Only this volume: its device and the
+/// device's other volumes are untouched, and this does not make the device
+/// safe to unplug. A volume MICA had not mounted is just kept unmounted.
+/// Answers the volume as it is now.
+#[utoipa::path(
+    post,
+    path = V1_STORAGE_MEDIA_UNMOUNT_PATH,
+    context_path = API,
+    tag = "actions",
+    params(("id" = String, Path, description = "The volume's `id` from `GET /api/v1/storage/media`")),
+    responses(
+        (status = 200, description = "Unmounted: `{item}`, its `state` now `unmounted`", body = ResourceValue),
+        (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
+        (status = 403, description = "A browser session without its CSRF token (`csrf_failed`)", body = ApiError),
+        (status = 404, description = "No volume has this id now: unplugged, or an id of an earlier plug (`media_not_found`)", body = ApiError),
+        (status = 409, description = "Something has a file open on the volume; it stays mounted (`media_busy`)", body = ApiError),
+        (status = 500, description = "micad failed to unmount (`micad_failed`)", body = ApiError),
+        (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
+        (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
+        (status = 405, description = "A method this route does not serve (`method_not_allowed`); carries `Allow`", body = ApiError),
+    ),
+)]
+pub(crate) async fn api_v1_storage_media_unmount(
+    _credential: ApiCredential,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    let answer = match state.api.unmount_media(&id).await {
+        Ok(answer) => answer,
+        Err(err) => return bus_api_error(&err, None),
+    };
+    match answer["outcome"].as_str() {
+        Some("unmounted") => api_response(
+            StatusCode::OK,
+            ResourceValue(serde_json::json!({ "item": answer["item"] })),
+        ),
+        Some("busy") => api_response(
+            StatusCode::CONFLICT,
+            ApiError::apid(
+                "media_busy",
+                "the volume is in use; it stays mounted".to_string(),
+            ),
+        ),
+        _ => api_response(
+            StatusCode::NOT_FOUND,
+            ApiError::apid("media_not_found", "no media volume has this id".to_string()),
+        ),
     }
 }
 

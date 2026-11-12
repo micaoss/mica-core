@@ -9,6 +9,7 @@ const BOOT: &str = "3f0c7d1e-8f44-4c2a-9a55-0d6c1f2e7b10";
 fn ext4(label: &str) -> Vec<u8> {
     let mut b = vec![0u8; 8192];
     b[1024 + 56..1024 + 58].copy_from_slice(&0xEF53u16.to_le_bytes());
+    b[1024 + 58..1024 + 60].copy_from_slice(&1u16.to_le_bytes());
     b[1024 + 92..1024 + 96].copy_from_slice(&0x4u32.to_le_bytes());
     b[1024 + 96..1024 + 100].copy_from_slice(&0x2c2u32.to_le_bytes());
     b[1024 + 120..1024 + 120 + label.len()].copy_from_slice(label.as_bytes());
@@ -57,6 +58,10 @@ fn ntfs() -> Vec<u8> {
 }
 
 fn probe_bytes(bytes: &[u8]) -> std::io::Result<(&'static str, Option<String>)> {
+    probed(bytes).map(|p| (p.filesystem, p.label))
+}
+
+fn probed(bytes: &[u8]) -> std::io::Result<Probed> {
     probe(|offset, buf| {
         let start = usize::try_from(offset).unwrap();
         let end = start + buf.len();
@@ -92,6 +97,24 @@ fn a_filesystem_is_known_by_its_superblock() {
 }
 
 #[test]
+fn a_volume_that_needs_repair_says_so() {
+    assert!(!probed(&ext4("x")).unwrap().dirty);
+    let mut journal = ext4("x");
+    journal[1024 + 96] |= 0x4;
+    assert!(probed(&journal).unwrap().dirty, "a journal to replay");
+    let mut errors = ext4("x");
+    errors[1024 + 58] = 3;
+    assert!(probed(&errors).unwrap().dirty, "recorded errors");
+    let mut fat = fat32(b"UPDATE     ");
+    assert!(!probed(&fat).unwrap().dirty);
+    fat[65] = 1;
+    assert!(probed(&fat).unwrap().dirty);
+    let mut ex = exfat("x");
+    ex[106] = 2;
+    assert!(probed(&ex).unwrap().dirty);
+}
+
+#[test]
 fn a_label_is_display_text_only() {
     let mut hostile = fat32(b"../\x1b[31m\n..");
     assert_eq!(
@@ -102,6 +125,56 @@ fn a_label_is_display_text_only() {
     assert_eq!(probe_bytes(&hostile).unwrap().1, None);
     let long = exfat(&"x".repeat(30));
     assert_eq!(probe_bytes(&long).unwrap().1.unwrap().len(), 11);
+}
+
+/// The kernel as the host tree shows it: a mount is a mountinfo line.
+struct FakeMounter {
+    root: PathBuf,
+    /// Targets whose unmount is refused as busy.
+    busy: std::sync::Mutex<Vec<PathBuf>>,
+}
+
+impl FakeMounter {
+    fn point(&self, target: &Path) -> String {
+        format!("/{}", target.strip_prefix(&self.root).unwrap().display())
+    }
+}
+
+impl Mounter for FakeMounter {
+    fn mount(&self, device: &Path, target: &Path, filesystem: &str) -> std::io::Result<()> {
+        let name = device.file_name().unwrap().to_str().unwrap();
+        let devnum = fs::read_to_string(self.root.join(format!("sys/class/block/{name}/dev")))?;
+        let (driver, data) = mount::options(filesystem).unwrap();
+        let info = self.root.join("proc/self/mountinfo");
+        let mut text = fs::read_to_string(&info)?;
+        text.push_str(&format!(
+            "60 1 {} / {} ro,nosuid,nodev,noexec - {driver} /dev/{name} ro,{}\n",
+            devnum.trim(),
+            self.point(target),
+            data.to_str().unwrap()
+        ));
+        fs::write(info, text)
+    }
+
+    fn unmount(&self, target: &Path, _detach: bool) -> std::io::Result<()> {
+        if self.busy.lock().unwrap().iter().any(|b| b == target) {
+            return Err(std::io::Error::from_raw_os_error(
+                rustix::io::Errno::BUSY.raw_os_error(),
+            ));
+        }
+        let info = self.root.join("proc/self/mountinfo");
+        let point = format!(" {} ", self.point(target));
+        let text: String = fs::read_to_string(&info)?
+            .lines()
+            .filter(|line| !line.contains(&point))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        fs::write(info, text)
+    }
+
+    fn available(&self, _target: &Path) -> Option<u64> {
+        Some(4096)
+    }
 }
 
 /// A host tree: a soldered eMMC holding the device's own partitions (DATA
@@ -224,14 +297,25 @@ impl Host {
         }
     }
 
+    fn media(&self) -> HostMedia {
+        HostMedia::at(
+            self.dir.path(),
+            Box::new(FakeMounter {
+                root: self.dir.path().to_path_buf(),
+                busy: std::sync::Mutex::new(Vec::new()),
+            }),
+        )
+    }
+
     fn scan(&self) -> Inventory {
-        HostMedia::at(self.dir.path()).scan().unwrap()
+        self.media().inner.reconcile().unwrap()
     }
 }
 
 #[test]
-fn usb_and_sd_volumes_are_listed_and_the_devices_own_disks_are_not() {
-    let inventory = Host::new().scan();
+fn usb_and_sd_volumes_are_listed_mounted_and_the_devices_own_disks_are_not() {
+    let host = Host::new();
+    let inventory = host.scan();
     let summary: Vec<_> = inventory
         .items
         .iter()
@@ -248,7 +332,7 @@ fn usb_and_sd_volumes_are_listed_and_the_devices_own_disks_are_not() {
     assert_eq!(
         summary,
         [
-            ("usb", "vfat", Some("UPDATE"), "detected", None),
+            ("usb", "vfat", Some("UPDATE"), "mounted_readonly", None),
             (
                 "usb",
                 "ntfs",
@@ -256,7 +340,7 @@ fn usb_and_sd_volumes_are_listed_and_the_devices_own_disks_are_not() {
                 "unsupported",
                 Some("filesystem_unsupported")
             ),
-            ("sd", "exfat", Some("CHARTS"), "detected", None),
+            ("sd", "exfat", Some("CHARTS"), "mounted_readonly", None),
         ]
     );
     let stick = &inventory.items[0];
@@ -265,11 +349,24 @@ fn usb_and_sd_volumes_are_listed_and_the_devices_own_disks_are_not() {
     assert_ne!(stick.device_id, inventory.items[2].device_id);
     assert_eq!(stick.size_bytes, 1_024_000 * 512);
     assert_eq!(inventory.items[2].size_bytes, 2_048_000 * 512);
+    assert!(inventory.items.iter().all(|v| !v.busy));
+    assert_eq!(stick.available_bytes, Some(4096));
+    assert_eq!(inventory.items[1].available_bytes, None);
+    let info = fs::read_to_string(host.path("proc/self/mountinfo")).unwrap();
     assert!(
-        inventory
-            .items
-            .iter()
-            .all(|v| !v.busy && v.available_bytes.is_none())
+        info.contains(&format!(
+            "8:1 / /run/mica/media/{} ro,nosuid,nodev,noexec - vfat",
+            stick.id
+        )),
+        "{info}"
+    );
+    assert_eq!(host.scan().items, inventory.items, "mounted once");
+    assert_eq!(
+        fs::read_to_string(host.path("proc/self/mountinfo"))
+            .unwrap()
+            .matches("/run/mica/media/")
+            .count(),
+        2
     );
     let text = serde_json::to_value(&inventory).unwrap();
     assert_eq!(text["items"][0]["deviceId"], stick.device_id.as_str());
@@ -296,10 +393,12 @@ fn an_sd_card_the_device_booted_from_is_not_media() {
 #[test]
 fn ids_belong_to_one_attachment() {
     let host = Host::new();
-    let first = host.scan();
-    assert_eq!(host.scan(), first, "stable while plugged");
+    let media = host.media();
+    let scan = || media.inner.reconcile().unwrap();
+    let first = scan();
+    assert_eq!(scan(), first, "stable while plugged");
     host.usb_stick(9);
-    let again = host.scan();
+    let again = scan();
     // In plug order: the SD card (7) now comes before the stick (9).
     assert_eq!(
         again.items[0], first.items[2],
@@ -310,7 +409,20 @@ fn ids_belong_to_one_attachment() {
         "a new id after a replug"
     );
     assert_ne!(again.items[1].device_id, first.items[0].device_id);
+    assert_eq!(again.items[1].state, "mounted_readonly");
     assert_ne!(again.generation, first.generation);
+    // The old plug's volumes are listed once as removed, their mount gone.
+    let removed: Vec<_> = again.items[3..].iter().map(|v| (&v.id, v.state)).collect();
+    assert_eq!(
+        removed,
+        [
+            (&first.items[0].id, "removed"),
+            (&first.items[1].id, "removed")
+        ]
+    );
+    let info = fs::read_to_string(host.path("proc/self/mountinfo")).unwrap();
+    assert!(!info.contains(&first.items[0].id), "{info}");
+    assert_eq!(scan().items.len(), 3, "listed once");
 }
 
 #[test]
@@ -324,8 +436,16 @@ fn a_volume_mounted_outside_mica_is_busy() {
     );
     let inventory = host.scan();
     assert!(inventory.items[0].busy);
-    assert_eq!(inventory.items[0].reason, Some("mounted_outside_mica"));
-    assert!(!inventory.items[2].busy, "MICA's own media mount");
+    assert_eq!(
+        (inventory.items[0].state, inventory.items[0].reason),
+        ("detected", Some("mounted_outside_mica")),
+        "not mounted by MICA as well"
+    );
+    // A mount under the media root is MICA's, of a plug that is gone.
+    assert!(!inventory.items[2].busy);
+    assert_eq!(inventory.items[2].state, "mounted_readonly");
+    let info = fs::read_to_string(host.path("proc/self/mountinfo")).unwrap();
+    assert!(!info.contains("/run/mica/media/x "), "{info}");
 }
 
 #[test]
@@ -348,7 +468,74 @@ fn an_unreadable_volume_is_failed_and_the_rest_listed() {
         (inventory.items[1].state, inventory.items[1].reason),
         ("failed", Some("unreadable"))
     );
-    assert_eq!(inventory.items[0].state, "detected");
+    assert_eq!(inventory.items[0].state, "mounted_readonly");
+}
+
+#[test]
+fn a_volume_that_needs_repair_is_not_mounted() {
+    let host = Host::new();
+    let mut dirty = exfat("CHARTS");
+    dirty[106] = 2;
+    host.dev("mmcblk1", &dirty);
+    let sd = host.scan().items[2].clone();
+    assert_eq!((sd.state, sd.reason), ("failed", Some("needs_repair")));
+    let info = fs::read_to_string(host.path("proc/self/mountinfo")).unwrap();
+    assert!(!info.contains(&sd.id));
+}
+
+#[test]
+fn a_volume_is_unmounted_alone_and_stays_unmounted() {
+    let host = Host::new();
+    let media = host.media();
+    let first = media.inner.reconcile().unwrap();
+    let (stick, sd) = (&first.items[0], &first.items[2]);
+    let Unmount::Unmounted { item } = media.inner.unmount(&stick.id).unwrap() else {
+        panic!("not unmounted");
+    };
+    assert_eq!(item.state, "unmounted");
+    let again = media.inner.reconcile().unwrap();
+    assert_eq!(again.items[0].state, "unmounted", "not mounted again");
+    assert_eq!(
+        again.items[2].state, "mounted_readonly",
+        "the SD card stays"
+    );
+    let info = fs::read_to_string(host.path("proc/self/mountinfo")).unwrap();
+    assert!(!info.contains(&stick.id) && info.contains(&sd.id), "{info}");
+    assert!(!host.path(&format!("run/mica/media/{}", stick.id)).exists());
+    assert!(matches!(
+        media.inner.unmount(&stick.id).unwrap(),
+        Unmount::Unmounted { .. }
+    ));
+    assert_eq!(
+        media.inner.unmount("0123456789abcdef0123").unwrap(),
+        Unmount::NotFound
+    );
+}
+
+#[test]
+fn a_busy_volume_stays_mounted() {
+    let host = Host::new();
+    let media = host.media();
+    let sd = media.inner.reconcile().unwrap().items[2].clone();
+    let fake = FakeMounter {
+        root: host.dir.path().to_path_buf(),
+        busy: std::sync::Mutex::new(vec![host.path(&format!("run/mica/media/{}", sd.id))]),
+    };
+    let busy = HostMedia {
+        inner: Arc::new(Inner {
+            root: host.dir.path().to_path_buf(),
+            mounter: Box::new(fake),
+            state: Mutex::new(State::default()),
+        }),
+    };
+    let Unmount::Busy { item } = busy.inner.unmount(&sd.id).unwrap() else {
+        panic!("not busy");
+    };
+    assert_eq!(item.state, "mounted_readonly");
+    assert_eq!(
+        busy.inner.reconcile().unwrap().items[2].state,
+        "mounted_readonly"
+    );
 }
 
 /// Volumes `mkfs` made, in `MICA_PROBE_DIR`, recognised with their labels.
@@ -368,6 +555,70 @@ fn probe_cross_check() {
     ] {
         let image = File::open(dir.join(file)).unwrap();
         let probed = probe(|offset, buf| image.read_exact_at(buf, offset)).unwrap();
-        assert_eq!(probed, (filesystem, label.map(str::to_string)), "{file}");
+        assert_eq!(
+            probed,
+            Probed {
+                filesystem,
+                label: label.map(str::to_string),
+                dirty: false
+            },
+            "{file}"
+        );
     }
+}
+
+/// One boot of the media VM check (a uefi-x64 kernel; `/dev/vda` a virtio
+/// disk; two USB sticks: one with a FAT32 `UPDATE` holding `hello.txt`, an
+/// ext4 that needs recovery and an exFAT the kernel lacks, the other an
+/// ext4 `logs` with no partition table). Run by its VM driver, not in CI.
+#[test]
+#[ignore = "runs as the init of a VM with USB sticks"]
+fn vm_media() {
+    use std::io::Write as _;
+    let media = HostMedia::production();
+    let inventory = media.inner.reconcile().unwrap();
+    println!("VM media: {}", serde_json::to_string(&inventory).unwrap());
+    let summary: Vec<_> = inventory
+        .items
+        .iter()
+        .map(|v| (v.transport, v.filesystem, v.label.as_deref(), v.state, v.reason))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("usb", "vfat", Some("UPDATE"), "mounted_readonly", None),
+            ("usb", "ext4", Some("dirty"), "failed", Some("needs_repair")),
+            ("usb", "exfat", Some("CHARTS"), "unsupported", Some("filesystem_not_in_kernel")),
+            ("usb", "ext4", Some("logs"), "mounted_readonly", None),
+        ]
+    );
+    let update = &inventory.items[0];
+    let place = Path::new(MEDIA_ROOT).join(&update.id);
+    assert_eq!(fs::read_to_string(place.join("hello.txt")).unwrap(), "mica\n");
+    let info = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    let line = info
+        .lines()
+        .find(|l| l.contains(&update.id))
+        .unwrap()
+        .to_string();
+    for option in ["ro", "nosuid", "nodev", "noexec"] {
+        assert!(line.split_whitespace().nth(5).unwrap().split(',').any(|o| o == option), "{line}");
+    }
+    println!("VM media: {line}");
+    let written = fs::File::create(place.join("new.txt"));
+    assert_eq!(
+        written.unwrap_err().raw_os_error(),
+        Some(rustix::io::Errno::ROFS.raw_os_error())
+    );
+    // Busy while a file is open, then unmounted alone.
+    let open = fs::File::open(place.join("hello.txt")).unwrap();
+    assert!(matches!(media.inner.unmount(&update.id).unwrap(), Unmount::Busy { .. }));
+    drop(open);
+    assert!(matches!(media.inner.unmount(&update.id).unwrap(), Unmount::Unmounted { .. }));
+    let again = media.inner.reconcile().unwrap();
+    assert_eq!(again.items[0].state, "unmounted");
+    assert_eq!(again.items[3].state, "mounted_readonly", "the other stick stays");
+    assert!(!fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&update.id));
+    std::io::stdout().flush().unwrap();
+    println!("VM_MEDIA PASS");
 }

@@ -611,6 +611,23 @@ impl SettingsApi for FakeSettings {
         Ok(self.storage_media.lock().unwrap().clone())
     }
 
+    /// Unmounts an item of the stored inventory; `busy` when its label is
+    /// `BUSY`.
+    async fn unmount_media(&self, id: &str) -> anyhow::Result<Value> {
+        let mut media = self.storage_media.lock().unwrap();
+        let Some(item) = media["items"]
+            .as_array_mut()
+            .and_then(|items| items.iter_mut().find(|item| item["id"] == id))
+        else {
+            return Ok(serde_json::json!({ "outcome": "not_found" }));
+        };
+        if item["label"] == "BUSY" {
+            return Ok(serde_json::json!({ "outcome": "busy", "item": item }));
+        }
+        item["state"] = "unmounted".into();
+        Ok(serde_json::json!({ "outcome": "unmounted", "item": item }))
+    }
+
     async fn get_system_info(&self) -> anyhow::Result<Value> {
         self.diagnostic_pause().await;
         Ok(self.system_info.lock().unwrap().clone())

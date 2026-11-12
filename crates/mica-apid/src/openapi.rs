@@ -45,6 +45,7 @@ use utoipa::OpenApi;
         crate::routes::api_v1_time_zones,
         crate::routes::api_v1_storage_status,
         crate::routes::api_v1_storage_media,
+        crate::routes::api_v1_storage_media_unmount,
         crate::routes::api_v1_system_info,
         crate::routes::api_v1_system_integrity,
         crate::routes::api_v1_system_support_info,

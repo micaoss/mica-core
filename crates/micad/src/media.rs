@@ -14,21 +14,32 @@
 //! plugged again, the same stick gets new ids, whatever its filesystem UUID.
 //! A filesystem is recognised from its superblock, read only; its label is
 //! for display and nothing else.
+//!
+//! Each inventory read also reconciles MICA's mounts, under one lifecycle
+//! lock: a supported, clean volume nothing else uses is mounted read-only at
+//! [`MEDIA_ROOT`]`/<id>` (`ro,nosuid,nodev,noexec`, and `noload` for ext, so
+//! no journal is replayed); a volume whose filesystem says it needs repair
+//! is left alone; a volume the user unmounted stays unmounted while it is
+//! plugged in; and the mount of a device that is gone is detached. Nothing
+//! is ever checked or written.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use aws_lc_rs::digest::{SHA256, digest};
 use serde::Serialize;
 
+mod mount;
 mod probe;
 #[cfg(test)]
 mod tests;
 
-pub use probe::probe;
+pub use mount::{HostMounter, Mounter};
+pub use probe::{Probed, probe};
 
 /// Where MICA mounts a media volume, by its id.
 pub const MEDIA_ROOT: &str = "/run/mica/media";
@@ -63,7 +74,10 @@ pub struct Volume {
     pub size_bytes: u64,
     /// Free space, once mounted.
     pub available_bytes: Option<u64>,
-    /// `detected`, `unsupported` or `failed`.
+    /// `mounted_readonly`, `unmounted` (by the user, until it is plugged
+    /// again), `detected` (supported but not mounted: something else uses
+    /// it), `unsupported`, `failed`, or `removed` (unplugged since the last
+    /// read, listed once).
     pub state: &'static str,
     /// Whether something outside MICA's media mounts uses it.
     pub busy: bool,
@@ -72,16 +86,42 @@ pub struct Volume {
     pub reason: Option<&'static str>,
 }
 
-/// Read-only source of the media inventory.
+/// What unmounting one volume came to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum Unmount {
+    /// Unmounted, or not mounted by MICA; it stays unmounted while plugged.
+    Unmounted {
+        /// The volume as it is now.
+        item: Volume,
+    },
+    /// No volume has this id now (unplugged, or an id of another plug).
+    NotFound,
+    /// The kernel refused: something has a file open on it.
+    Busy {
+        /// The volume, still mounted.
+        item: Volume,
+    },
+}
+
+/// The media inventory and MICA's mounts of it.
 #[async_trait::async_trait]
 pub trait MediaSource: Send + Sync {
-    /// The media plugged in now.
+    /// The media plugged in now, MICA's mounts reconciled with it.
     ///
     /// # Errors
     ///
     /// Returns an error when this daemon observes no media, or the host's
     /// tables cannot be read.
     async fn inventory(&self) -> Result<Inventory>;
+
+    /// Unmount the volume `id` MICA mounted, without forcing: this volume
+    /// only, its device and its other volumes untouched.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::inventory`], or an unmount error other than busy.
+    async fn unmount(&self, id: &str) -> Result<Unmount>;
 }
 
 /// The source a daemon without host access has: none.
@@ -92,20 +132,63 @@ impl MediaSource for UnavailableMedia {
     async fn inventory(&self) -> Result<Inventory> {
         Err(anyhow::anyhow!("this daemon observes no media"))
     }
+
+    async fn unmount(&self, _id: &str) -> Result<Unmount> {
+        Err(anyhow::anyhow!("this daemon observes no media"))
+    }
 }
 
 /// The media of the host under `root` (`/` on a device).
 pub struct HostMedia {
+    inner: Arc<Inner>,
+}
+
+struct Inner {
     root: PathBuf,
+    mounter: Box<dyn Mounter>,
+    /// The lifecycle lock, and what it keeps between reads.
+    state: Mutex<State>,
+}
+
+#[derive(Default)]
+struct State {
+    /// Volumes the user unmounted, while plugged in.
+    unmounted: BTreeSet<String>,
+    /// Volumes whose mount failed, and why, while plugged in.
+    failed: BTreeMap<String, &'static str>,
+    /// The volumes of the last read, to list once what has gone since.
+    last: Vec<Volume>,
+}
+
+/// A volume as one scan found it.
+struct Found {
+    volume: Volume,
+    /// Its kernel name.
+    name: String,
+    /// Whether it is mounted at its place under [`MEDIA_ROOT`].
+    mounted: bool,
+}
+
+struct Scan {
+    found: Vec<Found>,
+    /// MICA's media mounts whose volume is gone.
+    stale: Vec<String>,
 }
 
 #[async_trait::async_trait]
 impl MediaSource for HostMedia {
     async fn inventory(&self) -> Result<Inventory> {
-        let root = self.root.clone();
-        tokio::task::spawn_blocking(move || HostMedia { root }.scan())
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || inner.reconcile())
             .await
             .context("media scan")?
+    }
+
+    async fn unmount(&self, id: &str) -> Result<Unmount> {
+        let (inner, id) = (Arc::clone(&self.inner), id.to_string());
+        tokio::task::spawn_blocking(move || inner.unmount(&id))
+            .await
+            .context("media unmount")?
     }
 }
 
@@ -140,15 +223,23 @@ impl HostMedia {
     /// The source `main.rs` attaches on a device.
     #[must_use]
     pub fn production() -> Self {
-        Self::at("/")
+        Self::at("/", Box::new(HostMounter))
     }
 
-    /// A source over the host tree at `root`.
+    /// A source over the host tree at `root`, mounting with `mounter`.
     #[must_use]
-    pub fn at(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    pub fn at(root: impl Into<PathBuf>, mounter: Box<dyn Mounter>) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                root: root.into(),
+                mounter,
+                state: Mutex::new(State::default()),
+            }),
+        }
     }
+}
 
+impl Inner {
     fn path(&self, relative: &str) -> PathBuf {
         self.root.join(relative)
     }
@@ -214,7 +305,12 @@ impl HostMedia {
             .then_some("usb")
     }
 
-    fn scan(&self) -> Result<Inventory> {
+    /// Where MICA mounts the volume `id`.
+    fn place(&self, id: &str) -> PathBuf {
+        self.path(MEDIA_ROOT.trim_start_matches('/')).join(id)
+    }
+
+    fn scan(&self) -> Result<Scan> {
         let boot = self
             .read("proc/sys/kernel/random/boot_id")
             .context("read boot_id")?;
@@ -252,7 +348,7 @@ impl HostMedia {
             })
             .collect();
         disks.sort();
-        let mut items = Vec::new();
+        let mut found = Vec::new();
         for (seq, disk, transport) in disks {
             let seq = seq.to_string();
             let device_id = opaque("mica-media-device", &[&boot, &seq]);
@@ -273,6 +369,7 @@ impl HostMedia {
                 parts.insert(0, disk.clone());
             }
             for (number, name) in parts {
+                let id = opaque("mica-media-volume", &[&boot, &seq, &number.to_string()]);
                 let class = format!("sys/class/block/{name}");
                 let size = self
                     .read(&format!("{class}/size"))
@@ -280,14 +377,29 @@ impl HostMedia {
                     .unwrap_or(0)
                     * 512;
                 let devnum = self.read(&format!("{class}/dev")).unwrap_or_default();
-                let busy = mounts
-                    .iter()
-                    .any(|m| m.device == devnum && !Path::new(&m.point).starts_with(MEDIA_ROOT));
+                let place = Path::new(MEDIA_ROOT).join(&id);
+                let mut mounted = false;
+                let mut busy = false;
+                // A mount at another place under MEDIA_ROOT is MICA's, of a
+                // plug that is gone (a new plug can reuse its device number):
+                // it is detached below, and uses nothing of this one.
+                for mount in mounts.iter().filter(|m| m.device == devnum) {
+                    let point = Path::new(&mount.point);
+                    if point == place {
+                        mounted = true;
+                    } else if point.parent() != Some(Path::new(MEDIA_ROOT)) {
+                        busy = true;
+                    }
+                }
                 let probed = File::open(self.path(&format!("dev/{name}")))
                     .and_then(|file| probe(|offset, buf| file.read_exact_at(buf, offset)));
                 let (filesystem, label, state, reason) = match probed {
                     Err(_) => ("unknown", None, "failed", Some("unreadable")),
-                    Ok((filesystem, label)) => {
+                    Ok(Probed {
+                        filesystem,
+                        label,
+                        dirty,
+                    }) => {
                         let driver = match filesystem {
                             "ext2" | "ext3" | "ext4" => Some("ext4"),
                             "vfat" | "exfat" => Some(filesystem),
@@ -306,30 +418,155 @@ impl HostMedia {
                                 "unsupported",
                                 Some("filesystem_not_in_kernel"),
                             ),
+                            Some(_) if dirty && !mounted => {
+                                (filesystem, label, "failed", Some("needs_repair"))
+                            }
                             Some(_) => (filesystem, label, "detected", None),
                         }
                     }
                 };
-                items.push(Volume {
-                    id: opaque("mica-media-volume", &[&boot, &seq, &number.to_string()]),
-                    device_id: device_id.clone(),
-                    label,
-                    transport,
-                    filesystem,
-                    size_bytes: size,
-                    available_bytes: None,
-                    state,
-                    busy,
-                    reason: if busy && reason.is_none() {
-                        Some("mounted_outside_mica")
-                    } else {
-                        reason
+                found.push(Found {
+                    volume: Volume {
+                        id,
+                        device_id: device_id.clone(),
+                        label,
+                        transport,
+                        filesystem,
+                        size_bytes: size,
+                        available_bytes: None,
+                        state,
+                        busy,
+                        reason: if busy && reason.is_none() {
+                            Some("mounted_outside_mica")
+                        } else {
+                            reason
+                        },
                     },
+                    name,
+                    mounted,
                 });
             }
         }
+        let live: BTreeSet<PathBuf> = found
+            .iter()
+            .map(|f| Path::new(MEDIA_ROOT).join(&f.volume.id))
+            .collect();
+        let stale = mounts
+            .iter()
+            .filter(|m| {
+                let point = Path::new(&m.point);
+                point.parent() == Some(Path::new(MEDIA_ROOT)) && !live.contains(point)
+            })
+            .map(|m| m.point.clone())
+            .collect();
+        Ok(Scan { found, stale })
+    }
+
+    /// Mount `found` read-only at its place.
+    fn mount_one(&self, found: &Found) -> Result<()> {
+        let place = self.place(&found.volume.id);
+        std::fs::create_dir_all(&place).context("make the mount point")?;
+        let mounted = self.mounter.mount(
+            &self.path(&format!("dev/{}", found.name)),
+            &place,
+            found.volume.filesystem,
+        );
+        if mounted.is_err() {
+            let _ = std::fs::remove_dir(&place);
+        }
+        mounted.context("mount")
+    }
+
+    /// The inventory, with MICA's mounts made to match it.
+    fn reconcile(&self) -> Result<Inventory> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let scan = self.scan()?;
+        for point in &scan.stale {
+            let place = self.path(point.trim_start_matches('/'));
+            match self.mounter.unmount(&place, true) {
+                Ok(()) => {
+                    let _ = std::fs::remove_dir(&place);
+                }
+                Err(error) => {
+                    tracing::warn!(point, %error, "media: the mount of a removed volume stays")
+                }
+            }
+        }
+        let mut items = Vec::new();
+        for found in scan.found {
+            let mut volume = found.volume.clone();
+            if found.mounted {
+                volume.state = "mounted_readonly";
+            } else if state.unmounted.contains(&volume.id) {
+                volume.state = "unmounted";
+            } else if let Some(reason) = state.failed.get(&volume.id) {
+                volume.state = "failed";
+                volume.reason = Some(reason);
+            } else if volume.state == "detected" && !volume.busy {
+                match self.mount_one(&found) {
+                    Ok(()) => volume.state = "mounted_readonly",
+                    Err(error) => {
+                        tracing::warn!(id = volume.id, error = %format!("{error:#}"), "media: mount failed");
+                        state.failed.insert(volume.id.clone(), "mount_failed");
+                        volume.state = "failed";
+                        volume.reason = Some("mount_failed");
+                    }
+                }
+            }
+            if volume.state == "mounted_readonly" {
+                volume.available_bytes = self.mounter.available(&self.place(&volume.id));
+            }
+            items.push(volume);
+        }
+        let now: BTreeSet<String> = items.iter().map(|v| v.id.clone()).collect();
+        state.unmounted.retain(|id| now.contains(id));
+        state.failed.retain(|id, _| now.contains(id));
+        let removed: Vec<Volume> = state
+            .last
+            .iter()
+            .filter(|v| !now.contains(&v.id))
+            .map(|v| Volume {
+                available_bytes: None,
+                state: "removed",
+                busy: false,
+                reason: None,
+                ..v.clone()
+            })
+            .collect();
+        state.last = items.clone();
+        items.extend(removed);
         let generation =
             hex::encode(&digest(&SHA256, serde_json::to_string(&items)?.as_bytes()).as_ref()[..8]);
         Ok(Inventory { generation, items })
+    }
+
+    fn unmount(&self, id: &str) -> Result<Unmount> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let scan = self.scan()?;
+        let Some(found) = scan.found.into_iter().find(|f| f.volume.id == id) else {
+            return Ok(Unmount::NotFound);
+        };
+        let mut volume = found.volume;
+        if found.mounted {
+            let place = self.place(id);
+            if let Err(error) = self.mounter.unmount(&place, false) {
+                if error.raw_os_error() == Some(rustix::io::Errno::BUSY.raw_os_error()) {
+                    volume.state = "mounted_readonly";
+                    volume.available_bytes = self.mounter.available(&place);
+                    return Ok(Unmount::Busy { item: volume });
+                }
+                return Err(error).context("unmount");
+            }
+            let _ = std::fs::remove_dir(&place);
+        }
+        state.unmounted.insert(id.to_string());
+        volume.state = "unmounted";
+        Ok(Unmount::Unmounted { item: volume })
     }
 }

@@ -103,6 +103,9 @@ pub trait SettingsApi: Send + Sync {
     /// The external media plugged in now, as micad's inventory
     /// `{generation, items}`. Read-only.
     async fn get_storage_media(&self) -> anyhow::Result<Value>;
+    /// Unmount the media volume `id` MICA mounted: micad's answer
+    /// `{outcome, item}`, `outcome` `unmounted`, `not_found` or `busy`.
+    async fn unmount_media(&self, id: &str) -> anyhow::Result<Value>;
     /// The system-information surface micad assembles: machine id,
     /// board, kernel, release, image version with git stamp and build date,
     /// installed packages, booted slot and uptime. Read-only.

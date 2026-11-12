@@ -29,16 +29,33 @@ fn ascii_label(bytes: &[u8]) -> Option<String> {
     label(&String::from_utf8_lossy(bytes).replace('\0', ""))
 }
 
-/// The filesystem on a volume and its label, through `read(offset, buf)`,
-/// which fills `buf` from `offset`: `vfat`, `exfat`, `ext2`, `ext3`, `ext4`,
-/// `ntfs`, or `unknown`.
+/// What a volume's superblock says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Probed {
+    /// `vfat`, `exfat`, `ext2`, `ext3`, `ext4`, `ntfs`, or `unknown`.
+    pub filesystem: &'static str,
+    /// The label, for display.
+    pub label: Option<String>,
+    /// The filesystem says it needs repair: an ext journal to replay or
+    /// recorded errors, a FAT or exFAT volume left dirty.
+    pub dirty: bool,
+}
+
+fn found(filesystem: &'static str, label: Option<String>, dirty: bool) -> Probed {
+    Probed {
+        filesystem,
+        label,
+        dirty,
+    }
+}
+
+/// What the superblock of a volume says, through `read(offset, buf)`, which
+/// fills `buf` from `offset`.
 ///
 /// # Errors
 ///
 /// Returns the read's error when the volume cannot be read.
-pub fn probe(
-    read: impl Fn(u64, &mut [u8]) -> io::Result<()>,
-) -> io::Result<(&'static str, Option<String>)> {
+pub fn probe(read: impl Fn(u64, &mut [u8]) -> io::Result<()>) -> io::Result<Probed> {
     let mut head = vec![0u8; 4096];
     read(0, &mut head)?;
     let sb = &head[1024..2048];
@@ -53,29 +70,36 @@ pub fn probe(
         } else {
             "ext2"
         };
-        return Ok((kind, ascii_label(&sb[120..136])));
+        // s_state: 1 cleanly unmounted, 2 errors; incompat 0x4: needs recovery.
+        let state = u16_at(sb, 58);
+        let dirty = state & 1 == 0 || state & 2 != 0 || incompat & 0x4 != 0;
+        return Ok(found(kind, ascii_label(&sb[120..136]), dirty));
     }
     if &head[3..11] == b"EXFAT   " {
-        return Ok(("exfat", exfat_label(&head, &read)));
+        // VolumeFlags bit 1: VolumeDirty.
+        let dirty = u16_at(&head, 106) & 0x2 != 0;
+        return Ok(found("exfat", exfat_label(&head, &read), dirty));
     }
     if &head[3..11] == b"NTFS    " {
-        return Ok(("ntfs", None));
+        return Ok(found("ntfs", None, false));
     }
     let sector = u16_at(&head, 11);
     if head[510..512] == [0x55, 0xAA] && matches!(sector, 512 | 1024 | 2048 | 4096) {
+        // The label and the reserved byte whose bit 0 the kernel sets while a
+        // volume is mounted and clears on a clean unmount.
         let at = if &head[82..90] == b"FAT32   " {
-            Some(71)
+            Some((71, 65))
         } else if head[54..58] == *b"FAT1" {
-            Some(43)
+            Some((43, 37))
         } else {
             None
         };
-        if let Some(at) = at {
+        if let Some((at, flags)) = at {
             let name = ascii_label(&head[at..at + 11]).filter(|name| name != "NO NAME");
-            return Ok(("vfat", name));
+            return Ok(found("vfat", name, head[flags] & 1 != 0));
         }
     }
-    Ok(("unknown", None))
+    Ok(found("unknown", None, false))
 }
 
 /// The exFAT volume label: the label entry (type 0x83) in the first cluster

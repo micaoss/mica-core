@@ -281,7 +281,7 @@ directions, because `SettingsChanged` carries setting values.
 | --- | --- |
 | Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
 | Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetStorageMedia`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetLogOfBoot`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
-| Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `FactoryReset` (the administrator password, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
+| Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `UnmountMedia`, `FactoryReset` (the administrator password, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so two claims cannot both land), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
@@ -931,10 +931,21 @@ own and never listed, whatever their labels. micad reads sysfs and mountinfo on 
 hotplug needs no udev or mdev. `id` and `deviceId` are hashes of the boot id and the kernel's
 `diskseq` for the attachment, so a device plugged again gets new ones. The filesystem (`vfat`,
 `exfat`, `ext2`, `ext3`, `ext4`, `ntfs`, `unknown`) and label come from the superblock, read only;
-the label is display text (control characters dropped, at most 64 characters). `state` is
-`detected`, `unsupported` (`filesystem_unsupported`, or `filesystem_not_in_kernel` when
-`/proc/filesystems` lacks its driver) or `failed` (`unreadable`); `busy` is a mount of the volume
-outside `/run/mica/media` (`mounted_outside_mica`). Nothing is mounted, checked or written.
+the label is display text (control characters dropped, at most 64 characters). Each read also
+reconciles micad's mounts under one lock: a supported volume (vfat, exFAT, ext2/3/4 through the
+ext4 driver) that is clean and that nothing else mounts is mounted at `/run/mica/media/<id>` with
+`ro,nosuid,nodev,noexec` (`noload` for ext, so no journal is replayed; `utf8` and root-owned files
+for FAT and exFAT) and reported `mounted_readonly` with `availableBytes`; one whose superblock
+says it needs repair (an ext journal to replay or recorded errors, a FAT or exFAT dirty flag) is
+`failed` (`needs_repair`) and left alone, as is one whose mount fails (`mount_failed`); the
+mount of a volume that is gone is detached. The other states are `unmounted`, `detected` with
+`busy` (a mount outside `/run/mica/media`, `mounted_outside_mica`), `unsupported`
+(`filesystem_unsupported`, or `filesystem_not_in_kernel` when `/proc/filesystems` lacks its
+driver), `failed` (`unreadable`) and `removed` (gone since the last read, listed once).
+`POST /api/v1/storage/media/{id}/unmount` unmounts that volume only, without forcing (409
+`media_busy` while a file is open on it, 404 `media_not_found` for an id no volume has now), and
+it stays unmounted while it is plugged in; it does not make the device safe to unplug. Nothing on
+a medium is checked or written.
 `GET /api/v1/time/zones` lists the zones the device's tzdata offers (`UTC`, then `zone1970.tab`'s
 installed zones, with the tzdata release) and whether the stored `time.timezone` is installed and
 listed; the console's timezone picker searches it by city, region, IANA name or the offset the

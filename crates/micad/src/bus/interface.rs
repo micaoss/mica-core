@@ -334,6 +334,17 @@ impl MicadService {
             .map_err(|err| SettingsFault::Fdo(fdo::Error::Failed(format!("media JSON: {err}"))))
     }
 
+    /// Unmount the media volume `id` MICA mounted, without forcing, and
+    /// keep it unmounted while it is plugged in: JSON `{outcome, item}`,
+    /// `outcome` `unmounted`, `not_found` (no item) or `busy`.
+    pub(super) async fn unmount_media(&self, id: &str) -> Result<String, SettingsFault> {
+        let outcome = self.media.unmount(id).await.map_err(|err| {
+            SettingsFault::Fdo(fdo::Error::Failed(format!("unmount media: {err:#}")))
+        })?;
+        serde_json::to_string(&outcome)
+            .map_err(|err| SettingsFault::Fdo(fdo::Error::Failed(format!("media JSON: {err}"))))
+    }
+
     /// JSON snapshot returned by systemd-networkd's live `Describe` method.
     pub(super) async fn get_network_state(&self) -> Result<String, SettingsFault> {
         self.network_state

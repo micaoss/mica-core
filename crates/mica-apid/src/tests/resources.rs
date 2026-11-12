@@ -332,6 +332,69 @@ pub(super) async fn the_storage_media_route_answers_micads_inventory_read_only()
     }
 }
 
+// Unmounting one volume: 200 with the volume, 409 while busy, 404 for an id
+// no volume has.
+#[tokio::test]
+pub(super) async fn a_media_volume_is_unmounted_by_id() {
+    let (tree, token) = with_token(secret_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+    let item = |id: &str, label: &str| {
+        json!({
+            "id": id, "deviceId": "d1", "label": label, "transport": "usb",
+            "filesystem": "vfat", "sizeBytes": 1, "availableBytes": 1,
+            "state": "mounted_readonly", "busy": false, "reason": null,
+        })
+    };
+    fake.set_storage_media(json!({
+        "generation": "g",
+        "items": [item("a1", "UPDATE"), item("b2", "BUSY")],
+    }));
+
+    let response = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/storage/media/a1/unmount",
+        &token,
+        "{}",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["item"]["state"], "unmounted");
+
+    let response = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/storage/media/b2/unmount",
+        &token,
+        "{}",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(envelope(response).await["code"], "media_busy");
+
+    let response = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/storage/media/zz/unmount",
+        &token,
+        "{}",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(envelope(response).await["code"], "media_not_found");
+
+    let response = send(
+        &router,
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/storage/media/a1/unmount")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
 // The last acceptance bullet, as a gate rather than a promise: normal
 // apid exposes NO generic format or repartition action.
 #[tokio::test]
@@ -365,13 +428,19 @@ pub(super) async fn normal_apid_exposes_no_format_or_repartition_action() {
         "lvm",
         "raid",
         // The status surface describes mounts, so the API must not grow
-        // a verb that moves one: the units own the mounts, not apid.
+        // a verb that moves one: the units own the mounts, not apid. The
+        // one exception is external media, whose read-only mounts under
+        // /run/mica/media micad owns: a volume there may be unmounted.
         "mount",
         "unmount",
     ];
     for path in paths.keys() {
         let lowered = path.to_ascii_lowercase();
+        let media = lowered == "/api/v1/storage/media/{id}/unmount";
         for word in FORBIDDEN {
+            if media && word.contains("mount") {
+                continue;
+            }
             assert!(
                 !lowered.contains(word),
                 "the API declares `{path}`, which names the `{word}` operation this product does not have"
