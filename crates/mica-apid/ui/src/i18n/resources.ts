@@ -1260,7 +1260,7 @@ export const en = {
   },
   system: {
     title: 'System',
-    tabs: { general: 'General', information: 'Information', time: 'Time', update: 'Update & recovery', storage: 'Storage', drivers: 'Drivers', diagnostics: 'Diagnostics', recovery: 'Recovery' },
+    tabs: { general: 'General', information: 'Information', time: 'Time', update: 'Update & recovery', storage: 'Storage', drivers: 'Drivers', diagnostics: 'Diagnostics', help: 'Help', recovery: 'Recovery' },
     information: {
       loading: 'Reading system information…',
       identity: {
@@ -1512,6 +1512,49 @@ export const en = {
       udpOnly: 'This device forwards over UDP only.',
       save: 'Save logging',
       saved: 'Logging settings saved.',
+    },
+    help: {
+      documentation: {
+        title: 'Documentation',
+        none: 'Online documentation is not configured for this version.',
+      },
+      troubleshooting: {
+        title: 'Troubleshooting',
+        description: 'Short guides for common problems. They are part of this console and work without a connection.',
+        stillStuck: 'Still stuck? Copy or download the device information below and send it with your support request. The device never sends it by itself.',
+      },
+      guides: {
+        updateCheck: {
+          title: 'An update check failed',
+          step1: 'Open Update & recovery and read the reason shown with the update status; it names the step that failed.',
+          step2: 'Check that the device reaches the network: the Network page shows its default route and DNS servers.',
+          step3: 'Check the update source under Automatic updates; a source the device cannot reach fails every check.',
+          step4: 'Check for updates again once the cause is fixed.',
+          action: 'Open Update & recovery',
+        },
+        offlineImport: {
+          title: 'An offline import failed',
+          step1: 'The archive must be a signed .micaupd built for this board and product; an archive for another board or product is refused.',
+          step2: 'It is verified exactly as a downloaded update, so a damaged or truncated file fails: copy it again and upload it once more.',
+          step3: 'DATA needs room for the archive while it is verified; the Storage tab shows the free space.',
+          action: 'Open Update & recovery',
+        },
+        clock: {
+          title: 'The clock is not synchronized',
+          step1: 'The Time tab shows the synchronization state and the server in use.',
+          step2: 'The device needs at least one NTP server it can reach over UDP port 123; enter servers your network allows.',
+          step3: 'Until a server answers, the device keeps retrying. Its clock, logs and the API stay in UTC either way.',
+          action: 'Open Time',
+        },
+        wireguard: {
+          title: 'WireGuard has a handshake but no traffic',
+          step1: 'A handshake proves the keys and the endpoint; traffic also needs Allowed IPs that cover the addresses on each side.',
+          step2: "Check the peer's Allowed IPs on this device, and this device's tunnel address in the peer's own configuration.",
+          step3: 'Check that the far side routes and forwards the traffic, and that no firewall drops it.',
+          step4: 'Behind NAT, a keepalive of 25 seconds keeps the path open.',
+          action: 'Open WireGuard',
+        },
+      },
     },
     support: {
       title: 'Support information',

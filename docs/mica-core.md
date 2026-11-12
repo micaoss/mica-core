@@ -924,8 +924,11 @@ items' states, DATA's readiness and space, and the last update failure's code. E
 picked by name from micad's answers, so the machine id, host name, network names and addresses,
 device and claim codes, credentials, logs and settings are not in it; a section whose source
 failed is `{available: false, reason}`, and text values are single lines. It is served as the
-attachment `mica-support-<UTC time>.json`; the console's Information and Diagnostics tabs copy it
-as labelled lines or download it, and the device sends it nowhere.
+attachment `mica-support-<UTC time>.json`; the console's Information, Diagnostics and Help tabs copy it
+as labelled lines or download it, and the device sends it nowhere. System → Help also carries
+local troubleshooting guides (a failed update check, a failed offline import, an
+unsynchronized clock, a WireGuard tunnel with a handshake and no traffic), each linking to where
+the fix is made; it links to no online documentation, since the image names none.
 `PUT /api/v1/settings/{path}` (and `PATCH /api/v1/settings`) writes `logging.persistent` (`true`,
 `false`, or `null` for the product's default), `logging.maxSizeKiB` (a number of KiB or `null`)
 and `logging.remote` (the collector object), each checked as micad checks it before the write.

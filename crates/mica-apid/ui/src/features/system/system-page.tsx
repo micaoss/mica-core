@@ -25,6 +25,7 @@ import { InformationPanel } from '@/features/system/information-panel'
 import { TimePanel } from '@/features/system/time-panel'
 import { StoragePanel } from '@/features/system/storage-panel'
 import { DiagnosticsPanel } from '@/features/system/diagnostics-panel'
+import { HelpPanel } from '@/features/system/help-panel'
 import { LogsPanel } from '@/features/system/logs-panel'
 import { LoggingPanel } from '@/features/system/logging-panel'
 import { RollbackPanel } from '@/features/system/rollback-panel'
@@ -38,7 +39,7 @@ import { updateView } from '@/features/system/update-view'
 // The prototype has six tabs: recovery is folded into update, general and
 // diagnostics. A `#recovery` anchor resolves to update rather than dropping
 // the reader on the first tab.
-const TABS = ['general', 'information', 'time', 'update', 'storage', 'drivers', 'diagnostics'] as const
+const TABS = ['general', 'information', 'time', 'update', 'storage', 'drivers', 'diagnostics', 'help'] as const
 
 export function SystemPage() {
   const { t } = useTranslation()
@@ -84,6 +85,7 @@ export function SystemPage() {
           <LogsPanel />
           <LoggingPanel />
         </TabsContent>
+        <TabsContent value="help" className="grid gap-6 pt-4"><HelpPanel /></TabsContent>
       </Tabs>
     </Page>
   )

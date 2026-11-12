@@ -1046,7 +1046,7 @@ export const zhCN: Translation = {
   },
   system: {
     title: '系统',
-    tabs: { general: '常规', information: '信息', time: '时间', update: '更新与恢复', storage: '存储', drivers: '驱动', diagnostics: '诊断', recovery: '恢复' },
+    tabs: { general: '常规', information: '信息', time: '时间', update: '更新与恢复', storage: '存储', drivers: '驱动', diagnostics: '诊断', help: '帮助', recovery: '恢复' },
     information: {
       loading: '正在读取系统信息…',
       identity: {
@@ -1298,6 +1298,49 @@ export const zhCN: Translation = {
       udpOnly: '本设备只能通过 UDP 转发。',
       save: '保存日志设置',
       saved: '日志设置已保存。',
+    },
+    help: {
+      documentation: {
+        title: '使用文档',
+        none: '此版本暂未配置在线文档。',
+      },
+      troubleshooting: {
+        title: '故障排查',
+        description: '常见问题的简短指南，内置于控制台，离线也可使用。',
+        stillStuck: '仍未解决？复制或下载下方的设备信息，随支持请求一起发送。设备不会自行发送。',
+      },
+      guides: {
+        updateCheck: {
+          title: '更新检查失败',
+          step1: '打开“更新与恢复”，查看更新状态旁显示的原因，它会指出失败的步骤。',
+          step2: '确认设备能连上网络：“网络”页面会显示默认路由和 DNS 服务器。',
+          step3: '在“自动更新”中检查更新源；设备无法访问的更新源会导致每次检查都失败。',
+          step4: '排除原因后重新检查更新。',
+          action: '打开更新与恢复',
+        },
+        offlineImport: {
+          title: '离线导入失败',
+          step1: '归档必须是为本板卡和产品构建的已签名 .micaupd；其他板卡或产品的归档会被拒绝。',
+          step2: '它与下载的更新一样经过完整校验，损坏或不完整的文件会失败：请重新复制后再次上传。',
+          step3: '校验期间 DATA 需要容纳该归档的空间；“存储”标签页会显示可用空间。',
+          action: '打开更新与恢复',
+        },
+        clock: {
+          title: '时钟未同步',
+          step1: '“时间”标签页会显示同步状态和正在使用的服务器。',
+          step2: '设备至少需要一个可通过 UDP 123 端口访问的 NTP 服务器；请填写网络允许的服务器。',
+          step3: '在服务器应答之前，设备会持续重试。无论如何，设备时钟、日志和 API 都保持 UTC。',
+          action: '打开时间',
+        },
+        wireguard: {
+          title: 'WireGuard 已握手但无流量',
+          step1: '握手只证明密钥和端点正确；流量还需要“允许的网段”覆盖两端的地址。',
+          step2: '检查本设备上该对端的“允许的网段”，以及对端配置中本设备的隧道地址。',
+          step3: '确认远端会路由和转发这些流量，且没有防火墙丢弃它们。',
+          step4: '位于 NAT 之后时，25 秒的保活可保持路径畅通。',
+          action: '打开 WireGuard',
+        },
+      },
     },
     support: {
       title: '支持信息',
