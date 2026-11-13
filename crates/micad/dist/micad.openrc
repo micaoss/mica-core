@@ -5,28 +5,30 @@
 
 description="mica management daemon"
 command=/usr/bin/micad
+command_args="daemon"
 supervisor=supervise-daemon
 respawn_delay=2
 output_logger="logger -t micad -p daemon.info"
 error_logger="logger -t micad -p daemon.warn"
 
-# How long micad may take to claim its bus name, systemd's default start timeout.
+# How long micad may take to serve its interface, systemd's default start timeout.
 : "${micad_ready_timeout:=90}"
 
 depend() {
     need mica-dbus mica-mounts
 }
 
-# Started means micad owns com.mica.micad, as Type=dbus means under systemd:
+# Started means micad serves its interface, as READY=1 means under systemd:
 # supervise-daemon reports a service started once the process exists, and
-# micad claims its name only after its startup reconcile, so what needs micad
-# (apid, the health gate) would otherwise ask it too early.
+# micad owns its name from the start but serves /com/mica/micad only after its
+# startup reconcile, so what needs micad (apid, the health gate) would
+# otherwise ask it too early. Before then the call is answered UnknownObject.
 start_post() {
     waited=0
-    while ! dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
-        org.freedesktop.DBus.GetNameOwner string:com.mica.micad >/dev/null 2>&1; do
+    while ! dbus-send --system --print-reply --dest=com.mica.micad /com/mica/micad \
+        org.freedesktop.DBus.Properties.GetAll string:com.mica.micad1 >/dev/null 2>&1; do
         if [ "$waited" -ge "$micad_ready_timeout" ]; then
-            eerror "micad did not claim com.mica.micad within ${micad_ready_timeout}s"
+            eerror "micad did not serve /com/mica/micad within ${micad_ready_timeout}s"
             return 1
         fi
         sleep 1

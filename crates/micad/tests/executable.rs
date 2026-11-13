@@ -1,4 +1,4 @@
-//! `micad` is one executable for two daemons and two commands: `micad` is the
+//! `micad` is one executable for two daemons and two commands: `micad daemon` is the
 //! settings and reconciliation daemon, `mica-apid` (or `micad apid`) the HTTPS
 //! API daemon, `mica-update` (or `micad update`) the operator's update command
 //! and `mica-ctr` (or `micad ctr`) the containers command. `/usr/bin/mica-apid`,
@@ -100,5 +100,21 @@ fn an_unknown_command_starts_nothing() {
         let (success, stdout) = run("micad", &[command]);
         assert!(!success, "{command}");
         assert!(stdout.is_empty(), "{command}: {stdout}");
+    }
+}
+
+/// A bare `micad`, someone looking for a command, prints the usage and exits
+/// 2: only `micad daemon`, as the units run it, starts the daemon.
+#[test]
+fn a_bare_micad_prints_the_usage_and_starts_nothing() {
+    for args in [&[][..], &["daemon", "now"][..]] {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("micad");
+        symlink(env!("CARGO_BIN_EXE_micad"), &link).unwrap();
+        let output = Command::new(&link).args(args).env_clear().output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("usage: micad daemon"), "{args:?}: {stderr}");
     }
 }

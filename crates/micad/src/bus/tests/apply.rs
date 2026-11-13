@@ -300,9 +300,9 @@ pub(super) async fn concurrent_transient_password_writes_stay_serialized_by_the_
     assert!(bcrypt::verify(second_password, &root_hash).expect("verify second hash"));
 }
 
-/// micad claims its bus name while the container reconciler still waits on
+/// micad is served on the bus while the container reconciler still waits on
 /// mica-containerd: the startup apply leaves that reconciler to the deferred
-/// apply, and the deferred apply holds no lock the name claim needs.
+/// apply, and the deferred apply holds no lock serving needs.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn the_bus_name_is_claimed_while_the_container_reconciler_waits() {
     use std::io::BufRead;
@@ -467,7 +467,7 @@ pub(super) async fn a_deferred_apply_is_retried_while_the_daemon_is_not_ready() 
 }
 
 /// On either init, only the reconcilers that render files and make bus calls
-/// run before micad claims its name; every one that starts or restarts a
+/// run before micad is ready; every one that starts or restarts a
 /// service is deferred, and every deferred name is a reconciler's.
 #[test]
 pub(super) fn only_the_reconcilers_that_start_no_service_run_before_the_name() {

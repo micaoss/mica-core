@@ -9,9 +9,12 @@ After=dbus.service mica-accounts.service
 RequiresMountsFor=/var/lib/mica /mica
 
 [Service]
-Type=dbus
+# micad owns its bus name before anything else, and sends READY=1 only once its
+# startup reconcile is done and its interface is served.
+Type=notify
+NotifyAccess=main
 BusName=com.mica.micad
-ExecStart=/usr/bin/micad
+ExecStart=/usr/bin/micad daemon
 Restart=on-failure
 
 # Sandboxing for a root daemon. micad must keep root and broad file access —

@@ -133,6 +133,7 @@ async fn bus_roundtrip() -> anyhow::Result<()> {
     // must never be constructed in tests.
     let _micad_guard = ChildGuard(
         Command::new(env!("CARGO_BIN_EXE_micad"))
+            .arg("daemon")
             .env("DBUS_SESSION_BUS_ADDRESS", &address)
             .env("MICAD_BUS", "session")
             .env("MICAD_DRY_RUN", "1")
@@ -533,4 +534,70 @@ fn recorded_interface(name: &str) -> String {
         .join("tests/introspection")
         .join(format!("{name}.xml"));
     std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
+}
+
+/// A second micad finds `com.mica.micad` owned and exits 1 before it reads or
+/// writes anything: its configuration namespace is absent, which a daemon past
+/// the claim would report as a missing medium, its state directory stays
+/// empty, and the name stays with its owner.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_micad_exits_before_any_side_effect() -> anyhow::Result<()> {
+    let mut bus_child = Command::new(dbus_daemon())
+        .args(["--session", "--print-address=1", "--nofork"])
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let bus_stdout = bus_child.stdout.take().expect("piped stdout");
+    let _bus_guard = ChildGuard(bus_child);
+    let mut address = String::new();
+    BufReader::new(bus_stdout).read_line(&mut address)?;
+    let address = address.trim().to_string();
+
+    // The running micad: a peer that owns the name.
+    let owner = zbus::connection::Builder::address(address.as_str())
+        .build()
+        .await?;
+    owner.request_name("com.mica.micad").await?;
+    let owner_name = owner.unique_name().expect("a bus peer").to_string();
+
+    let dir = tempfile::tempdir()?;
+    let mut second = Command::new(env!("CARGO_BIN_EXE_micad"))
+        .arg("daemon")
+        .env("DBUS_SESSION_BUS_ADDRESS", &address)
+        .env("MICAD_BUS", "session")
+        .env("MICAD_DRY_RUN", "1")
+        .env("MICAD_SETTINGS_PATH", dir.path().join("settings.toml"))
+        .env("MICAD_CONFIG_DIR", dir.path().join("config"))
+        .env("MICAD_SHADOW_PATH", dir.path().join("shadow"))
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let status = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(status) = second.try_wait()? {
+                break anyhow::Ok(status);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await;
+    let status = match status {
+        Ok(status) => status?,
+        Err(_) => {
+            let _ = second.kill();
+            let _ = second.wait();
+            panic!("a second micad kept running");
+        }
+    };
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut second.stderr.take().expect("piped"), &mut stderr)?;
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("micad is already running"), "{stderr}");
+    assert!(!stderr.contains("load settings"), "{stderr}");
+    assert_eq!(std::fs::read_dir(dir.path())?.count(), 0, "it wrote a file");
+
+    let still = zbus::fdo::DBusProxy::new(&owner)
+        .await?
+        .get_name_owner("com.mica.micad".try_into()?)
+        .await?;
+    assert_eq!(still.as_str(), owner_name);
+    Ok(())
 }

@@ -340,7 +340,7 @@ impl MicadService {
 /// on that service: the container reconciler waits for mica-containerd, and on
 /// OpenRC `rc-service start` waits for the service and what it needs -- apid
 /// and the MQTT units need micad itself, mica-ntpd needs the network. Their
-/// startup apply runs after micad claims its bus name, so micad's readiness
+/// startup apply runs after micad serves its interface and reports ready, so micad's readiness
 /// waits on none of them; the ones that run before it only render files and
 /// bus calls. The mDNS and SSDP responders open their sockets there too, once
 /// the links are configured.

@@ -144,6 +144,7 @@ pub(super) async fn a_poured_document_is_adopted_and_its_secret_reaches_no_serve
     std::fs::write(&shadow_path, "root:*:20000:0:99999:7:::\n")?;
     let _micad_guard = ChildGuard(
         Command::new(find_micad()?)
+            .arg("daemon")
             .env("DBUS_SESSION_BUS_ADDRESS", &address)
             .env("MICAD_BUS", "session")
             .env("MICAD_DRY_RUN", "1")

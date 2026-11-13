@@ -6,8 +6,13 @@
 //!
 //! `--version` (or `-V`) is answered before any of the above is read: it prints
 //! `micad <package version>` and exits 0 without provisioning,
-//! connecting to a bus or writing a file (see [`main`]). Anything else on the
-//! command line is ignored.
+//! connecting to a bus or writing a file (see [`main`]).
+//!
+//! The daemon claims its bus name before it reads or writes anything, without
+//! queueing and without allowing replacement: a second micad finds the name
+//! owned, says `micad is already running` and exits 1 having touched nothing.
+//! It serves its interface and reports ready (systemd's `READY=1`) only after
+//! its startup reconcile.
 
 #![forbid(unsafe_code)]
 
@@ -40,6 +45,7 @@ mod openrc;
 mod power;
 mod provisioning;
 mod provisioning_doc;
+mod ready;
 mod reconciler;
 mod recovery;
 mod reset;
@@ -70,7 +76,7 @@ use micad_settings::Store;
 use serde_json::Value;
 use tokio::signal::unix::{SignalKind, signal};
 
-/// The daemon entry point: the `micad` binary runs it when invoked as `micad`.
+/// The daemon entry point: the `micad` binary runs it as `micad daemon`.
 pub fn main() -> anyhow::Result<()> {
     // `--version` is answered and returned from here, above every line that
     // makes this process a daemon -- before the tokio runtime, the subscriber,
@@ -110,6 +116,10 @@ async fn serve() -> anyhow::Result<()> {
         .unwrap_or_else(|_| micad_settings::DEFAULT_CONFIG_DIR.to_string());
     let bus_kind = std::env::var("MICAD_BUS").unwrap_or_else(|_| "system".to_string());
     let dry_run = std::env::var("MICAD_DRY_RUN").is_ok_and(|value| value == "1");
+    // FIRST, before the settings are read and before anything is written: a
+    // second micad must find the name owned and stop here, not reset, seed or
+    // reconcile under the running one.
+    let connection = claim_bus_name(&bus_kind).await?;
 
     let store = Store::new(&settings_path, &config_dir);
     // **Fail closed on the medium**. System configuration
@@ -481,19 +491,14 @@ async fn serve() -> anyhow::Result<()> {
     // not be applied from its schema default even once, so the refusals have
     // to be in place before `apply_startup` visits the reconcilers they gate.
     service.set_config_refusals(refusals).await;
-    // Every reconciler but those waiting on another daemon: those run once the
-    // name is claimed, so bus readiness never waits on them.
+    // Every reconciler but those waiting on another daemon: those run once
+    // micad is ready, so its readiness never waits on them.
     let deferred = service.apply_startup().await;
-    let builder = match bus_kind.as_str() {
-        "system" => zbus::connection::Builder::system(),
-        "session" => zbus::connection::Builder::session(),
-        other => anyhow::bail!("MICAD_BUS must be `system` or `session`, got `{other}`"),
-    };
-    let connection = builder
-        .serve_at(bus::OBJECT_PATH, service)
-        .build()
+    connection
+        .object_server()
+        .at(bus::OBJECT_PATH, service)
         .await
-        .with_context(|| format!("connect to {bus_kind} bus"))?;
+        .context("serve the micad interface")?;
     // The pairing agent, on the same connection. Served before it is
     // registered, so BlueZ never calls an object that is not there yet, and
     // registered whenever `org.bluez` is there to register with: a board with
@@ -532,11 +537,10 @@ async fn serve() -> anyhow::Result<()> {
             tracing::warn!(error = %err, "BLE provisioning could not start");
         }
     }
-    // The service scan, started before the well-known name is claimed so that
-    // its NameOwnerChanged subscription is in place before anything can react
-    // to micad appearing — a service that claims its name in that window is
-    // seen by the signal rather than missed between the sweep and the
-    // subscription.
+    // The service scan, started before micad reports ready so that its
+    // NameOwnerChanged subscription is in place before anything ordered after
+    // micad starts — a service that claims its name in that window is seen by
+    // the signal rather than missed between the sweep and the subscription.
     if let Some(registry) = registry {
         let service_ref = connection
             .object_server()
@@ -562,10 +566,7 @@ async fn serve() -> anyhow::Result<()> {
             service_ref,
         ))));
     }
-    connection
-        .request_name(bus::BUS_NAME)
-        .await
-        .with_context(|| format!("request name {}", bus::BUS_NAME))?;
+    ready::notify();
     tracing::info!(bus = bus_kind, name = bus::BUS_NAME, "serving");
     tokio::spawn(deferred.run());
     // The mDNS upkeep and the login prompt's issue. Never under dry-run.
@@ -588,6 +589,36 @@ async fn serve() -> anyhow::Result<()> {
         _ = tokio::signal::ctrl_c() => tracing::info!("SIGINT received, exiting"),
     }
     Ok(())
+}
+
+/// Connect to the bus and own `com.mica.micad`, or fail.
+///
+/// No queueing and no replacement either way: a second micad is refused
+/// rather than queued behind the first or handed its name. The object server
+/// is started before the name is owned, so a call that arrives before the
+/// interface is served is answered `UnknownObject` rather than left unanswered.
+async fn claim_bus_name(bus_kind: &str) -> anyhow::Result<zbus::Connection> {
+    let builder = match bus_kind {
+        "system" => zbus::connection::Builder::system(),
+        "session" => zbus::connection::Builder::session(),
+        other => anyhow::bail!("MICAD_BUS must be `system` or `session`, got `{other}`"),
+    };
+    let connection = builder
+        .build()
+        .await
+        .with_context(|| format!("connect to {bus_kind} bus"))?;
+    connection.object_server();
+    match connection
+        .request_name_with_flags(bus::BUS_NAME, zbus::fdo::RequestNameFlags::DO_NOT_QUEUE)
+        .await
+    {
+        Ok(_) => Ok(connection),
+        Err(zbus::Error::NameTaken) => anyhow::bail!(
+            "micad is already running: {} is owned on the {bus_kind} bus",
+            bus::BUS_NAME
+        ),
+        Err(err) => Err(err).with_context(|| format!("request name {}", bus::BUS_NAME)),
+    }
 }
 
 /// Directory holding STATE-backed data for a settings file at `settings_path`.

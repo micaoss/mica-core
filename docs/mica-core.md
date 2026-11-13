@@ -49,8 +49,9 @@ finds). apid and the MQTT daemons of mica-pkgs are enabled on neither init; mica
 after writing their configuration, apid unless `access.web.mode` is `off`.
 
 On OpenRC the scripts run under `supervise-daemon` with their output in syslog, and
-`/etc/init.d/micad` reports micad started only once it owns `com.mica.micad` on the system bus
-(waiting up to `micad_ready_timeout`, 90 s), which is what `Type=dbus` does under systemd, and
+`/etc/init.d/micad` reports micad started only once it serves `/com/mica/micad` on the system
+bus (waiting up to `micad_ready_timeout`, 90 s), which is what its `READY=1` does under systemd
+(`Type=notify`), and
 `/etc/init.d/apid` only once `mica-apid --healthcheck` answers (up to `apid_ready_timeout`, 90 s),
 so an apid reported started already answers, its first TLS identity made.
 
@@ -69,13 +70,16 @@ the table there lists the services still to follow (sections 3.4 and 3.8 say wha
 
 ### 3.1 Startup
 
-In order: `--version` is answered before anything is read; the settings are loaded, and micad
+The daemon is `micad daemon`, as both units run it; a bare `micad` prints the usage and exits 2.
+In order: `--version` is answered before anything is read; micad connects to the bus and owns
+`com.mica.micad` without queueing or allowing replacement, so a second micad says `micad is
+already running` and exits 1 having read and written nothing; the settings are loaded, and micad
 refuses to start when the DATA medium holding `/mica/config` is not there (a device that cannot
 read its configuration must not render another); a staged reset and a boot recovery intent are
 applied; a staged provisioning document is imported; first-boot provisioning mints identity and
 credentials; the product file is read; the reconcilers are built; the reconcilers that only
-render files and make bus calls (hostname, network, web) are applied once; the bus name is
-claimed; then the ones that start or restart another service (sshd, wifiClient, wifiAp,
+render files and make bus calls (hostname, network, web) are applied once; the interface is
+served and micad reports ready; then the ones that start or restart another service (sshd, wifiClient, wifiAp,
 container, mqtt, time, bluetooth) and the mDNS and SSDP responders are applied, again every 10 s
 while one fails, for up to five minutes. micad's readiness thus waits on no other service: the
 container reconciler waits for mica-containerd, and on OpenRC `rc-service start` waits for the
@@ -648,7 +652,7 @@ a service is refused when its `kind` is not the product's init, when the root sh
 one of its `Alias=` names (`/etc/systemd/system`, `/usr/lib/systemd/system`,
 `/lib/systemd/system`; `/etc/init.d`), or when the root has no `/usr/sbin/mica-unit`.
 
-**The reconciler** (after micad claims its bus name, as every reconciler that starts a service):
+**The reconciler** (after micad is ready, as every reconciler that starts a service):
 
 - A service whose text differs from the installed file is installed (`mica-unit install`, and
   `install --conf` for a changed conf), from a fresh `0700` directory under `/run/mica`.

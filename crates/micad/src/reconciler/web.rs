@@ -3,7 +3,7 @@
 //! Renders `access.web` into the file apid reads at start, then keeps apid
 //! running for `network` and `local` and stopped for `off`; a running apid is
 //! restarted when the file changed. Nothing enables apid at boot: this
-//! reconciler starts it, after micad claims its bus name.
+//! reconciler starts it, after micad is ready.
 
 use std::path::PathBuf;
 

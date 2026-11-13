@@ -213,6 +213,7 @@ impl Harness {
         // DBUS_SESSION_BUS_ADDRESS, so it reaches nothing on the host.
         let mut command = Command::new(env!("CARGO_BIN_EXE_micad"));
         command
+            .arg("daemon")
             .env("DBUS_SESSION_BUS_ADDRESS", &address)
             .env("MICAD_BUS", "session")
             .env("MICAD_DRY_RUN", "1")
