@@ -4,10 +4,11 @@
 //! A WireGuard private key is machine-only. Nothing outside this module ever
 //! holds one: it is drawn from the system CSPRNG on the first reconcile of a
 //! `kind = "wireguard"` entry that has no key yet, written to a file only
-//! systemd-networkd can read, and read back only here, only to derive the
-//! public half. There is no accessor for it, so no bus method, no route and no
-//! live-state field can grow one by accident, and the settings tree carries no
-//! field it could be written into either.
+//! systemd-networkd can read, and read back only here: to derive the public
+//! half, and on a root without networkd to hand it to one closure that passes
+//! it to the kernel ([`Keystore::with_private_key`]). Nothing returns it, so
+//! no bus method, no route and no live-state field can grow one by accident,
+//! and the settings tree carries no field it could be written into either.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, DirBuilder, Permissions};
@@ -191,6 +192,25 @@ impl Keystore {
             Some(secret) => public_key(&secret),
             None => self.write_new_key(iface),
         }
+    }
+
+    /// Run `use_key` on `iface`'s private key, drawn first if it has none,
+    /// and return what it returns: the key goes to the closure and out of
+    /// this module no other way.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the key cannot be read or written.
+    pub fn with_private_key<T>(
+        &self,
+        iface: &str,
+        use_key: impl FnOnce(&[u8; KEY_LEN]) -> T,
+    ) -> Result<T> {
+        self.ensure(iface)?;
+        let secret = self
+            .read_key(iface)?
+            .ok_or_else(|| anyhow!("{} has no key", self.key_path(iface).display()))?;
+        Ok(use_key(&secret))
     }
 
     /// Draw a new private key for `iface`, replacing any existing one, and

@@ -1,6 +1,6 @@
 # OpenRC WireGuard: micad runs the tunnels over netlink
 
-Status: approved plan (repair-20261110). It was approved by the user on 2026-11-11 as written, and nothing here is implemented yet. It comes after WG-01 round 2 in the approved order.
+Status: approved plan (repair-20261110), approved by the user on 2026-11-11. Round 1 is implemented: the netlink messages (`crates/micad/src/netlink/tunnel.rs`) and the reconciler (`crates/micad/src/reconciler/network/ifupdown/tunnels.rs`). Rounds 2 and 3 are not.
 
 **Decision:**
 
@@ -21,6 +21,7 @@ Status: approved plan (repair-20261110). It was approved by the user on 2026-11-
   - link up.
 - A peer change is applied in place, per peer: add, update, or remove with `WGPEER_F_REMOVE_ME`. The device is not rebuilt, so the other peers keep their handshakes.
 - An entry that is removed or disabled deletes the link.
+- Every link micad creates carries the alias `mica`. Only those are deleted: a container on the host network may run a WireGuard link of its own, and a name such a link already holds is refused.
 
 ## 2. Route ownership
 

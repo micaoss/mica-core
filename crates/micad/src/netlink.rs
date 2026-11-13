@@ -7,7 +7,9 @@
 //! configures them, and the route the kernel picks for one destination
 //! (rtnetlink; `ip route get` needs iproute2).
 //!
-//! Both are one request and the replies to it, on a socket that lives for
+//! The writes that run a WireGuard tunnel without networkd are in [`tunnel`].
+//!
+//! Each is one request and the replies to it, on a socket that lives for
 //! that exchange. The parsers take the reply bytes, so they are tested
 //! without a kernel.
 
@@ -593,17 +595,7 @@ pub fn wireguard_peers(body: &[u8]) -> Vec<WireguardPeerObservation> {
 
 /// A WireGuard device's peers, asked of the kernel by interface name.
 pub fn wireguard_device(interface: &str) -> io::Result<Vec<WireguardPeerObservation>> {
-    let mut body = vec![CTRL_CMD_GETFAMILY, 1, 0, 0];
-    body.extend(attribute(
-        CTRL_ATTR_FAMILY_NAME,
-        &name_payload(WG_GENL_NAME),
-    ));
-    let family = exchange(Some(netlink::GENERIC), &message(GENL_ID_CTRL, 0, &body))?
-        .iter()
-        .find_map(|(_, body)| family_id(body))
-        .ok_or_else(|| {
-            io::Error::other("the wireguard generic netlink family is not registered")
-        })?;
+    let family = wireguard_family()?;
     let mut body = vec![WG_CMD_GET_DEVICE, WG_GENL_VERSION, 0, 0];
     body.extend(attribute(WGDEVICE_A_IFNAME, &name_payload(interface)));
     let mut peers: Vec<WireguardPeerObservation> = Vec::new();
@@ -611,6 +603,19 @@ pub fn wireguard_device(interface: &str) -> io::Result<Vec<WireguardPeerObservat
         merge_peers(&mut peers, wireguard_peers(&body));
     }
     Ok(peers)
+}
+
+/// The generic netlink family id WireGuard registered.
+fn wireguard_family() -> io::Result<u16> {
+    let mut body = vec![CTRL_CMD_GETFAMILY, 1, 0, 0];
+    body.extend(attribute(
+        CTRL_ATTR_FAMILY_NAME,
+        &name_payload(WG_GENL_NAME),
+    ));
+    exchange(Some(netlink::GENERIC), &message(GENL_ID_CTRL, 0, &body))?
+        .iter()
+        .find_map(|(_, body)| family_id(body))
+        .ok_or_else(|| io::Error::other("the wireguard generic netlink family is not registered"))
 }
 
 /// Add one reply's peers to those of the replies before it. A peer whose
@@ -627,6 +632,8 @@ fn merge_peers(peers: &mut Vec<WireguardPeerObservation>, more: Vec<WireguardPee
         }
     }
 }
+
+pub mod tunnel;
 
 #[cfg(test)]
 mod tests;

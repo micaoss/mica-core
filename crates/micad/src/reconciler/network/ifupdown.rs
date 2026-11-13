@@ -12,7 +12,9 @@
 //! Wired DHCP and static addresses with their static routes, and CAN
 //! controllers set with iproute2's `ip` from their stanza: VLANs, bridges and
 //! WireGuard are networkd's, and an OpenRC device refuses them by name rather
-//! than half-configuring them.
+//! than half-configuring them. The WireGuard tunnels micad runs itself over
+//! netlink ([`Tunnels`]) are applied on every pass all the same; with no entry
+//! to run, that deletes only a tunnel link micad created.
 //!
 //! A static route on a static or manual stanza is an `up ip route add` line
 //! and the matching `down ip route del`. On a DHCP stanza the link is up
@@ -34,6 +36,9 @@ use super::{
 };
 use crate::openrc::{Commands, Host};
 use crate::reconciler::Reconciler;
+
+mod tunnels;
+pub use tunnels::Tunnels;
 
 /// Where micad writes the file `/etc/network/interfaces` links to.
 const INTERFACES_PATH: &str = "/var/lib/mica/network/interfaces";
@@ -59,6 +64,9 @@ pub struct IfupdownReconciler {
     /// The board's declared ports: an internal one's absent `internet` is
     /// `false`, and a hidden one gets no stanza unless declared.
     board: Arc<crate::board::Board>,
+    /// The WireGuard tunnels, which micad runs over netlink; `None` leaves
+    /// the kernel's alone.
+    tunnels: Option<Tunnels>,
 }
 
 impl IfupdownReconciler {
@@ -69,6 +77,7 @@ impl IfupdownReconciler {
             commands,
             ip: None,
             board: Arc::default(),
+            tunnels: None,
         }
     }
 
@@ -85,6 +94,13 @@ impl IfupdownReconciler {
         self
     }
 
+    /// Run the WireGuard tunnels through `tunnels`.
+    #[must_use]
+    pub fn with_tunnels(mut self, tunnels: Tunnels) -> Self {
+        self.tunnels = Some(tunnels);
+        self
+    }
+
     pub fn production() -> Self {
         Self::new(
             PathBuf::from(INTERFACES_PATH),
@@ -93,6 +109,10 @@ impl IfupdownReconciler {
         )
         .with_ip(iproute2_ip(&IP_PATHS.map(Path::new)))
         .with_board(Arc::new(crate::board::host().clone()))
+        .with_tunnels(Tunnels::new(
+            Arc::new(crate::netlink::tunnel::Kernel),
+            super::production_keystore(),
+        ))
     }
 
     /// Wired interfaces (`eth*`) the kernel has, less the ones the board
@@ -400,18 +420,20 @@ impl Reconciler for IfupdownReconciler {
                 .success("ifup -a")?;
         }
         let file = self.path.display().to_string();
-        Ok(serde_json::Value::Object(
-            settings
-                .network
-                .iter()
-                .map(|(iface, cfg)| {
-                    (
-                        iface.clone(),
-                        json!({ "file": file, "dhcp": cfg.dhcp, "kind": kind_name(cfg.kind) }),
-                    )
-                })
-                .collect(),
-        ))
+        let mut state: serde_json::Map<String, serde_json::Value> = settings
+            .network
+            .iter()
+            .map(|(iface, cfg)| {
+                (
+                    iface.clone(),
+                    json!({ "file": file, "dhcp": cfg.dhcp, "kind": kind_name(cfg.kind) }),
+                )
+            })
+            .collect();
+        if let Some(tunnels) = &self.tunnels {
+            state.extend(tunnels.apply(&settings.network)?);
+        }
+        Ok(serde_json::Value::Object(state))
     }
 }
 
