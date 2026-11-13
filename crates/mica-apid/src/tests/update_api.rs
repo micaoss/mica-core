@@ -705,3 +705,204 @@ async fn an_upload_directory_that_cannot_be_made_is_unavailable_storage() {
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert!(fake.update_calls().is_empty());
 }
+
+// --- Import from external media ----------------------------------------------
+
+const MEDIA_PATH: &str = "/api/v1/update/media";
+const MEDIA_IMPORT_PATH: &str = "/api/v1/update/media/import";
+const VOLUME: &str = "0123456789abcdef0123";
+
+struct MediaFixture {
+    router: axum::Router,
+    fake: Arc<FakeSettings>,
+    token: String,
+    media: TempDir,
+    uploads: TempDir,
+}
+
+fn media_app(files: &[(&str, &[u8])]) -> MediaFixture {
+    let media = TempDir::new().unwrap();
+    let uploads = TempDir::new().unwrap();
+    for (name, bytes) in files {
+        let path = media.path().join(VOLUME).join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    let (tree, token) = with_token(configured_tree("hunter2secret"));
+    let fake = Arc::new(FakeSettings::new(tree));
+    let router = app(AppState::new(fake.clone(), SIGNING_KEY)
+        .with_update_uploads(uploads.path())
+        .with_media_root(media.path()));
+    MediaFixture {
+        router,
+        fake,
+        token,
+        media,
+        uploads,
+    }
+}
+
+async fn listed(fixture: &MediaFixture) -> serde_json::Value {
+    let response = bearer(&fixture.router, "GET", MEDIA_PATH, &fixture.token).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    serde_json::from_str(&body_string(response).await).unwrap()
+}
+
+async fn import_media(fixture: &MediaFixture, candidate: &str) -> axum::response::Response {
+    bearer_json(
+        &fixture.router,
+        "POST",
+        MEDIA_IMPORT_PATH,
+        &fixture.token,
+        &json!({ "mediaId": VOLUME, "candidateId": candidate }).to_string(),
+    )
+    .await
+}
+
+fn left_in(dir: &TempDir) -> usize {
+    std::fs::read_dir(dir.path())
+        .map(Iterator::count)
+        .unwrap_or(0)
+}
+
+/// The listing names and sizes the archives and the import copies the one
+/// asked for into the upload directory and names it to micad, as an upload.
+#[tokio::test]
+async fn an_archive_on_media_is_listed_copied_and_handed_to_micad() {
+    let fixture = media_app(&[
+        ("mica-updates/v2.micaupd", b"MICAUPD1the second archive"),
+        ("v1.micaupd", b"MICAUPD1the first"),
+    ]);
+
+    let anonymous = get(&fixture.router, MEDIA_PATH, None).await;
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+    let listed = listed(&fixture).await;
+    let items = listed["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[1]["name"], "mica-updates/v2.micaupd");
+    assert_eq!(items[1]["sizeBytes"], 26);
+    assert_eq!(items[1]["mediaId"], VOLUME);
+    assert_eq!(items[1]["importable"], true);
+    assert!(
+        fixture.fake.update_calls().is_empty(),
+        "listing reached micad"
+    );
+
+    let response = import_media(&fixture, items[1]["id"].as_str().unwrap()).await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let call = fixture
+        .fake
+        .update_calls()
+        .into_iter()
+        .find(|call| call.starts_with("import "))
+        .expect("micad was asked to import");
+    let path = std::path::PathBuf::from(call.trim_start_matches("import "));
+    assert_eq!(path.parent(), Some(fixture.uploads.path()));
+    assert_eq!(std::fs::read(&path).unwrap(), b"MICAUPD1the second archive");
+    // The medium is read, never written.
+    assert_eq!(
+        std::fs::read(
+            fixture
+                .media
+                .path()
+                .join(VOLUME)
+                .join("mica-updates/v2.micaupd")
+        )
+        .unwrap(),
+        b"MICAUPD1the second archive"
+    );
+}
+
+/// A file changed after the listing, an id never listed, a volume gone and a
+/// file that is not an archive are each refused by name, and nothing is left
+/// in the upload directory nor asked of micad.
+#[tokio::test]
+async fn a_media_import_that_cannot_be_the_listed_archive_is_refused() {
+    let fixture = media_app(&[
+        ("a.micaupd", b"MICAUPD1archive"),
+        ("b.micaupd", b"not an archive"),
+    ]);
+    let listed = listed(&fixture).await;
+    let a = listed["items"][0]["id"].as_str().unwrap().to_string();
+    let b = listed["items"][1]["id"].as_str().unwrap().to_string();
+
+    let response = import_media(&fixture, &b).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(body_string(response).await.contains("archive_invalid"));
+
+    std::fs::write(
+        fixture.media.path().join(VOLUME).join("a.micaupd"),
+        b"MICAUPD1grown archive",
+    )
+    .unwrap();
+    let response = import_media(&fixture, &a).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(
+        body_string(response)
+            .await
+            .contains("media_candidate_changed")
+    );
+
+    let response = import_media(&fixture, "00000000000000000000").await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    std::fs::remove_dir_all(fixture.media.path().join(VOLUME)).unwrap();
+    let response = import_media(&fixture, &a).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(body_string(response).await.contains("media_removed"));
+    let response = bearer(
+        &fixture.router,
+        "GET",
+        &format!("{MEDIA_PATH}?mediaId={VOLUME}"),
+        &fixture.token,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    assert_eq!(left_in(&fixture.uploads), 0, "a refused import left a copy");
+    assert!(
+        !fixture
+            .fake
+            .update_calls()
+            .iter()
+            .any(|call| call.starts_with("import ")),
+        "micad was asked to import a refused archive"
+    );
+}
+
+/// micad's refusal of a media import removes the copy, as for an upload.
+#[tokio::test]
+async fn a_media_import_micad_refuses_leaves_no_copy() {
+    let fixture = media_app(&[("a.micaupd", b"MICAUPD1archive")]);
+    fixture
+        .fake
+        .refuse_updates(ACCESS_DENIED, "an update operation is already running");
+    let listed = listed(&fixture).await;
+
+    let response = import_media(&fixture, listed["items"][0]["id"].as_str().unwrap()).await;
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(left_in(&fixture.uploads), 0);
+}
+
+#[tokio::test]
+async fn a_media_id_that_is_not_one_is_refused() {
+    let fixture = media_app(&[]);
+    let response = bearer(
+        &fixture.router,
+        "GET",
+        &format!("{MEDIA_PATH}?mediaId=..%2F..%2Fetc"),
+        &fixture.token,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response = bearer_json(
+        &fixture.router,
+        "POST",
+        MEDIA_IMPORT_PATH,
+        &fixture.token,
+        &json!({ "mediaId": "../../etc", "candidateId": "x" }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

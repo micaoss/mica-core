@@ -175,6 +175,8 @@ describe('the offline import', () => {
   it('uploads the chosen archive as the body of one request', async () => {
     const fetch = stubFetch({
       '/api/v1/update': { lifecycle: { state: 'idle' } },
+      '/api/v1/update/media': { items: [], truncated: [], unreadable: [] },
+      '/api/v1/storage/media': { generation: '0', items: [] },
       'POST /api/v1/update/import': () => jsonResponse({}, 202),
     })
     renderPanel(<ManualUpdate />)

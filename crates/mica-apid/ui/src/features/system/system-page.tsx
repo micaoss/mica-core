@@ -35,6 +35,7 @@ import { FactoryResetPanel } from '@/features/recovery/factory-reset-panel'
 import { ResetPanel } from '@/features/recovery/reset-panel'
 import { DriversPanel } from '@/features/system/drivers-panel'
 import { updateView } from '@/features/system/update-view'
+import { MediaImport } from '@/features/system/media-import'
 
 // The prototype has six tabs: recovery is folded into update, general and
 // diagnostics. A `#recovery` anchor resolves to update rather than dropping
@@ -373,6 +374,7 @@ export function ManualUpdate() {
           onSubmit={(file) => upload.mutate(file)}
         />
       </div>
+      <MediaImport />
     </Panel>
   )
 }

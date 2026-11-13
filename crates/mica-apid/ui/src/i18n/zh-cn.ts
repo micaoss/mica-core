@@ -1682,6 +1682,18 @@ export const zhCN: Translation = {
       manualFormats: '输入签名 .micaupd 系统包导入成功后返回的部署 ID。',
       import: '上传并导入', importing: '上传中…', chooseArchive: '选择文件', noArchive: '未选择文件', importCopy: '从浏览器上传已签名的 .micaupd 包。设备对它的校验与在线下载完全一致，并且不受更新策略限制。',
       importAccepted: '包已上传，设备正在校验。', archive: '镜像包', archiveHint: '为本板型和产品构建的 .micaupd 组件包。',
+      media: {
+        title: '从外接存储导入',
+        description: 'U 盘或 SD 卡根目录或 mica-updates 文件夹中已签名的 .micaupd 包。导入会把包复制到设备，并与上传的包做完全相同的校验；导入不会安装。',
+        noLabel: '无卷标',
+        import: '导入',
+        importing: '复制中…',
+        accepted: '包已复制，设备正在校验。',
+        tooLarge: '超过本设备接受的大小',
+        none: '已插入的 U 盘或 SD 卡上没有更新包。',
+        truncated: '每个卷只列出前 100 个包。',
+        unreadable: '有一个卷无法读取。',
+      },
 
       checks: {
         safeToReboot: '可安全重启', blocked: '被阻止', client: '更新客户端', clientOk: '可达', policy: '策略',

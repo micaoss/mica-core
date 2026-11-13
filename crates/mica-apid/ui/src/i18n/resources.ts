@@ -1974,6 +1974,18 @@ export const en = {
       importAccepted: 'The archive was uploaded; the device is verifying it.',
       archive: 'Archive',
       archiveHint: 'A .micaupd component archive built for this board and product.',
+      media: {
+        title: 'Import from external storage',
+        description: 'Signed .micaupd archives at the top of a USB stick or SD card, or in its mica-updates folder. Importing copies the archive to the device and verifies it exactly as an upload; it installs nothing.',
+        noLabel: 'No label',
+        import: 'Import',
+        importing: 'Copying…',
+        accepted: 'The archive was copied; the device is verifying it.',
+        tooLarge: 'larger than this device accepts',
+        none: 'No update archive is on the USB sticks or SD cards plugged in.',
+        truncated: 'Only the first 100 archives of a volume are listed.',
+        unreadable: 'A volume could not be read.',
+      },
 
       checks: {
         safeToReboot: 'Safe to reboot',

@@ -148,6 +148,8 @@ use utoipa::OpenApi;
         crate::update_api::api_v1_update_state,
         crate::update_api::api_v1_update_check,
         crate::update_api::api_v1_update_import,
+        crate::update_api::api_v1_update_media,
+        crate::update_api::api_v1_update_media_import,
         crate::update_api::api_v1_update_fetch,
         crate::update_api::api_v1_update_install,
         crate::update_api::api_v1_update_install_latest,

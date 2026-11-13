@@ -917,7 +917,7 @@ information, the integrity card at `/system/integrity` (checks derived from the 
 update state and the storage status, read again on each request and never verified again), telemetry, service logs at `/system/logs/{source}` (`?boot=previous` for the boot
 before this one), network status, health, meta);
 actions (reboot, power off, transient root password, WireGuard key rotation); updates (check,
-fetch, import of an uploaded `.micaupd`, install, install of the newest release, confirm, reject, rollback (refused when the target is no longer the
+fetch, import of an uploaded `.micaupd` or of one on external media, install, install of the newest release, confirm, reject, rollback (refused when the target is no longer the
 `expectedTarget` the caller confirmed; micad records the target in `/var/lib/mica/update/rollback.json`
 with the boot it was staged in, and the first update-state read of the next boot reports in
 `lastRollback`, for that boot only, whether the booted deployment is the target), reboot override,
@@ -955,6 +955,21 @@ every volume `ejected` until the device is unplugged (404 `media_device_not_foun
 no device has now). The device is not powered off. Nothing on a medium is checked or written.
 The console's storage page lists the media by device, reading the list every 5 s while it is open,
 with an unmount action per mounted volume and an eject action per device.
+`GET /api/v1/update/media` (`?mediaId=` for one volume) lists the update archives on the volumes
+micad mounted: regular `*.micaupd` files at a volume's root and in its `mica-updates/` directory,
+not recursively, read through directory descriptors that never follow a symbolic link, at most
+100 per volume in name order (`truncated` names a volume with more, `unreadable` one that could
+not be read). Each has an opaque `id` bound to the volume, the file, its size and its change time,
+its `name` for display, `sizeBytes`, and `importable` false (`archive_too_large`) above the upload
+limit; nothing is opened or verified to list it. `POST /api/v1/update/media/import`
+(`{mediaId, candidateId}`) opens the file again the same way, refuses one that is not the file
+listed (409 `media_candidate_changed`) or a volume not mounted now (404 `media_removed`, also when
+a read fails during the copy), and copies it into the update uploads with the upload's own staging:
+the same size limit and magic check, then micad's `ImportUpdate`, so the signature, product and
+anti-rollback checks run on the copied bytes as for an upload; every refusal removes the copy.
+The file is open during the copy, so the volume cannot be unmounted or ejected meanwhile. The
+answer is 202 and the import's outcome is in the update state; nothing is installed. The
+console's manual update section lists the archives (every 5 s while open) with an import action.
 `GET /api/v1/time/zones` lists the zones the device's tzdata offers (`UTC`, then `zone1970.tab`'s
 installed zones, with the tzdata release) and whether the stored `time.timezone` is installed and
 listed; the console's timezone picker searches it by city, region, IANA name or the offset the

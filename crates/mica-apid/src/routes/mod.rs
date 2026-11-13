@@ -189,6 +189,10 @@ pub struct AppState {
     /// outside this directory, so the two agree on one location and neither
     /// takes the other's word for it.
     pub(crate) update_uploads: Arc<std::path::PathBuf>,
+    /// Where micad mounts external media read-only: `/run/mica/media` on a
+    /// device, a temporary directory in tests. An update archive on one is
+    /// read from here, never written.
+    pub(crate) media_root: Arc<std::path::PathBuf>,
     /// The diagnostic snapshot store: `/mica/diagnostics` on a
     /// device, a temporary directory in tests. A path and no syscall until
     /// the first publish.
@@ -285,6 +289,7 @@ impl AppState {
                 micad_settings::configuration::DEFAULT_FLEET_PATH,
             )),
             update_uploads: Arc::new(std::path::PathBuf::from(UPDATE_UPLOADS_DIR)),
+            media_root: Arc::new(std::path::PathBuf::from(MEDIA_ROOT)),
             diagnostics: Arc::new(SnapshotStore::at_default()),
             collecting: Arc::new(tokio::sync::Mutex::new(())),
             rotation: Arc::new(tokio::sync::Mutex::new(())),
@@ -531,6 +536,13 @@ impl AppState {
     #[cfg(test)]
     pub fn with_update_uploads(mut self, uploads: impl Into<std::path::PathBuf>) -> Self {
         self.update_uploads = Arc::new(uploads.into());
+        self
+    }
+
+    /// Point the external media root at an isolated test fixture.
+    #[cfg(test)]
+    pub fn with_media_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
+        self.media_root = Arc::new(root.into());
         self
     }
 

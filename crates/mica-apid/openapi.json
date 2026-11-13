@@ -10031,6 +10031,214 @@
         }
       }
     },
+    "/api/v1/update/media": {
+      "get": {
+        "tags": [
+          "update"
+        ],
+        "summary": "List the update archives on external media.",
+        "description": "Reads the volumes micad mounted read-only (`GET /api/v1/storage/media`,\n`state` `mounted_readonly`): each volume's root and its `mica-updates/`\ndirectory, not recursively, regular `*.micaupd` files only, never through\na symbolic link, at most 100 per volume in name order (`truncated` names\nthe volumes with more). Only names and sizes are read; nothing is opened,\nverified or installed. `name` is the file's, for display only: what an\narchive is, is known once it is imported. A file larger than an upload may\nbe is listed with `importable` false. Without `mediaId`, every mounted\nvolume is listed.",
+        "operationId": "api_v1_update_media",
+        "parameters": [
+          {
+            "name": "mediaId",
+            "in": "query",
+            "description": "Only this volume.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archives found, with the volumes listed only in part (`truncated`) or not at all (`unreadable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaCandidates"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`mediaId` is not a volume id (`request_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The volume is not mounted now (`media_removed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/update/media/import": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Import an update archive from external media.",
+        "description": "Copies the archive `candidateId` from the volume `mediaId` into the upload\ndirectory, then hands it to micad exactly as a browser upload is\n(`POST /api/v1/update/import`): the same size limit and magic check, the\nsame `mica-deploy import`, every signature, product and anti-rollback\ncheck on the copied bytes. The file is opened through the volume's\ndirectory without following a link and must still be the file listed, by\nsize and change time; a file replaced or changed since is\n`media_candidate_changed`, a volume gone before or during the copy is\n`media_removed`, and the partial copy is removed. While the copy runs the\nfile is open, so the volume cannot be unmounted or ejected. Nothing is\ninstalled: the install is the separate `POST /api/v1/update/install`.\n\nAnswers **202**: poll `GET /api/v1/update` for the import's outcome.",
+        "operationId": "api_v1_update_media_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "The archive was copied and the import started; poll the update state"
+          },
+          "400": {
+            "description": "Invalid JSON (`request_invalid`), or the file does not begin with the archive magic (`archive_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No stored bearer token or authenticated browser session (`not_authenticated`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The volume is not mounted now, or went away during the copy (`media_removed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A method this route does not serve (`method_not_allowed`); carries `Allow`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The archive is not on the volume as listed (`media_candidate_changed`), or another update operation is running (`policy_refused`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The archive is larger than this device accepts (`archive_too_large`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The copy could not be staged for another reason (`update_staging_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DATA is not there or is read-only (`update_storage_unavailable`), or micad could not be called (`micad_unreachable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The bounded call to micad timed out (`micad_timeout`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "The copy does not fit on DATA (`update_storage_full`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/update/reboot-override": {
       "post": {
         "tags": [
@@ -13305,6 +13513,94 @@
             "description": "What decided it: `setting` (`access.mdns.enabled`) or `product`."
           }
         }
+      },
+      "MediaCandidate": {
+        "type": "object",
+        "description": "An update archive on a volume, as listed.",
+        "required": [
+          "id",
+          "mediaId",
+          "name",
+          "sizeBytes",
+          "importable"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Opaque: the volume, the file and its size and change time. A file\nreplaced or changed since the listing gets another id."
+          },
+          "importable": {
+            "type": "boolean",
+            "description": "False for a file larger than an upload may be (`reason`\n`archive_too_large`)."
+          },
+          "mediaId": {
+            "type": "string",
+            "description": "The volume's `id` from `GET /api/v1/storage/media`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The file's path on the volume, for display: `name.micaupd` or\n`mica-updates/name.micaupd`."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "MediaCandidates": {
+        "type": "object",
+        "description": "`GET /api/v1/update/media`.",
+        "required": [
+          "items",
+          "truncated",
+          "unreadable"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaCandidate"
+            }
+          },
+          "truncated": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Volumes with more archives than are listed."
+          },
+          "unreadable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Volumes that could not be read."
+          }
+        }
+      },
+      "MediaImportRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/update/media/import`.",
+        "required": [
+          "mediaId",
+          "candidateId"
+        ],
+        "properties": {
+          "candidateId": {
+            "type": "string"
+          },
+          "mediaId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "MintTokenRequest": {
         "type": "object",

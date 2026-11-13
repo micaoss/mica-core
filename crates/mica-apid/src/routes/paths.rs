@@ -161,6 +161,11 @@ pub(super) const V1_SETUP_PATH: &str = "/v1/setup";
 /// of it while writing the upload -- the earlier and cheaper failure.
 pub(super) const UPDATE_UPLOADS_DIR: &str = "/mica/updates/uploads";
 
+/// Where micad mounts external media, read-only, one directory per volume
+/// id. apid only reads under it: an update archive on a stick is copied from
+/// here into [`UPDATE_UPLOADS_DIR`].
+pub(super) const MEDIA_ROOT: &str = "/run/mica/media";
+
 /// The read-only provisioning-document status.
 ///
 /// A fixed path on the time status's reasoning, and the whole of this

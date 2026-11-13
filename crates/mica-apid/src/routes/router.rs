@@ -188,6 +188,14 @@ pub(super) fn api_router(features: &micad_settings::Features) -> Router<AppState
             post(crate::update_api::api_v1_update_reboot_override),
         )
         .route(
+            crate::update_api::V1_UPDATE_MEDIA_PATH,
+            get(crate::update_api::api_v1_update_media),
+        )
+        .route(
+            crate::update_api::V1_UPDATE_MEDIA_IMPORT_PATH,
+            post(crate::update_api::api_v1_update_media_import),
+        )
+        .route(
             crate::update_api::V1_UPDATE_CONFIG_PATH,
             post(crate::update_api::api_v1_update_config),
         )

@@ -13,8 +13,10 @@ use crate::routes::{API, ApiCredential, ApiError, AppState, api_response, bus_ap
 
 mod config;
 mod deployment;
+mod media;
 pub(crate) use config::*;
 pub(crate) use deployment::*;
+pub(crate) use media::*;
 
 /// The cluster's paths, one spelling each (single-segment, so axum and
 /// OpenAPI agree without a doc variant).
@@ -290,7 +292,6 @@ pub(crate) async fn api_v1_update_import(
     request: axum::extract::Request<axum::body::Body>,
 ) -> Response {
     use futures_util::StreamExt as _;
-    use tokio::io::AsyncWriteExt as _;
 
     let refuse = |status: StatusCode, code: &'static str, message: &str| {
         api_response(status, ApiError::apid(code, message.to_string()))
@@ -322,109 +323,175 @@ pub(crate) async fn api_v1_update_import(
         );
     }
 
-    let uploads = state.update_uploads.as_path();
-    if let Err(err) = tokio::fs::create_dir_all(uploads).await {
-        tracing::error!(error = %err, "creating the update upload directory failed");
-        let (status, code) = staging_refusal(&err);
-        return refuse(
-            status,
-            code,
-            "the update upload directory could not be created",
-        );
-    }
-    // A name drawn here and not taken from the client: an upload is addressed
-    // by the path apid hands micad, and a client-chosen name is a client
-    // choosing where on the device its bytes land.
-    let upload = uploads.join(format!(
-        "{:032x}.micaupd",
-        u128::from_ne_bytes(micad_settings::random_bytes())
-    ));
-    let mut file = match tokio::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&upload)
-        .await
-    {
-        Ok(file) => file,
-        Err(err) => {
-            tracing::error!(error = %err, "creating the update upload file failed");
-            let (status, code) = staging_refusal(&err);
-            return refuse(status, code, "the upload file could not be created");
-        }
+    let mut staging = match Staging::create(&state).await {
+        Ok(staging) => staging,
+        Err(response) => return *response,
     };
     let mut stream = request.into_body().into_data_stream();
-    let mut written = 0_u64;
-    let mut magic = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(err) => {
-                let _ = tokio::fs::remove_file(&upload).await;
                 tracing::warn!(error = %err, "the update upload was interrupted");
-                return refuse(
-                    StatusCode::BAD_REQUEST,
-                    "archive_invalid",
-                    "the upload was interrupted",
-                );
+                return staging
+                    .abort(refuse(
+                        StatusCode::BAD_REQUEST,
+                        "archive_invalid",
+                        "the upload was interrupted",
+                    ))
+                    .await;
             }
         };
-        written += chunk.len() as u64;
-        if written > MAX_ARCHIVE_BYTES {
-            let _ = tokio::fs::remove_file(&upload).await;
-            return refuse(
+        if let Err(response) = staging.push(&chunk).await {
+            return *response;
+        }
+    }
+    staging.import(&state, &source).await
+}
+
+/// An archive being written into the upload directory, then named to micad.
+///
+/// The browser upload and the import from external media share it, so both
+/// write under a name apid draws, refuse the same sizes and magic, and hand
+/// micad the same kind of path for the same `mica-deploy import`.
+pub(crate) struct Staging {
+    upload: std::path::PathBuf,
+    file: tokio::fs::File,
+    written: u64,
+    magic: Vec<u8>,
+}
+
+impl Staging {
+    /// A new file in the upload directory.
+    pub(crate) async fn create(state: &AppState) -> Result<Self, Box<Response>> {
+        let uploads = state.update_uploads.as_path();
+        if let Err(err) = tokio::fs::create_dir_all(uploads).await {
+            tracing::error!(error = %err, "creating the update upload directory failed");
+            let (status, code) = staging_refusal(&err);
+            return Err(Box::new(api_response(
+                status,
+                ApiError::apid(
+                    code,
+                    "the update upload directory could not be created".to_string(),
+                ),
+            )));
+        }
+        // A name drawn here and not taken from the client: an upload is addressed
+        // by the path apid hands micad, and a client-chosen name is a client
+        // choosing where on the device its bytes land.
+        let upload = uploads.join(format!(
+            "{:032x}.micaupd",
+            u128::from_ne_bytes(micad_settings::random_bytes())
+        ));
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&upload)
+            .await
+        {
+            Ok(file) => Ok(Self {
+                upload,
+                file,
+                written: 0,
+                magic: Vec::new(),
+            }),
+            Err(err) => {
+                tracing::error!(error = %err, "creating the update upload file failed");
+                let (status, code) = staging_refusal(&err);
+                Err(Box::new(api_response(
+                    status,
+                    ApiError::apid(code, "the upload file could not be created".to_string()),
+                )))
+            }
+        }
+    }
+
+    /// Remove the file and answer `response`.
+    pub(crate) async fn abort(self, response: Response) -> Response {
+        drop(self.file);
+        let _ = tokio::fs::remove_file(&self.upload).await;
+        response
+    }
+
+    /// Append `chunk`; on a refusal the file is gone and the answer is given.
+    pub(crate) async fn push(&mut self, chunk: &[u8]) -> Result<(), Box<Response>> {
+        use tokio::io::AsyncWriteExt as _;
+        let refusal = |status: StatusCode, code: &'static str, message: &str| {
+            api_response(status, ApiError::apid(code, message.to_string()))
+        };
+        self.written += chunk.len() as u64;
+        let refused = if self.written > MAX_ARCHIVE_BYTES {
+            Some(refusal(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "archive_too_large",
                 "this device accepts an update archive of at most 2 GiB",
-            );
-        }
-        // The magic is checked as soon as there is enough of it, so a body
-        // that is not an archive at all is refused after eight bytes rather
-        // than after a gigabyte.
-        if magic.len() < ARCHIVE_MAGIC.len() {
-            magic.extend_from_slice(&chunk[..chunk.len().min(ARCHIVE_MAGIC.len() - magic.len())]);
-            if magic.len() == ARCHIVE_MAGIC.len() && magic != ARCHIVE_MAGIC {
-                let _ = tokio::fs::remove_file(&upload).await;
-                return refuse(
-                    StatusCode::BAD_REQUEST,
-                    "archive_invalid",
-                    "this is not a component archive: it does not begin with MICAUPD1",
-                );
+            ))
+        } else {
+            // The magic is checked as soon as there is enough of it, so a body
+            // that is not an archive at all is refused after eight bytes rather
+            // than after a gigabyte.
+            if self.magic.len() < ARCHIVE_MAGIC.len() {
+                let take = chunk.len().min(ARCHIVE_MAGIC.len() - self.magic.len());
+                self.magic.extend_from_slice(&chunk[..take]);
+            }
+            if self.magic.len() == ARCHIVE_MAGIC.len() && self.magic != ARCHIVE_MAGIC {
+                Some(not_an_archive())
+            } else if let Err(err) = self.file.write_all(chunk).await {
+                tracing::error!(error = %err, "writing the update upload failed");
+                let (status, code) = staging_refusal(&err);
+                Some(refusal(status, code, "the upload could not be written"))
+            } else {
+                None
+            }
+        };
+        match refused {
+            None => Ok(()),
+            Some(response) => {
+                let _ = tokio::fs::remove_file(&self.upload).await;
+                Err(Box::new(response))
             }
         }
-        if let Err(err) = file.write_all(&chunk).await {
-            let _ = tokio::fs::remove_file(&upload).await;
-            tracing::error!(error = %err, "writing the update upload failed");
-            let (status, code) = staging_refusal(&err);
-            return refuse(status, code, "the upload could not be written");
-        }
     }
-    if magic.len() < ARCHIVE_MAGIC.len() {
-        let _ = tokio::fs::remove_file(&upload).await;
-        return refuse(
-            StatusCode::BAD_REQUEST,
-            "archive_invalid",
-            "this is not a component archive: it does not begin with MICAUPD1",
-        );
-    }
-    if let Err(err) = file.sync_all().await {
-        let _ = tokio::fs::remove_file(&upload).await;
-        tracing::error!(error = %err, "syncing the update upload failed");
-        let (status, code) = staging_refusal(&err);
-        return refuse(status, code, "the upload could not be written");
-    }
-    drop(file);
 
-    match state.api.import_update(&upload.to_string_lossy()).await {
-        Ok(()) => {
-            state.audit.record(UPDATE_FETCH_EVENT, REQUESTED, &source);
-            accepted()
+    /// Sync the file and name it to micad: **202** once micad took it, its
+    /// refusal otherwise, the file removed on every refusal.
+    pub(crate) async fn import(self, state: &AppState, source: &str) -> Response {
+        if self.magic.len() < ARCHIVE_MAGIC.len() {
+            return self.abort(not_an_archive()).await;
         }
-        Err(err) => {
+        if let Err(err) = self.file.sync_all().await {
+            tracing::error!(error = %err, "syncing the update upload failed");
+            let (status, code) = staging_refusal(&err);
+            return self
+                .abort(api_response(
+                    status,
+                    ApiError::apid(code, "the upload could not be written".to_string()),
+                ))
+                .await;
+        }
+        match state
+            .api
+            .import_update(&self.upload.to_string_lossy())
+            .await
+        {
+            Ok(()) => {
+                state.audit.record(UPDATE_FETCH_EVENT, REQUESTED, source);
+                accepted()
+            }
             // micad never took it, so the copy on disk is apid's to remove.
-            let _ = tokio::fs::remove_file(&upload).await;
-            update_bus_error(&err)
+            Err(err) => self.abort(update_bus_error(&err)).await,
         }
     }
+}
+
+fn not_an_archive() -> Response {
+    api_response(
+        StatusCode::BAD_REQUEST,
+        ApiError::apid(
+            "archive_invalid",
+            "this is not a component archive: it does not begin with MICAUPD1".to_string(),
+        ),
+    )
 }
 
 /// The empty 202 the three long-running admissions answer: accepted, running
