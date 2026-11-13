@@ -25,9 +25,9 @@ export function staticRoutes(view: NetView, base: NetworkMap): StaticRow[] {
 }
 
 /// The interfaces a route can name: those with addressing of their own. On
-/// OpenRC only a physical link's stanza carries routes.
+/// OpenRC a physical link's stanza and a tunnel carry routes.
 export function routeTargets(view: NetView, openrc: boolean): string[] {
-  const kinds = openrc ? ['physical', 'wifi'] : ['physical', 'wifi', 'bridge', 'vlan', 'wireguard']
+  const kinds = openrc ? ['physical', 'wifi', 'wireguard'] : ['physical', 'wifi', 'bridge', 'vlan', 'wireguard']
   return view.order.filter((name) => kinds.includes(view.ifaces[name].kind) && !bridgeOf(view.map, name))
 }
 

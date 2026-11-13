@@ -651,3 +651,5 @@ fn only_an_endpoint_naming_a_host_is_resolved() {
     assert_eq!(resolve::host_endpoint("vpn.example.org"), None);
     assert_eq!(resolve::host_endpoint("vpn.example.org:http"), None);
 }
+
+mod vm;

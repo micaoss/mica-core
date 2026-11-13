@@ -447,3 +447,69 @@ async fn an_interface_with_static_routes_is_applied() {
         .unwrap();
     assert!(!fake.calls().is_empty());
 }
+
+fn tunnel(dhcp: bool, peer_key: &str) -> IfaceSettings {
+    IfaceSettings {
+        kind: IfaceKind::Wireguard,
+        dhcp,
+        static_: (!dhcp).then(|| StaticConfig {
+            address: "10.8.0.1/24".to_string(),
+            gateway: None,
+            dns: Vec::new(),
+        }),
+        wireguard: Some(micad_settings::WireguardConfig {
+            listen_port: Some(51820),
+            peers: vec![micad_settings::WireguardPeer {
+                public_key: peer_key.to_string(),
+                allowed_ips: vec!["10.8.0.2/32".to_string()],
+                endpoint: None,
+                persistent_keepalive: None,
+                name: None,
+                preshared_key: None,
+            }],
+        }),
+        ..IfaceSettings::default()
+    }
+}
+
+const PEER_KEY: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+
+/// A tunnel is micad's over netlink: ifupdown's file never names it.
+#[tokio::test]
+async fn a_wireguard_tunnel_is_accepted_and_left_out_of_the_file() {
+    let (dir, fake, reconciler) = fixture(&["eth0"]);
+    let state = reconciler
+        .apply(&settings(&[
+            ("eth0", dhcp()),
+            ("wg0", tunnel(false, PEER_KEY)),
+        ]))
+        .await
+        .unwrap();
+    let text = std::fs::read_to_string(dir.path().join("network/interfaces")).unwrap();
+    assert!(text.contains("iface eth0 inet dhcp"), "{text}");
+    assert!(!text.contains("wg0"), "{text}");
+    assert_eq!(state["wg0"]["kind"], "wireguard");
+    assert_eq!(fake.calls().len(), 2);
+}
+
+/// A tunnel out of its rules is refused by name before anything runs.
+#[tokio::test]
+async fn a_wireguard_tunnel_out_of_its_rules_is_refused() {
+    let (_dir, fake, reconciler) = fixture(&["eth0"]);
+    let no_block = IfaceSettings {
+        kind: IfaceKind::Wireguard,
+        ..fixed("10.8.0.1/24", None, &[])
+    };
+    for (cfg, word) in [
+        (tunnel(true, PEER_KEY), "static address, not DHCP"),
+        (tunnel(false, "not a key"), "wg0"),
+        (no_block, "no wireguard block"),
+    ] {
+        let error = reconciler
+            .apply(&settings(&[("wg0", cfg)]))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains(word), "{error}");
+    }
+    assert!(fake.calls().is_empty());
+}

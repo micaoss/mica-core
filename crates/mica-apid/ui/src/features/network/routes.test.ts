@@ -24,9 +24,9 @@ describe('the static routes', () => {
     ])
   })
 
-  it('offers the interfaces that carry addresses, physical ones alone on OpenRC', () => {
+  it('offers the interfaces that carry addresses, physical ones and tunnels on OpenRC', () => {
     expect(routeTargets(view(start()), false)).toEqual(['eth0', 'eth1', 'br0', 'wlan0', 'wg0'])
-    expect(routeTargets(view(start()), true)).toEqual(['eth0', 'eth1', 'wlan0'])
+    expect(routeTargets(view(start()), true)).toEqual(['eth0', 'eth1', 'wlan0', 'wg0'])
   })
 
   it('stages a route on an interface the map does not declare with that interface\'s default', () => {

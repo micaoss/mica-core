@@ -1,6 +1,6 @@
 # OpenRC WireGuard: micad runs the tunnels over netlink
 
-Status: approved plan (repair-20261110), approved by the user on 2026-11-11. Rounds 1 and 2 are implemented: the netlink messages (`crates/micad/src/netlink/tunnel.rs`), the reconciler (`crates/micad/src/reconciler/network/ifupdown/tunnels.rs`), and the endpoint resolution (`tunnels/resolve.rs`). Round 3 is not.
+Status: approved plan (repair-20261110), approved by the user on 2026-11-11. All 3 rounds are implemented: the netlink messages (`crates/micad/src/netlink/tunnel.rs`), the reconciler (`crates/micad/src/reconciler/network/ifupdown/tunnels.rs`), the endpoint resolution (`tunnels/resolve.rs`), and the QEMU case (`tunnels/tests/vm.rs`, ignored, run booted in a VM). The OpenRC refusal of `kind: wireguard` is lifted. The board kernels of qemu-armhf and ssd202d still need `wireguard` in their `KERNEL_FEATURES` (mica-build).
 
 **Decision:**
 
@@ -40,6 +40,7 @@ Status: approved plan (repair-20261110), approved by the user on 2026-11-11. Rou
 
 ## 4. Boot and restart recovery
 
+- A key rotation on OpenRC deletes nothing: the apply after it sets the new private key in place.
 - Links do not persist across a reboot. After boot, micad creates them from the settings at startup, before it reports the network ready.
 - On a micad restart, it reconciles idempotently against the kernel state:
   - it reads the existing link, address, peers and owned routes;

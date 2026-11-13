@@ -450,14 +450,15 @@ async fn serve() -> anyhow::Result<()> {
                 service.with_ap_pause(Arc::new(reconciler::wifi_ap::UnitPause::systemd()))
             };
         }
-        // WireGuard (networkd) is systemd's: an OpenRC daemon is not given the
-        // rotation, and answers that it has none.
-        if !openrc {
-            // Same reasoning again: the rotation writes a private key onto STATE
-            // and deletes a kernel device, so a dry-run daemon is never given one.
-            service =
-                service.with_wireguard(Arc::new(reconciler::network::KeyRotation::production()));
-        }
+        // Same reasoning again: the rotation writes a private key onto STATE
+        // and, under networkd, deletes a kernel device, so a dry-run daemon is
+        // never given one. On OpenRC the apply after it sets the new key in
+        // place.
+        service = if openrc {
+            service.with_wireguard(Arc::new(reconciler::network::KeyRotation::openrc()))
+        } else {
+            service.with_wireguard(Arc::new(reconciler::network::KeyRotation::production()))
+        };
         let policy_path = std::env::var("MICAD_UPDATE_POLICY_PATH").map_or_else(
             |_| PathBuf::from(update_policy::DEFAULT_POLICY_PATH),
             PathBuf::from,

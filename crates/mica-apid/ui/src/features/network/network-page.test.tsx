@@ -33,12 +33,12 @@ describe('the network page', () => {
     expect(screen.getByRole('tab', { name: 'Global DNS' })).toBeTruthy()
   })
 
-  it('offers no tunnels and no new interfaces on OpenRC', async () => {
+  it('offers tunnels and no new interfaces on OpenRC', async () => {
     stubFetch({ ...networkRoutes(), '/api/v1/meta': { api: 'v1', features: ['wifi'], init: 'openrc' } })
     open()
     await screen.findByRole('link', { name: 'eth0' })
-    await waitFor(() => expect(screen.queryByRole('tab', { name: 'WireGuard' })).toBeNull())
-    expect(screen.queryByRole('button', { name: 'Add interface' })).toBeNull()
+    expect(screen.getByRole('tab', { name: 'WireGuard' })).toBeTruthy()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add interface' })).toBeNull())
   })
 
   it('groups the interfaces by role and leaves the loopback out', async () => {
@@ -227,7 +227,7 @@ describe('the network page', () => {
     stubFetch({ ...networkRoutes(), '/api/v1/meta': { api: 'v1', features: ['wifi'], init: 'openrc' } })
     open()
     await screen.findByRole('link', { name: 'eth0' })
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Overview', 'Interfaces', 'Routes', 'Wi-Fi', 'Global DNS'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Overview', 'Interfaces', 'Routes', 'Wi-Fi', 'Global DNS', 'WireGuard'])
   })
 
   it('lists every IPv4 route of the main table with its source on the routes tab', async () => {

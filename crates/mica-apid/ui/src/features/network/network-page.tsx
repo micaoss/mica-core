@@ -31,7 +31,6 @@ export function NetworkPage() {
   const shown = NETWORK_TABS.filter((tab) => {
     if (tab === 'wifi') return data.serves('wifi')
     if (tab === 'bluetooth') return data.serves('bluetooth')
-    if (tab === 'wireguard') return !data.openrc
     return true
   })
   const tab = search.tab && shown.includes(search.tab) ? search.tab : 'interfaces'
@@ -51,7 +50,7 @@ export function NetworkPage() {
         <TabsContent value="routes" className="grid gap-4 pt-4"><RoutesTab data={data} /></TabsContent>
         {data.serves('wifi') ? <TabsContent value="wifi" className="grid gap-4 pt-4"><WifiTab data={data} onEditing={setCardEditing} /></TabsContent> : null}
         <TabsContent value="dns" className="grid gap-4 pt-4"><DnsTab data={data} onEditing={setCardEditing} /></TabsContent>
-        {!data.openrc ? <TabsContent value="wireguard" className="grid gap-4 pt-4"><WireguardTab data={data} tunnel={search.tunnel} onEditing={setCardEditing} /></TabsContent> : null}
+        <TabsContent value="wireguard" className="grid gap-4 pt-4"><WireguardTab data={data} tunnel={search.tunnel} onEditing={setCardEditing} /></TabsContent>
         {data.serves('bluetooth') ? <TabsContent value="bluetooth" className="grid gap-4 pt-4"><BluetoothPanel onEditing={setCardEditing} /></TabsContent> : null}
       </Tabs>
       {cardEditing ? null : <ChangeBar data={data} />}

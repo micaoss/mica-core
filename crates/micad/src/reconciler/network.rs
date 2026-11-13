@@ -129,6 +129,18 @@ impl LinkDelete for NoDelete {
     }
 }
 
+/// The rotation's deleter on a root without networkd: there is nothing to
+/// delete, because the apply after a rotation hands the tunnel its new key in
+/// place ([`IfupdownReconciler`]).
+pub struct KeyInPlace;
+
+#[async_trait::async_trait]
+impl LinkDelete for KeyInPlace {
+    async fn delete_link(&self, _iface: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
 /// The features the running kernel claims to carry.
 #[async_trait::async_trait]
 pub trait KernelFeatures: Send + Sync {
@@ -401,6 +413,14 @@ impl KeyRotation<NetworkctlDelete> {
     /// reconciler renders from.
     pub fn production() -> Self {
         Self::new(production_keystore(), NetworkctlDelete)
+    }
+}
+
+impl KeyRotation<KeyInPlace> {
+    /// The rotation of a root without networkd, against the key store its
+    /// tunnels are set from.
+    pub fn openrc() -> Self {
+        Self::new(production_keystore(), KeyInPlace)
     }
 }
 

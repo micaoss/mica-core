@@ -10,11 +10,10 @@
 //! its DNS servers into Base's `/run/mica/resolv.d/<iface>`.
 //!
 //! Wired DHCP and static addresses with their static routes, and CAN
-//! controllers set with iproute2's `ip` from their stanza: VLANs, bridges and
-//! WireGuard are networkd's, and an OpenRC device refuses them by name rather
-//! than half-configuring them. The WireGuard tunnels micad runs itself over
-//! netlink ([`Tunnels`]) are applied on every pass all the same; with no entry
-//! to run, that deletes only a tunnel link micad created.
+//! controllers set with iproute2's `ip` from their stanza. WireGuard tunnels
+//! are micad's own, over netlink ([`Tunnels`]), and the file never names them.
+//! VLANs and bridges are networkd's, and an OpenRC device refuses them by name
+//! rather than half-configuring them.
 //!
 //! A static route on a static or manual stanza is an `up ip route add` line
 //! and the matching `down ip route del`. On a DHCP stanza the link is up
@@ -32,7 +31,8 @@ use micad_settings::{CanConfig, IfaceKind, IfaceSettings, RouteConfig, Settings,
 use serde_json::json;
 
 use super::{
-    kind_name, route_metrics, validate_dns_override, validate_iface_name, validate_static,
+    kind_name, route_metrics, validate_dns_override, validate_iface_name, validate_kind_blocks,
+    validate_static,
 };
 use crate::openrc::{Commands, Host};
 use crate::reconciler::Reconciler;
@@ -150,23 +150,18 @@ fn validate(iface: &str, cfg: &IfaceSettings, ip: Option<&Path>) -> Result<()> {
         return Ok(());
     }
     validate_dns_override(iface, cfg)?;
-    let refused = if !matches!(cfg.kind, IfaceKind::Physical) {
-        Some(kind_name(cfg.kind))
-    } else if cfg.vlan.is_some() {
-        Some("vlan")
-    } else if cfg.bridge.is_some() {
-        Some("bridge")
-    } else if cfg.wireguard.is_some() {
-        Some("wireguard")
-    } else if cfg.can.is_some() {
-        Some("can")
-    } else {
-        None
-    };
-    if let Some(what) = refused {
+    if matches!(cfg.kind, IfaceKind::Vlan | IfaceKind::Bridge) {
         bail!(
-            "network.{iface}: {what} needs systemd-networkd, which this OpenRC device does not run"
+            "network.{iface}: {} needs systemd-networkd, which this OpenRC device does not run",
+            kind_name(cfg.kind)
         );
+    }
+    validate_kind_blocks(iface, cfg)?;
+    if let Some(wireguard) = &cfg.wireguard {
+        micad_settings::validate_peers(iface, &wireguard.peers).map_err(anyhow::Error::msg)?;
+        if cfg.dhcp {
+            bail!("network.{iface}: a WireGuard tunnel takes a static address, not DHCP");
+        }
     }
     if let Some(("routes", reason)) = micad_settings::routing_problem(cfg) {
         bail!("network.{iface}.routes: {reason}");
@@ -349,6 +344,9 @@ pub(super) fn render(
         .collect();
     let metrics = route_metrics(network, &BTreeMap::new(), &ports);
     for (iface, cfg) in network {
+        if cfg.kind == IfaceKind::Wireguard {
+            continue;
+        }
         if let (Some(can), Some(ip)) = (&cfg.can, ip) {
             can_stanza(&mut out, iface, can, ip);
             continue;
