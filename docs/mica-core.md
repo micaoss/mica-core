@@ -1023,6 +1023,14 @@ removed under `/api/v1/network/{iface}/peers`, each write applied before it answ
 listing's `ETag` is the network version: an add or an edit names it as `baseVersion` and a
 removal as `If-Match`, and a map changed since is refused `version_conflict`; a write naming no
 version writes whatever is stored.
+Each listed peer also carries what the kernel reports, joined by key over generic netlink:
+`latestHandshake`, `rxBytes`, `txBytes`, `operationalState` (`pending_endpoint_resolution` while
+a configured endpoint has no kernel endpoint, a host name networkd has not resolved;
+`endpoint_route_loop` when the kernel's endpoint lies inside a prefix any of the tunnel's peers
+routes; `ready` otherwise, a peer with no endpoint included), and `routesReady` with
+`unroutedIps`, the allowed IPs whose network address the kernel (an `RTM_GETROUTE` per prefix,
+IPv4 and IPv6) does not send out of the tunnel; all `null` when the tunnel could not be asked.
+The console edits a peer in place and shows its state beside its handshake.
 
 **LAN discovery** (sections 3.12 and 3.13). `GET /api/v1/mdns` answers the `mdns` live state as
 `{available, state?, error?}`: the switch, its source, the `.local` name, every service with its

@@ -149,4 +149,69 @@ describe('the WireGuard tab', () => {
     expect(within(bar).getByText('wg0')).toBeTruthy()
     expect(screen.getByText('Tunnel changes are staged and not applied yet.')).toBeTruthy()
   })
+
+  it('edits a peer in place by its key, keeping the pre-shared key unless removal is asked', async () => {
+    const peer = { name: 'Harbour office', publicKey: PEER_KEY, presharedKey: true, allowedIps: ['10.8.0.2/32'], persistentKeepalive: 25, latestHandshake: null, rxBytes: null, txBytes: null }
+    const fetch = stubFetch({
+      ...networkRoutes(),
+      '/api/v1/network/wg0/peers': [peer],
+      [`PUT /api/v1/network/wg0/peers/${encodeURIComponent(PEER_KEY)}`]: () => jsonResponse(peer),
+    })
+    open('tab=wireguard&tunnel=wg0')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit peer' }))
+    const dialog = await screen.findByRole('dialog')
+    expect((within(dialog).getByLabelText('Public key') as HTMLInputElement).readOnly).toBe(true)
+    const allowed = within(dialog).getByLabelText('Allowed IPs')
+    await userEvent.clear(allowed)
+    await userEvent.type(allowed, '10.8.0.2/32, 192.168.20.0/24')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    const sent = await waitFor(() => {
+      const call = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeTruthy()
+      return JSON.parse(String((call?.[1] as RequestInit).body))
+    })
+    // The key is the path, not the body; the stored pre-shared key is kept.
+    expect(sent).toEqual({ name: 'Harbour office', allowedIps: ['10.8.0.2/32', '192.168.20.0/24'], persistentKeepalive: 25 })
+    expect((await screen.findAllByText('Peer saved.')).length).toBeGreaterThan(0)
+
+  })
+
+  it('removes a pre-shared key only when asked', async () => {
+    const peer = { name: 'Harbour office', publicKey: PEER_KEY, presharedKey: true, allowedIps: ['10.8.0.2/32'], latestHandshake: null, rxBytes: null, txBytes: null }
+    const fetch = stubFetch({
+      ...networkRoutes(),
+      '/api/v1/network/wg0/peers': [peer],
+      [`PUT /api/v1/network/wg0/peers/${encodeURIComponent(PEER_KEY)}`]: () => jsonResponse(peer),
+    })
+    open('tab=wireguard&tunnel=wg0')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit peer' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Remove the pre-shared key')).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('switch'))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      const call = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
+      expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ name: 'Harbour office', allowedIps: ['10.8.0.2/32'], presharedKey: null })
+    })
+  })
+
+  it('shows where each peer stands: resolving, looped, unrouted or ready', async () => {
+    const base = { presharedKey: false, latestHandshake: null, rxBytes: null, txBytes: null }
+    stubFetch({
+      ...networkRoutes(),
+      '/api/v1/network/wg0/peers': [
+        { ...base, name: 'a', publicKey: PEER_KEY, allowedIps: ['10.8.0.2/32'], endpoint: 'vpn.example.net:51820', operationalState: 'pending_endpoint_resolution', routesReady: true, unroutedIps: [] },
+        { ...base, name: 'b', publicKey: NEW_PEER, allowedIps: ['10.9.0.0/24'], operationalState: 'endpoint_route_loop', routesReady: true, unroutedIps: [] },
+        { ...base, name: 'c', publicKey: 'Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M=', allowedIps: ['172.16.0.0/12'], operationalState: 'ready', routesReady: false, unroutedIps: ['172.16.0.0/12'] },
+        { ...base, name: 'd', publicKey: 'ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ=', allowedIps: ['10.10.0.0/24'], operationalState: 'ready', routesReady: true, unroutedIps: [] },
+      ],
+    })
+    open('tab=wireguard&tunnel=wg0')
+    const table = await screen.findByRole('table')
+    expect(await within(table).findByText('resolving the endpoint')).toBeTruthy()
+    expect(within(table).getByText('endpoint routed through this tunnel')).toBeTruthy()
+    expect(within(table).getByText('not routed: 172.16.0.0/12')).toBeTruthy()
+    expect(within(table).getByText('ready')).toBeTruthy()
+  })
 })

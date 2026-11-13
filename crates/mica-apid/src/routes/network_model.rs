@@ -166,6 +166,16 @@ pub(crate) struct WireguardPeerState {
     pub(super) rx_bytes: Option<u64>,
     /// Bytes sent to the peer; `null` when the tunnel could not be asked.
     pub(super) tx_bytes: Option<u64>,
+    /// `ready`, `pending_endpoint_resolution` (a configured endpoint the
+    /// kernel holds none for yet) or `endpoint_route_loop` (the kernel's
+    /// endpoint lies inside a prefix the tunnel routes); `null` when the
+    /// tunnel could not be asked.
+    pub(super) operational_state: Option<&'static str>,
+    /// Whether the kernel sends every allowed IP out of this tunnel; `null`
+    /// when the tunnel could not be asked.
+    pub(super) routes_ready: Option<bool>,
+    /// The allowed IPs the kernel does not send out of this tunnel.
+    pub(super) unrouted_ips: Vec<String>,
 }
 
 impl From<&micad_settings::WireguardPeer> for WireguardPeerState {
@@ -180,6 +190,9 @@ impl From<&micad_settings::WireguardPeer> for WireguardPeerState {
             latest_handshake: None,
             rx_bytes: None,
             tx_bytes: None,
+            operational_state: None,
+            routes_ready: None,
+            unrouted_ips: Vec::new(),
         }
     }
 }

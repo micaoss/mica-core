@@ -98,4 +98,7 @@ pub use recovery::{
 };
 pub use secret::{hash_password, random_bytes, verify_password};
 pub use store::{DEFAULT_PATH, DocumentRefusal, LoadedStore, Store};
-pub use wireguard_routes::{WireguardRoute, wireguard_route_violations, wireguard_routes};
+pub use wireguard_routes::{
+    WireguardRoute, wireguard_peer_state, wireguard_route_violations, wireguard_routes,
+    wireguard_unrouted,
+};

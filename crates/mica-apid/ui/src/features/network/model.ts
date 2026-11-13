@@ -11,7 +11,14 @@ export type ViewKind = IfaceKind | 'wifi'
 export interface WireguardPeer { name?: string; publicKey: string; presharedKey?: string; allowedIps: string[]; endpoint?: string; persistentKeepalive?: number }
 /// A peer as the peer collection reads it: whether a pre-shared key is
 /// stored, and the tunnel's handshake and counters, `null` until reported.
-export interface WireguardPeerState { name?: string; publicKey: string; presharedKey: boolean; allowedIps: string[]; endpoint?: string; persistentKeepalive?: number; latestHandshake: number | null; rxBytes: number | null; txBytes: number | null }
+export interface WireguardPeerState {
+  name?: string; publicKey: string; presharedKey: boolean; allowedIps: string[]; endpoint?: string; persistentKeepalive?: number
+  latestHandshake: number | null; rxBytes: number | null; txBytes: number | null
+  /// What the kernel reports of the peer; `null` when the tunnel could not be asked.
+  operationalState?: 'ready' | 'pending_endpoint_resolution' | 'endpoint_route_loop' | null
+  routesReady?: boolean | null
+  unroutedIps?: string[]
+}
 export interface StaticRoute { destination: string; gateway?: string; metric?: number }
 /// A CAN controller's parameters; no restart delay restarts nothing, and no FD is FD off.
 export interface CanConfig { bitrate: number; restartMs?: number; fd?: boolean; dataBitrate?: number }

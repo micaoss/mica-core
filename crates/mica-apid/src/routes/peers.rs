@@ -232,6 +232,25 @@ pub(crate) async fn api_v1_peers_list(
                     state.latest_handshake = seen.get("latestHandshake").and_then(Value::as_u64);
                     state.rx_bytes = seen.get("rxBytes").and_then(Value::as_u64);
                     state.tx_bytes = seen.get("txBytes").and_then(Value::as_u64);
+                    state.operational_state = Some(micad_settings::wireguard_peer_state(
+                        &peers,
+                        peer,
+                        seen.get("endpoint").and_then(Value::as_str),
+                    ));
+                    let routed: Vec<(String, Option<bool>)> = seen
+                        .get("allowedIps")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|ip| {
+                            Some((
+                                ip.get("prefix")?.as_str()?.to_string(),
+                                ip.get("routed").and_then(Value::as_bool),
+                            ))
+                        })
+                        .collect();
+                    state.unrouted_ips = micad_settings::wireguard_unrouted(peer, &routed);
+                    state.routes_ready = Some(state.unrouted_ips.is_empty());
                 }
                 state
             })

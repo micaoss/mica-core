@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { formatAge } from '@/i18n/format'
-import { KeyRound, Plus, Trash2 } from 'lucide-react'
+import { KeyRound, Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, json } from '@/shared/lib/http'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
@@ -30,7 +30,7 @@ import { computeStatus } from './view'
 
 const KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/
 const MAX_PEER_NAME = 64
-const EMPTY_PEER = { name: '', publicKey: '', presharedKey: '', allowedIps: '', endpoint: '', keepalive: '' }
+const EMPTY_PEER = { name: '', publicKey: '', presharedKey: '', removePsk: false, allowedIps: '', endpoint: '', keepalive: '' }
 const shortKey = (key: string) => `${key.slice(0, 8)}…${key.slice(-6)}`
 
 /// `10.10.0.2/24` as the route to that one host, `10.10.0.2/32`.
@@ -118,7 +118,21 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
   const [draft, setDraft] = useState<{ address: string; port: string }>()
   useEffect(() => { onEditing(draft !== undefined); return () => onEditing(false) }, [draft, onEditing])
   const [adding, setAdding] = useState(false)
+  /// The public key of the peer being edited; the add form otherwise.
+  const [editing, setEditing] = useState<WireguardPeerState>()
   const [peer, setPeer] = useState(EMPTY_PEER)
+  const openEdit = (each: WireguardPeerState) => {
+    setEditing(each)
+    setPeer({
+      name: each.name ?? '',
+      publicKey: each.publicKey,
+      presharedKey: '',
+      removePsk: false,
+      allowedIps: each.allowedIps.join(', '),
+      endpoint: each.endpoint ?? '',
+      keepalive: each.persistentKeepalive ? String(each.persistentKeepalive) : '',
+    })
+  }
   const peers = useQuery({ queryKey: ['wireguard-peers', name], queryFn: () => api<WireguardPeerState[]>(`/api/v1/network/${encodeURIComponent(name)}/peers`) })
   const invalidatePeers = () => {
     void queryClient.invalidateQueries({ queryKey: ['wireguard-peers', name] })
@@ -167,7 +181,7 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
   if (peer.presharedKey && !KEY_PATTERN.test(peer.presharedKey)) peerErrors.presharedKey = t('network.wireguard.keyFormat')
   const allowed = peer.allowedIps.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean)
   if (!KEY_PATTERN.test(peer.publicKey)) peerErrors.publicKey = t('network.wireguard.keyFormat')
-  else if (peers.data?.some((each) => each.publicKey === peer.publicKey)) peerErrors.publicKey = t('network.wireguard.keyTaken')
+  else if (!editing && peers.data?.some((each) => each.publicKey === peer.publicKey)) peerErrors.publicKey = t('network.wireguard.keyTaken')
   if (!allowed.length || allowed.some((item) => !parseCidr(item) && !item.includes(':'))) peerErrors.allowedIps = t('network.wireguard.allowedFormat')
   if (peer.endpoint && !/^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+):\d{1,5}$/.test(peer.endpoint)) peerErrors.endpoint = t('network.wireguard.endpointFormat')
   if (peer.keepalive && !(Number(peer.keepalive) >= 1 && Number(peer.keepalive) <= 65535)) peerErrors.keepalive = t('network.wireguard.keepaliveRange')
@@ -182,6 +196,26 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
     setPeer(EMPTY_PEER)
     invalidatePeers()
   })
+  // An edit sends the whole peer: a field left empty is cleared, and the
+  // pre-shared key is kept unless a new one is entered or removal is asked.
+  const editPeer = (key: string) => api<WireguardPeerState>(`/api/v1/network/${encodeURIComponent(name)}/peers/${encodeURIComponent(key)}`, json('PUT', {
+    ...(peer.name.trim() ? { name: peer.name.trim() } : {}),
+    allowedIps: allowed,
+    ...(peer.endpoint ? { endpoint: peer.endpoint } : {}),
+    ...(peer.keepalive ? { persistentKeepalive: Number(peer.keepalive) } : {}),
+    ...(peer.removePsk ? { presharedKey: null } : peer.presharedKey ? { presharedKey: peer.presharedKey } : {}),
+  })).then(() => {
+    setPeer(EMPTY_PEER)
+    setEditing(undefined)
+    invalidatePeers()
+  })
+  const peerState = (each: WireguardPeerState) => {
+    if (each.operationalState === 'endpoint_route_loop') return <Tag tone="pending">{t('network.wireguard.state.loop')}</Tag>
+    if (each.operationalState === 'pending_endpoint_resolution') return <Tag tone="pending">{t('network.wireguard.state.resolving')}</Tag>
+    if (each.routesReady === false) return <Tag tone="pending">{t('network.wireguard.state.unrouted', { prefixes: (each.unroutedIps ?? []).join(', ') })}</Tag>
+    if (each.operationalState === 'ready') return <Tag tone="exit">{t('network.wireguard.state.ready')}</Tag>
+    return <span className="text-muted-foreground">—</span>
+  }
 
   return (
     <>
@@ -271,8 +305,11 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
             { id: 'allowed', header: t('network.wireguard.allowed'), cell: (each) => <span className="font-mono text-[0.8125rem]">{each.allowedIps.join(', ')}</span> },
             { id: 'keepalive', header: t('network.wireguard.keepalive'), cell: (each) => each.persistentKeepalive ? t('network.values.seconds', { count: each.persistentKeepalive }) : '—' },
             { id: 'handshake', header: t('network.wireguard.handshake'), cell: (each) => each.latestHandshake ? formatAge(Date.now() - each.latestHandshake * 1000, t) : <span className="text-muted-foreground">{t('network.wireguard.neverHandshake')}</span> },
+            { id: 'state', header: t('network.fields.state'), cell: peerState },
             { id: 'traffic', header: t('network.wireguard.traffic'), cell: (each) => each.latestHandshake ? <span className="text-muted-foreground">{formatBytes(each.rxBytes ?? 0)} / {formatBytes(each.txBytes ?? 0)}</span> : '—' },
             { id: 'actions', header: '', align: 'end', cell: (each) => (
+              <span className="inline-flex gap-2">
+              <Button type="button" size="sm" variant="outline" aria-label={t('network.wireguard.edit')} onClick={() => openEdit(each)}><Pencil />{t('network.wireguard.edit')}</Button>
               <ConfirmDialog
                 trigger={<Button type="button" size="sm" variant="destructive" aria-label={t('network.wireguard.remove')}><Trash2 />{t('network.wireguard.remove')}</Button>}
                 title={t('network.wireguard.remove')}
@@ -282,6 +319,7 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
                 failure={t('network.wireguard.remove')}
                 onConfirm={() => remove.mutateAsync(each.publicKey)}
               />
+              </span>
             ) },
           ]}
         />
@@ -319,25 +357,35 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
       ) : null}
 
       <FormDialog
-        open={adding}
-        onOpenChange={setAdding}
-        title={t('network.wireguard.add')}
-        description={t('network.wireguard.addCopy', { iface: name })}
-        submitLabel={t('common.actions.add')}
-        success={t('network.wireguard.added')}
-        failure={t('network.wireguard.add')}
-        onSubmit={addPeer}
+        open={adding || editing !== undefined}
+        onOpenChange={(open) => {
+          if (open) return
+          setAdding(false)
+          if (editing) { setEditing(undefined); setPeer(EMPTY_PEER) }
+        }}
+        title={t(editing ? 'network.wireguard.edit' : 'network.wireguard.add')}
+        description={editing ? t('network.wireguard.editCopy', { iface: name }) : t('network.wireguard.addCopy', { iface: name })}
+        submitLabel={editing ? t('common.actions.save') : t('common.actions.add')}
+        success={t(editing ? 'network.wireguard.edited' : 'network.wireguard.added')}
+        failure={t(editing ? 'network.wireguard.edit' : 'network.wireguard.add')}
+        onSubmit={editing ? () => editPeer(editing.publicKey) : addPeer}
         submitDisabled={Object.keys(peerErrors).length > 0}
       >
         <FormField label={t('network.wireguard.name')} hint={peerErrors.name ? <span className="text-destructive">{peerErrors.name}</span> : t('network.wireguard.nameHint')}>
           {(id) => <Input id={id} value={peer.name} onChange={(event) => setPeer({ ...peer, name: event.target.value })} />}
         </FormField>
         <FormField label={t('network.wireguard.publicKey')} hint={peer.publicKey && peerErrors.publicKey ? <span className="text-destructive">{peerErrors.publicKey}</span> : t('network.wireguard.keyHint')}>
-          {(id) => <Input id={id} className="font-mono" value={peer.publicKey} onChange={(event) => setPeer({ ...peer, publicKey: event.target.value.trim() })} required />}
+          {(id) => <Input id={id} className="font-mono" value={peer.publicKey} readOnly={editing !== undefined} onChange={(event) => setPeer({ ...peer, publicKey: event.target.value.trim() })} required />}
         </FormField>
         <FormField label={t('network.wireguard.presharedKey')} hint={peerErrors.presharedKey ? <span className="text-destructive">{peerErrors.presharedKey}</span> : t('network.wireguard.presharedHint')}>
-          {(id) => <Input id={id} className="font-mono" value={peer.presharedKey} placeholder={t('network.wireguard.presharedNone')} onChange={(event) => setPeer({ ...peer, presharedKey: event.target.value.trim() })} />}
+          {(id) => <Input id={id} className="font-mono" value={peer.presharedKey} disabled={peer.removePsk} placeholder={t(editing?.presharedKey ? 'network.wireguard.presharedKeep' : 'network.wireguard.presharedNone')} onChange={(event) => setPeer({ ...peer, presharedKey: event.target.value.trim() })} />}
         </FormField>
+        {editing?.presharedKey ? (
+          <label className="flex items-center gap-2 text-sm">
+            <Switch checked={peer.removePsk} onCheckedChange={(removePsk) => setPeer({ ...peer, removePsk, presharedKey: '' })} aria-label={t('network.wireguard.presharedRemove')} />
+            {t('network.wireguard.presharedRemove')}
+          </label>
+        ) : null}
         <FormField label={t('network.wireguard.endpoint')} hint={peerErrors.endpoint ? <span className="text-destructive">{peerErrors.endpoint}</span> : t('network.wireguard.endpointHint')}>
           {(id) => <Input id={id} className="font-mono" value={peer.endpoint} placeholder="vpn.example.com:51820" onChange={(event) => setPeer({ ...peer, endpoint: event.target.value.trim() })} />}
         </FormField>

@@ -336,5 +336,59 @@ pub fn wireguard_route_violations(
     found
 }
 
+/// Where a peer stands, read from what the kernel reports of it.
+///
+/// - `pending_endpoint_resolution`: an endpoint is configured and the kernel
+///   holds none yet (a host name networkd has not resolved);
+/// - `endpoint_route_loop`: the kernel's endpoint lies inside a prefix one of
+///   the tunnel's peers routes into the tunnel, so the tunnel's own packets
+///   would be sent through itself;
+/// - `ready` otherwise, a peer with no endpoint that waits to be reached
+///   included.
+#[must_use]
+pub fn wireguard_peer_state(
+    peers: &[WireguardPeer],
+    peer: &WireguardPeer,
+    kernel_endpoint: Option<&str>,
+) -> &'static str {
+    let Some(endpoint) = kernel_endpoint else {
+        return if peer.endpoint.is_some() {
+            "pending_endpoint_resolution"
+        } else {
+            "ready"
+        };
+    };
+    let looped = endpoint_addr(endpoint).is_some_and(|addr| {
+        peers
+            .iter()
+            .flat_map(peer_prefixes)
+            .any(|prefix| prefix.contains_addr(addr))
+    });
+    if looped {
+        "endpoint_route_loop"
+    } else {
+        "ready"
+    }
+}
+
+/// The peer's allowed IPs the kernel does not send out of the tunnel: those
+/// whose `routed` entry (a kernel prefix and whether its network address
+/// leaves by the tunnel) is absent or not `true`, in stored order.
+#[must_use]
+pub fn wireguard_unrouted(peer: &WireguardPeer, routed: &[(String, Option<bool>)]) -> Vec<String> {
+    let routed: Vec<(Prefix, bool)> = routed
+        .iter()
+        .filter_map(|(prefix, ok)| Some((Prefix::parse(prefix)?, *ok == Some(true))))
+        .collect();
+    peer.allowed_ips
+        .iter()
+        .filter(|allowed| {
+            Prefix::parse(allowed)
+                .is_none_or(|wanted| !routed.iter().any(|(seen, ok)| *seen == wanted && *ok))
+        })
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

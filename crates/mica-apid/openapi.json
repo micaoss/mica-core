@@ -15654,7 +15654,8 @@
         "required": [
           "publicKey",
           "presharedKey",
-          "allowedIps"
+          "allowedIps",
+          "unroutedIps"
         ],
         "properties": {
           "allowedIps": {
@@ -15687,6 +15688,13 @@
             ],
             "description": "A label for the peer."
           },
+          "operationalState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`ready`, `pending_endpoint_resolution` (a configured endpoint the\nkernel holds none for yet) or `endpoint_route_loop` (the kernel's\nendpoint lies inside a prefix the tunnel routes); `null` when the\ntunnel could not be asked."
+          },
           "persistentKeepalive": {
             "type": [
               "integer",
@@ -15703,6 +15711,13 @@
           "publicKey": {
             "type": "string",
             "description": "The peer's X25519 public key, also its `DELETE` path segment."
+          },
+          "routesReady": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the kernel sends every allowed IP out of this tunnel; `null`\nwhen the tunnel could not be asked."
           },
           "rxBytes": {
             "type": [
@@ -15721,6 +15736,13 @@
             "format": "int64",
             "description": "Bytes sent to the peer; `null` when the tunnel could not be asked.",
             "minimum": 0
+          },
+          "unroutedIps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The allowed IPs the kernel does not send out of this tunnel."
           }
         }
       },

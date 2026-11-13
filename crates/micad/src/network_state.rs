@@ -307,14 +307,29 @@ pub(crate) async fn observe_links(describe: Result<&Value, &str>) -> LinkEvidenc
             evidence.can.insert(name, value);
         } else if wireguard {
             let asked = name.clone();
+            let index = link
+                .get("Index")
+                .and_then(Value::as_u64)
+                .and_then(|index| u32::try_from(index).ok());
             let value = match tokio::task::spawn_blocking(move || {
-                crate::netlink::wireguard_device(&asked)
+                crate::netlink::wireguard_device(&asked).map(|peers| {
+                    // Each allowed IP is routed when the kernel sends its
+                    // network address out of this tunnel.
+                    let routed = |address| {
+                        let link = crate::netlink::route_link(address).ok()?;
+                        Some(index.is_some() && link == index)
+                    };
+                    peers
+                        .iter()
+                        .map(|peer| peer.to_json(routed))
+                        .collect::<Vec<_>>()
+                })
             })
             .await
             {
                 Ok(Ok(peers)) => json!({
                     "available": true,
-                    "peers": peers.iter().map(crate::netlink::WireguardPeerObservation::to_json).collect::<Vec<_>>(),
+                    "peers": peers,
                 }),
                 Ok(Err(err)) => absent(format!("the kernel could not be asked: {err}")),
                 Err(err) => absent(format!("the kernel could not be asked: {err}")),

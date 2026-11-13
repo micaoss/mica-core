@@ -12,7 +12,7 @@
 //! without a kernel.
 
 use std::io;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -45,6 +45,7 @@ const RTA_DST: u16 = 1;
 const RTA_OIF: u16 = 4;
 const RTA_GATEWAY: u16 = 5;
 const AF_INET: u8 = 2;
+const AF_INET6: u8 = 10;
 const RT_SCOPE_HOST: u8 = 254;
 const IFA_LOCAL: u16 = 2;
 const IFA_LABEL: u16 = 3;
@@ -70,10 +71,15 @@ const WG_CMD_GET_DEVICE: u8 = 0;
 const WGDEVICE_A_IFNAME: u16 = 2;
 const WGDEVICE_A_PEERS: u16 = 8;
 const WGPEER_A_PUBLIC_KEY: u16 = 1;
+const WGPEER_A_ENDPOINT: u16 = 4;
 const WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL: u16 = 5;
 const WGPEER_A_LAST_HANDSHAKE_TIME: u16 = 6;
 const WGPEER_A_RX_BYTES: u16 = 7;
 const WGPEER_A_TX_BYTES: u16 = 8;
+const WGPEER_A_ALLOWEDIPS: u16 = 9;
+const WGALLOWEDIP_A_FAMILY: u16 = 1;
+const WGALLOWEDIP_A_IPADDR: u16 = 2;
+const WGALLOWEDIP_A_CIDR_MASK: u16 = 3;
 
 /// The attributes in `bytes`: each one's type, flags masked off, and payload.
 /// A truncated tail ends the walk.
@@ -362,11 +368,54 @@ pub struct RouteChoice {
 }
 
 fn route_request(destination: Ipv4Addr) -> Vec<u8> {
+    route_request_to(IpAddr::V4(destination))
+}
+
+fn route_request_to(destination: IpAddr) -> Vec<u8> {
     let mut body = vec![0u8; RTMSG];
-    body[0] = AF_INET;
-    body[1] = 32;
-    body.extend(attribute(RTA_DST, &destination.octets()));
+    match destination {
+        IpAddr::V4(address) => {
+            body[0] = AF_INET;
+            body[1] = 32;
+            body.extend(attribute(RTA_DST, &address.octets()));
+        }
+        IpAddr::V6(address) => {
+            body[0] = AF_INET6;
+            body[1] = 128;
+            body.extend(attribute(RTA_DST, &address.octets()));
+        }
+    }
     message(RTM_GETROUTE, 0, &body)
+}
+
+/// The output link of an `RTM_NEWROUTE` body, of either family.
+fn route_link_of(body: &[u8]) -> Option<u32> {
+    attributes(body.get(RTMSG..)?)
+        .iter()
+        .find(|(kind, _)| *kind == RTA_OIF)
+        .and_then(|(_, payload)| u32_at(payload, 0))
+}
+
+/// The link the kernel sends traffic for `destination` out of, IPv4 or
+/// IPv6, as `ip route get` answers. `None` when the kernel has no route.
+pub fn route_link(destination: IpAddr) -> io::Result<Option<u32>> {
+    match exchange(None, &route_request_to(destination)) {
+        Ok(replies) => Ok(replies
+            .iter()
+            .filter(|(kind, _)| *kind == RTM_NEWROUTE)
+            .find_map(|(_, body)| route_link_of(body))),
+        Err(err)
+            if [
+                rustix::io::Errno::NETUNREACH,
+                rustix::io::Errno::HOSTUNREACH,
+            ]
+            .iter()
+            .any(|errno| err.raw_os_error() == Some(errno.raw_os_error())) =>
+        {
+            Ok(None)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 /// An `RTM_NEWROUTE` body's output link and gateway. `None` for a body
@@ -415,19 +464,70 @@ pub struct WireguardPeerObservation {
     pub rx_bytes: u64,
     pub tx_bytes: u64,
     pub persistent_keepalive: u16,
+    /// The address the kernel sends this peer's packets to: the configured
+    /// endpoint once resolved, or where the peer was last heard from.
+    pub endpoint: Option<SocketAddr>,
+    /// The peer's allowed IPs as the kernel holds them, network address and
+    /// prefix length.
+    pub allowed_ips: Vec<(IpAddr, u8)>,
 }
 
 impl WireguardPeerObservation {
+    /// The peer as JSON, each allowed IP with `routed`: what `routed` says
+    /// of its network address, `null` when it was not asked.
     #[must_use]
-    pub fn to_json(&self) -> Value {
+    pub fn to_json(&self, routed: impl Fn(IpAddr) -> Option<bool>) -> Value {
         json!({
             "publicKey": self.public_key,
             "latestHandshake": self.latest_handshake,
             "rxBytes": self.rx_bytes,
             "txBytes": self.tx_bytes,
             "persistentKeepalive": self.persistent_keepalive,
+            "endpoint": self.endpoint.map(|endpoint| endpoint.to_string()),
+            "allowedIps": self.allowed_ips.iter().map(|(address, length)| json!({
+                "prefix": format!("{address}/{length}"),
+                "routed": routed(*address),
+            })).collect::<Vec<_>>(),
         })
     }
+}
+
+/// A `sockaddr_in` or `sockaddr_in6` as the kernel writes it.
+fn socket_address(payload: &[u8]) -> Option<SocketAddr> {
+    let family = u16_at(payload, 0)?;
+    let port = u16::from_be_bytes([*payload.get(2)?, *payload.get(3)?]);
+    match u8::try_from(family).ok()? {
+        AF_INET => {
+            let octets: [u8; 4] = payload.get(4..8)?.try_into().ok()?;
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port))
+        }
+        AF_INET6 => {
+            let octets: [u8; 16] = payload.get(8..24)?.try_into().ok()?;
+            Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(octets)), port))
+        }
+        _ => None,
+    }
+}
+
+/// One `WGPEER_A_ALLOWEDIPS` entry: its address and prefix length.
+fn allowed_ip(entry: &[u8]) -> Option<(IpAddr, u8)> {
+    let mut family = None;
+    let mut address = None;
+    let mut length = None;
+    for (kind, payload) in attributes(entry) {
+        match kind {
+            WGALLOWEDIP_A_FAMILY => family = u16_at(payload, 0),
+            WGALLOWEDIP_A_IPADDR => address = Some(payload),
+            WGALLOWEDIP_A_CIDR_MASK => length = payload.first().copied(),
+            _ => {}
+        }
+    }
+    let address = match u8::try_from(family?).ok()? {
+        AF_INET => IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(address?).ok()?)),
+        AF_INET6 => IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(address?).ok()?)),
+        _ => return None,
+    };
+    Some((address, length?))
 }
 
 /// The generic netlink family id in a `CTRL_CMD_GETFAMILY` reply body.
@@ -457,6 +557,8 @@ pub fn wireguard_peers(body: &[u8]) -> Vec<WireguardPeerObservation> {
                 rx_bytes: 0,
                 tx_bytes: 0,
                 persistent_keepalive: 0,
+                endpoint: None,
+                allowed_ips: Vec::new(),
             };
             for (kind, payload) in attributes(peer) {
                 match kind {
@@ -474,6 +576,12 @@ pub fn wireguard_peers(body: &[u8]) -> Vec<WireguardPeerObservation> {
                     }
                     WGPEER_A_RX_BYTES => observation.rx_bytes = u64_at(payload, 0).unwrap_or(0),
                     WGPEER_A_TX_BYTES => observation.tx_bytes = u64_at(payload, 0).unwrap_or(0),
+                    WGPEER_A_ENDPOINT => observation.endpoint = socket_address(payload),
+                    WGPEER_A_ALLOWEDIPS => observation.allowed_ips.extend(
+                        attributes(payload)
+                            .into_iter()
+                            .filter_map(|(_, ip)| allowed_ip(ip)),
+                    ),
                     _ => {}
                 }
             }
@@ -498,12 +606,26 @@ pub fn wireguard_device(interface: &str) -> io::Result<Vec<WireguardPeerObservat
         })?;
     let mut body = vec![WG_CMD_GET_DEVICE, WG_GENL_VERSION, 0, 0];
     body.extend(attribute(WGDEVICE_A_IFNAME, &name_payload(interface)));
-    Ok(
-        exchange(Some(netlink::GENERIC), &message(family, NLM_F_DUMP, &body))?
-            .iter()
-            .flat_map(|(_, body)| wireguard_peers(body))
-            .collect(),
-    )
+    let mut peers: Vec<WireguardPeerObservation> = Vec::new();
+    for (_, body) in exchange(Some(netlink::GENERIC), &message(family, NLM_F_DUMP, &body))? {
+        merge_peers(&mut peers, wireguard_peers(&body));
+    }
+    Ok(peers)
+}
+
+/// Add one reply's peers to those of the replies before it. A peer whose
+/// allowed IPs do not fit one reply is continued in the next under the same
+/// public key, with the rest of them.
+fn merge_peers(peers: &mut Vec<WireguardPeerObservation>, more: Vec<WireguardPeerObservation>) {
+    for peer in more {
+        match peers
+            .iter_mut()
+            .find(|seen| seen.public_key == peer.public_key)
+        {
+            Some(seen) => seen.allowed_ips.extend(peer.allowed_ips),
+            None => peers.push(peer),
+        }
+    }
 }
 
 #[cfg(test)]

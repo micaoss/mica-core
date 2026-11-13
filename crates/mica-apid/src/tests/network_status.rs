@@ -94,3 +94,44 @@ pub(super) async fn listed_peers_carry_their_handshake_and_traffic() {
     assert_eq!(listed[0]["latestHandshake"], serde_json::Value::Null);
     assert_eq!(listed[0]["rxBytes"], serde_json::Value::Null);
 }
+
+// Where a peer stands and whether its routes leave by the tunnel, from the
+// kernel's endpoint and per-prefix route check; null when the tunnel could
+// not be asked.
+#[tokio::test]
+pub(super) async fn listed_peers_carry_their_state_and_routes() {
+    let (router, fake, _cookie, token) = kinds_app().await;
+    let observed = |endpoint: serde_json::Value, routed: bool| {
+        json!({
+            "interfaces": { "available": true, "count": 1, "entries": [
+                { "name": "wg0", "present": true, "addresses": [], "wireguard": { "available": true, "peers": [
+                    { "publicKey": PEER_KEY, "latestHandshake": null, "rxBytes": 0, "txBytes": 0,
+                      "persistentKeepalive": 0, "endpoint": endpoint,
+                      "allowedIps": [{ "prefix": "10.8.0.0/24", "routed": routed }] }
+                ] } }
+            ] },
+        })
+    };
+
+    // The stored peer names a host endpoint the kernel has not resolved.
+    fake.set_observed_network(observed(serde_json::Value::Null, true));
+    let listed = body_json(bearer(&router, "GET", &peers_url("wg0"), &token).await).await;
+    assert_eq!(listed[0]["operationalState"], "pending_endpoint_resolution");
+    assert_eq!(listed[0]["routesReady"], true);
+    assert_eq!(listed[0]["unroutedIps"], json!([]));
+
+    fake.set_observed_network(observed(json!("10.8.0.9:51820"), false));
+    let listed = body_json(bearer(&router, "GET", &peers_url("wg0"), &token).await).await;
+    assert_eq!(listed[0]["operationalState"], "endpoint_route_loop");
+    assert_eq!(listed[0]["routesReady"], false);
+    assert_eq!(listed[0]["unroutedIps"], json!(["10.8.0.0/24"]));
+
+    fake.set_observed_network(observed(json!("198.51.100.4:51820"), true));
+    let listed = body_json(bearer(&router, "GET", &peers_url("wg0"), &token).await).await;
+    assert_eq!(listed[0]["operationalState"], "ready");
+
+    fake.set_observed_network(json!({ "interfaces": { "available": false, "detail": "fake" } }));
+    let listed = body_json(bearer(&router, "GET", &peers_url("wg0"), &token).await).await;
+    assert_eq!(listed[0]["operationalState"], serde_json::Value::Null);
+    assert_eq!(listed[0]["routesReady"], serde_json::Value::Null);
+}

@@ -258,3 +258,66 @@ fn an_endpoint_inside_the_routed_prefixes_is_a_loop() {
     }));
     assert!(codes(&empty, &named).is_empty());
 }
+
+fn peer(key: &str, endpoint: Option<&str>, allowed: &[&str]) -> WireguardPeer {
+    serde_json::from_value(json!({
+        "publicKey": key,
+        "endpoint": endpoint,
+        "allowedIps": allowed,
+    }))
+    .expect("a peer")
+}
+
+/// A configured endpoint the kernel does not hold yet is pending; one the
+/// kernel holds inside a prefix of any of the tunnel's peers is a loop; a
+/// peer without an endpoint is ready.
+#[test]
+fn a_peer_state_reads_the_kernel_endpoint_against_the_tunnel_prefixes() {
+    let a = peer(A, Some("vpn.example.net:51820"), &["10.8.0.0/24"]);
+    let b = peer(B, None, &["192.0.2.0/24", "fd00:8::/64"]);
+    let peers = [a.clone(), b.clone()];
+
+    assert_eq!(
+        wireguard_peer_state(&peers, &a, None),
+        "pending_endpoint_resolution"
+    );
+    assert_eq!(wireguard_peer_state(&peers, &b, None), "ready");
+    assert_eq!(
+        wireguard_peer_state(&peers, &a, Some("198.51.100.4:51820")),
+        "ready"
+    );
+    assert_eq!(
+        wireguard_peer_state(&peers, &a, Some("192.0.2.9:51820")),
+        "endpoint_route_loop"
+    );
+    assert_eq!(
+        wireguard_peer_state(&peers, &a, Some("[fd00:8::3]:51820")),
+        "endpoint_route_loop"
+    );
+}
+
+/// A prefix counts as routed only when the kernel holds the same prefix and
+/// sends it out of the tunnel; spellings of one prefix match.
+#[test]
+fn a_prefix_is_unrouted_unless_the_kernel_sends_it_out_of_the_tunnel() {
+    let p = peer(
+        A,
+        None,
+        &[
+            "10.8.0.0/24",
+            "10.9.0.1/16",
+            "fd00:8:0::/64",
+            "172.16.0.0/12",
+        ],
+    );
+    let routed = vec![
+        ("10.8.0.0/24".to_string(), Some(true)),
+        ("10.9.0.0/16".to_string(), Some(true)),
+        ("fd00:8::/64".to_string(), Some(false)),
+    ];
+    assert_eq!(
+        wireguard_unrouted(&p, &routed),
+        ["fd00:8:0::/64", "172.16.0.0/12"]
+    );
+    assert!(wireguard_unrouted(&peer(A, None, &["10.8.0.0/24"]), &routed).is_empty());
+}
