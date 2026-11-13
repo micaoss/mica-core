@@ -636,7 +636,7 @@ told. `mica-unit` stays on the device for a service micad does not manage.
 
 **Settings.** `services.units.<name>` is `{"kind", "text", "conf"?, "enabled"}`, in
 `/mica/config/services.json`. The name is the unit file's under systemd (`x.service`, `x.socket`,
-`x.timer`, `x.path`, `x.target`, `x.mount`, a template `x@.service`; addressed quoted,
+`x.timer`, `x.path`, `x.target`, `x.mount`, `x.automount`, `x.swap`, a template `x@.service`; addressed quoted,
 `services.units."x.service"`) and the script's under OpenRC (`[A-Za-z0-9._-]`, at most 64, no
 leading `.`). `kind` is the init it is for, `systemd` or `openrc`; `text` the unit file or the
 openrc-run script (its first line `#!/sbin/openrc-run`); `conf` the script's `conf.d` file

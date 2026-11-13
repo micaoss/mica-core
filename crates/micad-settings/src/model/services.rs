@@ -43,8 +43,15 @@ const MAX_SYSTEMD_NAME_LEN: usize = 255;
 /// The longest an OpenRC script name may be.
 const MAX_OPENRC_NAME_LEN: usize = 64;
 /// The unit types `mica-unit` installs.
-const SYSTEMD_SUFFIXES: [&str; 6] = [
-    ".service", ".socket", ".timer", ".path", ".target", ".mount",
+const SYSTEMD_SUFFIXES: [&str; 8] = [
+    ".service",
+    ".socket",
+    ".timer",
+    ".path",
+    ".target",
+    ".mount",
+    ".automount",
+    ".swap",
 ];
 /// The first lines `mica-unit` takes as an openrc-run script.
 const OPENRC_SHEBANGS: [&str; 3] = [
@@ -159,7 +166,8 @@ fn validate_user_unit(name: &str, unit: &UserUnit) -> Result<(), String> {
             if !is_systemd_unit_name(name) {
                 return Err(format!(
                     "{name:?} is not a unit file name: a name of a-z, A-Z, 0-9, `:`, `_`, `.`, `-` \
-                     ending in .service, .socket, .timer, .path, .target or .mount, a template \
+                     ending in .service, .socket, .timer, .path, .target, .mount, .automount or \
+                     .swap, a template \
                      (name@.service) at most"
                 ));
             }
@@ -242,12 +250,15 @@ mod tests {
             "x@.service",
             "x.socket",
             "x.mount",
+            "srv-backup.automount",
+            "dev-disk-by\\x2duuid-1234.swap",
         ] {
             assert!(is_systemd_unit_name(name), "{name}");
         }
         for name in [
             "x",
             "x.conf",
+            "x.slice",
             "x@y.service",
             ".service",
             "@.service",
