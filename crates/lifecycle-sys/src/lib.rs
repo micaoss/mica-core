@@ -12,6 +12,7 @@ mod clock;
 mod dm;
 mod keyring;
 mod quota;
+mod resize;
 mod startup;
 mod trim;
 mod ubi;
@@ -23,6 +24,7 @@ pub use keyring::{
     restrict_keyring,
 };
 pub use quota::{ProjectQuota, project_of, project_quota, set_project_inherit, set_project_limits};
+pub use resize::ext4_resize;
 pub use startup::{
     DmCreated, dm_create, dm_discard_created, dm_load_crypt, dm_load_verity, dm_resume,
     dm_resume_writable, loop_attach, loop_free,

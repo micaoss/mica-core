@@ -7,6 +7,11 @@
 //! replayed a partial grow, trips over the group count it recovered
 //! (`ext4_flex_group_add`, a kernel BUG): a mount and unmount first make the
 //! mount the root is given one that recovered nothing.
+//!
+//! An encrypted DATA is grown here too, after the mount the root is given:
+//! its mapping covers the whole partition at each boot, so once
+//! `systemd-repart` or `mica-grow-data` grew the partition the ext4 inside
+//! is smaller than the mapping, and the root has no fstab line to grow it.
 
 use anyhow::{Context, Result, ensure};
 use rustix::mount::{MountFlags, UnmountFlags};
@@ -71,6 +76,28 @@ pub fn replay_data(device: &str, target: &str, flags: MountFlags, data: &CStr) -
     Ok(format!(
         "ext4 of {fs} bytes on {partition}: journal replayed in a mount of its own"
     ))
+}
+
+/// Grow the ext4 mounted at `target` from `device` online to fill
+/// `device`, when it is smaller; answer what was done. Run again after a
+/// power cut stopped it, it grows what is left, and once grown it does
+/// nothing.
+///
+/// # Errors
+///
+/// `device` cannot be read, or the kernel refuses the grow.
+pub fn grow_data(device: &str, target: &str) -> Result<String> {
+    ensure!(target == "/newroot/mnt/data", "only DATA is grown");
+    let (fs, size) = ext4_extent(&mut File::open(device)?)?;
+    let block = rustix::fs::statvfs(target)?.f_bsize;
+    ensure!(block.is_power_of_two(), "invalid ext4 block size");
+    let blocks = size / block;
+    if blocks * block <= fs {
+        return Ok(String::new());
+    }
+    lifecycle_sys::ext4_resize(File::open(target)?, blocks)
+        .with_context(|| format!("grow the ext4 on {device} to {blocks} blocks"))?;
+    Ok(format!("ext4 grown from {fs} to {} bytes", blocks * block))
 }
 
 #[cfg(test)]

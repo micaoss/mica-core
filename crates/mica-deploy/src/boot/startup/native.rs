@@ -92,6 +92,12 @@ pub enum Operation {
         target: String,
         options: String,
     },
+    /// Grow the ext4 mounted at `target` from the block device `device` to
+    /// fill it (`replay::grow_data`), and print what was done.
+    GrowData {
+        device: String,
+        target: String,
+    },
     Verity {
         device: String,
         name: String,
@@ -324,6 +330,9 @@ fn perform(operation: Operation) -> Result<()> {
                 "{}",
                 replay::replay_data(&device, &target, flags, data.as_c_str())?
             );
+        }
+        Operation::GrowData { device, target } => {
+            println!("{}", replay::grow_data(&device, &target)?);
         }
         Operation::Verity {
             device,

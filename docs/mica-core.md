@@ -1634,7 +1634,10 @@ unmounted. The root's own mount of DATA is the one the runkit made: an encrypted
 a `dm-*` device without a name unready, so a line on `/dev/mapper/mica-data` would wait on, or be
 stopped with, a device that never appears; the root runs no check on DATA either. The mapping
 covers the whole partition at each boot (the segment size is `dynamic`), so a partition grown by
-`systemd-repart` is mapped whole at the next boot, but the ext4 inside is not grown yet. The volume is standard LUKS2: `cryptsetup open` with the recovery passphrase opens it.
+`systemd-repart`, or by `mica-grow-data` on OpenRC, is mapped whole at the next boot, and the
+runkit grows the ext4 inside it online (`EXT4_IOC_RESIZE_FS`) once it has mounted it, after the
+mount of its own that replays an interrupted grow; a grow that fails is logged and the boot goes
+on. The volume is standard LUKS2: `cryptsetup open` with the recovery passphrase opens it.
 A keyslot and token another tool adds (`clevis luks bind`, say) stay in the header untouched; the
 runkit tries only its providers' token types.
 

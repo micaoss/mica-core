@@ -264,6 +264,88 @@ fn vm_step() {
             println!("VM unlock: {}", serde_json::to_string(&report).unwrap());
             println!("VM_STEP unlock PASS");
         }
+        // The partition was grown between boots, as `systemd-repart` or
+        // `mica-grow-data` grows it: the mapping follows it whole, and the
+        // ext4 inside is grown online after the runkit's two mounts.
+        "grow" | "growcut" | "growagain" => {
+            use crate::boot::startup::native::replay::{ext4_extent, grow_data, replay_data};
+            let report = open("/dev/vdb1", Some(&on));
+            assert_eq!(report.state, State::On, "{report:?}");
+            let target = "/newroot/mnt/data";
+            fs::create_dir_all(target).unwrap();
+            let (before, mapped) = ext4_extent(&mut File::open(MAPPED).unwrap()).unwrap();
+            println!("VM {step}: ext4 {before} bytes in a mapping of {mapped}");
+            let replayed =
+                replay_data(MAPPED, target, rustix::mount::MountFlags::empty(), c"").unwrap();
+            println!("VM {step}: replay: {replayed:?}");
+            rustix::mount::mount(
+                MAPPED,
+                target,
+                "ext4",
+                rustix::mount::MountFlags::empty(),
+                c"",
+            )
+            .unwrap();
+            let grown = grow_data(MAPPED, target).unwrap();
+            println!("VM {step}: grow: {grown:?}");
+            if step == "growcut" {
+                // A power cut right after the grow: no unmount, no sync.
+                assert!(before < mapped, "the partition was grown for this boot");
+                println!("VM_STEP growcut PASS (cut now)");
+                let _ = std::process::Command::new("/bin/busybox")
+                    .args(["poweroff", "-f"])
+                    .status();
+            }
+            assert_eq!(grow_data(MAPPED, target).unwrap(), "", "grown once");
+            // The root's own `systemd-growfs@mnt-data` runs on the grown
+            // mount, without libcryptsetup as on a MICA root, when the VM
+            // driver supplies it under /growfs.
+            if Path::new("/growfs").exists() {
+                let lib = "/lib/x86_64-linux-gnu/libcryptsetup.so.12";
+                let hidden = fs::rename(lib, "/libcryptsetup.hidden").is_ok();
+                let growfs = std::process::Command::new("/growfs/lib64/ld-linux-x86-64.so.2")
+                    .args([
+                        "--library-path",
+                        "/growfs/lib/x86_64-linux-gnu:/growfs/usr/lib/x86_64-linux-gnu/systemd:/growfs/usr/lib/x86_64-linux-gnu",
+                        "/growfs/usr/lib/systemd/systemd-growfs",
+                        target,
+                    ])
+                    .env("SYSTEMD_LOG_LEVEL", "debug")
+                    .output()
+                    .unwrap();
+                if hidden {
+                    fs::rename("/libcryptsetup.hidden", lib).unwrap();
+                }
+                println!(
+                    "VM {step}: systemd-growfs: {} {}{}",
+                    growfs.status,
+                    String::from_utf8_lossy(&growfs.stdout),
+                    String::from_utf8_lossy(&growfs.stderr)
+                );
+            }
+            assert_eq!(
+                fs::read_to_string(format!("{target}/proof")).unwrap(),
+                "mica w1 step 1"
+            );
+            rustix::mount::unmount(target, rustix::mount::UnmountFlags::empty()).unwrap();
+            let (after, mapped) = ext4_extent(&mut File::open(MAPPED).unwrap()).unwrap();
+            assert_eq!(after, mapped, "the ext4 fills its mapping");
+            if step == "grow" {
+                assert!(before < after, "{before} grew");
+            }
+            let check = std::process::Command::new("/usr/sbin/e2fsck")
+                .args(["-f", "-n", MAPPED])
+                .output()
+                .unwrap();
+            assert!(
+                check.status.success(),
+                "e2fsck: {}",
+                String::from_utf8_lossy(&check.stdout)
+            );
+            unmap();
+            println!("VM {step}: ext4 {after} bytes, e2fsck clean");
+            println!("VM_STEP {step} PASS");
+        }
         "cleared" => {
             let report = open("/dev/vdb1", Some(&on));
             assert_eq!(report.state, State::Locked, "{report:?}");

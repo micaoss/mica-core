@@ -425,6 +425,23 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
             Err(error) => eprintln!("mica-init: DATA journal not replayed: {error:#}"),
         }
         mount(control, &data, "/newroot/mnt/data", "ext4", options)?;
+        // An encrypted DATA's mapping covers its whole partition, which the
+        // root may have grown since the last boot: its ext4 is grown here,
+        // online, in the mount the root is given, which recovered nothing.
+        // A DATA that is not grown is still DATA: the boot goes on.
+        if opened.state == DataState::On {
+            match run(
+                control,
+                Startup::GrowData {
+                    device: data.clone(),
+                    target: "/newroot/mnt/data".into(),
+                },
+            ) {
+                Ok(done) if done.trim().is_empty() => {}
+                Ok(done) => eprintln!("mica-init: DATA {}", done.trim()),
+                Err(error) => eprintln!("mica-init: DATA not grown: {error:#}"),
+            }
+        }
         Ok((quotas, Some(opened)))
     })()
     .context(mica_deploy::deployments::SharedDataFailure)?;
