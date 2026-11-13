@@ -1488,6 +1488,15 @@ export const en = {
         ejected: 'Safe to unplug',
         safeToUnplug: 'safe to unplug',
       },
+      userMounts: {
+        title: 'Your mounts',
+        description: 'Disks and swap you mount yourself, under /srv, /var/mnt, a home or an engine root, with units or fstab lines. Read only.',
+        user: 'yours',
+        other: 'not declared',
+        swap: 'Swap',
+        used: '{{used}} used of {{total}}',
+        none: 'Nothing is mounted in the places you may mount, and no swap is active.',
+      },
       media: {
         title: 'Media',
         description: 'Physical media and what each one reports about its own wear.',

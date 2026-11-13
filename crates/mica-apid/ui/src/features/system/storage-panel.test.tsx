@@ -152,6 +152,38 @@ describe('storage status', () => {
   })
 })
 
+describe('user mounts', () => {
+  it('lists the mounts in user places and the swaps, marking what the user declared', async () => {
+    stubFetch({
+      '/api/v1/storage/media': NO_MEDIA,
+      '/api/v1/storage/status': status({
+        userMounts: [
+          { target: '/srv/backup', source: '/dev/sdb1', filesystem: 'ext4', options: 'rw,nosuid,nodev,noatime', user: true, totalBytes: 2_147_483_648, usedBytes: 1_073_741_824 },
+          { target: '/var/mnt/media', source: 'systemd-1', filesystem: 'autofs', options: 'rw,relatime', user: false },
+        ],
+        swaps: [{ source: '/dev/sdb2', kind: 'partition', sizeBytes: 1_073_741_824, usedBytes: 0, user: true }],
+      }),
+    })
+    renderPanel(<StoragePanel />)
+
+    const backup = (await screen.findByText('/srv/backup')).closest('li, div')!
+    expect(within(backup as HTMLElement).getByText('yours')).toBeTruthy()
+    expect(screen.getByText(/\/dev\/sdb1 · ext4 · rw,nosuid,nodev,noatime · 1.0 GiB used of 2.0 GiB/)).toBeTruthy()
+    // No space for an automount: reading it would mount it.
+    expect(screen.getByText('systemd-1 · autofs · rw,relatime')).toBeTruthy()
+    expect(screen.getByText('not declared')).toBeTruthy()
+    expect(screen.getByText('/dev/sdb2')).toBeTruthy()
+    expect(screen.getByText(/partition · 0 B used of 1.0 GiB/)).toBeTruthy()
+  })
+
+  it('says when nothing is mounted in user places', async () => {
+    stubFetch({ '/api/v1/storage/media': NO_MEDIA, '/api/v1/storage/status': status({ userMounts: [], swaps: [] }) })
+    renderPanel(<StoragePanel />)
+
+    expect(await screen.findByText('Nothing is mounted in the places you may mount, and no swap is active.')).toBeTruthy()
+  })
+})
+
 describe('external media', () => {
   const media = (items: ExternalVolume[]) => ({ '/api/v1/storage/status': status(), '/api/v1/storage/media': { generation: '1', items } })
 

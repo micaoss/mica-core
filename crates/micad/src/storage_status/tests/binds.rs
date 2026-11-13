@@ -49,6 +49,7 @@ pub(super) fn a_bind_is_ready_only_when_it_is_actually_data_and_writable() {
     let read_only = BindEvidence {
         mount: Some(MountEvidence {
             read_only: true,
+            options: String::new(),
             ..mounted("/dev/mmcblk0p11", "/mica")
         }),
         ..bound("/dev/mmcblk0p11")

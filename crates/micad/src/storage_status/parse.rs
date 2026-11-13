@@ -48,6 +48,7 @@ pub fn parse_mountinfo(text: &str) -> Vec<MountEvidence> {
                 mount: unescape_octal(left.get(4)?),
                 fstype: (*right.first()?).to_string(),
                 read_only: left.get(5)?.split(',').any(|option| option == "ro"),
+                options: (*left.get(5)?).to_string(),
             })
         })
         .collect()

@@ -236,6 +236,24 @@ impl HostStorage {
         mounts
     }
 
+    /// What the user's units (`/usr/local/lib/systemd/system`, `mica-unit`'s)
+    /// and OpenRC fstab (`/usr/local/etc/fstab`) declare.
+    pub(super) fn declared(&self) -> user_mounts::Declared {
+        let mut declared = user_mounts::Declared::default();
+        if let Ok(entries) = std::fs::read_dir(self.path("usr/local/lib/systemd/system")) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if let Ok(text) = mica_fs::read_bounded(&entry.path(), 64 * 1024) {
+                    declared.unit(&name, &String::from_utf8_lossy(&text));
+                }
+            }
+        }
+        if let Ok(text) = mica_fs::read_bounded(&self.path("usr/local/etc/fstab"), 64 * 1024) {
+            declared.fstab(&String::from_utf8_lossy(&text));
+        }
+        declared
+    }
+
     /// The device under the device-mapper device `device` (`/dev/dm-N` or
     /// `/dev/mapper/<name>`), followed down its one backing device at each
     /// level (`/sys/block/dm-N/slaves`): an encrypted DATA's partition under
@@ -594,12 +612,27 @@ impl StorageStatusSource for HostStorage {
             .iter()
             .map(|spec| (spec.name.to_string(), self.bind(spec, &mounts)))
             .collect();
+        let declared = self.declared();
+        let data_device = tiers
+            .get(DATA_TIER)
+            .and_then(|tier: &TierEvidence| tier.device.clone());
+        let mut user_mounts = user_mounts::user_mounts(&mounts, data_device.as_deref(), &declared);
+        for mount in &mut user_mounts {
+            if mount.source.starts_with("/dev/") {
+                mount.space = (self.space)(&mount.target);
+            }
+        }
+        let swaps = std::fs::read_to_string(self.path("proc/swaps"))
+            .map(|text| user_mounts::parse_swaps(&text, &declared))
+            .unwrap_or_default();
         Ok(StorageEvidence {
             directory_bytes,
             project_quotas,
             tiers,
             media,
             binds,
+            user_mounts,
+            swaps,
         })
     }
 }

@@ -35,6 +35,7 @@ pub(super) fn the_status_json_carries_every_tier_and_names_the_absent_ones() {
                 mount: "/mnt/system".to_string(),
                 fstype: "ext4".to_string(),
                 read_only: true,
+                options: String::new(),
             }),
             ..TierEvidence::default()
         },
@@ -57,6 +58,7 @@ pub(super) fn the_status_json_carries_every_tier_and_names_the_absent_ones() {
                 pre_eol_raw: Some("0x01".to_string()),
             },
         }],
+        ..StorageEvidence::default()
     };
     let value = status_json(&evidence, &PressureTracker::default());
 

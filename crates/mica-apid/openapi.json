@@ -6407,7 +6407,7 @@
         "operationId": "api_v1_storage_status",
         "responses": {
           "200": {
-            "description": "The fixed tiers with their space, mount and check evidence; the `/mica` and `/srv` bind namespaces with their readiness (one shared capacity pool, reported once on the `data` tier); the physical media with normalized wear or an explicit `unsupported` reason; the low-space policy, directory usage and project quotas; and the explicit data-lifecycle decisions",
+            "description": "The fixed tiers with their space, mount and check evidence; the `/mica` and `/srv` bind namespaces with their readiness (one shared capacity pool, reported once on the `data` tier); the physical media with normalized wear or an explicit `unsupported` reason; the low-space policy, directory usage and project quotas; the mounts in the places a user may mount (`userMounts`) and the active swaps (`swaps`); and the explicit data-lifecycle decisions",
             "content": {
               "application/json": {
                 "schema": {

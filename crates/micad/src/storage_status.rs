@@ -17,6 +17,7 @@ mod host;
 mod json;
 mod parse;
 mod pressure;
+mod user_mounts;
 pub use host::*;
 pub use json::*;
 pub use parse::*;
@@ -234,6 +235,8 @@ pub struct MountEvidence {
     pub fstype: String,
     /// Whether the mount is read-only.
     pub read_only: bool,
+    /// The mount's own options, as mountinfo records them.
+    pub options: String,
 }
 
 /// What the system RECORDS about the last filesystem check of one device.
@@ -471,6 +474,10 @@ pub struct StorageEvidence {
     pub media: Vec<MediumEvidence>,
     /// Per-bind evidence, keyed by [`BindSpec::name`].
     pub binds: BTreeMap<String, BindEvidence>,
+    /// The mounts in the places a user may mount.
+    pub user_mounts: Vec<user_mounts::UserMount>,
+    /// The active swaps.
+    pub swaps: Vec<user_mounts::SwapEvidence>,
 }
 
 impl StorageEvidence {

@@ -74,6 +74,7 @@ pub(super) fn data_evidence(free: u64) -> crate::storage_status::StorageEvidence
                 mount: "/srv".to_string(),
                 fstype: "ext4".to_string(),
                 read_only: false,
+                options: String::new(),
             }),
             space: Some(FsSpace {
                 total: 1_000_000_000,
@@ -90,6 +91,7 @@ pub(super) fn data_evidence(free: u64) -> crate::storage_status::StorageEvidence
         tiers,
         media: Vec::new(),
         binds: std::collections::BTreeMap::new(),
+        ..StorageEvidence::default()
     }
 }
 

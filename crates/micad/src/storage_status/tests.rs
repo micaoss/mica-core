@@ -4,6 +4,7 @@ mod binds;
 mod host;
 mod media;
 mod status;
+mod user_mounts;
 
 fn space(total: u64, used: u64, free: u64) -> FsSpace {
     FsSpace {
@@ -26,6 +27,7 @@ fn mounted(device: &str, mount: &str) -> MountEvidence {
         mount: mount.to_string(),
         fstype: "ext4".to_string(),
         read_only: false,
+        options: String::new(),
     }
 }
 

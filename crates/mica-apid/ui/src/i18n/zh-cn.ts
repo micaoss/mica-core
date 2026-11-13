@@ -1274,6 +1274,15 @@ export const zhCN: Translation = {
         ejected: '可以安全拔出',
         safeToUnplug: '可以安全拔出',
       },
+      userMounts: {
+        title: '你的挂载',
+        description: '你自己用单元或 fstab 行挂载的磁盘和交换空间，位于 /srv、/var/mnt、主目录或容器引擎根目录下。只读。',
+        user: '你的',
+        other: '未声明',
+        swap: '交换空间',
+        used: '已用 {{used}}，共 {{total}}',
+        none: '你可以挂载的位置没有任何挂载，也没有启用的交换空间。',
+      },
       media: {
         title: '介质',
         description: '物理介质，以及每块介质对自身磨损的报告。',

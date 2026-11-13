@@ -499,6 +499,28 @@ export interface ExternalMedia {
   items: ExternalVolume[]
 }
 
+/// A mount in a place a user may mount (`userMounts` of the storage status).
+export interface StorageUserMount {
+  target: string
+  source: string
+  filesystem: string
+  options: string
+  /// Declared by one of the user's units or fstab lines.
+  user: boolean
+  /// Present for a mount of a block device only.
+  totalBytes?: number
+  usedBytes?: number
+}
+
+/// An active swap (`swaps` of the storage status).
+export interface StorageSwap {
+  source: string
+  kind: string
+  sizeBytes: number
+  usedBytes: number
+  user: boolean
+}
+
 export interface StorageStatus {
   tiers: StorageTier[]
   namespaces: {
@@ -507,6 +529,8 @@ export interface StorageStatus {
     binds: StorageBind[]
   }
   media: StorageMedium[]
+  userMounts?: StorageUserMount[]
+  swaps?: StorageSwap[]
   policy: {
     warningPercent: number
     warningClearPercent: number

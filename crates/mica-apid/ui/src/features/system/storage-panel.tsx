@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { FolderTree, HardDrive, Layers, ShieldQuestion, Usb } from 'lucide-react'
+import { FolderTree, HardDrive, Layers, ShieldQuestion, Unplug, Usb } from 'lucide-react'
 import { api } from '@/shared/lib/http'
-import type { ExternalMedia, ExternalVolume, StorageBind, StorageMedium, StorageStatus, StorageTier } from '@/lib/types'
+import type { ExternalMedia, ExternalVolume, StorageBind, StorageMedium, StorageStatus, StorageTier, StorageUserMount } from '@/lib/types'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
 import { RowItem, RowList } from '@/shared/components/row-item'
@@ -28,6 +28,7 @@ export function StoragePanel() {
     <div className="grid gap-3">
       <TiersPanel />
       <NamespacesPanel />
+      <UserMountsPanel />
       <ExternalMediaPanel />
       <div className="grid gap-3 lg:grid-cols-2"><MediaPanel /><LifecyclePanel /></div>
     </div>
@@ -149,6 +150,46 @@ function volumeSummary(volume: ExternalVolume, t: ReturnType<typeof useTranslati
   const parts = [volume.filesystem, formatBytes(volume.sizeBytes)]
   if (volume.availableBytes !== null) parts.push(t('system.storage.external.available', { available: formatBytes(volume.availableBytes) }))
   if (volume.reason) parts.push(t(`system.storage.external.reason.${volume.reason}`, { defaultValue: volume.reason }))
+  return parts.join(' · ')
+}
+
+/// The user's own disks: every mount in a place a user may mount, and every
+/// active swap, read only. The user adds them with units or fstab lines.
+export function UserMountsPanel() {
+  const { t } = useTranslation()
+  const status = useStorage()
+  const mounts = status.data?.userMounts ?? []
+  const swaps = status.data?.swaps ?? []
+  const origin = (user: boolean) => (
+    <StatusBadge tone={user ? 'accent' : 'neutral'}>{t(user ? 'system.storage.userMounts.user' : 'system.storage.userMounts.other')}</StatusBadge>
+  )
+  return (
+    <Panel title={t('system.storage.userMounts.title')} description={t('system.storage.userMounts.description')} action={<Unplug className="size-5 text-muted-foreground" />}>
+      {mounts.length + swaps.length > 0 ? (
+        <RowList>
+          {mounts.map((mount) => (
+            <RowItem key={`${mount.target} ${mount.source}`} title={<span className="flex items-center gap-2 font-mono">{mount.target}{origin(mount.user)}</span>} description={mountSummary(mount, t)} />
+          ))}
+          {swaps.map((swap) => (
+            <RowItem
+              key={`swap ${swap.source}`}
+              title={<span className="flex items-center gap-2"><span>{t('system.storage.userMounts.swap')}</span><span className="font-mono">{swap.source}</span>{origin(swap.user)}</span>}
+              description={[swap.kind, t('system.storage.userMounts.used', { used: formatBytes(swap.usedBytes), total: formatBytes(swap.sizeBytes) })].join(' · ')}
+            />
+          ))}
+        </RowList>
+      ) : null}
+      {status.data && mounts.length + swaps.length === 0 ? <Callout title={t('system.storage.userMounts.none')} /> : null}
+    </Panel>
+  )
+}
+
+/// A user-area mount in one line: what is mounted, how, and its space when micad read it.
+function mountSummary(mount: StorageUserMount, t: ReturnType<typeof useTranslation>['t']) {
+  const parts = [mount.source, mount.filesystem, mount.options]
+  if (mount.totalBytes !== undefined && mount.usedBytes !== undefined) {
+    parts.push(t('system.storage.userMounts.used', { used: formatBytes(mount.usedBytes), total: formatBytes(mount.totalBytes) }))
+  }
   return parts.join(' · ')
 }
 

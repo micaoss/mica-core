@@ -56,6 +56,27 @@ pub fn status_json(evidence: &StorageEvidence, pressure: &PressureTracker) -> Js
             "projectQuotas": evidence.project_quotas,
         },
         "media": media,
+        "userMounts": evidence.user_mounts.iter().map(|mount| {
+            let mut item = json!({
+                "target": mount.target,
+                "source": mount.source,
+                "filesystem": mount.filesystem,
+                "options": mount.options,
+                "user": mount.user,
+            });
+            if let Some(space) = mount.space {
+                item["totalBytes"] = json!(space.total);
+                item["usedBytes"] = json!(space.used);
+            }
+            item
+        }).collect::<Vec<_>>(),
+        "swaps": evidence.swaps.iter().map(|swap| json!({
+            "source": swap.source,
+            "kind": swap.kind,
+            "sizeBytes": swap.size_bytes,
+            "usedBytes": swap.used_bytes,
+            "user": swap.user,
+        })).collect::<Vec<_>>(),
         "policy": {
             "warningPercent": WARNING_ENTER_PERCENT,
             "warningClearPercent": WARNING_CLEAR_PERCENT,
