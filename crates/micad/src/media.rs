@@ -18,7 +18,7 @@
 //! Each inventory read also reconciles MICA's mounts, under one lifecycle
 //! lock: a supported, clean volume nothing else uses is mounted read-only at
 //! [`MEDIA_ROOT`]`/<id>` (`ro,nosuid,nodev,noexec`, and `noload` for ext, so
-//! no journal is replayed); a volume whose filesystem says it needs repair
+//! no journal is replayed), by PID 1 on systemd and by micad on OpenRC; a volume whose filesystem says it needs repair
 //! is left alone; a volume the user unmounted stays unmounted while it is
 //! plugged in; and the mount of a device that is gone is detached. Nothing
 //! is ever checked or written.
@@ -43,11 +43,13 @@ use serde::Serialize;
 
 mod mount;
 mod probe;
+mod systemd;
 #[cfg(test)]
 mod tests;
 
 pub use mount::{HostMounter, Mounter};
 pub use probe::{Probed, probe};
+pub use systemd::SystemdMounter;
 
 /// Where MICA mounts a media volume, by its id.
 pub const MEDIA_ROOT: &str = "/run/mica/media";
@@ -271,10 +273,15 @@ fn opaque(tag: &str, parts: &[&str]) -> String {
 }
 
 impl HostMedia {
-    /// The source `main.rs` attaches on a device.
+    /// The source `main.rs` attaches on a device. On systemd PID 1 makes
+    /// the mounts, so they reach the host and every service; on OpenRC
+    /// micad shares the host's mount namespace and makes them itself.
     #[must_use]
-    pub fn production() -> Self {
-        Self::at("/", Box::new(HostMounter))
+    pub fn production(init: micad_settings::Init) -> Self {
+        match init {
+            micad_settings::Init::Systemd => Self::at("/", Box::new(SystemdMounter::default())),
+            micad_settings::Init::Openrc => Self::at("/", Box::new(HostMounter)),
+        }
     }
 
     /// A source over the host tree at `root`, mounting with `mounter`.

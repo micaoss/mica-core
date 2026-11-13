@@ -679,7 +679,7 @@ fn probe_cross_check() {
 #[ignore = "runs as the init of a VM with USB sticks"]
 fn vm_media() {
     use std::io::Write as _;
-    let media = HostMedia::production();
+    let media = HostMedia::production(micad_settings::Init::Openrc);
     let inventory = media.inner.reconcile().unwrap();
     println!("VM media: {}", serde_json::to_string(&inventory).unwrap());
     let summary: Vec<_> = inventory

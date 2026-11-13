@@ -934,12 +934,14 @@ hotplug needs no udev or mdev. `id` and `deviceId` are hashes of the boot id and
 `exfat`, `ext2`, `ext3`, `ext4`, `ntfs`, `unknown`) and label come from the superblock, read only;
 the label is display text (control characters dropped, at most 64 characters). Each read also
 reconciles micad's mounts under one lock: a supported volume (vfat, exFAT, ext2/3/4 through the
-ext4 driver) that is clean and that nothing else mounts is mounted at `/run/mica/media/<id>` with
+ext4 driver) that is clean and that nothing else mounts is mounted at `/run/mica/media/<id>` (on
+systemd by PID 1, as the transient unit `run-mica-media-<id>.mount` bound to the device's unit,
+so the mount reaches the host and every service's namespace; on OpenRC by micad) with
 `ro,nosuid,nodev,noexec` (`noload` for ext, so no journal is replayed; `utf8` and root-owned files
 for FAT and exFAT) and reported `mounted_readonly` with `availableBytes`; one whose superblock
 says it needs repair (an ext journal to replay or recorded errors, a FAT or exFAT dirty flag) is
 `failed` (`needs_repair`) and left alone, as is one whose mount fails (`mount_failed`); the
-mount of a volume that is gone is detached. The other states are `unmounted`, `detected` with
+mount of a volume that is gone is detached (on systemd its unit stops with the device's). The other states are `unmounted`, `detected` with
 `busy` (a mount outside `/run/mica/media`, `mounted_outside_mica`), `unsupported`
 (`filesystem_unsupported`, or `filesystem_not_in_kernel` when `/proc/filesystems` lacks its
 driver), `failed` (`unreadable`) and `removed` (gone since the last read, listed once).
