@@ -64,6 +64,7 @@ const WGALLOWEDIP_A_IPADDR: u16 = 2;
 const WGALLOWEDIP_A_CIDR_MASK: u16 = 3;
 const WGPEER_F_REMOVE_ME: u32 = 0x1;
 const WGPEER_F_REPLACE_ALLOWEDIPS: u32 = 0x2;
+const WGPEER_F_UPDATE_ONLY: u32 = 0x4;
 
 /// An address with its prefix length.
 pub type Prefix = (IpAddr, u8);
@@ -130,6 +131,14 @@ pub trait TunnelKernel: Send + Sync {
     /// The base64 public keys of the peers device `name` holds.
     fn peers(&self, name: &str) -> io::Result<Vec<String>>;
     fn set_device(&self, name: &str, device: &DeviceSet) -> io::Result<()>;
+    /// Point device `name`'s peer `public_key` at `endpoint`, and change
+    /// nothing else: a peer the device no longer holds stays gone.
+    fn set_endpoint(
+        &self,
+        name: &str,
+        public_key: &[u8; 32],
+        endpoint: SocketAddr,
+    ) -> io::Result<()>;
     /// The main-table routes out of link `index`, each with its protocol.
     fn routes(&self, index: u32) -> io::Result<Vec<(TunnelRoute, u8)>>;
     /// Add `route` out of link `index` as micad's ([`RTPROT_MICA`]).
@@ -197,6 +206,20 @@ impl TunnelKernel for Kernel {
     fn set_device(&self, name: &str, device: &DeviceSet) -> io::Result<()> {
         let family = wireguard_family()?;
         exchange(Some(netlink::GENERIC), &set_device(family, name, device)).map(drop)
+    }
+
+    fn set_endpoint(
+        &self,
+        name: &str,
+        public_key: &[u8; 32],
+        endpoint: SocketAddr,
+    ) -> io::Result<()> {
+        let family = wireguard_family()?;
+        exchange(
+            Some(netlink::GENERIC),
+            &set_endpoint(family, name, public_key, endpoint),
+        )
+        .map(drop)
     }
 
     fn routes(&self, index: u32) -> io::Result<Vec<(TunnelRoute, u8)>> {
@@ -428,6 +451,30 @@ pub(super) fn set_device(family: u16, name: &str, device: &DeviceSet) -> Vec<u8>
     if !peers.is_empty() {
         body.extend(nested(WGDEVICE_A_PEERS, &peers));
     }
+    message(family, NLM_F_ACK, &body)
+}
+
+/// `WG_CMD_SET_DEVICE` of one endpoint on WireGuard link `name`: the peer
+/// with `WGPEER_F_UPDATE_ONLY` and its endpoint, and nothing else.
+pub(super) fn set_endpoint(
+    family: u16,
+    name: &str,
+    public_key: &[u8; 32],
+    endpoint: SocketAddr,
+) -> Vec<u8> {
+    let mut body = vec![WG_CMD_SET_DEVICE, WG_GENL_VERSION, 0, 0];
+    body.extend(attribute(WGDEVICE_A_IFNAME, &name_payload(name)));
+    body.extend(nested(
+        WGDEVICE_A_PEERS,
+        &[nested(
+            0,
+            &[
+                attribute(WGPEER_A_PUBLIC_KEY, public_key),
+                attribute(WGPEER_A_FLAGS, &WGPEER_F_UPDATE_ONLY.to_ne_bytes()),
+                attribute(WGPEER_A_ENDPOINT, &sockaddr(endpoint)),
+            ],
+        )],
+    ));
     message(family, NLM_F_ACK, &body)
 }
 

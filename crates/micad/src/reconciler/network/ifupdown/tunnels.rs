@@ -16,12 +16,14 @@
 //!   other protocol is left as it is, and one already holding a wanted
 //!   route's place keeps it.
 //!
-//! A peer's endpoint is set when it is a numeric `address:port`.
+//! A numeric endpoint is set with its peer; one that names a host is set
+//! once it resolves ([`resolve`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use base64::Engine as _;
@@ -34,19 +36,43 @@ use crate::netlink::tunnel::{
     DeviceSet, PeerSet, Prefix, RTPROT_MICA, TunnelKernel, TunnelRoute, kernel_metric,
 };
 use crate::wgkeys::Keystore;
+use resolve::{HostEndpoint, RETRY_DELAYS, Resolve, SystemResolver, host_endpoint};
+
+mod resolve;
 
 pub struct Tunnels {
     kernel: Arc<dyn TunnelKernel>,
     keys: Keystore,
+    resolver: Arc<dyn Resolve>,
+    /// The waits between tries of the endpoints left unresolved.
+    delays: Vec<Duration>,
+    /// The task resolving the last apply's host-name endpoints.
+    resolving: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Tunnels {
     pub fn new(kernel: Arc<dyn TunnelKernel>, keys: Keystore) -> Self {
-        Self { kernel, keys }
+        Self {
+            kernel,
+            keys,
+            resolver: Arc::new(SystemResolver),
+            delays: RETRY_DELAYS.to_vec(),
+            resolving: Mutex::new(None),
+        }
+    }
+
+    /// Resolve host names through `resolver`, retrying after `delays`.
+    #[cfg(test)]
+    fn with_resolver(mut self, resolver: Arc<dyn Resolve>, delays: Vec<Duration>) -> Self {
+        self.resolver = resolver;
+        self.delays = delays;
+        self
     }
 
     /// Bring the kernel's tunnels to the `kind: wireguard` entries of
-    /// `network`, and return each one's state.
+    /// `network`, and return each one's state. The resolution of the
+    /// previous apply's endpoints stops; this one's starts, when it has host
+    /// names.
     pub(super) fn apply(
         &self,
         network: &BTreeMap<String, IfaceSettings>,
@@ -56,6 +82,14 @@ impl Tunnels {
             .filter(|(_, cfg)| cfg.kind == IfaceKind::Wireguard)
             .filter_map(|(iface, cfg)| Some((iface, (cfg, cfg.wireguard.as_ref()?))))
             .collect();
+        if let Some(previous) = self
+            .resolving
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            previous.abort();
+        }
         let links = self.kernel.owned_links()?;
         for (iface, index) in &links {
             if !wanted.contains_key(iface) {
@@ -66,10 +100,12 @@ impl Tunnels {
             }
         }
         let mut state = BTreeMap::new();
+        let mut hosts = Vec::new();
         for (iface, (cfg, wireguard)) in &wanted {
             let index = self
                 .tunnel(iface, cfg, wireguard, links.get(*iface).copied())
                 .with_context(|| format!("network.{iface}"))?;
+            hosts.extend(host_endpoints(iface, wireguard));
             state.insert(
                 (*iface).clone(),
                 json!({
@@ -83,6 +119,18 @@ impl Tunnels {
         let names: BTreeSet<&str> = wanted.keys().map(|iface| iface.as_str()).collect();
         for iface in self.keys.retain_keys(&names)? {
             tracing::info!(%iface, "removed the private key of a deleted tunnel");
+        }
+        if !hosts.is_empty() {
+            *self
+                .resolving
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(tokio::spawn(resolve::resolve_until_set(
+                    self.kernel.clone(),
+                    self.resolver.clone(),
+                    self.delays.clone(),
+                    hosts,
+                )));
         }
         Ok(state)
     }
@@ -160,6 +208,27 @@ impl Tunnels {
         }
         Ok(index)
     }
+}
+
+/// The peers of `wireguard` whose endpoints name a host.
+fn host_endpoints(iface: &str, wireguard: &WireguardConfig) -> Vec<HostEndpoint> {
+    let peers: Arc<[micad_settings::WireguardPeer]> = wireguard.peers.clone().into();
+    wireguard
+        .peers
+        .iter()
+        .enumerate()
+        .filter_map(|(index, peer)| {
+            let (host, port) = host_endpoint(peer.endpoint.as_deref()?)?;
+            Some(HostEndpoint {
+                iface: iface.to_string(),
+                public_key: key_bytes(&peer.public_key)?,
+                host,
+                port,
+                peers: peers.clone(),
+                peer: index,
+            })
+        })
+        .collect()
 }
 
 /// The 32 bytes of a base64 key.

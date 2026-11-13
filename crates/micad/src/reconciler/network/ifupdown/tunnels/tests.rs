@@ -150,6 +150,23 @@ impl TunnelKernel for Fake {
         Ok(())
     }
 
+    fn set_endpoint(
+        &self,
+        name: &str,
+        public_key: &[u8; 32],
+        endpoint: SocketAddr,
+    ) -> io::Result<()> {
+        let mut links = self.links.lock().unwrap();
+        let peer = links
+            .get_mut(name)
+            .and_then(|link| link.peers.get_mut(public_key))
+            .ok_or_else(|| io::Error::from_raw_os_error(2))?;
+        peer.endpoint = Some(endpoint);
+        drop(links);
+        self.record(format!("endpoint {name} {} {endpoint}", short(public_key)));
+        Ok(())
+    }
+
     fn routes(&self, index: u32) -> io::Result<Vec<(TunnelRoute, u8)>> {
         self.with_link(index, |_, link| link.routes.clone())
     }
@@ -227,21 +244,55 @@ fn network(entries: &[(&str, IfaceSettings)]) -> BTreeMap<String, IfaceSettings>
         .collect()
 }
 
+/// A resolver answering from a queue, and failing once it is empty.
+#[derive(Default)]
+struct Answers {
+    queue: Mutex<std::collections::VecDeque<io::Result<Vec<SocketAddr>>>>,
+    asked: Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl Resolve for Answers {
+    async fn resolve(&self, host: &str, port: u16) -> io::Result<Vec<SocketAddr>> {
+        self.asked.lock().unwrap().push(format!("{host}:{port}"));
+        self.queue
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| Err(io::ErrorKind::NotFound.into()))
+    }
+}
+
 struct Setup {
     _dir: tempfile::TempDir,
     fake: Arc<Fake>,
+    resolver: Arc<Answers>,
     tunnels: Tunnels,
 }
 
 fn setup() -> Setup {
     let dir = tempfile::tempdir().unwrap();
     let fake = Arc::new(Fake::default());
-    let tunnels = Tunnels::new(fake.clone(), Keystore::under(dir.path(), None));
+    let resolver = Arc::new(Answers::default());
+    let tunnels = Tunnels::new(fake.clone(), Keystore::under(dir.path(), None))
+        .with_resolver(resolver.clone(), vec![Duration::from_millis(1); 2]);
     Setup {
         _dir: dir,
         fake,
+        resolver,
         tunnels,
     }
+}
+
+/// Wait until `done` holds, for at most a second.
+async fn until(done: impl Fn() -> bool) {
+    for _ in 0..200 {
+        if done() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("never happened");
 }
 
 fn route_destinations(fake: &Fake, name: &str) -> Vec<(String, u8)> {
@@ -515,8 +566,8 @@ fn a_gateway_and_declared_routes_are_micads_routes_too() {
     });
 }
 
-#[test]
-fn a_numeric_endpoint_is_set_and_a_host_name_is_not_yet() {
+#[tokio::test]
+async fn a_numeric_endpoint_is_set_and_a_host_name_is_not_yet() {
     let setup = setup();
     let mut numeric = peer(2, &["10.8.0.2/32"]);
     numeric.endpoint = Some("192.0.2.2:51820".to_string());
@@ -538,4 +589,65 @@ fn a_numeric_endpoint_is_set_and_a_host_name_is_not_yet() {
         assert_eq!(numeric.preshared_key, Some([9; 32]));
         assert_eq!(link.peers[&[3; 32]].endpoint, None);
     });
+}
+
+#[tokio::test]
+async fn a_host_name_endpoint_is_set_once_it_resolves() {
+    let setup = setup();
+    let address: SocketAddr = "198.51.100.7:51820".parse().unwrap();
+    {
+        let mut queue = setup.resolver.queue.lock().unwrap();
+        queue.push_back(Err(io::ErrorKind::TimedOut.into()));
+        queue.push_back(Ok(Vec::new()));
+        queue.push_back(Ok(vec![address]));
+    }
+    let mut named = peer(3, &["10.8.0.3/32"]);
+    named.endpoint = Some("vpn.example.org:51820".to_string());
+    setup
+        .tunnels
+        .apply(&network(&[("wg0", tunnel("10.8.0.1/24", vec![named]))]))
+        .unwrap();
+    let fake = setup.fake.clone();
+    until(move || fake.link("wg0", |link| link.peers[&[3; 32]].endpoint.is_some())).await;
+    assert_eq!(
+        setup.fake.take_log().last().unwrap(),
+        "endpoint wg0 k3 198.51.100.7:51820"
+    );
+    // Tried at once, after the first wait, and after the last one again.
+    assert_eq!(
+        *setup.resolver.asked.lock().unwrap(),
+        ["vpn.example.org:51820"; 3]
+    );
+}
+
+#[tokio::test]
+async fn the_next_apply_stops_the_previous_resolution() {
+    let setup = setup();
+    let mut named = peer(3, &["10.8.0.3/32"]);
+    named.endpoint = Some("vpn.example.org:51820".to_string());
+    setup
+        .tunnels
+        .apply(&network(&[("wg0", tunnel("10.8.0.1/24", vec![named]))]))
+        .unwrap();
+    let resolver = setup.resolver.clone();
+    until(move || resolver.asked.lock().unwrap().len() >= 3).await;
+    setup
+        .tunnels
+        .apply(&network(&[("wg0", tunnel("10.8.0.1/24", Vec::new()))]))
+        .unwrap();
+    let asked = setup.resolver.asked.lock().unwrap().len();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(setup.resolver.asked.lock().unwrap().len(), asked);
+}
+
+#[test]
+fn only_an_endpoint_naming_a_host_is_resolved() {
+    assert_eq!(
+        resolve::host_endpoint("vpn.example.org:51820"),
+        Some(("vpn.example.org".to_string(), 51820))
+    );
+    assert_eq!(resolve::host_endpoint("192.0.2.1:51820"), None);
+    assert_eq!(resolve::host_endpoint("[2001:db8::1]:51820"), None);
+    assert_eq!(resolve::host_endpoint("vpn.example.org"), None);
+    assert_eq!(resolve::host_endpoint("vpn.example.org:http"), None);
 }

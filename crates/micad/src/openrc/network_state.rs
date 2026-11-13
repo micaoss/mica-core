@@ -32,6 +32,8 @@ const AP_LEASES: &str = "run/mica/wifi-ap-udhcpd.leases";
 const UDHCPD_LEASE_BYTES: usize = 36;
 /// What precedes the leases: the 64-bit time the file was written.
 const UDHCPD_HEADER_BYTES: usize = 8;
+/// The administrative up flag in a link's sysfs `flags`.
+const IFF_UP: u32 = 0x1;
 
 pub struct IpNetworkState {
     root: PathBuf,
@@ -226,8 +228,17 @@ fn link(
     let link_type = read(dir, "type");
     let loopback = link_type.as_deref() == Some("772");
     let can = link_type.as_deref() == Some("280");
+    // A WireGuard link, as networkd describes it: `Kind` wireguard, `Type`
+    // none. Its operstate stays unknown once it is up, as a loopback's does.
+    let wireguard = read(dir, "uevent")
+        .is_some_and(|uevent| uevent.lines().any(|line| line == "DEVTYPE=wireguard"));
+    let flagged_up = read(dir, "flags")
+        .and_then(|flags| u32::from_str_radix(flags.trim_start_matches("0x"), 16).ok())
+        .is_some_and(|flags| flags & IFF_UP != 0);
     let carrier = read(dir, "carrier").as_deref() == Some("1");
-    let up = read(dir, "operstate").as_deref() == Some("up") || (loopback && carrier);
+    let up = read(dir, "operstate").as_deref() == Some("up")
+        || (loopback && carrier)
+        || (wireguard && flagged_up);
     let own: Vec<&Address> = addresses.iter().filter(|a| a.link == name).collect();
     let routable = own.iter().any(|address| !address.scope_host);
     let operational = match (up, carrier, routable) {
@@ -251,7 +262,15 @@ fn link(
     let mut value = json!({
         "Index": read(dir, "ifindex").and_then(|index| index.parse::<u64>().ok()),
         "Name": name,
-        "Type": if loopback { "loopback" } else if can { "can" } else { "ether" },
+        "Type": if loopback {
+            "loopback"
+        } else if can {
+            "can"
+        } else if wireguard {
+            "none"
+        } else {
+            "ether"
+        },
         "OperationalState": operational,
         "CarrierState": if carrier { "carrier" } else { "no-carrier" },
         "MTU": read(dir, "mtu").and_then(|mtu| mtu.parse::<u64>().ok()),
@@ -280,6 +299,9 @@ fn link(
         }).collect::<Vec<_>>(),
         "DNS": dns,
     });
+    if wireguard {
+        value["Kind"] = json!("wireguard");
+    }
     if let Some(hardware) = hardware.filter(|bytes| bytes.len() == 6 && !loopback) {
         value["HardwareAddress"] = json!(hardware);
     }

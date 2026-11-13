@@ -166,6 +166,22 @@ fn set_device_without_peers_or_port_carries_the_key_alone() {
 }
 
 #[test]
+fn set_endpoint_updates_one_existing_peer_only() {
+    let expected = concat(&[
+        &hex("64000000 1c00 0500 01000000 00000000 0101 0000"),
+        &hex(&format!("0800 0200 {WG0}")),
+        &hex("4800 0880 4400 0080 2400 0100"),
+        &[2; 32],
+        &hex("0800 0300 04000000"),
+        &hex("1400 0400 0200 ca6c c0000202 0000000000000000"),
+    ]);
+    assert_eq!(
+        set_endpoint(0x1c, "wg0", &[2; 32], "192.0.2.2:51820".parse().unwrap()),
+        expected
+    );
+}
+
+#[test]
 fn an_ipv6_endpoint_is_a_sockaddr_in6() {
     let endpoint: SocketAddr = "[2001:db8::1]:51820".parse().unwrap();
     assert_eq!(

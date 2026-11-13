@@ -1,6 +1,6 @@
 # OpenRC WireGuard: micad runs the tunnels over netlink
 
-Status: approved plan (repair-20261110), approved by the user on 2026-11-11. Round 1 is implemented: the netlink messages (`crates/micad/src/netlink/tunnel.rs`) and the reconciler (`crates/micad/src/reconciler/network/ifupdown/tunnels.rs`). Rounds 2 and 3 are not.
+Status: approved plan (repair-20261110), approved by the user on 2026-11-11. Rounds 1 and 2 are implemented: the netlink messages (`crates/micad/src/netlink/tunnel.rs`), the reconciler (`crates/micad/src/reconciler/network/ifupdown/tunnels.rs`), and the endpoint resolution (`tunnels/resolve.rs`). Round 3 is not.
 
 **Decision:**
 
@@ -33,9 +33,10 @@ Status: approved plan (repair-20261110), approved by the user on 2026-11-11. Rou
 
 ## 3. Endpoints
 
-- The kernel takes numeric endpoints only, so micad resolves a host name itself. Resolution is bounded, and retried at 5, 15, 30 and 60 s.
+- The kernel takes numeric endpoints only, so micad resolves a host name itself. Resolution is bounded (5 s per try), runs off the apply's path, and is tried at once and then after waits of 5, 15, 30 and 60 s, the 60 s wait repeating until the name resolves or the next apply replaces it.
 - Until an endpoint resolves, the peer reports `pending_endpoint_resolution` in the observations.
-- A resolved address is checked against the endpoint loop rule again.
+- A resolved address is checked against the endpoint loop rule again: it is set all the same, logged, and the observation reports `endpoint_route_loop`.
+- On OpenRC the observation finds the tunnel by its sysfs `DEVTYPE=wireguard`, as `Kind` wireguard, so its peers are read as on systemd.
 
 ## 4. Boot and restart recovery
 

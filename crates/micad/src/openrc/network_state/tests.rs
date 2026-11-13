@@ -152,6 +152,46 @@ async fn a_can_link_is_typed_can() {
     assert_eq!(raw["Interfaces"][0]["Type"], "can");
 }
 
+/// A WireGuard link is described as networkd describes one, so the
+/// observation asks the kernel for its peers.
+#[tokio::test]
+async fn a_wireguard_link_is_kind_wireguard_and_routable_once_up() {
+    let (root, fake) = fixture();
+    let wg0 = |flags: &str| {
+        sysfs(
+            root.path(),
+            "wg0",
+            &[
+                ("ifindex", "5"),
+                ("type", "65534"),
+                ("carrier", "1"),
+                ("operstate", "unknown"),
+                ("flags", flags),
+                ("uevent", "DEVTYPE=wireguard\nINTERFACE=wg0\nIFINDEX=5"),
+            ],
+        );
+    };
+    wg0("0x91");
+    fake.answer(
+        "ip -o addr show",
+        0,
+        &format!("{ADDRS}5: wg0    inet 10.8.0.1/24 scope global wg0\\       valid_lft forever preferred_lft forever\n"),
+    );
+    let state = IpNetworkState::new(root.path(), Arc::clone(&fake) as Arc<dyn Commands>);
+    let raw = state.describe_raw().await.unwrap();
+    let link = &raw["Interfaces"][3];
+    assert_eq!(link["Name"], "wg0");
+    assert_eq!(link["Kind"], "wireguard");
+    assert_eq!(link["Type"], "none");
+    assert_eq!(link["OperationalState"], "routable");
+    assert!(raw["Interfaces"][0].get("Kind").is_none());
+
+    // Down: flags without IFF_UP.
+    wg0("0x90");
+    let raw = state.describe_raw().await.unwrap();
+    assert_eq!(raw["Interfaces"][3]["OperationalState"], "no-carrier");
+}
+
 /// The access point's udhcpd leases land on its link the way networkd's DHCP
 /// server reports its own.
 #[tokio::test]
