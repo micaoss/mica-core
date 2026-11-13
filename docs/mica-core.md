@@ -311,7 +311,8 @@ absence is reported with its reason rather than as a healthy reading:
   `{ok, name, latencyMs, checkedAt, detail?}`.
 - **Time**: timesyncd; on OpenRC whether `mica-ntpd` runs and the kernel's synchronized bit.
 - **Storage**: tiers from the signed boot policy, bind namespaces, usage, DATA's project quotas
-  (`quotactl_fd`), media health and pressure.
+  (`quotactl_fd`), media health and pressure, and the user's own mounts and swaps (section 6.1,
+  *The user's own disks*).
 - **System and telemetry**: identity, board, kernel, image, packages, the running deployment;
   thermal zones, watchdogs, the reset reason.
 - **Failure evidence**: failed services, and warnings of this boot (`journal`) and of the
@@ -1154,6 +1155,54 @@ A product carries MQTT when its `FEATURES` has `mqtt` and its root holds both pa
 
 SYSTEM and the boot partition are mounted read-only and made writable only inside an operation,
 under the transaction lock.
+
+**The write map.** What a running root can write, and with which options (the runkit's mounts and
+Base's binds, which `mica-mounts` repeats on OpenRC):
+
+| Path | Backing | Written | Options |
+| --- | --- | --- | --- |
+| `/`, `/usr`, `/etc`, `/run/mica-core/<pkg>` | the root's and the core components' squashfs on dm-verity (`/usr` and `/etc` an overlay of them) | never | `ro,nodev` |
+| `/mnt/data` | DATA | yes | `rw,noatime`, with `prjquota` when quotas are on |
+| `/mica`, `/mica/containers`, `/srv`, `/var` | binds of DATA's `mica/`, `containers/`, `srv/`, `var/` | yes, under projects 100, 102, 100, 101 | `nosuid,nodev`, private |
+| `/var/lib/mica`, `/root`, `/home` | binds of DATA's `state/mica`, `/mica/root`, `/mica/home` | yes | `nosuid,nodev` |
+| `/etc/hostname`, `/usr/local/lib/systemd/system`, `/usr/local/etc`, and the network daemons' `/etc` directories when installed | binds of DATA's `state/` | yes | bind |
+| `/run`, `/dev/shm` | tmpfs | yes, in RAM | `nosuid,nodev` |
+| `/dev` | devtmpfs | kernel | `nosuid` |
+| `/proc`, `/sys` | proc, sysfs | kernel | `nosuid,nodev,noexec` |
+
+Everything else a program writes lands in one of these; the user's own disks add to it.
+
+**The user's own disks.** A user may mount in `/srv` and below, `/var/mnt/<name>`, a home
+(`/home/<user>`) and below, and exactly at an engine's root, `/mica/containers/storage` (podman)
+or `/mica/containers/docker`. They declare it with a `.mount`, `.automount` or `.swap` unit
+through `mica-unit` on systemd (section 3.10), or an `/usr/local/etc/fstab` line on OpenRC; Base
+refuses a target outside those places and mounts the rest `nosuid,nodev`. The guide is
+mica-system-base's `docs/floor-and-options.md`, *The user's own mounts*. The storage status lists
+them, read only:
+
+- `userMounts`: every mount whose target is in one of those places, but the default `/srv` bind of
+  DATA, with its `target`, `source`, `filesystem` and `options` as mountinfo has them; `user` is
+  true when one of the user's units (in `/usr/local/lib/systemd/system`) or fstab lines names the
+  target; `totalBytes` and `usedBytes` are there for a mounted block device only, so an automount
+  or a network share is never touched to be listed.
+- `swaps`: every active swap in `/proc/swaps`, with its `source`, `kind`, `sizeBytes` and
+  `usedBytes`; `user` as above.
+
+The console's storage page shows both in *Your mounts*. A diagnostic snapshot carries neither.
+
+**Moving container storage to a disk.** The engine's root moves whole; its networks and `tmp`
+stay on DATA.
+
+1. Turn containers off (`container.enabled` false, section 3.9) and wait until the engine has
+   stopped.
+2. Mount the new disk in a place of the user's, `/var/mnt/new` say, and copy the root with its
+   owners, modes and extended attributes: `cp -a --preserve=xattr /mica/containers/storage/.
+   /var/mnt/new/` (on docker `/mica/containers/docker/.`). Unmount it.
+3. Empty the old root on DATA, which the mount would otherwise hide while it keeps using DATA's
+   space, and declare the disk's mount at the engine's root.
+4. Turn containers on.
+
+Project 102's quota does not cover a moved root; the disk's own size is its limit.
 
 ### 6.2 Signed metadata
 
