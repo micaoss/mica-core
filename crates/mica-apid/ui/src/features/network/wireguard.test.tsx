@@ -177,6 +177,53 @@ describe('the WireGuard tab', () => {
 
   })
 
+  it('names the listing\'s version on add, edit and remove', async () => {
+    const peer = { name: 'Harbour office', publicKey: PEER_KEY, presharedKey: false, allowedIps: ['10.8.0.2/32'], latestHandshake: null, rxBytes: null, txBytes: null }
+    const fetch = stubFetch({
+      ...networkRoutes(),
+      '/api/v1/network/wg0/peers': () => new Response(JSON.stringify([peer]), { headers: { 'content-type': 'application/json', etag: '"7"' } }),
+      'POST /api/v1/network/wg0/peers': () => jsonResponse({ publicKey: NEW_PEER, allowedIps: ['10.8.0.3/32'] }),
+      [`PUT /api/v1/network/wg0/peers/${encodeURIComponent(PEER_KEY)}`]: () => jsonResponse(peer),
+      [`DELETE /api/v1/network/wg0/peers/${encodeURIComponent(PEER_KEY)}`]: () => jsonResponse(null, 204),
+    })
+    const sent = (method: string) => fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === method)?.[1] as RequestInit | undefined
+    open('tab=wireguard&tunnel=wg0')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Add peer' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Add peer' })
+    await userEvent.type(within(dialog).getByLabelText('Public key'), NEW_PEER)
+    await userEvent.type(within(dialog).getByLabelText('Allowed IPs'), '10.8.0.3/32')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(JSON.parse(String(sent('POST')?.body)).baseVersion).toBe('7'))
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit peer' }))
+    dialog = await screen.findByRole('dialog', { name: 'Edit peer' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(JSON.parse(String(sent('PUT')?.body)).baseVersion).toBe('7'))
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove peer' }))
+    const confirm = await screen.findByRole('alertdialog')
+    await userEvent.click(within(confirm).getByRole('button', { name: /Remove/ }))
+    await waitFor(() => expect(new Headers(sent('DELETE')?.headers).get('if-match')).toBe('"7"'))
+  })
+
+  it('shows a version conflict and reloads the peers', async () => {
+    const peer = { name: 'Harbour office', publicKey: PEER_KEY, presharedKey: false, allowedIps: ['10.8.0.2/32'], latestHandshake: null, rxBytes: null, txBytes: null }
+    const fetch = stubFetch({
+      ...networkRoutes(),
+      '/api/v1/network/wg0/peers': () => new Response(JSON.stringify([peer]), { headers: { 'content-type': 'application/json', etag: '"7"' } }),
+      [`PUT /api/v1/network/wg0/peers/${encodeURIComponent(PEER_KEY)}`]: () => jsonResponse({ error: { code: 'version_conflict', message: 'stale' } }, 409),
+    })
+    const listings = () => fetch.mock.calls.filter(([input, init]) => String(input) === '/api/v1/network/wg0/peers' && !(init as RequestInit | undefined)?.method).length
+    open('tab=wireguard&tunnel=wg0')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit peer' }))
+    const before = listings()
+    const dialog = await screen.findByRole('dialog', { name: 'Edit peer' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect((await screen.findAllByText('Another session changed the peers. The list is reloaded; make the change again.')).length).toBeGreaterThan(0)
+    await waitFor(() => expect(listings()).toBeGreaterThan(before))
+  })
+
   it('removes a pre-shared key only when asked', async () => {
     const peer = { name: 'Harbour office', publicKey: PEER_KEY, presharedKey: true, allowedIps: ['10.8.0.2/32'], latestHandshake: null, rxBytes: null, txBytes: null }
     const fetch = stubFetch({

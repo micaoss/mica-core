@@ -711,6 +711,7 @@ export const zhCN: Translation = {
       edit: '编辑对端',
       editCopy: '修改 {{iface}} 的对端，立即生效；留空的字段将被清除。',
       edited: '对端已保存',
+      conflict: '对端已被另一个会话修改。列表已重新加载，请再次进行修改。',
       presharedKeep: '留空 = 保留当前密钥',
       presharedRemove: '删除预共享密钥',
       state: {

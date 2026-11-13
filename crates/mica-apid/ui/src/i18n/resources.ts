@@ -791,6 +791,7 @@ export const en = {
       edit: 'Edit peer',
       editCopy: 'Change a peer of {{iface}}. It takes effect immediately; an empty field is cleared.',
       edited: 'Peer saved.',
+      conflict: 'Another session changed the peers. The list is reloaded; make the change again.',
       presharedKeep: 'Empty = keep the current key',
       presharedRemove: 'Remove the pre-shared key',
       state: {

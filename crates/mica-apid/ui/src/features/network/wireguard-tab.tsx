@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { formatAge } from '@/i18n/format'
 import { KeyRound, Pencil, Plus, Trash2 } from 'lucide-react'
-import { api, json } from '@/shared/lib/http'
+import { api, ApiError, apiWithVersion, json } from '@/shared/lib/http'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/components/callout'
 import { ConfirmDialog } from '@/shared/components/confirm-dialog'
@@ -133,13 +133,24 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
       keepalive: each.persistentKeepalive ? String(each.persistentKeepalive) : '',
     })
   }
-  const peers = useQuery({ queryKey: ['wireguard-peers', name], queryFn: () => api<WireguardPeerState[]>(`/api/v1/network/${encodeURIComponent(name)}/peers`) })
+  // The listing's ETag is the version every peer write names, so a write
+  // made against a listing another session has changed since is refused.
+  const listing = useQuery({ queryKey: ['wireguard-peers', name], queryFn: () => apiWithVersion<WireguardPeerState[]>(`/api/v1/network/${encodeURIComponent(name)}/peers`) })
+  const peers = { ...listing, data: listing.data?.data }
+  const version = listing.data?.version
   const invalidatePeers = () => {
     void queryClient.invalidateQueries({ queryKey: ['wireguard-peers', name] })
     void queryClient.invalidateQueries({ queryKey: ['network'] })
   }
+  /// A refused write's failure stands; a version conflict also reloads the
+  /// listing, so the next attempt is made against what is stored.
+  const reloadOnConflict = (failure: unknown): never => {
+    if (!(failure instanceof ApiError && failure.code === 'version_conflict')) throw failure
+    invalidatePeers()
+    throw new Error(t('network.wireguard.conflict'))
+  }
   const remove = useMutationFeedback<void, string>({
-    mutationFn: (key) => api<void>(`/api/v1/network/${encodeURIComponent(name)}/peers/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    mutationFn: (key) => api<void>(`/api/v1/network/${encodeURIComponent(name)}/peers/${encodeURIComponent(key)}`, { method: 'DELETE', headers: version ? { 'if-match': `"${version}"` } : {} }).catch(reloadOnConflict),
     success: t('network.wireguard.removed'),
     failure: t('network.wireguard.remove'),
     onSuccess: invalidatePeers,
@@ -192,10 +203,11 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
     allowedIps: allowed,
     ...(peer.endpoint ? { endpoint: peer.endpoint } : {}),
     ...(peer.keepalive ? { persistentKeepalive: Number(peer.keepalive) } : {}),
+    ...(version ? { baseVersion: version } : {}),
   })).then(() => {
     setPeer(EMPTY_PEER)
     invalidatePeers()
-  })
+  }, reloadOnConflict)
   // An edit sends the whole peer: a field left empty is cleared, and the
   // pre-shared key is kept unless a new one is entered or removal is asked.
   const editPeer = (key: string) => api<WireguardPeerState>(`/api/v1/network/${encodeURIComponent(name)}/peers/${encodeURIComponent(key)}`, json('PUT', {
@@ -204,11 +216,12 @@ function TunnelDetail({ data, name, publicKey, onEditing }: { data: NetworkData;
     ...(peer.endpoint ? { endpoint: peer.endpoint } : {}),
     ...(peer.keepalive ? { persistentKeepalive: Number(peer.keepalive) } : {}),
     ...(peer.removePsk ? { presharedKey: null } : peer.presharedKey ? { presharedKey: peer.presharedKey } : {}),
+    ...(version ? { baseVersion: version } : {}),
   })).then(() => {
     setPeer(EMPTY_PEER)
     setEditing(undefined)
     invalidatePeers()
-  })
+  }, reloadOnConflict)
   const peerState = (each: WireguardPeerState) => {
     if (each.operationalState === 'endpoint_route_loop') return <Tag tone="pending">{t('network.wireguard.state.loop')}</Tag>
     if (each.operationalState === 'pending_endpoint_resolution') return <Tag tone="pending">{t('network.wireguard.state.resolving')}</Tag>

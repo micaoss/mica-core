@@ -40,6 +40,12 @@ export function rememberSession(session: SessionStatus) {
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await apiWithVersion<T>(path, init)).data
+}
+
+/// The answer with its `ETag` unquoted: the version a later write of the
+/// same resource names, so a write made against an older read is refused.
+export async function apiWithVersion<T>(path: string, init: RequestInit = {}): Promise<{ data: T; version?: string }> {
   const method = (init.method ?? 'GET').toUpperCase()
   const headers = new Headers(init.headers)
   // A form sets its own multipart boundary.
@@ -65,9 +71,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       body.error?.details,
     )
   }
-  if (response.status === 204) return undefined as T
+  const version = response.headers.get('etag')?.replace(/^"|"$/g, '') ?? undefined
+  if (response.status === 204) return { data: undefined as T, version }
   const text = await response.text()
-  return (text ? JSON.parse(text) : undefined) as T
+  return { data: (text ? JSON.parse(text) : undefined) as T, version }
 }
 
 export function json(method: string, body?: unknown): RequestInit {

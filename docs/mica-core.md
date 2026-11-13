@@ -1031,7 +1031,7 @@ a configured endpoint has no kernel endpoint, a host name networkd has not resol
 routes; `ready` otherwise, a peer with no endpoint included), and `routesReady` with
 `unroutedIps`, the allowed IPs whose network address the kernel (an `RTM_GETROUTE` per prefix,
 IPv4 and IPv6) does not send out of the tunnel; all `null` when the tunnel could not be asked.
-The console edits a peer in place and shows its state beside its handshake.
+The console edits a peer in place and shows its state beside its handshake. It keeps the peer listing's `ETag` and names it on every peer write (`baseVersion` on add and edit, `If-Match` on removal); a `409` `version_conflict` is shown and the listing reloaded.
 
 **LAN discovery** (sections 3.12 and 3.13). `GET /api/v1/mdns` answers the `mdns` live state as
 `{available, state?, error?}`: the switch, its source, the `.local` name, every service with its
