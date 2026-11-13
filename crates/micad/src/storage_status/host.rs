@@ -227,7 +227,53 @@ impl HostStorage {
         let Ok(text) = std::fs::read_to_string(self.path("proc/self/mountinfo")) else {
             return Vec::new();
         };
-        parse_mountinfo(&text)
+        let mut mounts = parse_mountinfo(&text);
+        for mount in &mut mounts {
+            if let Some(backing) = self.backing(&mount.device) {
+                mount.device = backing;
+            }
+        }
+        mounts
+    }
+
+    /// The device under the device-mapper device `device` (`/dev/dm-N` or
+    /// `/dev/mapper/<name>`), followed down its one backing device at each
+    /// level (`/sys/block/dm-N/slaves`): an encrypted DATA's partition under
+    /// `mica-data`. `None` for any other device, or a mapping over several.
+    pub(super) fn backing(&self, device: &str) -> Option<String> {
+        let mut name = match device.strip_prefix("/dev/mapper/") {
+            Some(mapped) => std::fs::read_dir(self.path("sys/block"))
+                .ok()?
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .find(|dm| {
+                    dm.starts_with("dm-")
+                        && self
+                            .read_trimmed(&format!("sys/block/{dm}/dm/name"))
+                            .as_deref()
+                            == Some(mapped)
+                })?,
+            None => device
+                .strip_prefix("/dev/")
+                .filter(|n| n.starts_with("dm-"))?
+                .to_string(),
+        };
+        // Bounded: a stack of mappings is a few levels deep.
+        for _ in 0..8 {
+            if !name.starts_with("dm-") {
+                break;
+            }
+            let mut slaves = std::fs::read_dir(self.path(&format!("sys/block/{name}/slaves")))
+                .ok()?
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned());
+            let slave = slaves.next()?;
+            if slaves.next().is_some() {
+                return None;
+            }
+            name = slave;
+        }
+        Some(format!("/dev/{name}"))
     }
 
     /// Observe one bind namespace.

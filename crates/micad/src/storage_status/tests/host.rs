@@ -354,3 +354,56 @@ pub(super) fn only_a_ubi_policy_names_a_ubi_partition() {
         None
     );
 }
+
+/// An encrypted DATA is mounted from `mica-data`, a crypt mapping over the
+/// DATA partition: the tier and its binds are seen on the partition.
+#[tokio::test]
+pub(super) async fn an_encrypted_data_is_seen_on_its_partition() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let path = root.path();
+    let write = |relative: &str, contents: &str| {
+        let target = path.join(relative);
+        std::fs::create_dir_all(target.parent().expect("a parent")).expect("mkdir");
+        std::fs::write(target, contents).expect("write");
+    };
+    write("sys/block/sda/size", "60000000\n");
+    write("sys/block/sda/sda4/partition", "4\n");
+    write("sys/block/sda/sda4/size", "40000000\n");
+    write("sys/block/dm-3/dm/name", "mica-data\n");
+    write("sys/block/dm-3/slaves/sda4/.keep", "");
+    std::fs::create_dir_all(path.join("dev/disk/by-partlabel")).expect("mkdir");
+    std::os::unix::fs::symlink("../../sda4", path.join("dev/disk/by-partlabel/data"))
+        .expect("symlink");
+    write(
+        "proc/self/mountinfo",
+        concat!(
+            "33 25 254:3 /mica /mica rw,noatime - ext4 /dev/mapper/mica-data rw\n",
+            "35 25 254:3 / /mnt/data rw,noatime - ext4 /dev/mapper/mica-data rw\n",
+        ),
+    );
+    std::fs::create_dir_all(path.join("mnt/data/mica")).expect("mkdir");
+    std::fs::create_dir_all(path.join("mica/updates/staging")).expect("mkdir");
+
+    let observer = HostStorage::at(path)
+        .with_space_reader(|mount| (mount == DATA_MOUNT).then(|| space(1000, 100, 850)));
+    let evidence = observer.observe().await.expect("the fixture observes");
+
+    let data = &evidence.tiers["data"];
+    assert_eq!(data.device.as_deref(), Some("/dev/sda4"));
+    assert_eq!(
+        data.mount
+            .as_ref()
+            .map(|mount| (mount.mount.as_str(), mount.device.as_str())),
+        Some((DATA_MOUNT, "/dev/sda4"))
+    );
+    let mica = &evidence.binds["mica"];
+    assert_eq!(
+        classify_readiness(mica, evidence.data_tier(), Pressure::Normal),
+        Readiness::Ready
+    );
+    // A mapping over several devices, or a device that is not a mapping,
+    // is not followed.
+    write("sys/block/dm-3/slaves/sdb1/.keep", "");
+    assert_eq!(observer.backing("/dev/dm-3"), None);
+    assert_eq!(observer.backing("/dev/sda4"), None);
+}

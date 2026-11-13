@@ -220,11 +220,11 @@ impl FsSpace {
 /// One mount, as `/proc/self/mountinfo` records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountEvidence {
-    /// The block device backing the mount, canonical. For a device-mapper
-    /// mount this is the BACKING partition (`/sys/block/dm-N/slaves`), not
-    /// `/dev/dm-N`: the booted rootfs slot is a partition under a verity
-    /// device, and reporting the mapper device would leave the tier that
-    /// actually holds it looking unmounted.
+    /// The block device backing the mount. For a device-mapper mount this is
+    /// the device under the mapping (`/sys/block/dm-N/slaves`), not
+    /// `/dev/dm-N`: an encrypted DATA is mounted from `mica-data` over its
+    /// partition, and reporting the mapper device would leave the DATA tier
+    /// looking unmounted.
     pub device: String,
     /// The filesystem-relative source path from mountinfo, including bind roots.
     pub root: String,
