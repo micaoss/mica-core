@@ -870,11 +870,26 @@ shows it, read from `GET /api/v1/state/cloudAdmins`.
 
 `/usr/bin/mica`, a link to `micad`, is the one command for root on the device. Its verbs are full
 words, with no short forms or aliases; `mica help` lists them, and `mica help <verb>` or `mica
-<verb> help` gives one's usage. Each asks micad over the system bus, where the rule it applies
-lives, so it works whatever `access.web.mode` says.
+<verb> help` gives one's usage. A verb asks where the rule it applies lives. What micad decides is
+asked over the system bus, so it works whatever `access.web.mode` says. What apid decides -- the
+credentials, and the settings the API writes -- is asked on apid's local socket (section 4), as
+an API call: apid checks it, audits it with the source `local uid 0`, and counts a wrong password
+in its login backoff. With apid off (`access.web.mode` `off`) those verbs exit 3 and say that
+`mica web local` serves the local socket alone.
 
 | Verb | Does |
 | --- | --- |
+| `setup [--hostname NAME] [--password-file FILE] [--device-code-file FILE]` | `POST /api/v1/setup`: the administrator password, asked twice on the terminal, and the device code when `GET /api/v1/session` says `required` |
+| `password change [--current-password-file FILE] [--password-file FILE]` | `POST /api/v1/actions/change-password` |
+| `root-password [--password-file FILE]` | `POST /api/v1/actions/transient-root-password`, waiting for its task |
+| `ssh status`, `ssh on\|off`, `ssh keys list`, `ssh keys add <file\|->`, `ssh keys remove <fingerprint>` | `access.ssh.enabled`; `/api/v1/ssh/authorized-keys` |
+| `tokens list`, `tokens create <name>`, `tokens revoke <id>` | `/api/v1/tokens`; `create` prints the token, once |
+| `get <path>` | `GET /api/v1/settings/<path>`, secrets redacted |
+| `set <path> <value>` | `PUT /api/v1/settings/<path>`, waiting for its task. The value is typed by the setting: a string takes the argument as it is (`mica set hostname 1234` is the string `"1234"`), a switch `true` or `false` only, a number a number, a list or an object JSON; `logging.persistent`, `logging.maxSizeKiB` and `logging.remote` also take `null`. A path the API does not write is typed by its current value and refused by the API; an absent one is refused with its name |
+| `hostname [NAME]` | `hostname`, read or written |
+| `time`, `time zone [ZONE]`, `time zones`, `time servers [SERVER...]` | `GET /api/v1/time/status`; `time.timezone`; `GET /api/v1/time/zones`; `time.ntp.servers` |
+| `network`, `network show <interface>` | `GET /api/v1/network/status`: each interface's state and addresses, or one in full |
+| `wifi`, `wifi scan`, `wifi on\|off`, `wifi add <ssid> [--password-file FILE] [--open] [--hidden]`, `wifi remove <ssid>` | `/api/v1/wifi/client`, its scan and its networks; `wifi.client.enabled` |
 | `status` | The board, the running system and the update state, uptime, the interfaces and their addresses, time synchronization and DATA's use: `GetSystemInfo`, `GetUpdateState`, `GetNetworkState`, `GetTimeStatus`, `GetStorageStatus`; one that fails is shown as unavailable |
 | `update` | Section 3.7 |
 | `container` | Section 3.9 |
@@ -891,16 +906,24 @@ the build's and the factory's tools (`docs/factory-ap-key.md`, section 3.11); `m
 list them. `micad` itself runs only `micad daemon` and `micad apid`, as their units do, and
 `--version`; any other word exits 2 and names the `mica` verb.
 
+**Secrets.** A password, a network key or a device code is never an argument: it is asked for on
+the terminal with the echo off (a new one twice), or read from the file a `--…-file` flag names,
+`-` being standard input, its one line the secret.
+
 **`--json`.** A verb that reads (`status`, `update status`, `container list|status`, `unit
-list`, `web status`, `mdns status|list`, `ssdp status`) prints micad's answer as JSON on stdout
-instead of lines; `status --json` is one object, `system`, `update`, `network`, `time` and
-`storage`, a member that failed being `{"error"}`. On a failure stdout is empty and stderr is
-one object, `{"error": {"code", "message"}}`, `code` being the refusal's code or the bus error's
-last part. `--json` on a verb that reads nothing is a misuse.
+list`, `web status`, `mdns status|list`, `ssdp status`, `ssh status`, `ssh keys list`, `tokens
+list|create`, `get`, `hostname`, `time`, `time zone|zones|servers`, `network`, `wifi`, `wifi
+scan`) prints its answer as JSON on stdout instead of lines; `status --json` is one object,
+`system`, `update`, `network`, `time` and `storage`, a member that failed being `{"error"}`. On a
+failure stdout is empty and stderr is one object, `{"error": {"code", "message"}}`, `code` being
+the API's error code, the refusal's, or the bus error's last part. `--json` on a verb that reads
+nothing is a misuse.
 
 **Exit codes.** 0 done; 1 refused or failed; 2 misused (an unknown verb, a short form, a missing
-or extra argument); 3 micad not reached (no system bus, micad not on it, no reply); 4 a wrong
-password or the backoff after it (`password_incorrect`, `login_throttled`).
+or extra argument); 3 micad or apid not reached (no system bus, micad not on it, no reply, apid's
+socket not answering or apid off, the API's 503 and 504); 4 a wrong password or device code, or
+the backoff after them (`wrong_password`, `password_incorrect`, `device_code_incorrect`,
+`login_throttled`).
 
 ## 4. mica-apid
 
@@ -1116,6 +1139,9 @@ BLE to the claim. Browsers exchange the
 password for an HMAC-signed, HttpOnly session cookie and send the session's CSRF token on every
 mutation; automation uses bearer tokens `mica_<id>_<secret>`, stored as digests. Passwords are
 argon2id, failed logins back off persistently, and security-relevant actions go to an audit ring.
+`POST /api/v1/actions/change-password` `{currentPassword, newPassword}` asks for the current
+password: a wrong one is 403 `wrong_password` and counts in the same backoff as a failed login
+(429 `login_throttled` while it runs), and a right one ends the run, as a login does.
 
 **The factory reset** (section 3.7). `POST /api/v1/system/factory-reset` `{password}` asks for
 the administrator password whatever the caller's credential, and answers 202 `{applies:

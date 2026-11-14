@@ -55,6 +55,35 @@ pub(super) async fn the_api_password_change_rejects_a_wrong_current_password() {
     assert!(fake.set_paths().is_empty());
 }
 
+// A wrong current password counts in the login backoff: the very next
+// attempt, even with the right password, is refused and writes nothing.
+#[tokio::test]
+pub(super) async fn a_wrong_current_password_backs_off_the_next_change() {
+    let (tree, token) = with_token(configured_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+
+    let wrong = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/actions/change-password",
+        &token,
+        r#"{"currentPassword":"not-the-password","newPassword":"newsecret9"}"#,
+    )
+    .await;
+    assert_eq!(wrong.status(), StatusCode::FORBIDDEN);
+    let throttled = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/actions/change-password",
+        &token,
+        r#"{"currentPassword":"hunter2secret","newPassword":"newsecret9"}"#,
+    )
+    .await;
+    assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(envelope(throttled).await["code"], "login_throttled");
+    assert!(fake.set_paths().is_empty());
+}
+
 // The API half of the success: 204, the hash written, and **every** browser
 // session dropped.
 

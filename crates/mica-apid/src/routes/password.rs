@@ -22,6 +22,8 @@ use super::*;
 pub(super) enum PasswordChangeError {
     /// The current password did not verify; nothing was written.
     WrongCurrent,
+    /// The login backoff is running; the current password was not looked at.
+    Throttled,
     /// The new password is under the same floor the setup wizard enforces;
     /// nothing was written.
     TooShort,
@@ -58,6 +60,12 @@ pub(super) async fn change_password(
     if password_under_floor(new) {
         return Err(PasswordChangeError::TooShort);
     }
+    // A guess at the current password is a guess at the login's: one backoff
+    // counts both.
+    if !state.guard.begin_attempt() {
+        state.audit.record("password", "throttled", source);
+        return Err(PasswordChangeError::Throttled);
+    }
     let access = match state.api.get_settings("access").await {
         Ok(value) => value,
         Err(err) => return Err(PasswordChangeError::Bus(err)),
@@ -83,9 +91,11 @@ pub(super) async fn change_password(
             false
         });
     if !verified {
+        state.guard.confirm_failure();
         state.audit.record("password", "wrong-password", source);
         return Err(PasswordChangeError::WrongCurrent);
     }
+    state.guard.record_success();
     let password = new.to_string();
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&password))
         .await
@@ -173,8 +183,9 @@ pub(crate) struct ChangePasswordRequest {
 /// Change the admin password.
 ///
 /// Requires the current password. Answers **204** on success; every session
-/// but the acting one is dropped. A wrong current password is **401**, and a
-/// new password below the length floor is **422**.
+/// but the acting one is dropped. A wrong current password is **403** and
+/// counts in the login backoff, which answers **429** while it runs; a new
+/// password below the length floor is **422**.
 #[utoipa::path(
     post,
     path = V1_CHANGE_PASSWORD_PATH,
@@ -187,6 +198,7 @@ pub(crate) struct ChangePasswordRequest {
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "The browser CSRF token is invalid (`csrf_invalid`), or the current password does not verify (`wrong_password`)", body = ApiError),
         (status = 422, description = "The new password is shorter than 8 characters (`validation_failed`)", body = ApiError),
+        (status = 429, description = "Too many wrong passwords, here or at login; retry shortly (`login_throttled`)", body = ApiError),
         (status = 500, description = "Hashing failed (`hashing_failed`), or micad failed to answer (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -230,6 +242,13 @@ pub(crate) async fn api_v1_change_password(
             ApiError::apid(
                 "wrong_password",
                 "the current password does not verify".to_string(),
+            ),
+        ),
+        Err(PasswordChangeError::Throttled) => api_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            ApiError::apid(
+                "login_throttled",
+                "too many wrong passwords; retry shortly".to_string(),
             ),
         ),
         Err(PasswordChangeError::TooShort) => api_response(

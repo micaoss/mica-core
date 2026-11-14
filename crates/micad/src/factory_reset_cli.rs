@@ -4,9 +4,7 @@
 //! no way around it: the password comes from the terminal, or from a file
 //! (`-` for standard input) for a script.
 
-use std::io::{BufRead, Read, Write};
-
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 
 use crate::unit_cli::MicadProxy;
 
@@ -28,9 +26,6 @@ const USAGE: &str = concat!(
     "\n\n  The administrator password is asked for on the terminal.\n",
     "  --password-file FILE  read it from FILE instead, - for standard input"
 );
-
-/// The largest password file read.
-const MAX_PASSWORD: u64 = 4096;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
@@ -63,58 +58,12 @@ pub fn main(args: &[String], json: bool) -> Result<()> {
         Err(error) => crate::cli::misuse("factory-reset", &error, USAGE),
     };
     crate::cli::json_reads(json, false, "factory-reset", USAGE);
-    let password = password(password_file.as_deref())?;
+    if password_file.is_none() {
+        println!("{}\n", what!());
+    }
+    let password =
+        crate::cli::secret::secret(password_file.as_deref(), "Administrator password", false)?;
     crate::cli::block_on(run(&password))
-}
-
-/// The password from `file`, or from the terminal without echo.
-fn password(file: Option<&str>) -> Result<String> {
-    let text = match file {
-        Some("-") => read_limited(std::io::stdin().lock())?,
-        Some(file) => {
-            read_limited(std::fs::File::open(file).with_context(|| format!("open {file}"))?)
-                .with_context(|| format!("read {file}"))?
-        }
-        None => prompt()?,
-    };
-    let password = text.strip_suffix('\n').map_or(text.as_str(), |line| {
-        line.strip_suffix('\r').unwrap_or(line)
-    });
-    if password.is_empty() {
-        bail!("no password given");
-    }
-    Ok(password.to_string())
-}
-
-fn read_limited(reader: impl Read) -> Result<String> {
-    let mut bytes = Vec::new();
-    reader.take(MAX_PASSWORD + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_PASSWORD {
-        bail!("the password is longer than {MAX_PASSWORD} bytes");
-    }
-    String::from_utf8(bytes).context("the password is not UTF-8")
-}
-
-/// Print what the reset does, and read the password from the terminal with
-/// its echo off.
-fn prompt() -> Result<String> {
-    let stdin = std::io::stdin();
-    if !rustix::termios::isatty(&stdin) {
-        bail!("standard input is not a terminal; give the password with --password-file");
-    }
-    println!("{}", what!());
-    print!("\nAdministrator password: ");
-    std::io::stdout().flush()?;
-    let saved = rustix::termios::tcgetattr(&stdin)?;
-    let mut quiet = saved.clone();
-    quiet.local_modes.remove(rustix::termios::LocalModes::ECHO);
-    rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &quiet)?;
-    let mut line = String::new();
-    let read = stdin.lock().take(MAX_PASSWORD + 1).read_line(&mut line);
-    rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &saved)?;
-    println!();
-    read?;
-    Ok(line)
 }
 
 async fn run(password: &str) -> Result<()> {
@@ -167,24 +116,5 @@ mod tests {
         ] {
             assert!(parse(&words(misuse)).is_err(), "{misuse}");
         }
-    }
-
-    #[test]
-    fn a_password_file_is_one_line_of_bounded_text() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("password");
-        for (text, want) in [
-            ("secret\n", Some("secret")),
-            ("secret\r\n", Some("secret")),
-            ("with spaces ", Some("with spaces ")),
-            ("\n", None),
-            ("", None),
-        ] {
-            std::fs::write(&file, text).unwrap();
-            let read = password(Some(file.to_str().unwrap()));
-            assert_eq!(read.ok().as_deref(), want, "{text:?}");
-        }
-        std::fs::write(&file, "x".repeat(4097)).unwrap();
-        assert!(password(Some(file.to_str().unwrap())).is_err());
     }
 }

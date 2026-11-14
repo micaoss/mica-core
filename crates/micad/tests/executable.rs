@@ -124,6 +124,13 @@ fn mica_refuses_short_forms_and_other_spellings() {
         &["reboot", "now"][..],
         &["reboot", "--json"][..],
         &["internal", "frobnicate"][..],
+        &["password"][..],
+        &["password", "change", "--password", "secret"][..],
+        &["set", "hostname"][..],
+        &["ssh", "key", "list"][..],
+        &["tokens", "remove", "x"][..],
+        &["wifi", "add", "home", "--psk", "secret"][..],
+        &["time", "ntp"][..],
     ] {
         let (code, stdout, _) = run_full("mica", args);
         assert_eq!(code, Some(2), "{args:?}");

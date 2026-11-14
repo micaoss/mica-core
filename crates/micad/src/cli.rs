@@ -2,8 +2,11 @@
 //! its exit codes and its `--json`.
 //!
 //! A verb goes where its rules live: what micad decides is asked over the
-//! system bus, as the console's API asks it. `mica internal` holds the build
-//! and factory tools, and `mica help` does not list it.
+//! system bus, as the console's API asks it; what apid decides -- the
+//! credentials and the settings it writes -- is asked on apid's local socket
+//! (`api`), so its checks, its audit and its login backoff apply. `mica
+//! internal` holds the build and factory tools, and `mica help` does not list
+//! it.
 //!
 //! Exit codes: 0 done, 1 refused or failed, 2 misused, 3 micad (or apid) not
 //! reached, 4 a wrong password or device code, or the backoff after them.
@@ -13,6 +16,11 @@ use std::future::Future;
 use anyhow::Result;
 use serde_json::{Value, json};
 
+mod account;
+pub mod api;
+mod network;
+pub mod secret;
+mod settings;
 mod status;
 
 /// Every verb `mica help` lists, with its line.
@@ -21,6 +29,23 @@ pub const VERBS: &[(&str, &str)] = &[
         "status",
         "the device at a glance: system, update, network, time, storage",
     ),
+    ("setup", "first-run setup: the administrator password"),
+    ("password", "change the administrator password"),
+    (
+        "root-password",
+        "set the transient root password, until the next boot",
+    ),
+    ("ssh", "SSH on or off, and its authorized keys"),
+    ("tokens", "API tokens: list, create, revoke"),
+    ("get", "read one setting"),
+    ("set", "write one setting"),
+    ("hostname", "show or set the hostname"),
+    (
+        "time",
+        "time synchronization, the time zone and the NTP servers",
+    ),
+    ("network", "the interfaces and their addresses"),
+    ("wifi", "the Wi-Fi station and its known networks"),
     ("update", "look for, install or roll back a release"),
     ("container", "Compose projects and their containers"),
     ("unit", "this device's own services"),
@@ -128,6 +153,17 @@ pub fn main(args: &[String]) -> i32 {
             _ => misuse("help", "help names one command", &help()),
         },
         "status" => status::main(rest, json),
+        "setup" => account::setup(rest, json),
+        "password" => account::password(rest, json),
+        "root-password" => account::root_password(rest, json),
+        "ssh" => account::ssh(rest, json),
+        "tokens" => account::tokens(rest, json),
+        "get" => settings::get(rest, json),
+        "set" => settings::set(rest, json),
+        "hostname" => settings::hostname(rest, json),
+        "time" => settings::time(rest, json),
+        "network" => network::network(rest, json),
+        "wifi" => network::wifi(rest, json),
         "update" => crate::update_cli::main(rest, json),
         "container" => crate::ctr_cli::main(rest, json),
         "unit" => crate::unit_cli::main(rest, json),

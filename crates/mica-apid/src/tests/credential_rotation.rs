@@ -155,12 +155,27 @@ async fn old_password_login_cannot_survive_a_completed_password_change() {
     tokio::time::timeout(std::time::Duration::from_secs(5), paused.entered.notified())
         .await
         .unwrap();
-    let changed = send(&router, Request::builder().method("POST")
-        .uri("/api/v1/actions/change-password")
-        .header(AUTHORIZATION, format!("Bearer {token}"))
-        .header(CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({"currentPassword": "audit-old-password", "newPassword": "audit-new-password"}).to_string())).unwrap()).await;
-    assert_eq!(changed.status(), StatusCode::NO_CONTENT);
+    // The pending login was charged at admission, and one backoff counts the
+    // login's and the change's passwords: the change waits that window out.
+    let mut changed = None;
+    for _ in 0..50 {
+        let response = send(&router, Request::builder().method("POST")
+            .uri("/api/v1/actions/change-password")
+            .header(AUTHORIZATION, format!("Bearer {token}"))
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({"currentPassword": "audit-old-password", "newPassword": "audit-new-password"}).to_string())).unwrap()).await;
+        if response.status() != StatusCode::TOO_MANY_REQUESTS {
+            changed = Some(response);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        changed
+            .expect("the backoff ended within five seconds")
+            .status(),
+        StatusCode::NO_CONTENT
+    );
     paused.release.notify_one();
     let response = pending.await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);

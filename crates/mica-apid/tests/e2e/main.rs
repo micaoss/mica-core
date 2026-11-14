@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::Duration;
 
+mod cli;
 mod poured;
 mod web_flow;
 use poured::*;

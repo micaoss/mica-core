@@ -12,7 +12,7 @@
           "actions"
         ],
         "summary": "Change the admin password.",
-        "description": "Requires the current password. Answers **204** on success; every session\nbut the acting one is dropped. A wrong current password is **401**, and a\nnew password below the length floor is **422**.",
+        "description": "Requires the current password. Answers **204** on success; every session\nbut the acting one is dropped. A wrong current password is **403** and\ncounts in the login backoff, which answers **429** while it runs; a new\npassword below the length floor is **422**.",
         "operationId": "api_v1_change_password",
         "requestBody": {
           "content": {
@@ -70,6 +70,16 @@
           },
           "422": {
             "description": "The new password is shorter than 8 characters (`validation_failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many wrong passwords, here or at login; retry shortly (`login_throttled`)",
             "content": {
               "application/json": {
                 "schema": {
