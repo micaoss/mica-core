@@ -1,4 +1,4 @@
-//! `micad diag`: a diagnostic snapshot made on the device, with no apid.
+//! `mica doctor`: a diagnostic snapshot made on the device, with no apid.
 //!
 //! The snapshot is the one `POST /api/v1/diagnostics` makes, collected over
 //! the system bus and published to the same store, so it is there whatever
@@ -10,21 +10,21 @@ use crate::diagnostics::{Collector, SnapshotStore};
 use crate::settings_api::SettingsApi;
 
 const USAGE: &str = "\
-usage: micad diag
+usage: mica doctor
 
   collect a diagnostic snapshot, redacted as the API's, into /mica/diagnostics,
   and print its path";
 
-/// `micad diag`'s entry point: exit 0 done, 1 failed, 2 misused.
+/// `mica doctor`'s entry point: exit 0 done, 1 failed, 2 misused.
 pub fn main(args: &[String]) -> anyhow::Result<()> {
     match args {
         [] => {}
-        [help] if matches!(help.as_str(), "help" | "-h" | "--help") => {
+        [help] if matches!(help.as_str(), "help" | "--help") => {
             println!("{USAGE}");
             return Ok(());
         }
         [other, ..] => {
-            eprintln!("micad diag: unexpected argument: {other}\n{USAGE}");
+            eprintln!("mica doctor: unexpected argument: {other}\n{USAGE}");
             std::process::exit(2);
         }
     }
@@ -37,10 +37,7 @@ pub fn main(args: &[String]) -> anyhow::Result<()> {
             println!("{}", path.display());
             Ok(())
         }
-        Err(error) => {
-            eprintln!("micad diag: {error:#}");
-            std::process::exit(1);
-        }
+        Err(error) => Err(error),
     }
 }
 

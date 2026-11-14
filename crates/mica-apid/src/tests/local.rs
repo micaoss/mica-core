@@ -120,7 +120,7 @@ pub(super) async fn the_socket_is_root_s_alone() {
     assert_eq!(mode(&path), 0o600);
 }
 
-/// Root on the device is already where `micad web network` runs, so the SSH
+/// Root on the device is already where `mica web network` runs, so the SSH
 /// rule for leaving the network does not hold it.
 #[tokio::test]
 pub(super) async fn root_may_take_the_api_off_the_network_without_ssh() {

@@ -1,5 +1,4 @@
-//! `mica-update` (or `micad update`), the operator's update command: micad
-//! over the system bus.
+//! `mica update`, the operator's update command: micad over the system bus.
 //!
 //! It asks micad what `mica-deploy` would otherwise be asked by hand, so the
 //! source, channel and workspace budget are the device's own and the gates
@@ -7,17 +6,17 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use serde_json::Value;
 
 const USAGE: &str = "\
-usage: mica-update [status]
-       mica-update check
-       mica-update install [--reboot]
-       mica-update rollback [--reboot]
-       (micad update ... is the same command)
+usage: mica update [status] [--json]
+       mica update check
+       mica update install [--reboot]
+       mica update rollback [--reboot]
 
-  status    show the running versions and the update state
+  status    show the running versions and the update state; --json prints
+            micad's update state
   check     look for a newer release
   install   check, download and install the newest release
   rollback  return to the retained previous system
@@ -65,51 +64,37 @@ fn parse(args: &[String]) -> Result<Command, String> {
         Some("check") => Ok(Command::Check),
         Some("install") => Ok(Command::Install { reboot }),
         Some("rollback") => Ok(Command::Rollback { reboot }),
-        Some("help" | "-h" | "--help") => Ok(Command::Help),
+        Some("help" | "--help") => Ok(Command::Help),
         Some(other) => Err(format!("unknown command: {other}")),
     }
 }
 
-/// `mica-update`'s entry point: exit 0 done, 1 failed, 2 misused.
-///
-/// `args` are the words after the command: after `mica-update`, or after
-/// `micad update`.
-pub fn main(args: &[String]) -> Result<()> {
-    if mica_apid::wants_version(args.iter().cloned()) {
-        println!("{}", mica_apid::version_line("micad"));
-        return Ok(());
-    }
+/// `mica update`'s entry point; `args` are the words after it.
+pub fn main(args: &[String], json: bool) -> Result<()> {
     let command = match parse(args) {
         Ok(Command::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
         Ok(command) => command,
-        Err(error) => {
-            eprintln!("mica-update: {error}\n{USAGE}");
-            std::process::exit(2);
-        }
+        Err(error) => crate::cli::misuse("update", &error, USAGE),
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    if let Err(error) = runtime.block_on(run(command)) {
-        eprintln!("mica-update: {error:#}");
-        std::process::exit(1);
-    }
-    Ok(())
+    crate::cli::json_reads(json, command == Command::Status, "update", USAGE);
+    crate::cli::block_on(run(command, json))
 }
 
-async fn run(command: Command) -> Result<()> {
-    let connection = zbus::Connection::system()
-        .await
-        .context("connect to the system bus")?;
-    let micad = MicadProxy::new(&connection).await?;
+async fn run(command: Command, json: bool) -> Result<()> {
+    let connection = crate::cli::system_bus().await?;
+    let micad = MicadProxy::new(&connection).await.map_err(bus_error)?;
     let me = connection
         .unique_name()
         .map(|name| name.to_string())
         .unwrap_or_default();
     match command {
+        Command::Status if json => {
+            println!("{}", micad.get_update_state().await.map_err(bus_error)?);
+            Ok(())
+        }
         Command::Status => {
             print!("{}", render_status(&state(&micad).await?));
             Ok(())
@@ -173,13 +158,7 @@ async fn state(micad: &MicadProxy<'_>) -> Result<Value> {
     Ok(serde_json::from_str(&raw)?)
 }
 
-/// micad's refusal, in its own words rather than the bus error's name.
-fn bus_error(error: zbus::Error) -> anyhow::Error {
-    match crate::bus::error_reply(&error) {
-        Some((name, message)) => anyhow::anyhow!(message.unwrap_or(name)),
-        None => anyhow::Error::new(error).context("micad"),
-    }
-}
+use crate::cli::bus_error;
 
 /// Read the state until the request ends, printing each step once.
 async fn follow(micad: &MicadProxy<'_>, me: &str, before: &Value, watch: Watch) -> Result<Done> {
@@ -200,7 +179,7 @@ async fn follow(micad: &MicadProxy<'_>, me: &str, before: &Value, watch: Watch) 
                 stalled += 1;
                 if stalled >= STALLED_POLLS {
                     let at = text(&doc, "/lifecycle/state").unwrap_or_default();
-                    bail!("stopped at {at}; see `mica-update status`");
+                    bail!("stopped at {at}; see `mica update status`");
                 }
             }
             Progress::Finished(outcome) => return outcome.map_err(anyhow::Error::msg),
@@ -305,7 +284,7 @@ fn rollback_target(doc: &Value) -> Result<(String, String)> {
 }
 
 /// `status`: what runs, what is on offer, where the lifecycle stands.
-fn render_status(doc: &Value) -> String {
+pub(crate) fn render_status(doc: &Value) -> String {
     let mut lines = Vec::new();
     let running = text(doc, "/boot/deploymentId");
     let version = running.as_deref().and_then(|id| {

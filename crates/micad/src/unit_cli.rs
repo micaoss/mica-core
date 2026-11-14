@@ -1,4 +1,4 @@
-//! `micad unit`, the operator's command for their own services: micad over the
+//! `mica unit`, the operator's command for their own services: micad over the
 //! system bus.
 //!
 //! A service put here is stored in micad's settings (`services.units`), the
@@ -14,12 +14,12 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 const USAGE: &str = "\
-usage: micad unit install <file|-> [--name <name>] [--conf <file>] [--enable]
-       micad unit enable|disable <name>
-       micad unit remove <name>
-       micad unit start|stop|restart <name>
-       micad unit list
-       micad unit logs <name> [--tail N]
+usage: mica unit install <file|-> [--name <name>] [--conf <file>] [--enable]
+       mica unit enable|disable <name>
+       mica unit remove <name>
+       mica unit start|stop|restart <name>
+       mica unit list [--json]
+       mica unit logs <name> [--tail N]
 
   install  store a unit file (systemd) or an openrc-run script (OpenRC) as one
            of this device's services; its name is the file's unless --name
@@ -154,36 +154,23 @@ fn parse(args: &[String]) -> Result<Command, String> {
                 tail,
             })
         }
-        [] | ["help" | "-h" | "--help"] => Ok(Command::Help),
+        [] | ["help" | "--help"] => Ok(Command::Help),
         [other, ..] => Err(format!("unknown command or arguments: {other}")),
     }
 }
 
-/// `micad unit`'s entry point: exit 0 done, 1 failed, 2 misused.
-pub fn main(args: &[String]) -> Result<()> {
-    if mica_apid::wants_version(args.iter().cloned()) {
-        println!("{}", mica_apid::version_line("micad"));
-        return Ok(());
-    }
+/// `mica unit`'s entry point; `args` are the words after it.
+pub fn main(args: &[String], json: bool) -> Result<()> {
     let command = match parse(args) {
         Ok(Command::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
         Ok(command) => command,
-        Err(error) => {
-            eprintln!("micad unit: {error}\n{USAGE}");
-            std::process::exit(2);
-        }
+        Err(error) => crate::cli::misuse("unit", &error, USAGE),
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    if let Err(error) = runtime.block_on(run(command)) {
-        eprintln!("micad unit: {error:#}");
-        std::process::exit(1);
-    }
-    Ok(())
+    crate::cli::json_reads(json, command == Command::List, "unit", USAGE);
+    crate::cli::block_on(run(command, json))
 }
 
 /// `name` as the init knows it: under systemd a name without a unit type is
@@ -204,12 +191,11 @@ fn unit_path(name: &str) -> String {
     )
 }
 
-async fn run(command: Command) -> Result<()> {
-    let connection = zbus::Connection::system()
-        .await
-        .context("connect to the system bus")?;
-    let micad = MicadProxy::new(&connection).await?;
-    let units: Value = serde_json::from_str(&micad.get_units().await.map_err(bus_error)?)?;
+async fn run(command: Command, json: bool) -> Result<()> {
+    let connection = crate::cli::system_bus().await?;
+    let micad = MicadProxy::new(&connection).await.map_err(bus_error)?;
+    let listed = micad.get_units().await.map_err(bus_error)?;
+    let units: Value = serde_json::from_str(&listed)?;
     let init = units["init"].as_str().unwrap_or("systemd").to_string();
     let declared = || async {
         let declared: serde_json::Map<String, Value> = match serde_json::from_str(
@@ -261,7 +247,7 @@ async fn run(command: Command) -> Result<()> {
             let name = unit_name(&init, &name);
             if !declared().await?.contains_key(&name) {
                 bail!(
-                    "no service named {name} is declared here; `micad unit install` it, or use mica-unit for one put there by hand"
+                    "no service named {name} is declared here; `mica unit install` it, or use mica-unit for one put there by hand"
                 );
             }
             let task = micad
@@ -296,6 +282,7 @@ async fn run(command: Command) -> Result<()> {
             }
             .map_err(bus_error)?;
         }
+        Command::List if json => println!("{listed}"),
         Command::List => print!("{}", render_list(&units)),
         Command::Logs { name, tail } => {
             let name = unit_name(&init, &name);
@@ -418,13 +405,7 @@ pub(crate) async fn wait(micad: &MicadProxy<'_>, task: &str) -> Result<()> {
     }
 }
 
-/// micad's refusal, in its own words rather than the bus error's name.
-pub(crate) fn bus_error(error: zbus::Error) -> anyhow::Error {
-    match crate::bus::error_reply(&error) {
-        Some((name, message)) => anyhow::anyhow!(message.unwrap_or(name)),
-        None => anyhow::Error::new(error).context("micad"),
-    }
-}
+pub(crate) use crate::cli::bus_error;
 
 #[cfg(test)]
 mod tests;

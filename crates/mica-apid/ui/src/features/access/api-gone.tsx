@@ -49,7 +49,7 @@ function ApiGoneScreen({ gone }: { gone: Gone }) {
         <BrandMark className="size-8" />
         <h1 className="text-xl font-semibold">{t(`access.web.gone.title.${gone.mode}`)}</h1>
         <p className="text-muted-foreground">{t('access.web.gone.body')}</p>
-        <pre className="rounded-md border bg-muted p-3 font-mono text-sm">{`ssh root@${gone.host}\nmicad web network`}</pre>
+        <pre className="rounded-md border bg-muted p-3 font-mono text-sm">{`ssh root@${gone.host}\nmica web network`}</pre>
       </div>
     </main>
   )

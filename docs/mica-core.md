@@ -32,7 +32,7 @@ root hash with the product's key.
 
 | Component | What it holds | systemd | OpenRC | Started |
 | --- | --- | --- | --- | --- |
-| `micad` | The management daemon and its D-Bus policy, and the API, `/usr/bin/mica-apid` (a link to `micad`, the same as `micad apid`), with the OpenAPI document; the update command `/usr/bin/mica-update` (a link, the same as `micad update`) and the containers command `/usr/bin/mica-ctr` (a link, the same as `micad ctr`); feature `micad` | `micad.service`, `apid.service` | `/etc/init.d/micad`, `/etc/init.d/apid` | micad at boot (the component links it); apid by micad (`access.web.mode`) |
+| `micad` | The management daemon and its D-Bus policy, and the API, `/usr/bin/mica-apid` (a link to `micad`, the same as `micad apid`), with the OpenAPI document; the operator's command `/usr/bin/mica` (a link, section 3.15); feature `micad` | `micad.service`, `apid.service` | `/etc/init.d/micad`, `/etc/init.d/apid` | micad at boot (the component links it); apid by micad (`access.web.mode`) |
 | `mica-apid-ui` | The web console at `/usr/share/mica-apid/ui`; feature `ui`, at micad's exact version | -- | -- | Served by apid; optional |
 
 The rest are Debian packages built into the root:
@@ -364,7 +364,7 @@ absence is reported with its reason rather than as a healthy reading:
   `InstallLatestUpdate` is the operator's one request for the newest release: the maintenance
   window, a metered link and the check's admission refuse it at once, and the check, fetch and
   install then run in the background through the same gates; it never reboots.
-  `mica-update` (or `micad update`) is that request on the device's command line: `status`,
+  `mica update` is that request on the device's command line: `status`,
   `check`, `install` and `rollback`, the last two rebooting only with `--reboot`. Nothing
   installs without `install`.
 - **Power, reset and recovery.** Reboot and power-off are recorded with their caller before they
@@ -412,7 +412,7 @@ absence is reported with its reason rather than as a healthy reading:
   unclaimed device (`not_claimed`), while an update is installing, holds the transaction lock or
   waits for its reboot (`update_in_progress`), while a deployment or set is on trial
   (`trial_pending`), and on a wrong password (`password_incorrect`). After 3 wrong passwords
-  each one doubles a wait from 5 s to 300 s (`login_throttled`). `micad factory-reset` is the
+  each one doubles a wait from 5 s to 300 s (`login_throttled`). `mica factory-reset` is the
   same request as root on the device: it prompts for the password with echo off, or reads it
   from `--password-file FILE` (`-` for stdin); there is no flag to skip it. The first boot
   after a reset logs its record (`factory-reset-done.json`: requested, completed, by, source,
@@ -506,7 +506,7 @@ At start micad logs where the device code comes from (`device code on the login 
 `device code present` for a `random` code, with its source, never the code, which a log kept or
 forwarded off the device would carry) and writes it to `/run/mica/device-code.issue`, replaced
 whole: `Device code: XXXX-XXXX-XXX` (for a `random` code, which is not shown, the line says to
-run `sudo micad device-code` after login, `docs/factory-ap-key.md`), then a
+run `sudo mica internal device-code` after login, `docs/factory-ap-key.md`), then a
 `Console: <url>` line for each IPv4 address the device holds (the loopback and the container
 engines' links left out, a link-local address kept) and one for `<hostname>.local`, as
 `access.web` serves the console (section 4), then a blank line. micad reads the addresses again
@@ -576,27 +576,29 @@ answer `{"ok": true, "containers": [<spec>...]}` or
 `GetContainerLog(name, tail)` answers the last `tail` lines (1 to 1000) of
 `<project>/<service>`, at most 256 KiB.
 
-**On the device: `micad ctr`** (or `mica-ctr`). Root's, over the bus to micad, so it, the console
+**On the device: `mica container`.** Root's, over the bus to micad, so it, the console
 and the API change one set of declarations:
 
 | Command | Does |
 | --- | --- |
-| `up [-p <project>] [-f <file\|->] [--project-dir <dir>]` | Checks the file, prints the problems and exits 1 when refused; otherwise stores it as the project with its directory and turns containers on |
-| `down [-p <project>]` | Removes the project; its containers and network go, its directory and `/mica/volumes/<project>/` stay |
-| `list` (or `ps`) | Every project's containers: project, service, container, phase, health |
-| `check [-p <project>] [-f <file\|->] [--project-dir <dir>]` | Checks a file without storing it: the containers it becomes, or the problems |
+| `up [--project <project>] [--file <file\|->] [--project-dir <dir>]` | Checks the file, prints the problems and exits 1 when refused; otherwise stores it as the project with its directory and turns containers on |
+| `down [--project <project>]` | Removes the project; its containers and network go, its directory and `/mica/volumes/<project>/` stay |
+| `list` | Every project's containers: project, service, container, phase, health; `--json` prints `GetContainers` |
+| `check [--project <project>] [--file <file\|->] [--project-dir <dir>]` | Checks a file without storing it: the containers it becomes, or the problems |
 | `start`, `stop`, `restart <project>[/<service>]` | The verb on the project's every container, or on one |
 | `logs <project>/<service> [--tail N]` | The last lines of its log (100 unless asked) |
+| `status` | Whether containers are on (`container.enabled`); `--json` prints `{"enabled"}` |
+| `on`, `off` | Writes `container.enabled` and waits for it; the projects stay declared |
 
 `up`, `down` and `check` take docker compose's defaults. The file is the first of
 `compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` in the working
-directory unless `-f` names one (`-` is stdin). The project directory is the file's directory
-(the working directory for stdin) unless `--project-dir` names one. The project is `-p`, else the
+directory unless `--file` names one (`-` is stdin). The project directory is the file's directory
+(the working directory for stdin) unless `--project-dir` names one. The project is `--project`, else the
 file's top-level `name`, else the project directory's name in lower case with only `a-z`, `0-9`,
 `_` and `-`, none of `_` and `-` leading; `down` takes the same name from the working directory.
-So `cd /srv/bit-56-core && micad ctr up` declares project `bit-56-core`, its `./data` being
-`/srv/bit-56-core/data`. `up` and `down` wait for the reconcile and report it; exit 0 done, 1
-failed, 2 misused.
+So `cd /srv/bit-56-core && mica container up` declares project `bit-56-core`, its `./data` being
+`/srv/bit-56-core/data`. `up` and `down` wait for the reconcile and report it; the exit codes are
+`mica`'s (section 3.15).
 
 **API.** `GET /api/v1/containers` is `GetContainers`. `PUT /api/v1/container-projects/{project}`
 (`{"compose": "<text>"}`) declares or replaces a project, which keeps its directory; a refused file is 422 `compose_invalid`
@@ -619,7 +621,7 @@ and health are dockerd's, from each container's restart policy and health check.
   disables the service. Nothing is declared and no container is started or stopped by micad:
   dockerd runs with `live-restore` off (mica-docker), so stopping it stops its containers, as
   `systemctl stop docker` does, and the next start applies their restart policies.
-- **Reads and verbs.** `GetContainers`, `micad ctr list` and the console list every container
+- **Reads and verbs.** `GetContainers`, `mica container list` and the console list every container
   dockerd holds, as it reports it: a container compose made under its project and service (its
   labels), any other as the project and the service of its own name. The phase is dockerd's state
   (`created`, `running`, `paused`, `restarting`, `removing`, `exited`, `dead`); `health`,
@@ -627,7 +629,7 @@ and health are dockerd's, from each container's restart policy and health check.
   `RestartContainer` take `<project>` (each of its containers) or `<project>/<service>`, and are
   dockerd's `start`, `stop` and `restart` (10 s before a kill); `GetContainerLog` is its `logs`.
 - **No declarations.** A write that adds or changes `container.projects` or
-  `container.projectDirs` is refused, and so are `CheckContainerProject(In)` and `micad ctr up`,
+  `container.projectDirs` is refused, and so are `CheckContainerProject(In)` and `mica container up`,
   `down` and `check`: they say to use docker compose.
 - dockerd starts after micad, so a staged reset runs before it, and neither micad nor the boot's
   health waits for it: a dockerd that is late or absent is a container apply that fails and is
@@ -689,7 +691,7 @@ change of `enabled`. `GetUnitLog` answers its newest lines as `GetLog` answers a
 journal of the unit under systemd, and under OpenRC the RAM log's lines tagged with the script's
 name, which is what the script sends to syslog. A name that is not installed is `InvalidArgs`.
 
-**On the device: `micad unit`.** Root's, over the bus to micad, like `micad ctr`:
+**On the device: `mica unit`.** Root's, over the bus to micad, like `mica container`:
 
 | Command | Does |
 | --- | --- |
@@ -697,11 +699,11 @@ name, which is what the script sends to syslog. A name that is not installed is 
 | `enable`, `disable <name>` | Enables it, which starts it; disables it, which stops it |
 | `remove <name>` | Stops it and deletes it |
 | `start`, `stop`, `restart <name>` | The verb, now, on any installed service |
-| `list` | Every service: whether it is enabled, the init's state, and whether micad or a hand manages it |
+| `list` | Every service: whether it is enabled, the init's state, and whether micad or a hand manages it; `--json` prints `GetUnits` |
 | `logs <name> [--tail N]` | Its newest lines (200 unless asked) |
 
 Under systemd a name without a unit type is a `.service`. The writes wait for the reconcile and
-report it; exit 0 done, 1 failed, 2 misused.
+report it; the exit codes are `mica`'s (section 3.15).
 
 **API.** `GET /api/v1/units` is `GetUnits`. `PUT /api/v1/units/{name}`
 (`{"kind", "text", "conf"?, "enabled"}`) declares or replaces a service, `DELETE` removes one;
@@ -757,7 +759,7 @@ file is logged and the device discovers.
 At start micad logs each declared port the kernel does not list and each physical link
 (`/sys/class/net/<name>/device`) the board does not declare. The console lists declared ports
 first, in order and with their label, an absent one as 未检测到, and tags a physical link the
-board does not declare 未声明; it is still managed. `micad board check <file>` reads a file with
+board does not declare 未声明; it is still managed. `mica internal board check <file>` reads a file with
 the same parser, for a build to verify the file it ships.
 
 ### 3.12 LAN discovery: mDNS
@@ -799,11 +801,11 @@ published already, by the device or an earlier source, is refused, as is any pas
 `/run/mica/mdns.d` with inotify and re-applies within a second of a change, at most once a
 second, and reads the drop-ins again every 10 s.
 
-`micad mdns status|list` show the switch, its source, the `.local` name and every service with its
-source (`built-in`, `image:<name>`, `runtime:<name>`), and what is refused; `micad
-mdns on|off` write `access.mdns.enabled` and wait for it; `micad mdns add <name> --type <type>
+`mica mdns status|list` show the switch, its source, the `.local` name and every service with its
+source (`built-in`, `image:<name>`, `runtime:<name>`), and what is refused; `mica
+mdns on|off` write `access.mdns.enabled` and wait for it; `mica mdns add <name> --type <type>
 --port <port> [--instance <label>] [--txt KEY=VALUE]...` writes the runtime file `<name>.json`
-whole, and `micad mdns remove <name>` removes it.
+whole, and `mica mdns remove <name>` removes it.
 
 A change sends goodbyes for what went and announces what came; a new hostname withdraws every
 record and publishes them under the new name. The responder answers only a query whose source
@@ -842,8 +844,8 @@ console on the address asked, and no services. It is 404 while the responder doe
 
 `access.ssdp.enabled` switches it; absent, the product's `SSDP=` line decides (section 3.2), on
 when the product says nothing. It runs only while it is on and apid serves the network
-(`access.web.mode`), and on a device with a machine id; otherwise there is no socket. `micad ssdp
-status` shows the switch, its source, whether it runs and why not, and what it announces; `micad
+(`access.web.mode`), and on a device with a machine id; otherwise there is no socket. `mica ssdp
+status` shows the switch, its source, whether it runs and why not, and what it announces; `mica
 ssdp on|off` write the switch and wait for it. The live state (`ssdp`) carries the same, and the
 description's fields.
 
@@ -864,6 +866,42 @@ says `off`. Both are rendered at every start, since `/run` is memory. The live s
 written through `PUT /api/v1/settings/access.cloudAdmins.enabled`, and the console's Access page
 shows it, read from `GET /api/v1/state/cloudAdmins`.
 
+### 3.15 The operator's command: `mica`
+
+`/usr/bin/mica`, a link to `micad`, is the one command for root on the device. Its verbs are full
+words, with no short forms or aliases; `mica help` lists them, and `mica help <verb>` or `mica
+<verb> help` gives one's usage. Each asks micad over the system bus, where the rule it applies
+lives, so it works whatever `access.web.mode` says.
+
+| Verb | Does |
+| --- | --- |
+| `status` | The board, the running system and the update state, uptime, the interfaces and their addresses, time synchronization and DATA's use: `GetSystemInfo`, `GetUpdateState`, `GetNetworkState`, `GetTimeStatus`, `GetStorageStatus`; one that fails is shown as unavailable |
+| `update` | Section 3.7 |
+| `container` | Section 3.9 |
+| `unit` | Section 3.10 |
+| `web` | Section 4 |
+| `mdns`, `ssdp` | Sections 3.12, 3.13 |
+| `reboot`, `poweroff` | `Reboot`, `PowerOff` |
+| `factory-reset` | Section 3.7 |
+| `doctor` | The diagnostic snapshot (section 4) |
+| `help` | The verbs, or one's usage |
+
+`mica internal device-code`, `mica internal derive-ap-key` and `mica internal board check` are
+the build's and the factory's tools (`docs/factory-ap-key.md`, section 3.11); `mica help` does not
+list them. `micad` itself runs only `micad daemon` and `micad apid`, as their units do, and
+`--version`; any other word exits 2 and names the `mica` verb.
+
+**`--json`.** A verb that reads (`status`, `update status`, `container list|status`, `unit
+list`, `web status`, `mdns status|list`, `ssdp status`) prints micad's answer as JSON on stdout
+instead of lines; `status --json` is one object, `system`, `update`, `network`, `time` and
+`storage`, a member that failed being `{"error"}`. On a failure stdout is empty and stderr is
+one object, `{"error": {"code", "message"}}`, `code` being the refusal's code or the bus error's
+last part. `--json` on a verb that reads nothing is a misuse.
+
+**Exit codes.** 0 done; 1 refused or failed; 2 misused (an unknown verb, a short form, a missing
+or extra argument); 3 micad not reached (no system bus, micad not on it, no reply); 4 a wrong
+password or the backoff after it (`password_incorrect`, `login_throttled`).
+
 ## 4. mica-apid
 
 The same executable as micad, run as `mica-apid` or `micad apid`: the API and the console. It holds
@@ -880,14 +918,14 @@ no configuration of its own; every read and change goes through micad.
 Out of `network` there is no console, no HTTP API, no setup page on the access point and no
 bearer token in use; micad and what it drives (the health gate, updates, SSH, MQTT, BLE
 provisioning, the `micad` commands, the user's services) are unchanged. A device may
-run with no API at all, managed by its own services or its fleet. The way back is `micad web network` as
+run with no API at all, managed by its own services or its fleet. The way back is `mica web network` as
 root on the device (over SSH when it is on), a provisioning document, or a reset. The console's
 access page sets the mode: it asks once, naming that command, and once the write is accepted it gives way to a screen that says the API has left the network and
 how to bring it back, and makes no further request.
 
-On the device, root's commands work in every mode, over the bus to micad: `micad web status`
-names the mode and the listeners, `micad web network|local|off` sets the mode and waits for it to
-apply (exit 0 done, 1 failed, 2 misused), and `micad diag` collects the diagnostic snapshot
+On the device, root's commands work in every mode, over the bus to micad: `mica web status`
+names the mode and the listeners, `mica web network|local|off` sets the mode and waits for it to
+apply, and `mica doctor` collects the diagnostic snapshot
 `POST /api/v1/diagnostics` makes, into the same store, and prints its path.
 
 Under `network` apid listens where `access.web` says (`GET`/`PUT /api/v1/web`, the console's
@@ -1064,7 +1102,7 @@ which read the effective state, and the mDNS services, read-only.
 device code the body carries the code as `deviceCode` (dashes, spaces and case ignored): that is
 the claimer's proof of holding the device, which reaching its console is not once BLE
 provisioning has put an unclaimed device on a network. The code is on the label and on the
-device's own console, the login prompt (section 3.8), and `micad device-code` prints it. A missing one is 422
+device's own console, the login prompt (section 3.8), and `mica internal device-code` prints it. A missing one is 422
 at `deviceCode`, a wrong one 403 `device_code_incorrect` and counts in the login backoff (429
 `login_throttled`, at most 300 s). A device that declares a `random` code and cannot read it
 is not claimed: 503 `device_code_unavailable`. A device without a code is claimed without one, and so is one whose

@@ -1,4 +1,4 @@
-//! `micad factory-reset`: the factory reset from the device's command line.
+//! `mica factory-reset`: the factory reset from the device's command line.
 //!
 //! It asks for the administrator password, as every trigger does, and has
 //! no way around it: the password comes from the terminal, or from a file
@@ -7,7 +7,6 @@
 use std::io::{BufRead, Read, Write};
 
 use anyhow::{Context, Result, bail};
-use serde_json::Value;
 
 use crate::unit_cli::MicadProxy;
 
@@ -24,7 +23,7 @@ macro_rules! what {
 }
 
 const USAGE: &str = concat!(
-    "usage: micad factory-reset [--password-file FILE]\n\n",
+    "usage: mica factory-reset [--password-file FILE]\n\n",
     what!(),
     "\n\n  The administrator password is asked for on the terminal.\n",
     "  --password-file FILE  read it from FILE instead, - for standard input"
@@ -48,40 +47,24 @@ fn parse(args: &[String]) -> Result<Command, String> {
         ["--password-file", file] => Ok(Command::Reset {
             password_file: Some((*file).to_string()),
         }),
-        ["help" | "-h" | "--help"] => Ok(Command::Help),
+        ["help" | "--help"] => Ok(Command::Help),
         [other, ..] => Err(format!("unknown arguments: {other}")),
     }
 }
 
-/// `micad factory-reset`'s entry point: exit 0 staged, 1 refused or
-/// failed, 2 misused.
-pub fn main(args: &[String]) -> Result<()> {
-    if mica_apid::wants_version(args.iter().cloned()) {
-        println!("{}", mica_apid::version_line("micad"));
-        return Ok(());
-    }
+/// `mica factory-reset`'s entry point; `args` are the words after it.
+pub fn main(args: &[String], json: bool) -> Result<()> {
     let password_file = match parse(args) {
         Ok(Command::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
         Ok(Command::Reset { password_file }) => password_file,
-        Err(error) => {
-            eprintln!("micad factory-reset: {error}\n{USAGE}");
-            std::process::exit(2);
-        }
+        Err(error) => crate::cli::misuse("factory-reset", &error, USAGE),
     };
-    let outcome = password(password_file.as_deref()).and_then(|password| {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?
-            .block_on(run(&password))
-    });
-    if let Err(error) = outcome {
-        eprintln!("micad factory-reset: {error:#}");
-        std::process::exit(1);
-    }
-    Ok(())
+    crate::cli::json_reads(json, false, "factory-reset", USAGE);
+    let password = password(password_file.as_deref())?;
+    crate::cli::block_on(run(&password))
 }
 
 /// The password from `file`, or from the terminal without echo.
@@ -135,33 +118,20 @@ fn prompt() -> Result<String> {
 }
 
 async fn run(password: &str) -> Result<()> {
-    let connection = zbus::Connection::system()
+    let connection = crate::cli::system_bus().await?;
+    let micad = MicadProxy::new(&connection)
         .await
-        .context("connect to the system bus")?;
-    let micad = MicadProxy::new(&connection).await?;
+        .map_err(crate::cli::bus_error)?;
     let source = format!("uid {}", rustix::process::getuid().as_raw());
     micad
         .factory_reset(password, "cli", &source)
         .await
-        .map_err(refusal)?;
+        .map_err(crate::cli::bus_error)?;
     println!(
         "The factory reset is staged. The device reboots in a few seconds, erases everything \
          configured and starts as on its first boot."
     );
     Ok(())
-}
-
-/// micad's refusal in its own words: the message of a `FactoryResetRefused`
-/// reply, or the reply as the other commands show it.
-fn refusal(error: zbus::Error) -> anyhow::Error {
-    if let Some((name, Some(description))) = crate::bus::error_reply(&error)
-        && name == crate::bus::FACTORY_RESET_REFUSED_ERROR
-        && let Ok(value) = serde_json::from_str::<Value>(&description)
-        && let Some(message) = value["message"].as_str()
-    {
-        return anyhow::anyhow!("{message}");
-    }
-    crate::unit_cli::bus_error(error)
 }
 
 #[cfg(test)]
@@ -190,6 +160,7 @@ mod tests {
         for misuse in [
             "--yes",
             "-y",
+            "-h",
             "--force",
             "--password-file",
             "--password secret",

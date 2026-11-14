@@ -6,7 +6,7 @@
 //! their logs and the images. Containers are made with `docker` and `docker
 //! compose` themselves; restart, boot start and health are dockerd's. A
 //! container is answered in mica-containerd's shape so the bus, the API, the
-//! console and `micad ctr` read one answer on either engine: a compose
+//! console and `mica container` read one answer on either engine: a compose
 //! container under its project and service, from the labels compose puts on
 //! it, and any other container as a project of its own name. Its phase is the
 //! state dockerd reports.
@@ -25,7 +25,7 @@ pub const SOCKET_PATH: &str = "/run/docker.sock";
 /// The service that runs dockerd: a systemd unit, or the OpenRC script of the
 /// same name. It pulls in containerd itself.
 pub const SERVICE_UNIT: &str = "docker.service";
-/// What a write of the projects, and `micad ctr up`, `down` and `check`, are
+/// What a write of the projects, and `mica container up`, `down` and `check`, are
 /// told on a docker product.
 pub const USE_DOCKER_COMPOSE: &str = "this is a docker product: containers are made with docker and docker compose, not declared to micad";
 /// The API version every call names: the oldest Docker 29 serves, so a newer

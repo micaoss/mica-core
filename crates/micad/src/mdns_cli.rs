@@ -1,4 +1,4 @@
-//! `micad mdns`, what the device announces on the LAN: the switch over the
+//! `mica mdns`, what the device announces on the LAN: the switch over the
 //! system bus, and runtime drop-ins in `/run/mica/mdns.d`.
 
 use std::collections::BTreeMap;
@@ -11,10 +11,10 @@ use crate::reconciler::mdns::entries::{self, Entry, RUNTIME_DIR};
 use crate::unit_cli::{MicadProxy, bus_error, wait};
 
 const USAGE: &str = "\
-usage: micad mdns status|list
-       micad mdns on|off
-       micad mdns add NAME --type _x._tcp --port N [--instance S] [--txt KEY=VALUE]...
-       micad mdns remove NAME
+usage: mica mdns status|list [--json]
+       mica mdns on|off
+       mica mdns add NAME --type _x._tcp --port N [--instance S] [--txt KEY=VALUE]...
+       mica mdns remove NAME
 
   status  whether the responder runs, and under which name
   list    every service, its source, and whether it is published
@@ -48,7 +48,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
                 Err(format!("{name:?} is not a drop-in name"))
             }
         }
-        [] | ["help" | "-h" | "--help"] => Ok(Command::Help),
+        [] | ["help" | "--help"] => Ok(Command::Help),
         [other, ..] => Err(format!("unknown command or arguments: {other}")),
     }
 }
@@ -93,49 +93,39 @@ fn add(name: &str, words: &[&str]) -> Result<Command, String> {
     Ok(Command::Add(name.to_string(), entry))
 }
 
-/// `micad mdns`'s entry point: exit 0 done, 1 failed, 2 misused.
-pub fn main(args: &[String]) -> Result<()> {
-    if mica_apid::wants_version(args.iter().cloned()) {
-        println!("{}", mica_apid::version_line("micad"));
-        return Ok(());
-    }
+/// `mica mdns`'s entry point; `args` are the words after it.
+pub fn main(args: &[String], json: bool) -> Result<()> {
     let command = match parse(args) {
         Ok(Command::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
         Ok(command) => command,
-        Err(error) => {
-            eprintln!("micad mdns: {error}\n{USAGE}");
-            std::process::exit(2);
-        }
+        Err(error) => crate::cli::misuse("mdns", &error, USAGE),
     };
-    let result = match command {
+    crate::cli::json_reads(
+        json,
+        matches!(command, Command::Status | Command::List),
+        "mdns",
+        USAGE,
+    );
+    match command {
         Command::Add(name, entry) => add_file(Path::new(RUNTIME_DIR), &name, &entry),
         Command::Remove(name) => remove_file(Path::new(RUNTIME_DIR), &name),
-        command => tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(anyhow::Error::from)
-            .and_then(|runtime| runtime.block_on(run(command))),
-    };
-    if let Err(error) = result {
-        eprintln!("micad mdns: {error:#}");
-        std::process::exit(1);
+        command => crate::cli::block_on(run(command, json)),
     }
-    Ok(())
 }
 
-async fn run(command: Command) -> Result<()> {
-    let connection = zbus::Connection::system()
-        .await
-        .context("connect to the system bus")?;
-    let micad = MicadProxy::new(&connection).await?;
+async fn run(command: Command, json: bool) -> Result<()> {
+    let connection = crate::cli::system_bus().await?;
+    let micad = MicadProxy::new(&connection).await.map_err(bus_error)?;
     match command {
         Command::Status | Command::List => {
-            let state: Value =
-                serde_json::from_str(&micad.get_state("mdns").await.map_err(bus_error)?)?;
-            if command == Command::Status {
+            let text = micad.get_state("mdns").await.map_err(bus_error)?;
+            let state: Value = serde_json::from_str(&text)?;
+            if json {
+                println!("{text}");
+            } else if command == Command::Status {
                 print!("{}", render_status(&state));
             } else {
                 print!("{}", render_list(&state));

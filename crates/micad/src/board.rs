@@ -345,13 +345,13 @@ fn declared_json(port: &Port, order: usize) -> Value {
     declared
 }
 
-/// `micad board check <file>`: whether this build takes `file`.
+/// `mica internal board check <file>`: whether this build takes `file`.
 pub fn main(args: &[String]) -> anyhow::Result<()> {
     let [command, file] = args else {
-        anyhow::bail!("usage: micad board check <file>");
+        anyhow::bail!("usage: mica internal board check <file>");
     };
     if command != "check" {
-        anyhow::bail!("usage: micad board check <file>");
+        anyhow::bail!("usage: mica internal board check <file>");
     }
     let text = std::fs::read_to_string(file).map_err(|err| anyhow::anyhow!("{file}: {err}"))?;
     match Board::parse(&text).map_err(|err| anyhow::anyhow!("{file}: {err}"))? {

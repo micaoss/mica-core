@@ -1,5 +1,5 @@
-//! `mica-ctr` (or `micad ctr`), the operator's containers command: micad over
-//! the system bus.
+//! `mica container`, the operator's containers command: micad over the system
+//! bus.
 //!
 //! A project put here is stored in micad's settings, the same set the console
 //! and the API change, and micad declares it to mica-containerd. The bus
@@ -13,13 +13,14 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 const USAGE: &str = "\
-usage: mica-ctr up [-p <project>] [-f <file|->] [--project-dir <dir>]
-       mica-ctr down [-p <project>]
-       mica-ctr list (or ps)
-       mica-ctr check [-p <project>] [-f <file|->] [--project-dir <dir>]
-       mica-ctr start|stop|restart <project>[/<service>]
-       mica-ctr logs <project>/<service> [--tail N]
-       (micad ctr ... is the same command)
+usage: mica container up [--project <project>] [--file <file|->] [--project-dir <dir>]
+       mica container down [--project <project>]
+       mica container list [--json]
+       mica container check [--project <project>] [--file <file|->] [--project-dir <dir>]
+       mica container start|stop|restart <project>[/<service>]
+       mica container logs <project>/<service> [--tail N]
+       mica container status [--json]
+       mica container on|off
 
   up       check a Compose file, store it as the project with its directory and
            turn containers on
@@ -29,12 +30,15 @@ usage: mica-ctr up [-p <project>] [-f <file|->] [--project-dir <dir>]
   start, stop, restart
            the project's every container, or one service's
   logs     the last lines of one service's log (100 unless --tail)
+  status   whether containers are on (container.enabled)
+  on, off  turn containers on or off; the projects stay declared
 
   As docker compose: the file is the first of compose.yaml, compose.yml,
-  docker-compose.yaml and docker-compose.yml in the working directory unless -f
-  names one (- is stdin); the project directory, where relative host paths
-  resolve, is the file's directory (the working directory for stdin) unless
-  --project-dir names one; the project is -p, else the file's name key, else the
+  docker-compose.yaml and docker-compose.yml in the working directory unless
+  --file names one (- is stdin); the project directory, where relative host
+  paths resolve, is the file's directory (the working directory for stdin)
+  unless --project-dir names one; the project is --project, else the file's
+  name key, else the
   project directory's name in lower case without other characters than a-z,
   0-9, _ and -.";
 
@@ -97,6 +101,8 @@ enum Command {
     Check(Target),
     Verb { verb: Verb, name: String },
     Logs { name: String, tail: u32 },
+    Status,
+    Switch(bool),
     Help,
 }
 
@@ -113,8 +119,8 @@ fn target(words: &[&str], files: bool) -> Result<Target, String> {
     let mut rest = words.iter();
     while let Some(flag) = rest.next() {
         let slot = match *flag {
-            "-p" | "--project" => &mut target.project,
-            "-f" | "--file" if files => &mut target.file,
+            "--project" => &mut target.project,
+            "--file" if files => &mut target.file,
             "--project-dir" if files => &mut target.dir,
             other => return Err(format!("unexpected argument: {other}")),
         };
@@ -145,7 +151,10 @@ fn parse(args: &[String]) -> Result<Command, String> {
     match words.as_slice() {
         ["up", rest @ ..] => Ok(Command::Up(target(rest, true)?)),
         ["down", rest @ ..] => Ok(Command::Down(target(rest, false)?)),
-        ["list" | "ps"] => Ok(Command::List),
+        ["list"] => Ok(Command::List),
+        ["status"] => Ok(Command::Status),
+        ["on"] => Ok(Command::Switch(true)),
+        ["off"] => Ok(Command::Switch(false)),
         ["check", rest @ ..] => Ok(Command::Check(target(rest, true)?)),
         [verb @ ("start" | "stop" | "restart"), name] => Ok(Command::Verb {
             verb: match *verb {
@@ -175,50 +184,38 @@ fn parse(args: &[String]) -> Result<Command, String> {
                 tail,
             })
         }
-        [] | ["help" | "-h" | "--help"] => Ok(Command::Help),
+        [] | ["help" | "--help"] => Ok(Command::Help),
         [other, ..] => Err(format!("unknown command or arguments: {other}")),
     }
 }
 
-/// `mica-ctr`'s entry point: exit 0 done, 1 failed, 2 misused.
-///
-/// `args` are the words after the command: after `mica-ctr`, or after
-/// `micad ctr`.
-pub fn main(args: &[String]) -> Result<()> {
-    if mica_apid::wants_version(args.iter().cloned()) {
-        println!("{}", mica_apid::version_line("micad"));
-        return Ok(());
-    }
+/// `mica container`'s entry point; `args` are the words after it.
+pub fn main(args: &[String], json: bool) -> Result<()> {
     let command = match parse(args) {
         Ok(Command::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
         Ok(command) => command,
-        Err(error) => {
-            eprintln!("mica-ctr: {error}\n{USAGE}");
-            std::process::exit(2);
-        }
+        Err(error) => crate::cli::misuse("container", &error, USAGE),
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    match runtime.block_on(run(command)) {
-        Ok(true) => Ok(()),
-        Ok(false) => std::process::exit(1),
-        Err(error) => {
-            eprintln!("mica-ctr: {error:#}");
-            std::process::exit(1);
-        }
+    crate::cli::json_reads(
+        json,
+        matches!(command, Command::List | Command::Status),
+        "container",
+        USAGE,
+    );
+    if crate::cli::block_on(run(command, json))? {
+        Ok(())
+    } else {
+        Err(crate::cli::Failure::printed("refused").into())
     }
 }
 
 /// Run one command; `false` when it printed its own refusal.
-async fn run(command: Command) -> Result<bool> {
-    let connection = zbus::Connection::system()
-        .await
-        .context("connect to the system bus")?;
-    let micad = MicadProxy::new(&connection).await?;
+async fn run(command: Command, json: bool) -> Result<bool> {
+    let connection = crate::cli::system_bus().await?;
+    let micad = MicadProxy::new(&connection).await.map_err(bus_error)?;
     if matches!(
         command,
         Command::Up(_) | Command::Down(_) | Command::Check(_)
@@ -271,9 +268,36 @@ async fn run(command: Command) -> Result<bool> {
             Ok(true)
         }
         Command::List => {
-            let doc: Value =
-                serde_json::from_str(&micad.get_containers().await.map_err(bus_error)?)?;
-            print!("{}", render_list(&doc));
+            let text = micad.get_containers().await.map_err(bus_error)?;
+            if json {
+                println!("{text}");
+            } else {
+                print!("{}", render_list(&serde_json::from_str(&text)?));
+            }
+            Ok(true)
+        }
+        Command::Status => {
+            let enabled: Value = serde_json::from_str(
+                &micad
+                    .get_settings("container.enabled")
+                    .await
+                    .map_err(bus_error)?,
+            )?;
+            let enabled = enabled == json!(true);
+            if json {
+                println!("{}", json!({ "enabled": enabled }));
+            } else {
+                println!("enabled: {enabled}");
+            }
+            Ok(true)
+        }
+        Command::Switch(on) => {
+            let task = micad
+                .set_settings("container.enabled", &json!(on).to_string())
+                .await
+                .map_err(bus_error)?;
+            wait(&micad, &task).await?;
+            println!("container.enabled is {on}");
             Ok(true)
         }
         Command::Check(target) => {
@@ -480,7 +504,7 @@ async fn checked(
 
 /// A refused check, one problem a line.
 fn render_problems(project: &str, outcome: &Value) -> String {
-    let mut out = format!("mica-ctr: project {project} is refused\n");
+    let mut out = format!("mica container: project {project} is refused\n");
     let problems = outcome["problems"].as_array().cloned().unwrap_or_default();
     if problems.is_empty() {
         out.push_str(&format!(
@@ -572,7 +596,7 @@ fn render_list(doc: &Value) -> String {
     if doc["enabled"] != json!(true) && docker {
         out.push_str("containers are off: `container.enabled` turns dockerd on\n");
     } else if doc["enabled"] != json!(true) {
-        out.push_str("containers are off: `mica-ctr up` turns them on\n");
+        out.push_str("containers are off: `mica container on` or `up` turns them on\n");
     } else if engine["available"] != json!(true) {
         out.push_str(&format!(
             "{} is not answering: {}\n",
@@ -614,13 +638,7 @@ async fn wait(micad: &MicadProxy<'_>, task: &str) -> Result<()> {
     }
 }
 
-/// micad's refusal, in its own words rather than the bus error's name.
-fn bus_error(error: zbus::Error) -> anyhow::Error {
-    match crate::bus::error_reply(&error) {
-        Some((name, message)) => anyhow::anyhow!(message.unwrap_or(name)),
-        None => anyhow::Error::new(error).context("micad"),
-    }
-}
+use crate::cli::bus_error;
 
 #[cfg(test)]
 mod tests;

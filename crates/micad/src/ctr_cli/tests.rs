@@ -8,7 +8,9 @@ fn words(line: &str) -> Vec<String> {
 fn every_command_parses_and_a_misuse_is_named() {
     assert_eq!(parse(&words("up")), Ok(Command::Up(Target::default())));
     assert_eq!(
-        parse(&words("up -p app -f app.yaml --project-dir /srv/app")),
+        parse(&words(
+            "up --project app --file app.yaml --project-dir /srv/app"
+        )),
         Ok(Command::Up(Target {
             project: Some("app".into()),
             file: Some("app.yaml".into()),
@@ -23,9 +25,11 @@ fn every_command_parses_and_a_misuse_is_named() {
         }))
     );
     assert_eq!(parse(&words("list")), Ok(Command::List));
-    assert_eq!(parse(&words("ps")), Ok(Command::List));
+    assert_eq!(parse(&words("status")), Ok(Command::Status));
+    assert_eq!(parse(&words("on")), Ok(Command::Switch(true)));
+    assert_eq!(parse(&words("off")), Ok(Command::Switch(false)));
     assert_eq!(
-        parse(&words("check -f -")),
+        parse(&words("check --file -")),
         Ok(Command::Check(Target {
             file: Some("-".into()),
             ..Target::default()
@@ -54,11 +58,17 @@ fn every_command_parses_and_a_misuse_is_named() {
     );
     assert_eq!(parse(&[]), Ok(Command::Help));
     for misuse in [
-        "up -p App",
-        "up -f",
-        "up -p a -p b",
+        "up --project App",
+        "up --file",
+        "up --project a --project b",
         "up app.yaml",
-        "down -f app.yaml",
+        "down --file app.yaml",
+        // No short forms: list, --project and --file are the only words.
+        "ps",
+        "up -p app",
+        "check -f -",
+        "-h",
+        "status now",
         "put app app.yaml",
         "delete app",
         "logs app",
@@ -100,7 +110,7 @@ fn up_in_a_project_directory_takes_compose_defaults() {
     );
 }
 
-// The file's name key names the project; -p overrides it, -f names another
+// The file's name key names the project; --project overrides it, --file names another
 // file whose directory is the project's, and --project-dir another directory.
 #[test]
 fn the_name_key_and_the_flags_override_the_defaults() {
@@ -187,7 +197,7 @@ fn a_refusal_is_one_problem_a_line() {
     });
     assert_eq!(
         render_problems("app", &outcome),
-        "mica-ctr: project app is refused\n  web.privileged: privileged is not supported\n  name: name differs\n"
+        "mica container: project app is refused\n  web.privileged: privileged is not supported\n  name: name differs\n"
     );
 }
 

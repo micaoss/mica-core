@@ -78,7 +78,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use crate::settings_api::SettingsApi;
 
 /// The daemon entry point of the `mica-apid` executable.
-/// `micad diag`: a diagnostic snapshot made over the bus, without apid.
+/// `mica doctor`: a diagnostic snapshot made over the bus, without apid.
 ///
 /// # Errors
 ///

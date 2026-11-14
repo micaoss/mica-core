@@ -55,7 +55,7 @@ pub enum Requester {
     Console,
     /// An API client, through apid.
     Api,
-    /// A command on the device: `micad factory-reset` or
+    /// A command on the device: `mica factory-reset` or
     /// `mica-deploy factory-reset`.
     Cli,
 }

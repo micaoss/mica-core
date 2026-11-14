@@ -113,7 +113,7 @@ export function WebPanel() {
         description={(
           <span className="grid gap-2">
             <span>{t('access.web.confirm.body')}</span>
-            <code className="font-mono text-sm">{`ssh root@${host} · micad web network`}</code>
+            <code className="font-mono text-sm">{`ssh root@${host} · mica web network`}</code>
           </span>
         )}
         confirmLabel={t('access.web.confirm.action')}

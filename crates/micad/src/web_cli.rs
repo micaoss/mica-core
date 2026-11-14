@@ -1,18 +1,18 @@
-//! `micad web`, who reaches the API: `access.web.mode` over the system bus.
+//! `mica web`, who reaches the API: `access.web.mode` over the system bus.
 //!
 //! The way back once the API has left the network: it needs no apid, and
 //! the bus policy makes it root's.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{Value, json};
 
 use crate::unit_cli::{MicadProxy, bus_error, wait};
 
 const USAGE: &str = "\
-usage: micad web status
-       micad web network|local|off
+usage: mica web status [--json]
+       mica web network|local|off
 
-  status   who reaches the API, and where it listens
+  status   who reaches the API, and where it listens; --json prints access.web
   network  the console and the API on the network, and the local socket
   local    the API on apid's local socket alone, for root on this device
   off      no API: apid stops";
@@ -31,48 +31,36 @@ fn parse(args: &[String]) -> Result<Command, String> {
         ["network"] => Ok(Command::Mode("network")),
         ["local"] => Ok(Command::Mode("local")),
         ["off"] => Ok(Command::Mode("off")),
-        [] | ["help" | "-h" | "--help"] => Ok(Command::Help),
+        [] | ["help" | "--help"] => Ok(Command::Help),
         [other, ..] => Err(format!("unknown command or arguments: {other}")),
     }
 }
 
-/// `micad web`'s entry point: exit 0 done, 1 failed, 2 misused.
-pub fn main(args: &[String]) -> Result<()> {
-    if mica_apid::wants_version(args.iter().cloned()) {
-        println!("{}", mica_apid::version_line("micad"));
-        return Ok(());
-    }
+/// `mica web`'s entry point; `args` are the words after it.
+pub fn main(args: &[String], json: bool) -> Result<()> {
     let command = match parse(args) {
         Ok(Command::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
         Ok(command) => command,
-        Err(error) => {
-            eprintln!("micad web: {error}\n{USAGE}");
-            std::process::exit(2);
-        }
+        Err(error) => crate::cli::misuse("web", &error, USAGE),
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    if let Err(error) = runtime.block_on(run(command)) {
-        eprintln!("micad web: {error:#}");
-        std::process::exit(1);
-    }
-    Ok(())
+    crate::cli::json_reads(json, command == Command::Status, "web", USAGE);
+    crate::cli::block_on(run(command, json))
 }
 
-async fn run(command: Command) -> Result<()> {
-    let connection = zbus::Connection::system()
-        .await
-        .context("connect to the system bus")?;
-    let micad = MicadProxy::new(&connection).await?;
+async fn run(command: Command, json: bool) -> Result<()> {
+    let connection = crate::cli::system_bus().await?;
+    let micad = MicadProxy::new(&connection).await.map_err(bus_error)?;
     match command {
         Command::Status => {
-            let web: Value =
-                serde_json::from_str(&micad.get_settings("access.web").await.map_err(bus_error)?)?;
-            print!("{}", render_status(&web));
+            let text = micad.get_settings("access.web").await.map_err(bus_error)?;
+            if json {
+                println!("{text}");
+            } else {
+                print!("{}", render_status(&serde_json::from_str::<Value>(&text)?));
+            }
         }
         Command::Mode(mode) => {
             let task = micad

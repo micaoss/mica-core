@@ -23,7 +23,7 @@ pub const CONFIG_PATH: &str = "usr/share/mica/device-code.conf";
 pub const RANDOM_PATH: &str = "mnt/data/meta/device-code";
 /// What the login prompt says instead of a `random` code, which only who
 /// can log in and become root reads.
-pub const RANDOM_HINT: &str = "run `sudo micad device-code` after login";
+pub const RANDOM_HINT: &str = "run `sudo mica internal device-code` after login";
 /// The product secret the default access-point key is derived under.
 pub const SECRET_PATH: &str = "usr/share/mica/ap-secret";
 /// The fewest bytes a product secret holds.
@@ -571,7 +571,7 @@ pub fn put_issue(path: &Path, text: Option<&str>) -> std::io::Result<()> {
     std::fs::rename(&staged, path)
 }
 
-/// `micad device-code`: print this device's code and its source.
+/// `mica internal device-code`: print this device's code and its source.
 pub fn device_code_main() -> anyhow::Result<()> {
     match device_code(Path::new("/")) {
         Ok(code) => {
@@ -579,16 +579,16 @@ pub fn device_code_main() -> anyhow::Result<()> {
             Ok(())
         }
         Err(reason) => {
-            eprintln!("micad device-code: this device has no code: {reason}");
+            eprintln!("mica internal device-code: this device has no code: {reason}");
             std::process::exit(1);
         }
     }
 }
 
-/// `micad derive-ap-key --secret FILE CODE`: print the default SSID and key a
+/// `mica internal derive-ap-key --secret FILE CODE`: print the default SSID and key a
 /// device with `CODE` has under the product secret in `FILE`.
 pub fn derive_ap_key_main(args: &[String]) -> anyhow::Result<()> {
-    const USAGE: &str = "usage: micad derive-ap-key --secret FILE CODE";
+    const USAGE: &str = "usage: mica internal derive-ap-key --secret FILE CODE";
     let (secret, code) = match args {
         [flag, file, code] if flag == "--secret" => (file, code),
         _ => {

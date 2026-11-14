@@ -12,7 +12,7 @@ mod enabled;
 mod hostname;
 mod logging;
 pub use hostname::HostnameExecutor;
-/// Visible to the daemon: `micad mdns` holds its entries to its rules.
+/// Visible to the daemon: `mica mdns` holds its entries to its rules.
 pub mod mdns;
 mod mqtt;
 /// Visible to the daemon rather than to this module alone: the WireGuard key

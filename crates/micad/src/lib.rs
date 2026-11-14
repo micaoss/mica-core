@@ -23,6 +23,7 @@ mod bluetooth;
 pub mod board;
 mod board_defaults;
 mod bus;
+pub mod cli;
 mod compose;
 mod containerd;
 mod containers;

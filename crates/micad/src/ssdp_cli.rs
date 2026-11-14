@@ -1,14 +1,14 @@
-//! `micad ssdp`, whether the device answers UPnP discovery: the switch over
+//! `mica ssdp`, whether the device answers UPnP discovery: the switch over
 //! the system bus.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{Value, json};
 
 use crate::unit_cli::{MicadProxy, bus_error, wait};
 
 const USAGE: &str = "\
-usage: micad ssdp status
-       micad ssdp on|off
+usage: mica ssdp status [--json]
+       mica ssdp on|off
 
   status  whether the responder runs, and what it announces
   on      answer UPnP discovery (access.ssdp.enabled)
@@ -27,48 +27,36 @@ fn parse(args: &[String]) -> Result<Command, String> {
         ["status"] => Ok(Command::Status),
         ["on"] => Ok(Command::Switch(true)),
         ["off"] => Ok(Command::Switch(false)),
-        [] | ["help" | "-h" | "--help"] => Ok(Command::Help),
+        [] | ["help" | "--help"] => Ok(Command::Help),
         [other, ..] => Err(format!("unknown command or arguments: {other}")),
     }
 }
 
-/// `micad ssdp`'s entry point: exit 0 done, 1 failed, 2 misused.
-pub fn main(args: &[String]) -> Result<()> {
-    if mica_apid::wants_version(args.iter().cloned()) {
-        println!("{}", mica_apid::version_line("micad"));
-        return Ok(());
-    }
+/// `mica ssdp`'s entry point; `args` are the words after it.
+pub fn main(args: &[String], json: bool) -> Result<()> {
     let command = match parse(args) {
         Ok(Command::Help) => {
             println!("{USAGE}");
             return Ok(());
         }
         Ok(command) => command,
-        Err(error) => {
-            eprintln!("micad ssdp: {error}\n{USAGE}");
-            std::process::exit(2);
-        }
+        Err(error) => crate::cli::misuse("ssdp", &error, USAGE),
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    if let Err(error) = runtime.block_on(run(command)) {
-        eprintln!("micad ssdp: {error:#}");
-        std::process::exit(1);
-    }
-    Ok(())
+    crate::cli::json_reads(json, command == Command::Status, "ssdp", USAGE);
+    crate::cli::block_on(run(command, json))
 }
 
-async fn run(command: Command) -> Result<()> {
-    let connection = zbus::Connection::system()
-        .await
-        .context("connect to the system bus")?;
-    let micad = MicadProxy::new(&connection).await?;
+async fn run(command: Command, json: bool) -> Result<()> {
+    let connection = crate::cli::system_bus().await?;
+    let micad = MicadProxy::new(&connection).await.map_err(bus_error)?;
     match command {
         Command::Status => {
-            let state: Value =
-                serde_json::from_str(&micad.get_state("ssdp").await.map_err(bus_error)?)?;
-            print!("{}", render_status(&state));
+            let text = micad.get_state("ssdp").await.map_err(bus_error)?;
+            if json {
+                println!("{text}");
+            } else {
+                print!("{}", render_status(&serde_json::from_str::<Value>(&text)?));
+            }
         }
         Command::Switch(on) => {
             let task = micad

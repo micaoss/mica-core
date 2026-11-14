@@ -70,7 +70,7 @@ describe('the web console panel', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Leave the network' }))
 
     expect(await screen.findByText('API access is now device only')).toBeTruthy()
-    expect(screen.getByText(/micad web network/)).toBeTruthy()
+    expect(screen.getByText(/mica web network/)).toBeTruthy()
     const call = fetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PUT')
     expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ ...defaults, mode: 'local' })
   })

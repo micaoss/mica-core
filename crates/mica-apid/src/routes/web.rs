@@ -19,7 +19,7 @@ pub(crate) struct WebConfiguration {
     /// Who reaches the API. `network`: the console and the API on the ports
     /// below. `local`: only root on the device, through apid's local socket.
     /// `off`: nobody; apid does not run. Leaving `network` from here needs
-    /// SSH on with an authorized key, the way back (`micad web network`).
+    /// SSH on with an authorized key, the way back (`mica web network`).
     pub(super) mode: WebModeValue,
     /// TCP port of the HTTP listener. It serves the console, or only
     /// redirects to HTTPS when that is enabled. Default 8080.

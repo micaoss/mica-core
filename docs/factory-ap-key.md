@@ -38,7 +38,7 @@ bytes at startup, before anything reads the code, and writes their hex root-only
 synced, renamed, `meta/` synced). A seed already there is never replaced, even an unreadable one.
 The seed survives reboots and updates. A factory reset that formats DATA removes it, so the next
 boot draws a new code. A `random` code is not logged and not put on the login prompt, which a
-cloud copies to its serial output: the prompt says to run `sudo micad device-code` after login.
+cloud copies to its serial output: the prompt says to run `sudo mica internal device-code` after login.
 A device that declares `random` and cannot read its code is not claimed: `GetDeviceCode` answers
 the gate `unavailable`, and `POST /api/v1/setup` answers 503 `device_code_unavailable`.
 
@@ -105,9 +105,9 @@ list.
 
 ## Tools
 
-- `micad device-code` prints this device's code and its source: `DFN4-L34C-T8N (emmc-cid)`.
+- `mica internal device-code` prints this device's code and its source: `DFN4-L34C-T8N (emmc-cid)`.
   Nothing on the device prints the key or the secret.
-- `micad derive-ap-key --secret FILE CODE` runs on a host. It verifies `CODE` and prints the SSID
+- `mica internal derive-ap-key --secret FILE CODE` runs on a host. It verifies `CODE` and prints the SSID
   and key under the secret in `FILE`, as `ssid=…` and `psk=…` lines. It does not check the file's
   mode. A label tool needs only the printed code and the product's secret: the SSID comes from the
   code alone, the key from the code and the secret.
