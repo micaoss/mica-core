@@ -64,11 +64,11 @@ impl Rig {
     /// A root of `init` with mica-unit, its directory listing `listed`.
     fn new(init: Init, listed: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let program = dir.path().join("usr/sbin/mica-unit");
+        let program = dir.path().join("usr/lib/mica/mica-unit");
         std::fs::create_dir_all(program.parent().unwrap()).unwrap();
         std::fs::write(&program, "#!/bin/sh\n").unwrap();
         let commands = Arc::new(FakeCommands::default());
-        commands.answer("/usr/sbin/mica-unit list", 0, listed);
+        commands.answer("/usr/lib/mica/mica-unit list", 0, listed);
         let control = Arc::new(FakeControl::default());
         let units = UserUnits::new(
             init,
@@ -91,7 +91,7 @@ impl Rig {
         self.commands
             .calls()
             .iter()
-            .filter_map(|line| line.strip_prefix("/usr/sbin/mica-unit "))
+            .filter_map(|line| line.strip_prefix("/usr/lib/mica/mica-unit "))
             .filter(|line| *line != "list")
             .map(|line| line.replace(&scratch, "$T"))
             .collect()
@@ -272,7 +272,7 @@ async fn a_unit_of_the_other_init_is_stored_not_applied() {
 async fn a_unit_that_fails_is_named_and_the_others_still_apply() {
     let rig = Rig::new(Init::Systemd, "");
     rig.commands
-        .answer("/usr/sbin/mica-unit enable bad.service", 1, "");
+        .answer("/usr/lib/mica/mica-unit enable bad.service", 1, "");
 
     let err = rig
         .units
@@ -296,7 +296,7 @@ async fn a_unit_that_fails_is_named_and_the_others_still_apply() {
 #[tokio::test]
 async fn without_mica_unit_nothing_can_be_declared() {
     let rig = Rig::new(Init::Systemd, "");
-    std::fs::remove_file(rig.dir.path().join("usr/sbin/mica-unit")).unwrap();
+    std::fs::remove_file(rig.dir.path().join("usr/lib/mica/mica-unit")).unwrap();
 
     let live = rig.units.apply(&ServicesSettings::default()).await.unwrap();
     assert_eq!(live["available"], false);
@@ -305,7 +305,10 @@ async fn without_mica_unit_nothing_can_be_declared() {
         .apply(&services(&[("x.service", Init::Systemd, SERVICE, true)]))
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("no /usr/sbin/mica-unit"), "{err}");
+    assert!(
+        err.to_string().contains("no /usr/lib/mica/mica-unit"),
+        "{err}"
+    );
 }
 
 #[tokio::test]
@@ -376,10 +379,10 @@ fn a_write_the_device_cannot_apply_is_refused() {
     let stored = services(&[("x", Init::Openrc, SCRIPT, true)]);
     rig.units.check_written(&stored, &stored).unwrap();
 
-    std::fs::remove_file(rig.dir.path().join("usr/sbin/mica-unit")).unwrap();
+    std::fs::remove_file(rig.dir.path().join("usr/lib/mica/mica-unit")).unwrap();
     refused(
         services(&[("x.service", Init::Systemd, SERVICE, true)]),
-        "no /usr/sbin/mica-unit",
+        "no /usr/lib/mica/mica-unit",
     );
 }
 

@@ -22,7 +22,10 @@ pub(super) async fn a_service_is_refused_where_there_is_no_mica_unit() {
         .await
         .unwrap_err();
 
-    assert!(err.to_string().contains("no /usr/sbin/mica-unit"), "{err}");
+    assert!(
+        err.to_string().contains("no /usr/lib/mica/mica-unit"),
+        "{err}"
+    );
     assert!(
         service
             .inner
@@ -41,11 +44,11 @@ pub(super) async fn a_service_is_refused_where_there_is_no_mica_unit() {
 pub(super) async fn a_service_is_written_listed_and_driven() {
     let (service, _calls, dir) = service_with_mock();
     let root = dir.path().join("root");
-    std::fs::create_dir_all(root.join("usr/sbin")).unwrap();
-    std::fs::write(root.join("usr/sbin/mica-unit"), "").unwrap();
+    std::fs::create_dir_all(root.join("usr/lib/mica")).unwrap();
+    std::fs::write(root.join("usr/lib/mica/mica-unit"), "").unwrap();
     let commands = Arc::new(FakeCommands::default());
     commands.answer(
-        "/usr/sbin/mica-unit list",
+        "/usr/lib/mica/mica-unit list",
         0,
         "x.service\tenabled\nhand.service\tdisabled\n",
     );

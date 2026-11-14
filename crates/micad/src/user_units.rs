@@ -24,7 +24,7 @@ use crate::openrc::{Commands, Host};
 use crate::reconciler::systemd::UnitControl;
 
 /// Base's command, in mica-systemd and in mica-openrc.
-const PROGRAM: &str = "/usr/sbin/mica-unit";
+pub(crate) const PROGRAM: &str = "/usr/lib/mica/mica-unit";
 /// The units micad applied and whether each was enabled, on STATE.
 const RECORD: &str = "var/lib/mica/services-applied.json";
 /// Where the texts are put for `mica-unit install` to copy: made afresh, root's

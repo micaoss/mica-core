@@ -119,3 +119,15 @@ fn a_log_is_its_newest_lines_or_the_reason_it_is_not() {
             .contains("no journal")
     );
 }
+
+#[test]
+fn fstab_check_takes_an_optional_file() {
+    assert_eq!(parse(&words("fstab check")), Ok(Command::FstabCheck(None)));
+    assert_eq!(
+        parse(&words("fstab check /tmp/fstab")),
+        Ok(Command::FstabCheck(Some("/tmp/fstab".into())))
+    );
+    for misuse in ["fstab", "fstab verify", "fstab check a b", "fstab --check"] {
+        assert!(parse(&words(misuse)).is_err(), "{misuse}");
+    }
+}

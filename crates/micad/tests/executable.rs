@@ -126,6 +126,8 @@ fn mica_refuses_short_forms_and_other_spellings() {
         &["internal", "frobnicate"][..],
         &["password"][..],
         &["password", "change"][..],
+        &["unit", "fstab"][..],
+        &["unit", "fstab", "check", "a", "b"][..],
         &["password", "set", "--password", "secret"][..],
         &["password", "set", "--current-password-file", "-"][..],
         &["setup", "--device-code-file", "-"][..],
@@ -140,6 +142,19 @@ fn mica_refuses_short_forms_and_other_spellings() {
         assert_eq!(code, Some(2), "{args:?}");
         assert!(stdout.is_empty(), "{args:?}: {stdout}");
     }
+}
+
+/// The fstab check is OpenRC's: a root that is not OpenRC refuses it as a
+/// misuse and names why.
+#[test]
+fn the_fstab_check_is_openrc_s() {
+    if std::path::Path::new("/usr/lib/mica/product.conf").exists() {
+        return;
+    }
+    let (code, stdout, stderr) = run_full("mica", &["unit", "fstab", "check"]);
+    assert_eq!(code, Some(2), "{stderr}");
+    assert!(stdout.is_empty(), "{stdout}");
+    assert!(stderr.contains("OpenRC"), "{stderr}");
 }
 
 /// With no micad to reach, a command exits 3, and --json says so as JSON.

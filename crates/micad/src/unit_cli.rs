@@ -20,6 +20,7 @@ usage: mica unit install <file|-> [--name <name>] [--conf <file>] [--enable]
        mica unit start|stop|restart <name>
        mica unit list [--json]
        mica unit logs <name> [--tail N]
+       mica unit fstab check [<file>]
 
   install  store a unit file (systemd) or an openrc-run script (OpenRC) as one
            of this device's services; its name is the file's unless --name
@@ -33,6 +34,11 @@ usage: mica unit install <file|-> [--name <name>] [--conf <file>] [--enable]
            the service, now; managed here or put there with mica-unit
   list     every service, declared here or put there with mica-unit
   logs     its newest lines (200 unless --tail)
+  fstab check
+           OpenRC only: the user's mounts, /usr/local/etc/fstab or <file>,
+           as Base applies them at boot; exit 0 accepted, 1 refused (each
+           refusal named), 2 misused. Under systemd mounts are units: install
+           a .mount, .automount or .swap
 
   Under systemd a name without a unit type is a .service.";
 
@@ -81,6 +87,7 @@ enum Command {
     Verb { verb: Verb, name: String },
     List,
     Logs { name: String, tail: usize },
+    FstabCheck(Option<String>),
     Help,
 }
 
@@ -154,6 +161,8 @@ fn parse(args: &[String]) -> Result<Command, String> {
                 tail,
             })
         }
+        ["fstab", "check"] => Ok(Command::FstabCheck(None)),
+        ["fstab", "check", file] => Ok(Command::FstabCheck(Some((*file).to_string()))),
         [] | ["help" | "--help"] => Ok(Command::Help),
         [other, ..] => Err(format!("unknown command or arguments: {other}")),
     }
@@ -170,7 +179,34 @@ pub fn main(args: &[String], json: bool) -> Result<()> {
         Err(error) => crate::cli::misuse("unit", &error, USAGE),
     };
     crate::cli::json_reads(json, command == Command::List, "unit", USAGE);
+    if let Command::FstabCheck(file) = command {
+        fstab_check(file.as_deref());
+    }
     crate::cli::block_on(run(command, json))
+}
+
+/// `mica unit fstab check`: Base's check, its output and exit status as they
+/// are. OpenRC's alone: under systemd the user's mounts are units.
+fn fstab_check(file: Option<&str>) -> ! {
+    let init =
+        micad_settings::Init::load(Path::new(micad_settings::PRODUCT_FILE)).unwrap_or_default();
+    if init != micad_settings::Init::Openrc {
+        crate::cli::misuse(
+            "unit",
+            "fstab check is OpenRC's: under systemd the user's mounts are .mount, .automount \
+             and .swap units, installed with mica unit install",
+            USAGE,
+        );
+    }
+    let mut command = std::process::Command::new(crate::user_units::PROGRAM);
+    command.args(["fstab", "check"]).args(file);
+    match command.status() {
+        Ok(status) => std::process::exit(status.code().unwrap_or(crate::cli::EXIT_FAILED)),
+        Err(error) => {
+            eprintln!("mica unit: run {}: {error}", crate::user_units::PROGRAM);
+            std::process::exit(crate::cli::EXIT_FAILED)
+        }
+    }
 }
 
 /// `name` as the init knows it: under systemd a name without a unit type is
@@ -290,7 +326,7 @@ async fn run(command: Command, json: bool) -> Result<()> {
                 serde_json::from_str(&micad.get_unit_log(&name).await.map_err(bus_error)?)?;
             print!("{}", render_log(&log, tail)?);
         }
-        Command::Help => {}
+        Command::Help | Command::FstabCheck(_) => {}
     }
     Ok(())
 }

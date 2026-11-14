@@ -662,7 +662,7 @@ KiB, a conf at most 16 KiB, together at most 256 KiB. An enabled systemd unit ne
 `RequiredBy=` or `Alias=` in `[Install]`; a template is not enabled. A write that adds or changes
 a service is refused when its `kind` is not the product's init, when the root ships its name or
 one of its `Alias=` names (`/etc/systemd/system`, `/usr/lib/systemd/system`,
-`/lib/systemd/system`; `/etc/init.d`), or when the root has no `/usr/sbin/mica-unit`.
+`/lib/systemd/system`; `/etc/init.d`), or when the root has no `/usr/lib/mica/mica-unit`.
 
 **The reconciler** (after micad is ready, as every reconciler that starts a service):
 
@@ -704,6 +704,7 @@ name, which is what the script sends to syslog. A name that is not installed is 
 | `start`, `stop`, `restart <name>` | The verb, now, on any installed service |
 | `list` | Every service: whether it is enabled, the init's state, and whether micad or a hand manages it; `--json` prints `GetUnits` |
 | `logs <name> [--tail N]` | Its newest lines (200 unless asked) |
+| `fstab check [<file>]` | OpenRC only: Base's `/usr/lib/mica/mica-unit fstab check`, on `/usr/local/etc/fstab` or `<file>`, its output and exit status as they are (0 accepted, 1 refused, 2 misused); under systemd a misuse (exit 2), the mounts being units |
 
 Under systemd a name without a unit type is a `.service`. The writes wait for the reconcile and
 report it; the exit codes are `mica`'s (section 3.15).
