@@ -818,24 +818,47 @@ async fn a_board_without_media_says_so_and_lists_nothing() {
     assert_eq!(NoMedia.eject("x").await.expect("answered"), Eject::NotFound);
 }
 
-/// A `ubi` boot policy is a board without media; any other policy, or none,
-/// is one with.
+/// Media are a hardware fact: a kernel with no USB host and no MMC host
+/// offers none (ssd202d), one with a USB host does (qemu-armhf, x64), and an
+/// MMC host offers them only when it is empty or holds an SD card.
 #[test]
-fn only_a_ubi_board_takes_no_media() {
-    let root = tempfile::tempdir().expect("tempdir");
-    assert!(board_takes_media(root.path()));
-    let policy = root.path().join(crate::storage_status::BOOT_POLICY_PATH);
-    fs::create_dir_all(policy.parent().expect("a parent")).expect("mkdir");
-    fs::write(
-        &policy,
-        r#"{"board":{"boot":"uefi","partitions":{"boot":1}},"systemPartUuid":"a","dataPartUuid":"b"}"#,
-    )
-    .expect("write");
-    assert!(board_takes_media(root.path()));
-    fs::write(
-        &policy,
-        r#"{"board":{"boot":"uboot-fit","storage":"ubi","ubi":{"mtd":"ubi"}}}"#,
-    )
-    .expect("write");
-    assert!(!board_takes_media(root.path()));
+fn media_are_supported_where_the_kernel_offers_a_host() {
+    let sysfs = |entries: &[(&str, Option<&str>)]| {
+        let root = tempfile::tempdir().expect("tempdir");
+        for (path, contents) in entries {
+            let path = root.path().join(path);
+            match contents {
+                Some(contents) => {
+                    fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
+                    fs::write(path, contents).expect("write");
+                }
+                None => fs::create_dir_all(path).expect("mkdir"),
+            }
+        }
+        board_takes_media(root.path())
+    };
+    // Neither host, or a USB bus with no host controller.
+    assert!(!sysfs(&[]));
+    assert!(!sysfs(&[("sys/bus/usb/devices", None)]));
+    // A USB host controller's root hub.
+    assert!(sysfs(&[("sys/bus/usb/devices/usb1", None)]));
+    assert!(!sysfs(&[("sys/bus/usb/devices/1-1:1.0", None)]));
+    // The boot eMMC's host only, or an SDIO radio's: none.
+    assert!(!sysfs(&[(
+        "sys/class/mmc_host/mmc0/mmc0:0001/type",
+        Some("MMC\n")
+    )]));
+    assert!(!sysfs(&[(
+        "sys/class/mmc_host/mmc1/mmc1:0001/type",
+        Some("SDIO\n")
+    )]));
+    // An empty slot, or an SD card in one, beside the eMMC.
+    assert!(sysfs(&[
+        ("sys/class/mmc_host/mmc0/mmc0:0001/type", Some("MMC\n")),
+        ("sys/class/mmc_host/mmc1", None),
+    ]));
+    assert!(sysfs(&[(
+        "sys/class/mmc_host/mmc1/mmc1:aaaa/type",
+        Some("SD\n")
+    )]));
 }

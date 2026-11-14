@@ -497,7 +497,7 @@ export interface ExternalVolume {
 export interface ExternalMedia {
   generation: string
   items: ExternalVolume[]
-  /// False on a board that takes no external media (a `ubi` board).
+  /// False on a device whose kernel offers no host for external media.
   supported: boolean
 }
 

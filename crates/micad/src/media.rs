@@ -64,8 +64,9 @@ pub struct Inventory {
     pub generation: String,
     /// The volumes, grouped by device in plug order.
     pub items: Vec<Volume>,
-    /// Whether this board takes external media at all: `false` on a `ubi`
-    /// board ([`NoMedia`]), which never lists one.
+    /// Whether this device takes external media at all: `false` where its
+    /// kernel offers no host to plug one into ([`NoMedia`]), which never lists
+    /// one.
     pub supported: bool,
 }
 
@@ -183,17 +184,41 @@ impl MediaSource for UnavailableMedia {
     }
 }
 
-/// Whether the board under `root` takes external media: every board but a
-/// `ubi` one, as its signed boot policy says.
+/// Whether the device under `root` takes external media: its kernel offers a
+/// USB host controller (a root hub `usbN` in `/sys/bus/usb/devices`), or an
+/// MMC host that is empty or holds an SD card. A host holding eMMC (`MMC`, the
+/// device's own disk) or an SDIO function (`SDIO`, a radio) offers none.
 #[must_use]
 pub fn board_takes_media(root: &std::path::Path) -> bool {
-    std::fs::read_to_string(root.join(crate::storage_status::BOOT_POLICY_PATH))
-        .map_or(true, |policy| {
-            crate::storage_status::policy_ubi_mtd(&policy).is_none()
-        })
+    let names = |dir: &str| -> Vec<String> {
+        std::fs::read_dir(root.join(dir))
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let usb_host = names("sys/bus/usb/devices").iter().any(|name| {
+        name.strip_prefix("usb")
+            .is_some_and(|bus| !bus.is_empty() && bus.bytes().all(|b| b.is_ascii_digit()))
+    });
+    let sd_host = names("sys/class/mmc_host").iter().any(|host| {
+        let cards: Vec<String> = names(&format!("sys/class/mmc_host/{host}"))
+            .into_iter()
+            .filter(|name| name.starts_with(&format!("{host}:")))
+            .collect();
+        cards.is_empty()
+            || cards.iter().any(|card| {
+                std::fs::read_to_string(root.join(format!("sys/class/mmc_host/{host}/{card}/type")))
+                    .is_ok_and(|kind| kind.trim() == "SD")
+            })
+    });
+    usb_host || sd_host
 }
 
-/// The source of a board that takes no external media (a `ubi` board): an
+/// The source of a device whose kernel offers no host for external media: an
 /// empty inventory that says so, and no volume or device to act on.
 pub struct NoMedia;
 
