@@ -31,6 +31,51 @@ mod data_crypt;
 mod transactions;
 mod trials;
 
+/// How long one interrupted case may run; a case takes milliseconds.
+const CASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Run the re-exec'd case `cmd`, named `case`, to its exit. Its output goes to
+/// anonymous files, not pipes, so nothing it leaves running can hold the wait
+/// open; a case that does not exit within [`CASE_TIMEOUT`] is killed and fails
+/// with its name and how long it ran.
+pub(crate) fn run_case(cmd: &mut std::process::Command, case: &str) -> std::process::Output {
+    use std::io::Read;
+    let mut stdout = tempfile::tempfile().unwrap();
+    let mut stderr = tempfile::tempfile().unwrap();
+    let started = std::time::Instant::now();
+    let mut child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(stdout.try_clone().unwrap())
+        .stderr(stderr.try_clone().unwrap())
+        .spawn()
+        .unwrap();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if started.elapsed() > CASE_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "{case}: no exit after {:.1} s; killed",
+                started.elapsed().as_secs_f64()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    let read = |file: &mut fs::File| {
+        let mut bytes = Vec::new();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        file.read_to_end(&mut bytes).unwrap();
+        bytes
+    };
+    std::process::Output {
+        status,
+        stdout: read(&mut stdout),
+        stderr: read(&mut stderr),
+    }
+}
+
 /// Where a device keeps its deployments: files with UEFI entries, files with
 /// FIT records in a partition, or UBI volumes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

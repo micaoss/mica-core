@@ -10,6 +10,8 @@ use std::{
 };
 use tempfile::TempDir;
 
+use crate::run_case;
+
 const TPM: &[u8] = b"a sealed secret, base64 in a real one";
 const RECOVERY: &[u8] = b"AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-FFFFF-GGGGG-HHHHH";
 const STAGED: &[u8] = b"a staged secret";
@@ -184,7 +186,10 @@ pub(super) fn luks_writes_survive_each_boundary() {
             if enospc {
                 cmd.env("MICA_FAULT_ENOSPC", "1");
             }
-            cmd.output().unwrap()
+            run_case(
+                &mut cmd,
+                &format!("luks {operation} boundary {at} {phase} enospc={enospc}"),
+            )
         };
         let baseline = TempDir::new_in(&evidence).unwrap();
         seed(baseline.path(), operation);

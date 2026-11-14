@@ -62,7 +62,10 @@ pub(super) fn transactions_survive_each_boundary() {
                 if enospc {
                     cmd.env("MICA_FAULT_ENOSPC", "1");
                 }
-                cmd.output().unwrap()
+                run_case(
+                    &mut cmd,
+                    &format!("{kind:?} {operation} boundary {at} {phase} enospc={enospc}"),
+                )
             };
             let baseline = TempDir::new_in(&evidence).unwrap();
             seed(baseline.path(), kind, operation);
