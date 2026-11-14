@@ -330,22 +330,41 @@ const ACCOUNTS_TOOL: &str = "/usr/lib/mica/mica-accounts";
 
 /// Have mica-accounts bind `/etc/passwd` and `/etc/group` again from what
 /// STATE holds, after tier 2 cleared the service accounts there. A root
-/// without it has nothing to rebuild.
+/// without it has nothing to rebuild. A failure is a warning: the next boot's
+/// build corrects it.
 pub fn rebuild_accounts() {
-    if !Path::new(ACCOUNTS_TOOL).exists() {
+    let Some((program, args)) = accounts_rebuild(Path::new("/")) else {
         return;
-    }
-    match std::process::Command::new(ACCOUNTS_TOOL)
-        .arg("build")
+    };
+    match std::process::Command::new(program)
+        .args(args)
         .stdin(std::process::Stdio::null())
         .output()
     {
         Ok(output) if output.status.success() => {}
         Ok(output) => tracing::warn!(
             stderr = %String::from_utf8_lossy(&output.stderr).trim(),
-            "mica-accounts build"
+            "rebuilding the accounts"
         ),
-        Err(err) => tracing::warn!(%err, "mica-accounts build"),
+        Err(err) => tracing::warn!(%err, "rebuilding the accounts"),
+    }
+}
+
+/// How the root under `root` rebuilds its accounts, if it can.
+///
+/// On systemd micad runs in a mount namespace of its own (its unit's
+/// sandboxing), where the tool's binds would stay: PID 1 restarts Base's own
+/// `mica-accounts.service`, which builds in the host's namespace, and
+/// `systemctl` waits for the job. On OpenRC micad shares the host's
+/// namespace and runs the tool.
+fn accounts_rebuild(root: &Path) -> Option<(&'static str, &'static [&'static str])> {
+    if !root.join(ACCOUNTS_TOOL.trim_start_matches('/')).exists() {
+        return None;
+    }
+    if root.join("run/systemd/system").is_dir() {
+        Some(("/usr/bin/systemctl", &["restart", "mica-accounts.service"]))
+    } else {
+        Some((ACCOUNTS_TOOL, &["build"]))
     }
 }
 

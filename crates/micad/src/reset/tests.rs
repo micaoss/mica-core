@@ -655,3 +655,27 @@ fn a_running_dockerd_refuses_the_tiers_that_clear_its_storage() {
         Outcome::Applied(ResetTier::Configuration)
     );
 }
+
+/// The accounts are rebuilt where the host sees them: by PID 1 through Base's
+/// unit on systemd, by the tool on OpenRC, and not at all without the tool.
+#[test]
+fn the_accounts_are_rebuilt_in_the_hosts_namespace() {
+    let root = TempDir::new().unwrap();
+    assert_eq!(accounts_rebuild(root.path()), None);
+    write(
+        &root.path().join("usr/lib/mica/mica-accounts"),
+        "#!/bin/sh\n",
+    );
+    assert_eq!(
+        accounts_rebuild(root.path()),
+        Some((ACCOUNTS_TOOL, &["build"][..]))
+    );
+    fs::create_dir_all(root.path().join("run/systemd/system")).unwrap();
+    assert_eq!(
+        accounts_rebuild(root.path()),
+        Some((
+            "/usr/bin/systemctl",
+            &["restart", "mica-accounts.service"][..]
+        ))
+    );
+}

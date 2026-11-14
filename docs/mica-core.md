@@ -371,7 +371,9 @@ absence is reported with its reason rather than as a healthy reading:
   run. A staged reset applies one tier: `configuration` or `application-data`.
   `application-data` also clears DATA/state
   `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10) and
-  `accounts` (the service accounts, then `mica-accounts build`), and
+  `accounts` (the service accounts, then `mica-accounts build`: on systemd as
+  `systemctl restart mica-accounts.service`, so PID 1 binds the new `/etc/passwd` and
+  `/etc/group` where every process sees them, not in micad's own mount namespace), and
   refuses to run while `/run/docker.pid` names a live dockerd, whose storage it would clear
   under it. No tier opens `/srv`: it is the user's, and only a factory reset, which makes DATA
   again, takes DATA's `/srv` with it. No tier crosses into a mount either: a directory of a
