@@ -7,10 +7,8 @@ use mica_deploy::{
         shutdown::{self, Action, Device, LifecycleIo, Operation, Ownership, Supervisor, SystemIo},
         startup::native,
     },
-    components::BootIdentity,
     deployments::boot_partition,
 };
-use serde::Deserialize;
 use std::{
     fs,
     os::unix::fs::{FileTypeExt, MetadataExt},
@@ -25,24 +23,8 @@ use boot::*;
 use data::*;
 use mounts::*;
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Config {
-    identity: BootIdentity,
-    board: BoardFacts,
-    public_keys: Vec<String>,
-    /// SYSTEM's and DATA's GPT partition UUIDs; a `ubi` board has neither.
-    #[serde(default)]
-    system_part_uuid: String,
-    #[serde(default)]
-    data_part_uuid: String,
-    /// What the product asks of the system; absent asks nothing.
-    #[serde(default)]
-    product: mica_deploy::boot::trust::ProductPolicy,
-    /// DATA encryption; absent is off.
-    #[serde(default)]
-    data_encryption: Option<mica_deploy::data_crypt::runkit::Encryption>,
-}
+/// The signed boot policy, as the running system's `mica-deploy` reads it too.
+type Config = mica_deploy::boot::policy::BootPolicy;
 
 #[derive(Debug)]
 struct SharedSystemFailure;

@@ -5,9 +5,8 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use mica_deploy::{
     acquisition::Acquisition,
     acquisition::Imported,
-    board::{BoardFacts, Storage},
+    board::Storage,
     boot::BootKind,
-    components::BootIdentity,
     core_set::{self, CoreBoot},
     defaults::{Defaults, GENERAL_CHANNEL},
     deployments::{
@@ -547,21 +546,8 @@ impl Cli {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Policy {
-    identity: BootIdentity,
-    board: BoardFacts,
-    public_keys: Vec<String>,
-    /// SYSTEM's and DATA's GPT partition UUIDs; a `ubi` board has neither.
-    #[serde(default)]
-    system_part_uuid: String,
-    #[serde(default)]
-    data_part_uuid: String,
-    /// What the product asks of the system; absent asks nothing.
-    #[serde(default)]
-    product: mica_deploy::boot::trust::ProductPolicy,
-}
+/// The signed boot policy, as the runkit read it at boot.
+type Policy = mica_deploy::boot::policy::BootPolicy;
 
 fn receipt() -> Result<BootReceipt> {
     Ok(serde_json::from_slice(&read_bounded(
@@ -654,6 +640,45 @@ fn require_mount(path: &str, filesystem: &str, writable: bool, number: u32) -> R
         filesystem,
         writable,
     )?;
+    partition(&sys_block(&device)?, number, path)
+}
+/// The DATA partition behind `/mnt/data`: the mount's own device, or on an
+/// encrypted DATA the one partition under its crypt mapping.
+fn data_partition(encrypted: bool, number: u32) -> Result<PathBuf> {
+    if !encrypted {
+        return require_mount("/mnt/data", "ext4", true, number);
+    }
+    let device = mount_device(
+        &std::fs::read_to_string("/proc/self/mountinfo")?,
+        "/mnt/data",
+        "ext4",
+        true,
+    )?;
+    let mapping = sys_block(&device)?;
+    ensure!(
+        std::fs::read_to_string(mapping.join("dm/name"))?.trim()
+            == mica_deploy::data_crypt::runkit::MAPPING,
+        "encrypted DATA is not mounted from its mapping"
+    );
+    let slaves = std::fs::read_dir(mapping.join("slaves"))?
+        .map(|entry| Ok(entry?.path()))
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        slaves.len() == 1,
+        "the DATA mapping is not over one partition"
+    );
+    partition(&std::fs::canonicalize(&slaves[0])?, number, "/mnt/data")
+}
+/// `physical`, once it is partition `number`.
+fn partition(physical: &Path, number: u32, path: &str) -> Result<PathBuf> {
+    ensure!(
+        std::fs::read_to_string(physical.join("partition"))?.trim() == number.to_string(),
+        "wrong partition: {path}"
+    );
+    Ok(physical.to_path_buf())
+}
+/// The sysfs directory of the block device `major:minor`.
+fn sys_block(device: &str) -> Result<PathBuf> {
     let (major, minor) = device.split_once(':').context("invalid mount device")?;
     ensure!(
         !major.is_empty()
@@ -664,12 +689,7 @@ fn require_mount(path: &str, filesystem: &str, writable: bool, number: u32) -> R
                 .all(|c| c.is_ascii_digit()),
         "invalid mount device"
     );
-    let physical = std::fs::canonicalize(format!("/sys/dev/block/{device}"))?;
-    ensure!(
-        std::fs::read_to_string(physical.join("partition"))?.trim() == number.to_string(),
-        "wrong partition: {path}"
-    );
-    Ok(physical)
+    Ok(std::fs::canonicalize(format!("/sys/dev/block/{device}"))?)
 }
 
 /// The product the running, dm-verity authenticated root was built as.
@@ -1815,7 +1835,7 @@ fn gpt_storage(policy: &Policy) -> Result<BootBackend> {
         },
     };
     let data_check = (|| -> Result<()> {
-        let data = require_mount("/mnt/data", "ext4", true, partitions.data)?;
+        let data = data_partition(policy.data_encryption.is_some(), partitions.data)?;
         ensure!(
             system.parent() == data.parent(),
             "DATA and SYSTEM are on different disks"

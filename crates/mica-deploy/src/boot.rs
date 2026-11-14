@@ -1,6 +1,7 @@
 //! Bounded boot selection and the single signed dm-verity invocation.
 
 mod data_projects;
+pub mod policy;
 pub mod shutdown;
 pub mod startup;
 pub mod trust;

@@ -146,13 +146,81 @@ fn unmount_data() {
     rustix::mount::unmount("/mnt", rustix::mount::UnmountFlags::empty()).unwrap();
 }
 
+/// The `booted` VM step, with DATA open as `report` says.
+fn booted(report: &Report) {
+    use rustix::mount::{MountFlags, mount};
+    use serde_json::json;
+    assert_eq!(report.state, State::On, "{report:?}");
+    for dir in ["/mnt/data", "/mnt/system", "/boot", "/run/mica"] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    mount(MAPPED, "/mnt/data", "ext4", MountFlags::empty(), c"").unwrap();
+    mount("/dev/vde2", "/mnt/system", "ext4", MountFlags::RDONLY, c"").unwrap();
+    mount("/dev/vde1", "/boot", "vfat", MountFlags::empty(), c"").unwrap();
+    let id = "8a1b766db5d18653a8db34a9ac17ef522c428e145a1bdd88d6b75500a50e9156";
+    fs::write(
+        "/run/mica/boot.json",
+        json!({
+            "backend": "uefi", "deploymentId": id, "entry": format!("mica-{id}.conf"),
+            "kernelId": "k", "rootfsId": "r", "contentVerified": true,
+            "secureBoot": false, "bootVerified": false,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let cases: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/component-contracts/cases.json"
+    ))
+    .unwrap();
+    let mut policy = json!({
+        "identity": {
+            "board": "uefi-x64", "arch": "amd64", "kernelBuildId": "d".repeat(64),
+            "kernelRelease": "6.12.107", "supportId": "0".repeat(64),
+        },
+        "board": cases["boardPolicies"]["uefi-x64"]["board"],
+        "publicKeys": ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="],
+        "systemPartUuid": "2f3c1b4a-5d6e-4f70-8192-a3b4c5d6e7f2",
+        "dataPartUuid": "3f4c2b5a-6d7e-4f80-9192-a3b4c5d6e7f3",
+        "dataEncryption": serde_json::from_str::<serde_json::Value>(ON).unwrap(),
+    });
+    let run = |policy: &serde_json::Value| {
+        fs::write("/run/mica/boot-policy.json", policy.to_string()).unwrap();
+        std::process::Command::new("/mica-deploy")
+            .arg("booted")
+            .output()
+            .unwrap()
+    };
+    let out = run(&policy);
+    assert!(
+        out.status.success(),
+        "mica-deploy booted: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), id);
+    println!("VM booted: mica-deploy booted on encrypted DATA answered {id}");
+    // The same DATA under a policy that says it is plain is refused.
+    policy.as_object_mut().unwrap().remove("dataEncryption");
+    let plain = run(&policy);
+    assert!(!plain.status.success(), "a mapping taken for the partition");
+    println!(
+        "VM booted: under a plain policy: {}",
+        String::from_utf8_lossy(&plain.stderr).trim()
+    );
+    for target in ["/boot", "/mnt/system", "/mnt/data"] {
+        rustix::mount::unmount(target, rustix::mount::UnmountFlags::empty()).unwrap();
+    }
+    unmap();
+    println!("VM_STEP booted PASS");
+}
+
 const ON: &str = r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"refuse","cipher":"aes-xts-plain64","recoveryMemoryKib":262144}"#;
 const ADIANTUM: &str = r#"{"mode":"on","keyProviders":["tpm2"],"noProvider":"plain","cipher":"xchacha12,aes-adiantum-plain64","recoveryMemoryKib":65536}"#;
 
 /// One boot of the W1 VM check (a uefi-x64 kernel, swtpm as its TPM,
 /// `/dev/vdb` the DATA under test, `/dev/vdc` a second fresh disk, `/dev/vdd`
-/// scratch for the recovery passphrase), the step in `MICA_VM_STEP`. Run by
-/// the step's VM driver, not in CI.
+/// scratch for the recovery passphrase, `/dev/vde` a uefi-x64 disk of ESP,
+/// SYSTEM and DATA), the step in `MICA_VM_STEP`. Run by the step's VM
+/// driver, not in CI.
 #[test]
 #[ignore = "runs as the init of a VM with a TPM"]
 fn vm_step() {
@@ -346,6 +414,11 @@ fn vm_step() {
             println!("VM {step}: ext4 {after} bytes, e2fsck clean");
             println!("VM_STEP {step} PASS");
         }
+        // The running system's health gate on an encrypted DATA: the real
+        // `mica-deploy booted` (the driver puts it at /mica-deploy) reads a
+        // boot policy carrying `dataEncryption` and finds DATA's partition
+        // under its mapping.
+        "booted" => booted(&open("/dev/vde3", Some(&on))),
         "cleared" => {
             let report = open("/dev/vdb1", Some(&on));
             assert_eq!(report.state, State::Locked, "{report:?}");

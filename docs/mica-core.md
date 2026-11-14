@@ -1748,7 +1748,9 @@ it, whatever the policy says:
   is loaded with it (`:<size>:logon:mica:data`, `allow_discards`, 4096-byte sectors, the payload
   at 16 MiB), and the key is invalidated once the table holds it. DATA is then mounted from
   `/dev/mapper/mica-data`. A header that no provider unlocks, encryption off included, refuses
-  the boot (`DATA is locked`); it is never formatted again.
+  the boot (`DATA is locked`); it is never formatted again. The running system's `mica-deploy`
+  reads the same policy type as the runkit, and holds `/mnt/data` to the one partition under
+  `mica-data` when the policy has `dataEncryption`, to the mounted partition itself when not.
 - With encryption on, no header and a fresh DATA (neither a LUKS2 header nor an ext4 superblock),
   the runkit first checks that the kernel maps the cipher: a table with a throwaway key is loaded
   and discarded unresumed. Then every listed provider that is ready enrols a keyslot with its
