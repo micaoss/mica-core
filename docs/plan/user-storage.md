@@ -239,7 +239,7 @@ OpenRC's `mica-mounts` makes the same binds, in the same order, with the same op
   - `/mica/containers` already has both.
 - **`/var/lib/mica`: yes** (STATE: configuration files only).
 - **Defense in depth**: the runkit could mount DATA itself `nosuid,nodev`, so a bind without the options cannot reopen them. Every DATA tree can take both, as above.
-  - That is a mica-deploy change (core), decided: in U2 together with the Base binds, once the QEMU suites show nothing on DATA needs either.
+  - Done in U2 (core): the runkit mounts DATA `rw,nosuid,nodev,noatime` (with `prjquota` when quotas are on), ext4 and UBIFS alike.
 
 ## 7. Split of work, tests, order
 

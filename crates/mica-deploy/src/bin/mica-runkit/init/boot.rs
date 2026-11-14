@@ -28,6 +28,10 @@ use std::{
 
 use super::*;
 
+/// DATA's mount: no set-uid bits and no device nodes from it, so a bind of
+/// it that forgets the options reopens neither.
+const DATA_OPTIONS: &str = "rw,nosuid,nodev,noatime";
+
 pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>) -> Result<()> {
     let started = Instant::now();
     ensure!(std::process::id() == 1, "mica-init must run as PID 1");
@@ -310,7 +314,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
                 &format!("ubi{}:data", ubi.number()),
                 "/newroot/mnt/data",
                 "ubifs",
-                "rw,noatime",
+                DATA_OPTIONS,
             )?;
             return Ok((false, None));
         }
@@ -403,9 +407,9 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         // ext4.
         let quotas = config.board.data_quotas;
         let options = if quotas {
-            "rw,noatime,prjquota"
+            "rw,nosuid,nodev,noatime,prjquota"
         } else {
-            "rw,noatime"
+            DATA_OPTIONS
         };
         // An ext4 smaller than its partition may be a grow the root started
         // and a power cut stopped: its journal is replayed in a mount of its

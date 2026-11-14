@@ -1252,7 +1252,7 @@ Base's binds, which `mica-mounts` repeats on OpenRC):
 | Path | Backing | Written | Options |
 | --- | --- | --- | --- |
 | `/`, `/usr`, `/etc`, `/run/mica-core/<pkg>` | the root's and the core components' squashfs on dm-verity (`/usr` and `/etc` an overlay of them) | never | `ro,nodev` |
-| `/mnt/data` | DATA | yes | `rw,noatime`, with `prjquota` when quotas are on |
+| `/mnt/data` | DATA | yes | `rw,nosuid,nodev,noatime`, with `prjquota` when quotas are on |
 | `/mica`, `/mica/containers`, `/srv`, `/var` | binds of DATA's `mica/`, `containers/`, `srv/`, `var/` | yes, under projects 100, 102, 100, 101 | `nosuid,nodev`, private |
 | `/var/lib/mica`, `/root`, `/home` | binds of DATA's `state/mica`, `/mica/root`, `/mica/home` | yes | `nosuid,nodev` |
 | `/etc/hostname`, `/usr/local/lib/systemd/system`, `/usr/local/etc`, and the network daemons' `/etc` directories when installed | binds of DATA's `state/` | yes | bind |
