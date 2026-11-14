@@ -139,3 +139,53 @@ pub(super) async fn root_may_take_the_api_off_the_network_without_ssh() {
         json!("off")
     );
 }
+
+/// Root on the device holds it already: its claim needs no device code, on
+/// a device whose network claim asks for one.
+#[tokio::test]
+pub(super) async fn root_claims_without_the_device_code() {
+    let (router, fake) = local_router(unclaimed());
+    let response = local(
+        &router,
+        Some(0),
+        "POST",
+        "/api/v1/setup",
+        Some(r#"{"password":"first-boot-pw"}"#),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let access = fake.get_settings("access").await.unwrap();
+    let hash = access["webAdmin"]["password_hash"].as_str().unwrap();
+    assert!(crate::auth::verify_password(hash, "first-boot-pw"));
+}
+
+/// Root sets a new administrator password without the current one, and the
+/// change is the same change: written, other sessions dropped.
+#[tokio::test]
+pub(super) async fn root_sets_the_password_without_the_current_one() {
+    let (router, fake) = local_router(configured_tree("hunter2secret"));
+    let response = local(
+        &router,
+        Some(0),
+        "POST",
+        "/api/v1/actions/change-password",
+        Some(r#"{"newPassword":"newsecret9"}"#),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let access = fake.get_settings("access").await.unwrap();
+    let hash = access["webAdmin"]["password_hash"].as_str().unwrap();
+    assert!(crate::auth::verify_password(hash, "newsecret9"));
+
+    // A current password root does send is still held to.
+    let wrong = local(
+        &router,
+        Some(0),
+        "POST",
+        "/api/v1/actions/change-password",
+        Some(r#"{"currentPassword":"not-it","newPassword":"newsecret10"}"#),
+    )
+    .await;
+    assert_eq!(wrong.status(), StatusCode::FORBIDDEN);
+    assert_eq!(envelope(wrong).await["code"], "wrong_password");
+}

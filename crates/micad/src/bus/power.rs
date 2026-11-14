@@ -196,12 +196,14 @@ impl MicadService {
     }
 
     /// Stage a factory reset for `by` (`console`, `api` or `cli`) from
-    /// `source`, once `password` is the administrator's, and reboot into it
-    /// a few seconds later, so the answer reaches the caller first.
+    /// `source`, once `password` is the administrator's, or empty from a
+    /// `root` caller, and reboot into it a few seconds later, so the answer
+    /// reaches the caller first.
     pub(super) async fn request_factory_reset(
         &self,
         sender: &str,
         password: String,
+        root: bool,
         by: &str,
         source: &str,
     ) -> Result<(), ResetFault> {
@@ -223,8 +225,17 @@ impl MicadService {
                 "no factory reset".into(),
             )));
         };
-        self.admin_password(sender, source, "factory reset", password)
-            .await?;
+        if password.is_empty() && !root {
+            return Err(Refusal::new(
+                "password_required",
+                "only root on the device resets without the administrator password",
+            )
+            .into());
+        }
+        if !password.is_empty() {
+            self.admin_password(sender, source, "factory reset", password)
+                .await?;
+        }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());
@@ -243,6 +254,7 @@ impl MicadService {
             sender,
             ?by,
             source,
+            root,
             "factory reset staged; rebooting into it"
         );
         self.note_power_request("factory_reset", sender, None).await;

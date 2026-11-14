@@ -12,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use micad_settings::{ClaimChannel, ClaimSettings, MIN_ADMIN_PASSWORD_LEN};
 use serde_json::Value;
 
+use super::local::LocalCredential;
 use super::*;
 
 /// `POST /api/v1/setup` request body.
@@ -43,9 +44,10 @@ pub(crate) struct SetupRequest {
     #[schema(value_type = Option<std::collections::BTreeMap<String, NetworkInterface>>)]
     pub(super) network: Option<NetworkEntries>,
     /// The device code from the device's label, as printed or without its
-    /// dashes, in any case. Required when the device has a code: it is the
-    /// proof that whoever claims the device holds it, which reaching the
-    /// console over a network the device joined by BLE is not.
+    /// dashes, in any case. Required over the network when the device has a
+    /// code: it is the proof that whoever claims the device holds it, which
+    /// reaching the console over a network the device joined by BLE is not.
+    /// Root on the local socket already holds the device, and sends none.
     #[serde(default, rename = "deviceCode")]
     pub(super) device_code: Option<String>,
 }
@@ -73,10 +75,11 @@ pub(crate) struct SetupResult {
 /// **Unauthenticated**, because it creates the device's first credential.
 /// Answers **409** once a password exists, which closes it permanently.
 ///
-/// On a device with a device code the body carries it as `deviceCode`, and a
-/// wrong one counts in the login backoff; a product with
+/// On a device with a device code a network caller's body carries it as
+/// `deviceCode`, and a wrong one counts in the login backoff; a product with
 /// `CLAIM_DEVICE_CODE=off` asks for none and ignores one sent
-/// (`GET /api/v1/session` says which).
+/// (`GET /api/v1/session` says which). Root on apid's local socket is asked
+/// for no code on any product.
 ///
 /// The claim sets no access-point key: the key on the label keeps applying
 /// until one is set (`docs/factory-ap-key.md`). An `apPsk` member a client
@@ -100,7 +103,7 @@ pub(crate) struct SetupResult {
         (status = 403, description = "`deviceCode` is not this device's code (`device_code_incorrect`)", body = ApiError),
         (status = 409, description = "The device already has an admin password, so it is not in setup mode (`already_configured`). Change the password with `POST /api/v1/actions/change-password`", body = ApiError),
         (status = 429, description = "Too many wrong device codes or logins; retry shortly (`login_throttled`)", body = ApiError),
-        (status = 422, description = "The body is not this shape, `deviceCode` is missing on a device whose claim asks for its code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them", body = ApiError),
+        (status = 422, description = "The body is not this shape, `deviceCode` is missing from a network caller on a device whose claim asks for its code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them", body = ApiError),
         (status = 500, description = "Hashing the password failed (`hash_failed`), the stored `access` subtree could not be read (`settings_invalid`), or micad failed to write (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`. Or the device's code, drawn on the device (`random`), cannot be read (`device_code_unavailable`): nothing claims it without the code", body = ApiError),
         (status = 504, description = "The bounded call to micad timed out (`micad_timeout`); the operation may still be running", body = ApiError),
@@ -110,6 +113,7 @@ pub(crate) struct SetupResult {
 pub(crate) async fn api_v1_setup(
     State(state): State<AppState>,
     Source(source): Source,
+    local: Option<axum::Extension<LocalCredential>>,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     // No dot-path: this route writes three subtrees and a malformed body is
@@ -147,7 +151,10 @@ pub(crate) async fn api_v1_setup(
         state.audit.record(CLAIM_EVENT, "refused", &source);
         return already_configured();
     }
-    if let Err(response) = check_device_code(&state, request.device_code.as_deref(), &source).await
+    // The code proves possession of the device; root on it has that already.
+    if local.is_none()
+        && let Err(response) =
+            check_device_code(&state, request.device_code.as_deref(), &source).await
     {
         return *response;
     }

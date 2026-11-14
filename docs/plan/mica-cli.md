@@ -66,13 +66,13 @@ Nothing is required. `status` needs no new method: it composes `GetSystemInfo`, 
 
 `mica help` prints one line per verb. `mica help <verb>` and `mica <verb> help` print that verb's usage. `--json` is accepted by every reading verb. `--version` is kept as a flag, as `wants_version` accepts it today.
 
-Passwords, PSKs and the device code are never taken from argv. They come from a prompt with echo off (asked twice for a new password, as in `factory_reset_cli.rs`), or from `--password-file FILE` (`-` is stdin), whose first line is the value. This reuses the bounded reader already in `factory_reset_cli.rs`.
+Passwords and PSKs are never taken from argv. They come from a prompt with echo off (asked twice for a new one), or from `--password-file FILE` (`-` is stdin), whose first line is the value (`cli/secret.rs`). Root on the device is asked for no device code, no current administrator password and no password for the factory reset (section 10, item 3).
 
 | Verb | Does | Route |
 | --- | --- | --- |
 | `mica status` | version, deployment and update state, network addresses, time sync, DATA use | bus: `GetSystemInfo`, `GetUpdateState`, `GetNetworkState`, `GetTimeStatus`, `GetStorageStatus` |
-| `mica setup [--hostname NAME] [--password-file FILE] [--device-code-file FILE]` | first-run setup. Asks for the device code when the device has one (`GET /v1/session` says so) | `POST /v1/setup` |
-| `mica password change [--current-password-file FILE] [--password-file FILE]` | change the admin password | `POST /v1/actions/change-password` |
+| `mica setup [--hostname NAME] [--password-file FILE]` | first-run setup, with no device code | `POST /v1/setup` |
+| `mica password set [--password-file FILE]` | set a new admin password without the current one | `POST /v1/actions/change-password` `{newPassword}` |
 | `mica root-password [--password-file FILE]` | the transient root password | `POST /v1/actions/transient-root-password`, then waits for the task |
 | `mica ssh status` / `on` / `off` | whether sshd runs; `access.ssh.enabled` | `GET`/`PUT /v1/settings/access/ssh/enabled` |
 | `mica ssh keys list` / `add <file\|->` / `remove <fingerprint>` | authorized keys | `/v1/ssh/authorized-keys[/{fingerprint}]` |
@@ -89,7 +89,7 @@ Passwords, PSKs and the device code are never taken from argv. They come from a 
 | `mica unit install` / `enable` / `disable` / `remove` / `start` / `stop` / `restart` / `list` / `logs` | as `micad unit` | bus, `unit_cli.rs` |
 | `mica web status` / `network` / `local` / `off` | as `micad web` | bus |
 | `mica mdns ...`, `mica ssdp ...` | as today | bus |
-| `mica factory-reset [--password-file FILE]` | as today, micad's backoff | bus `FactoryReset` |
+| `mica factory-reset [--yes]` | no password; prints what is erased and kept, then the hostname or `factory-reset` typed, or `--yes` | bus `FactoryReset` with an empty password, micad checking the caller's uid |
 | `mica reboot`, `mica poweroff` | | bus `Reboot`, `PowerOff`, as `update --reboot` uses today |
 | `mica doctor` | the diagnostic snapshot, as `micad diag` | unchanged |
 | `mica help [verb]` | | |
@@ -130,7 +130,8 @@ Tasks (202 with a task id) are waited for by default, as `unit` and `ctr` do tod
 - **Exit-code mapping**: unit tests from `ApiError` codes, HTTP statuses and bus error names to 0–4.
 - **`mica set` typing**: a string setting takes `1234` as a string, a boolean refuses anything but `true`/`false`, an absent path is refused with its name.
 - **Change-password backoff**: wrong current passwords reach `login_throttled` (429, exit 4).
-- **Local-socket e2e** (`crates/mica-apid/tests/e2e`, real micad + apid on a private bus, as `web_flow` does): `mica setup` with and without a device code; `mica password change` with the wrong current password (exit 4, audit line `password wrong-password` source `local`); login backoff reached through `mica setup` with wrong device codes (exit 4, `login_throttled`); `tokens create/list/revoke`; `ssh keys add/list/remove`; `set` of an accepted scalar and a refused path; `--json` shapes; apid stopped gives exit 3.
+- **Root and network paths** (round 2b): setup without `deviceCode` on the local socket and refused without it on the network; change-password without `currentPassword` from root and refused (422) on the network, a wrong one still 403; `FactoryReset` with an empty password from root staged, from any other caller `password_required` and not counted in the backoff.
+- **Local-socket e2e** (`crates/mica-apid/tests/e2e`, real micad + apid on a private bus, as `web_flow` does): `mica setup` with no device code; `mica password set` (audit line `password changed` source `local uid 0`), `mica password change` gone (exit 2); `tokens create/list/revoke`; `ssh keys add/list/remove`; `set` of an accepted scalar and a refused path; `--json` shapes; apid stopped gives exit 3.
 - **Bus verbs**: the existing `update`, `ctr`, `unit`, `web`, `mdns`, `ssdp`, `factory-reset` tests are renamed; `status` against the test bus prints each member and `--json` is one object.
 - **`executable.rs`**: `mica` via argv0, the removed links, and bare `micad` still exiting 2.
 
@@ -159,7 +160,7 @@ Tasks (202 with a task id) are waited for by default, as `unit` and `ctr` do tod
 ## 9. Rounds and effort
 
 1. **Entry and renames** (about 1 day): `mica` link and dispatcher, help, exit codes, `--json` on the existing verbs, and the renames (`container`, `doctor`, `internal`, `mica unit`). Old links and `micad <verb>` go. `status`, `reboot`, `poweroff`, and `container status|on|off` on the bus. Docs for these. Lands on main with the gate. Build is told its suites' new verbs before the next pin move.
-2. **Local-socket verbs** (about 1.5 days): socket client, `setup`, `password change`, `root-password`, `ssh`, `tokens`, `get`/`set`, `hostname`, `time`, `network`, `wifi`, the e2e cases and the docs.
+2. **Local-socket verbs** (about 1.5 days): socket client, `setup`, `password set` (round 2b), `root-password`, `ssh`, `tokens`, `get`/`set`, `hostname`, `time`, `network`, `wifi`, the e2e cases and the docs.
 3. **Base hand-off** (core side under an hour once Base has released): `PROGRAM` moves to `/usr/lib/mica/mica-unit` when Base's release with the move exists, in the same product round.
 
 The plan doc itself lands as round 1's first commit.
@@ -168,3 +169,4 @@ The plan doc itself lands as round 1's first commit.
 
 1. A wrong current password on `POST /v1/actions/change-password` counts in the login backoff (`GuardStore`), on the API and so on `mica` (round 2, with a test).
 2. `mica set` types its value by the setting (section 3), not by whether it parses as JSON.
+3. Root on the device needs no credential the device itself guards (round 2b): `POST /v1/setup` on the local socket takes no device code on any product; root on the local socket sets a new admin password without the current one (`mica password set`, replacing `mica password change`); `FactoryReset` with an empty password stages the reset for a caller the bus reports as uid 0 (`mica factory-reset`, one confirmation: the hostname or `factory-reset` typed, or `--yes`). The network paths keep the device code, the current password with its backoff, and the factory-reset password. Each is audited with its source (`local uid 0`, `uid 0`).

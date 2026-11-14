@@ -1,27 +1,27 @@
 //! The credential verbs: `setup`, `password`, `root-password`, `ssh` and
-//! `tokens`, through apid's local socket (`super::api`), so its checks, audit
-//! and login backoff apply.
+//! `tokens`, through apid's local socket (`super::api`), so its checks and
+//! audit apply. Root on the device is asked for neither the device code nor
+//! the current administrator password.
 
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use super::secret::{plain, secret};
+use super::secret::secret;
 use super::{api, json_reads, misuse};
 
 const SETUP_USAGE: &str = "\
-usage: mica setup [--hostname NAME] [--password-file FILE] [--device-code-file FILE]
+usage: mica setup [--hostname NAME] [--password-file FILE]
 
   first-run setup: set the administrator password and, given one, the
   hostname. The password is asked for twice on the terminal unless
-  --password-file names a file (- is stdin); a device whose claim asks for
-  its device code is asked for it unless --device-code-file names one";
+  --password-file names a file (- is stdin). No device code: root on the
+  device holds it already";
 
 const PASSWORD_USAGE: &str = "\
-usage: mica password change [--current-password-file FILE] [--password-file FILE]
+usage: mica password set [--password-file FILE]
 
-  change the administrator password: the current one, then the new one
-  twice, on the terminal unless a file names each (- is stdin, for one of
-  them). A wrong current password counts in the login backoff";
+  set a new administrator password, without the current one: asked twice
+  on the terminal unless --password-file names a file (- is stdin)";
 
 const ROOT_PASSWORD_USAGE: &str = "\
 usage: mica root-password [--password-file FILE]
@@ -84,17 +84,14 @@ pub fn setup(args: &[String], json: bool) -> Result<()> {
         println!("{SETUP_USAGE}");
         return Ok(());
     }
-    let [hostname, password_file, code_file] = flags(
+    let [hostname, password_file] = flags(
         args,
-        &["--hostname", "--password-file", "--device-code-file"],
+        &["--hostname", "--password-file"],
         "setup",
         SETUP_USAGE,
     )[..] else {
-        unreachable!("three flags")
+        unreachable!("two flags")
     };
-    if password_file == Some("-") && code_file == Some("-") {
-        misuse("setup", "only one of the files can be stdin", SETUP_USAGE);
-    }
     json_reads(json, false, "setup", SETUP_USAGE);
     let session = api::get("/v1/session")?;
     if session["state"] != json!("setup") {
@@ -102,19 +99,14 @@ pub fn setup(args: &[String], json: bool) -> Result<()> {
             exit: super::EXIT_FAILED,
             code: "already_configured".to_string(),
             message:
-                "the device already has an administrator password; mica password change changes it"
+                "the device already has an administrator password; mica password set replaces it"
                     .to_string(),
         }
         .into());
     }
-    let mut body = json!({});
-    if session["deviceCode"] == json!("required") {
-        body["deviceCode"] = json!(match code_file {
-            Some(file) => secret(Some(file), "Device code", false)?,
-            None => plain("Device code (on the device's label)")?,
-        });
-    }
-    body["password"] = json!(secret(password_file, "Administrator password", true)?);
+    let mut body = json!({
+        "password": secret(password_file, "Administrator password", true)?,
+    });
     if let Some(hostname) = hostname {
         body["hostname"] = json!(hostname);
     }
@@ -123,45 +115,32 @@ pub fn setup(args: &[String], json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `mica password change`.
+/// `mica password set`.
 pub fn password(args: &[String], json: bool) -> Result<()> {
     let rest = match args {
         [word] if word == "help" || word == "--help" => {
             println!("{PASSWORD_USAGE}");
             return Ok(());
         }
-        [verb, rest @ ..] if verb == "change" => rest,
-        [] => misuse("password", "name the command: change", PASSWORD_USAGE),
+        [verb, rest @ ..] if verb == "set" => rest,
+        [] => misuse("password", "name the command: set", PASSWORD_USAGE),
         [other, ..] => misuse(
             "password",
             &format!("unknown command: {other}"),
             PASSWORD_USAGE,
         ),
     };
-    let [current_file, new_file] = flags(
-        rest,
-        &["--current-password-file", "--password-file"],
-        "password",
-        PASSWORD_USAGE,
-    )[..] else {
-        unreachable!("two flags")
+    let [file] = flags(rest, &["--password-file"], "password", PASSWORD_USAGE)[..] else {
+        unreachable!("one flag")
     };
-    if current_file == Some("-") && new_file == Some("-") {
-        misuse(
-            "password",
-            "only one of the files can be stdin",
-            PASSWORD_USAGE,
-        );
-    }
     json_reads(json, false, "password", PASSWORD_USAGE);
-    let current = secret(current_file, "Current password", false)?;
-    let new = secret(new_file, "New password", true)?;
+    let new = secret(file, "New administrator password", true)?;
     api::send(
         "POST",
         "/v1/actions/change-password",
-        &json!({ "currentPassword": current, "newPassword": new }),
+        &json!({ "newPassword": new }),
     )?;
-    println!("the administrator password is changed");
+    println!("the administrator password is set");
     Ok(())
 }
 

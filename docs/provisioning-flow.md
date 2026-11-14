@@ -84,6 +84,7 @@ boots with what was last written.
 
 1. The device code and the login backoff gate it, unless the product turns the code off
    (`CLAIM_DEVICE_CODE=off`, `docs/mica-core.md` section 3.2); `409` once a password exists.
+   Root on the device (`mica setup`, apid's local socket) is asked for no code on any product.
 2. `hostname` when the body has one: one write, applied by `hostname` and `dns`.
 3. `network` entries when the body has them: merged into the current map, one write, applied by
    `network` and `dns`. The console's setup page sends none.

@@ -863,17 +863,20 @@ impl MicadService {
     /// Stage a factory reset and reboot into it: everything configured on
     /// the device is erased at the next boot, before anything of the root
     /// runs, and the software stays at its version. `password` must be the
-    /// administrator's; `by` is `console`, `api` or `cli`, and `source` the
+    /// administrator's, or empty from a caller the bus knows as uid 0 (root
+    /// on the device); `by` is `console`, `api` or `cli`, and `source` the
     /// peer or mechanism, both for the record. Refused with
     /// `FactoryResetRefused`, whose description is JSON `{code, message}`.
     pub(super) async fn factory_reset(
         &self,
+        #[zbus(connection)] connection: &zbus::Connection,
         #[zbus(header)] header: Header<'_>,
         password: String,
         by: &str,
         source: &str,
     ) -> Result<(), ResetFault> {
-        self.request_factory_reset(sender_of(&header), password, by, source)
+        let root = password.is_empty() && caller_uid(connection, &header).await == Some(0);
+        self.request_factory_reset(sender_of(&header), password, root, by, source)
             .await
     }
 
@@ -1271,4 +1274,14 @@ impl MicadService {
         emitter: &SignalEmitter<'_>,
         task_json: &str,
     ) -> zbus::Result<()>;
+}
+
+/// The uid of the process that sent `header`'s message, as the bus daemon
+/// took it from the kernel; `None` when the bus does not say.
+async fn caller_uid(connection: &zbus::Connection, header: &Header<'_>) -> Option<u32> {
+    let sender = header.sender()?;
+    let dbus = fdo::DBusProxy::new(connection).await.ok()?;
+    dbus.get_connection_unix_user(sender.clone().into())
+        .await
+        .ok()
 }

@@ -12,7 +12,7 @@
           "actions"
         ],
         "summary": "Change the admin password.",
-        "description": "Requires the current password. Answers **204** on success; every session\nbut the acting one is dropped. A wrong current password is **403** and\ncounts in the login backoff, which answers **429** while it runs; a new\npassword below the length floor is **422**.",
+        "description": "Requires the current password, except from root on apid's local socket,\nwhich sets a new one without it. Answers **204** on success; every session\nbut the acting one is dropped. A wrong current password is **403** and\ncounts in the login backoff, which answers **429** while it runs; a new\npassword below the length floor, or a missing current one, is **422**.",
         "operationId": "api_v1_change_password",
         "requestBody": {
           "content": {
@@ -69,7 +69,7 @@
             }
           },
           "422": {
-            "description": "The new password is shorter than 8 characters (`validation_failed`)",
+            "description": "The new password is shorter than 8 characters, or `currentPassword` is missing from a caller other than root on the local socket (`validation_failed`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -5560,7 +5560,7 @@
           "actions"
         ],
         "summary": "First-run setup: set the admin password and, optionally, a hostname and\nnetwork entries.",
-        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nOn a device with a device code the body carries it as `deviceCode`, and a\nwrong one counts in the login backoff; a product with\n`CLAIM_DEVICE_CODE=off` asks for none and ignores one sent\n(`GET /api/v1/session` says which).\n\nThe claim sets no access-point key: the key on the label keeps applying\nuntil one is set (`docs/factory-ap-key.md`). An `apPsk` member a client\nstill sends is ignored.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, then `access`.\n\nAnswers **201** with the browser session's CSRF token. It mints no API\ntoken: see [`SetupResult`].",
+        "description": "**Unauthenticated**, because it creates the device's first credential.\nAnswers **409** once a password exists, which closes it permanently.\n\nOn a device with a device code a network caller's body carries it as\n`deviceCode`, and a wrong one counts in the login backoff; a product with\n`CLAIM_DEVICE_CODE=off` asks for none and ignores one sent\n(`GET /api/v1/session` says which). Root on apid's local socket is asked\nfor no code on any product.\n\nThe claim sets no access-point key: the key on the label keeps applying\nuntil one is set (`docs/factory-ap-key.md`). An `apPsk` member a client\nstill sends is ignored.\n\nEverything is validated before anything is written; a rejected request\nleaves the device untouched and still in setup mode. On success the writes\nrun in the order hostname, network, then `access`.\n\nAnswers **201** with the browser session's CSRF token. It mints no API\ntoken: see [`SetupResult`].",
         "operationId": "api_v1_setup",
         "requestBody": {
           "content": {
@@ -5624,7 +5624,7 @@
             }
           },
           "422": {
-            "description": "The body is not this shape, `deviceCode` is missing on a device whose claim asks for its code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them",
+            "description": "The body is not this shape, `deviceCode` is missing from a network caller on a device whose claim asks for its code, the password is under 8 bytes, the hostname is not a hostname, a `network` key is not an interface name, a static address is not IPv4 CIDR notation, or a relational rule refuses the resulting map -- a VLAN parent or a bridge port that is not a declared entry, a bridge port carrying addressing, a port claimed twice (`validation_failed`); or micad rejected a write (`settings_rejected`). Nothing is written on any of them",
             "content": {
               "application/json": {
                 "schema": {
@@ -12699,13 +12699,15 @@
         "type": "object",
         "description": "`POST /api/v1/actions/change-password` request body.",
         "required": [
-          "currentPassword",
           "newPassword"
         ],
         "properties": {
           "currentPassword": {
-            "type": "string",
-            "description": "The password being replaced, verified before anything is written."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The password being replaced, verified before anything is written.\nRequired, except from root on apid's local socket."
           },
           "newPassword": {
             "type": "string",
@@ -14414,7 +14416,7 @@
               "string",
               "null"
             ],
-            "description": "The device code from the device's label, as printed or without its\ndashes, in any case. Required when the device has a code: it is the\nproof that whoever claims the device holds it, which reaching the\nconsole over a network the device joined by BLE is not."
+            "description": "The device code from the device's label, as printed or without its\ndashes, in any case. Required over the network when the device has a\ncode: it is the proof that whoever claims the device holds it, which\nreaching the console over a network the device joined by BLE is not.\nRoot on the local socket already holds the device, and sends none."
           },
           "hostname": {
             "type": [

@@ -59,7 +59,7 @@ pub(super) async fn the_administrator_password_stages_the_reset_and_the_reboot_f
     let (service, calls, dir) = claimed(MockDeployments::default());
 
     service
-        .request_factory_reset(":1.5", PASSWORD.into(), "console", "192.0.2.7")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "console", "192.0.2.7")
         .await
         .unwrap();
 
@@ -85,19 +85,19 @@ pub(super) async fn a_wrong_password_stages_nothing_and_repeated_ones_back_off()
 
     for _ in 0..3 {
         let fault = service
-            .request_factory_reset(":1.5", "guess".into(), "api", "192.0.2.9")
+            .request_factory_reset(":1.5", "guess".into(), false, "api", "192.0.2.9")
             .await
             .unwrap_err();
         assert_eq!(code(fault), "password_incorrect");
     }
     let fault = service
-        .request_factory_reset(":1.5", "guess".into(), "api", "192.0.2.9")
+        .request_factory_reset(":1.5", "guess".into(), false, "api", "192.0.2.9")
         .await
         .unwrap_err();
     assert_eq!(code(fault), "password_incorrect");
     // Backed off: even the right password waits.
     let fault = service
-        .request_factory_reset(":1.5", PASSWORD.into(), "api", "192.0.2.9")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "api", "192.0.2.9")
         .await
         .unwrap_err();
     assert_eq!(code(fault), "login_throttled");
@@ -107,10 +107,52 @@ pub(super) async fn a_wrong_password_stages_nothing_and_repeated_ones_back_off()
     service.password_backoff.succeeded();
 
     service
-        .request_factory_reset(":1.5", PASSWORD.into(), "api", "192.0.2.9")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "api", "192.0.2.9")
         .await
         .unwrap();
     assert!(staged(&dir));
+}
+
+#[tokio::test]
+pub(super) async fn root_resets_without_the_password_and_no_one_else_does() {
+    let (service, _calls, dir) = claimed(MockDeployments::default());
+
+    // Not root: an empty password is refused, and not counted as a guess.
+    for _ in 0..5 {
+        let fault = service
+            .request_factory_reset(":1.5", String::new(), false, "api", "192.0.2.9")
+            .await
+            .unwrap_err();
+        assert_eq!(code(fault), "password_required");
+    }
+    assert!(service.password_backoff.throttled().is_none());
+    assert!(!staged(&dir));
+
+    // Root, with no password: staged, recorded as the command line's.
+    service
+        .request_factory_reset(":1.5", String::new(), true, "cli", "uid 0")
+        .await
+        .unwrap();
+    assert!(staged(&dir));
+    let request: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("data/meta/factory-reset.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        (&request["by"], &request["source"]),
+        (&"cli".into(), &"uid 0".into())
+    );
+}
+
+#[tokio::test]
+pub(super) async fn root_with_a_password_is_held_to_it() {
+    let (service, _calls, dir) = claimed(MockDeployments::default());
+    let fault = service
+        .request_factory_reset(":1.5", "guess".into(), true, "cli", "uid 0")
+        .await
+        .unwrap_err();
+    assert_eq!(code(fault), "password_incorrect");
+    assert!(!staged(&dir));
 }
 
 #[tokio::test]
@@ -119,7 +161,7 @@ pub(super) async fn an_unclaimed_device_has_nothing_to_reset() {
     service.inner.write().await.settings.access.web_admin = None;
 
     let fault = service
-        .request_factory_reset(":1.5", PASSWORD.into(), "cli", "uid 0")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "cli", "uid 0")
         .await
         .unwrap_err();
     assert_eq!(code(fault), "not_claimed");
@@ -132,7 +174,7 @@ pub(super) async fn a_runkit_without_the_reset_refuses_it() {
     std::fs::remove_file(dir.path().join("run/runkit.json")).unwrap();
 
     let fault = service
-        .request_factory_reset(":1.5", PASSWORD.into(), "cli", "uid 0")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "cli", "uid 0")
         .await
         .unwrap_err();
     assert_eq!(code(fault), "factory_reset_unsupported");
@@ -147,7 +189,7 @@ pub(super) async fn an_update_or_a_trial_comes_first() {
         ..MockDeployments::default()
     });
     let fault = service
-        .request_factory_reset(":1.5", PASSWORD.into(), "cli", "uid 0")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "cli", "uid 0")
         .await
         .unwrap_err();
     assert_eq!(code(fault), "update_in_progress");
@@ -161,7 +203,7 @@ pub(super) async fn an_update_or_a_trial_comes_first() {
         ..MockDeployments::default()
     });
     let fault = service
-        .request_factory_reset(":1.5", PASSWORD.into(), "cli", "uid 0")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "cli", "uid 0")
         .await
         .unwrap_err();
     assert_eq!(code(fault), "trial_pending");
@@ -172,13 +214,13 @@ pub(super) async fn an_update_or_a_trial_comes_first() {
     let lock = std::fs::File::create(dir.path().join("data/meta/transaction.lock")).unwrap();
     lock.try_lock().unwrap();
     let fault = service
-        .request_factory_reset(":1.5", PASSWORD.into(), "cli", "uid 0")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "cli", "uid 0")
         .await
         .unwrap_err();
     assert_eq!(code(fault), "update_in_progress");
     drop(lock);
     service
-        .request_factory_reset(":1.5", PASSWORD.into(), "cli", "uid 0")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "cli", "uid 0")
         .await
         .unwrap();
     assert!(staged(&dir));
@@ -204,7 +246,7 @@ pub(super) async fn the_status_says_why_a_reset_cannot_run() {
 pub(super) async fn a_requester_outside_the_three_is_refused_as_an_argument() {
     let (service, _calls, dir) = claimed(MockDeployments::default());
     let fault = service
-        .request_factory_reset(":1.5", PASSWORD.into(), "ble", "")
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "ble", "")
         .await
         .unwrap_err();
     assert!(matches!(fault, ResetFault::Fdo(fdo::Error::InvalidArgs(_))));

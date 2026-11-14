@@ -36,12 +36,14 @@ pub(super) enum PasswordChangeError {
 }
 
 /// Verify the current admin password, write the new hash through the settings
-/// tree, and drop every session except the acting one.
+/// tree, and drop every session except the acting one. `current` is `None`
+/// only for root on the local socket, which sets the password without it.
 ///
 /// The current password is demanded even though the caller holds a session: a
 /// session is a browser artifact that outlives the moment the password was
 /// typed, and an unattended browser must not be enough to rotate the sole
-/// credential on the management surface.
+/// credential on the management surface. Root on the device already holds
+/// more than the password guards.
 ///
 /// The invalidation and the write belong in one step. The gate's
 /// short-circuit comment says an unset-password operation "has to clear the
@@ -54,7 +56,7 @@ pub(super) async fn change_password(
     state: &AppState,
     source: &str,
     acting_session: Option<&str>,
-    current: &str,
+    current: Option<&str>,
     new: &str,
 ) -> Result<(), PasswordChangeError> {
     if password_under_floor(new) {
@@ -62,7 +64,7 @@ pub(super) async fn change_password(
     }
     // A guess at the current password is a guess at the login's: one backoff
     // counts both.
-    if !state.guard.begin_attempt() {
+    if current.is_some() && !state.guard.begin_attempt() {
         state.audit.record("password", "throttled", source);
         return Err(PasswordChangeError::Throttled);
     }
@@ -82,20 +84,22 @@ pub(super) async fn change_password(
     // Off the async workers for the same reason login verification is:
     // argon2id costs real CPU per call, by design. A panic in the closure
     // surfaces as a failed verification: closed, never open.
-    let hash = hash.to_string();
-    let password = current.to_string();
-    let verified = tokio::task::spawn_blocking(move || auth::verify_password(&hash, &password))
-        .await
-        .unwrap_or_else(|err| {
-            tracing::error!(error = %err, "password verification task failed");
-            false
-        });
-    if !verified {
-        state.guard.confirm_failure();
-        state.audit.record("password", "wrong-password", source);
-        return Err(PasswordChangeError::WrongCurrent);
+    if let Some(current) = current {
+        let hash = hash.to_string();
+        let password = current.to_string();
+        let verified = tokio::task::spawn_blocking(move || auth::verify_password(&hash, &password))
+            .await
+            .unwrap_or_else(|err| {
+                tracing::error!(error = %err, "password verification task failed");
+                false
+            });
+        if !verified {
+            state.guard.confirm_failure();
+            state.audit.record("password", "wrong-password", source);
+            return Err(PasswordChangeError::WrongCurrent);
+        }
+        state.guard.record_success();
     }
-    state.guard.record_success();
     let password = new.to_string();
     let hash = tokio::task::spawn_blocking(move || auth::hash_password(&password))
         .await
@@ -175,17 +179,20 @@ pub(super) async fn change_password(
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChangePasswordRequest {
     /// The password being replaced, verified before anything is written.
-    pub(super) current_password: String,
+    /// Required, except from root on apid's local socket.
+    #[serde(default)]
+    pub(super) current_password: Option<String>,
     /// The replacement; at least 8 characters.
     pub(super) new_password: String,
 }
 
 /// Change the admin password.
 ///
-/// Requires the current password. Answers **204** on success; every session
+/// Requires the current password, except from root on apid's local socket,
+/// which sets a new one without it. Answers **204** on success; every session
 /// but the acting one is dropped. A wrong current password is **403** and
 /// counts in the login backoff, which answers **429** while it runs; a new
-/// password below the length floor is **422**.
+/// password below the length floor, or a missing current one, is **422**.
 #[utoipa::path(
     post,
     path = V1_CHANGE_PASSWORD_PATH,
@@ -197,7 +204,7 @@ pub(crate) struct ChangePasswordRequest {
         (status = 400, description = "The body is not JSON, or not this shape (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "The browser CSRF token is invalid (`csrf_invalid`), or the current password does not verify (`wrong_password`)", body = ApiError),
-        (status = 422, description = "The new password is shorter than 8 characters (`validation_failed`)", body = ApiError),
+        (status = 422, description = "The new password is shorter than 8 characters, or `currentPassword` is missing from a caller other than root on the local socket (`validation_failed`)", body = ApiError),
         (status = 429, description = "Too many wrong passwords, here or at login; retry shortly (`login_throttled`)", body = ApiError),
         (status = 500, description = "Hashing failed (`hashing_failed`), or micad failed to answer (`settings_io`, `micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
@@ -206,7 +213,7 @@ pub(crate) struct ChangePasswordRequest {
     ),
 )]
 pub(crate) async fn api_v1_change_password(
-    _credential: ApiCredential,
+    credential: ApiCredential,
     State(state): State<AppState>,
     Source(source): Source,
     headers: HeaderMap,
@@ -222,12 +229,22 @@ pub(crate) async fn api_v1_change_password(
             );
         }
     };
+    if request.current_password.is_none() && !matches!(credential, ApiCredential::Local) {
+        return api_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ApiError::apid(
+                "validation_failed",
+                "the current password is required".to_string(),
+            )
+            .at("currentPassword"),
+        );
+    }
     let acting = session::cookie_from_headers(&headers);
     match change_password(
         &state,
         &source,
         acting.as_deref(),
-        &request.current_password,
+        request.current_password.as_deref(),
         &request.new_password,
     )
     .await

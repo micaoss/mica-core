@@ -84,6 +84,30 @@ pub(super) async fn a_wrong_current_password_backs_off_the_next_change() {
     assert!(fake.set_paths().is_empty());
 }
 
+// Over the network the current password is required: a body without it is
+// refused and nothing is written.
+#[tokio::test]
+pub(super) async fn the_network_change_requires_the_current_password() {
+    let (tree, token) = with_token(configured_tree("hunter2secret"));
+    let (router, fake) = test_app(tree);
+
+    let response = bearer_json(
+        &router,
+        "POST",
+        "/api/v1/actions/change-password",
+        &token,
+        r#"{"newPassword":"newsecret9"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let error = envelope(response).await;
+    assert_eq!(
+        (error["code"].as_str(), error["path"].as_str()),
+        (Some("validation_failed"), Some("currentPassword"))
+    );
+    assert!(fake.set_paths().is_empty());
+}
+
 // The API half of the success: 204, the hash written, and **every** browser
 // session dropped.
 

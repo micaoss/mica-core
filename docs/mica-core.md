@@ -286,7 +286,7 @@ directions, because `SettingsChanged` carries setting values.
 | --- | --- |
 | Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
 | Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetStorageMedia`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetLogOfBoot`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
-| Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `UnmountMedia`, `EjectMedia`, `FactoryReset` (the administrator password, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
+| Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `UnmountMedia`, `EjectMedia`, `FactoryReset` (the administrator password, or none from a caller the bus knows as uid 0, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so two claims cannot both land), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
 | Updates | `GetUpdateState`, `CheckUpdate`, `FetchUpdate`, `ImportUpdate`, `InstallUpdate`, `InstallLatestUpdate`, `ConfirmDeployment`, `RejectDeployment`, `RollbackDeployment`, `SetRebootOverride`, `SetUpdateConfig` |
 | The user's services | `GetUnits`, `StartUnit`, `StopUnit`, `RestartUnit`, `GetUnitLog` |
@@ -384,7 +384,9 @@ absence is reported with its reason rather than as a healthy reading:
   on DATA itself is cleared. A board-declared physical recovery action at boot maps to a tier. A
   transient root password lives in `/etc/shadow` until the next boot and in no setting.
 - **Factory reset.** The software stays at its current version; everything configured is
-  erased. `FactoryReset` checks the administrator password, has mica-deploy stage the reset
+  erased. `FactoryReset` checks the administrator password, or asks none of a caller whose
+  uid the bus daemon reports as 0 (root on the device) and sends an empty one; an empty
+  password from any other caller is refused (`password_required`). It has mica-deploy stage the reset
   (6.3), then reboots after 3 s; the runkit carries it out at the next boot (6.5). Everything
   on DATA goes: STATE with the settings, the claim, the API tokens, the keys, the SSH host keys
   and the machine-id, the containers, `/srv`, `/mica` and the logs kept there. The
@@ -413,8 +415,9 @@ absence is reported with its reason rather than as a healthy reading:
   waits for its reboot (`update_in_progress`), while a deployment or set is on trial
   (`trial_pending`), and on a wrong password (`password_incorrect`). After 3 wrong passwords
   each one doubles a wait from 5 s to 300 s (`login_throttled`). `mica factory-reset` is the
-  same request as root on the device: it prompts for the password with echo off, or reads it
-  from `--password-file FILE` (`-` for stdin); there is no flag to skip it. The first boot
+  same request from root on the device, without the password: it prints what is erased and what
+  is kept, then asks for the hostname or `factory-reset` to be typed on the terminal, or takes
+  `--yes`; with neither, or standard input not a terminal, nothing is reset. The first boot
   after a reset logs its record (`factory-reset-done.json`: requested, completed, by, source,
   the entries an erase in place could not remove and, from the finish, whether DATA was made
   again: `formatted`), keeps a copy on STATE so later boots do not
@@ -873,14 +876,15 @@ words, with no short forms or aliases; `mica help` lists them, and `mica help <v
 <verb> help` gives one's usage. A verb asks where the rule it applies lives. What micad decides is
 asked over the system bus, so it works whatever `access.web.mode` says. What apid decides -- the
 credentials, and the settings the API writes -- is asked on apid's local socket (section 4), as
-an API call: apid checks it, audits it with the source `local uid 0`, and counts a wrong password
-in its login backoff. With apid off (`access.web.mode` `off`) those verbs exit 3 and say that
+an API call: apid checks it and audits it with the source `local uid 0`. Root on the device is
+asked for no device code, no current administrator password and, for the factory reset, no
+administrator password. With apid off (`access.web.mode` `off`) those verbs exit 3 and say that
 `mica web local` serves the local socket alone.
 
 | Verb | Does |
 | --- | --- |
-| `setup [--hostname NAME] [--password-file FILE] [--device-code-file FILE]` | `POST /api/v1/setup`: the administrator password, asked twice on the terminal, and the device code when `GET /api/v1/session` says `required` |
-| `password change [--current-password-file FILE] [--password-file FILE]` | `POST /api/v1/actions/change-password` |
+| `setup [--hostname NAME] [--password-file FILE]` | `POST /api/v1/setup`: the administrator password, asked twice on the terminal; no device code |
+| `password set [--password-file FILE]` | `POST /api/v1/actions/change-password` `{newPassword}`: a new administrator password, asked twice on the terminal, without the current one |
 | `root-password [--password-file FILE]` | `POST /api/v1/actions/transient-root-password`, waiting for its task |
 | `ssh status`, `ssh on\|off`, `ssh keys list`, `ssh keys add <file\|->`, `ssh keys remove <fingerprint>` | `access.ssh.enabled`; `/api/v1/ssh/authorized-keys` |
 | `tokens list`, `tokens create <name>`, `tokens revoke <id>` | `/api/v1/tokens`; `create` prints the token, once |
@@ -897,7 +901,7 @@ in its login backoff. With apid off (`access.web.mode` `off`) those verbs exit 3
 | `web` | Section 4 |
 | `mdns`, `ssdp` | Sections 3.12, 3.13 |
 | `reboot`, `poweroff` | `Reboot`, `PowerOff` |
-| `factory-reset` | Section 3.7 |
+| `factory-reset [--yes]` | `FactoryReset` without the password (section 3.7), once the hostname or `factory-reset` is typed, or with `--yes` |
 | `doctor` | The diagnostic snapshot (section 4) |
 | `help` | The verbs, or one's usage |
 
@@ -906,7 +910,7 @@ the build's and the factory's tools (`docs/factory-ap-key.md`, section 3.11); `m
 list them. `micad` itself runs only `micad daemon` and `micad apid`, as their units do, and
 `--version`; any other word exits 2 and names the `mica` verb.
 
-**Secrets.** A password, a network key or a device code is never an argument: it is asked for on
+**Secrets.** A password or a network key is never an argument: it is asked for on
 the terminal with the echo off (a new one twice), or read from the file a `--…-file` flag names,
 `-` being standard input, its one line the secret.
 
@@ -921,8 +925,8 @@ nothing is a misuse.
 
 **Exit codes.** 0 done; 1 refused or failed; 2 misused (an unknown verb, a short form, a missing
 or extra argument); 3 micad or apid not reached (no system bus, micad not on it, no reply, apid's
-socket not answering or apid off, the API's 503 and 504); 4 a wrong password or device code, or
-the backoff after them (`wrong_password`, `password_incorrect`, `device_code_incorrect`,
+socket not answering or apid off, the API's 503 and 504); 4 a wrong or missing password, or
+the backoff after one (`wrong_password`, `password_incorrect`, `password_required`,
 `login_throttled`).
 
 ## 4. mica-apid
@@ -1122,7 +1126,9 @@ the `ssdp` live state the same way, and `/ssdp/device.xml`, outside `/api`, the 
 which read the effective state, and the mDNS services, read-only.
 
 **Authentication.** Until an admin password exists, `POST /setup` sets it. On a device with a
-device code the body carries the code as `deviceCode` (dashes, spaces and case ignored): that is
+device code a network caller's body carries the code as `deviceCode` (dashes, spaces and case
+ignored); root on the local socket is asked for none, on any product, holding the device already.
+The code is
 the claimer's proof of holding the device, which reaching its console is not once BLE
 provisioning has put an unclaimed device on a network. The code is on the label and on the
 device's own console, the login prompt (section 3.8), and `mica internal device-code` prints it. A missing one is 422
@@ -1140,11 +1146,15 @@ password for an HMAC-signed, HttpOnly session cookie and send the session's CSRF
 mutation; automation uses bearer tokens `mica_<id>_<secret>`, stored as digests. Passwords are
 argon2id, failed logins back off persistently, and security-relevant actions go to an audit ring.
 `POST /api/v1/actions/change-password` `{currentPassword, newPassword}` asks for the current
-password: a wrong one is 403 `wrong_password` and counts in the same backoff as a failed login
-(429 `login_throttled` while it runs), and a right one ends the run, as a login does.
+password: a missing one is 422 at `currentPassword`, a wrong one 403 `wrong_password` and counts
+in the same backoff as a failed login (429 `login_throttled` while it runs), and a right one ends
+the run, as a login does. Root on the local socket may leave `currentPassword` out, and sets the
+new password without it (audited as `password` `changed`, source `local uid 0`); one it sends is
+held to as any other.
 
 **The factory reset** (section 3.7). `POST /api/v1/system/factory-reset` `{password}` asks for
-the administrator password whatever the caller's credential, and answers 202 `{applies:
+the administrator password whatever the caller's credential, the local socket's too (root
+resets without it through micad, `mica factory-reset`), and answers 202 `{applies:
 "reboot"}` once micad has staged it. An empty password is 422 at `password`; a wrong one 403
 `password_incorrect` at `password`, counted in the login backoff (429 `login_throttled`, micad's
 own backoff the same code); micad's refusals are 409 with their code. `GET` answers `supported`,

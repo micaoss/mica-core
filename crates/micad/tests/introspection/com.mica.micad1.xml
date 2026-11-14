@@ -419,7 +419,8 @@ call is made.
 Stage a factory reset and reboot into it: everything configured on
 the device is erased at the next boot, before anything of the root
 runs, and the software stays at its version. `password` must be the
-administrator's; `by` is `console`, `api` or `cli`, and `source` the
+administrator's, or empty from a caller the bus knows as uid 0 (root
+on the device); `by` is `console`, `api` or `cli`, and `source` the
 peer or mechanism, both for the record. Refused with
 `FactoryResetRefused`, whose description is JSON `{code, message}`.
 -->

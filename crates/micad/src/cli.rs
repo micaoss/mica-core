@@ -80,6 +80,7 @@ const CREDENTIAL_CODES: &[&str] = &[
     "invalid_credentials",
     "device_code_incorrect",
     "wrong_password",
+    "password_required",
 ];
 
 /// The bus's own errors for a service that is not there to answer.

@@ -119,7 +119,8 @@ pub(super) async fn mica_end_to_end() -> anyhow::Result<()> {
     .context("micad did not come up on the private bus")?;
     let d = dir.path();
 
-    // Setup, with the password from a file: the device leaves setup mode.
+    // Setup, with the password from a file and no device code: the device
+    // leaves setup mode.
     let password = file(d, "password", "first-password\n")?;
     let out = mica(
         d,
@@ -142,28 +143,20 @@ pub(super) async fn mica_end_to_end() -> anyhow::Result<()> {
     )?;
     assert_eq!(code(&again), Some(1), "{}", text(&again.stderr));
 
-    // A wrong current password is exit 4, audited as the local caller's, and
-    // backs off the next change even with the right one.
-    let wrong = file(d, "wrong", "not-the-password\n")?;
+    // Root sets a new password without the current one, audited as the local
+    // caller's; the old verb is gone.
     let new = file(d, "new", "second-password\n")?;
     let out = mica(
         d,
         &socket,
-        &[
-            "password",
-            "change",
-            "--current-password-file",
-            wrong.to_str().unwrap(),
-            "--password-file",
-            new.to_str().unwrap(),
-        ],
+        &["password", "set", "--password-file", new.to_str().unwrap()],
         "",
     )?;
-    assert_eq!(code(&out), Some(4), "{}", text(&out.stderr));
+    assert_eq!(code(&out), Some(0), "{}", text(&out.stderr));
     let audit = std::fs::read_to_string(state_dir.join("audit.log"))?;
     assert!(
         audit.lines().any(|line| line.contains("\"password\"")
-            && line.contains("wrong-password")
+            && line.contains("\"changed\"")
             && line.contains("\"local uid 0\"")),
         "{audit}"
     );
@@ -172,9 +165,7 @@ pub(super) async fn mica_end_to_end() -> anyhow::Result<()> {
         &socket,
         &[
             "password",
-            "change",
-            "--current-password-file",
-            password.to_str().unwrap(),
+            "set",
             "--password-file",
             new.to_str().unwrap(),
             "--json",
@@ -188,19 +179,12 @@ pub(super) async fn mica_end_to_end() -> anyhow::Result<()> {
         &[
             "password",
             "change",
-            "--current-password-file",
-            password.to_str().unwrap(),
             "--password-file",
             new.to_str().unwrap(),
         ],
         "",
     )?;
-    assert_eq!(code(&out), Some(4), "{}", text(&out.stderr));
-    assert!(
-        text(&out.stderr).contains("retry shortly"),
-        "{}",
-        text(&out.stderr)
-    );
+    assert_eq!(code(&out), Some(2), "{}", text(&out.stderr));
 
     // Tokens: created, printed once, listed, revoked.
     let out = mica(d, &socket, &["tokens", "create", "ci", "--json"], "")?;
