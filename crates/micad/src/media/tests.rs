@@ -801,3 +801,41 @@ fn vm_media() {
     std::io::stdout().flush().unwrap();
     println!("VM_MEDIA PASS");
 }
+
+/// A board that takes no external media says so, lists nothing, and has
+/// nothing to unmount or eject.
+#[tokio::test]
+async fn a_board_without_media_says_so_and_lists_nothing() {
+    let inventory = NoMedia.inventory().await.expect("answered");
+    assert!(!inventory.supported);
+    assert!(inventory.items.is_empty());
+    let json = serde_json::to_value(&inventory).expect("json");
+    assert_eq!(json["supported"], false);
+    assert_eq!(
+        NoMedia.unmount("x").await.expect("answered"),
+        Unmount::NotFound
+    );
+    assert_eq!(NoMedia.eject("x").await.expect("answered"), Eject::NotFound);
+}
+
+/// A `ubi` boot policy is a board without media; any other policy, or none,
+/// is one with.
+#[test]
+fn only_a_ubi_board_takes_no_media() {
+    let root = tempfile::tempdir().expect("tempdir");
+    assert!(board_takes_media(root.path()));
+    let policy = root.path().join(crate::storage_status::BOOT_POLICY_PATH);
+    fs::create_dir_all(policy.parent().expect("a parent")).expect("mkdir");
+    fs::write(
+        &policy,
+        r#"{"board":{"boot":"uefi","partitions":{"boot":1}},"systemPartUuid":"a","dataPartUuid":"b"}"#,
+    )
+    .expect("write");
+    assert!(board_takes_media(root.path()));
+    fs::write(
+        &policy,
+        r#"{"board":{"boot":"uboot-fit","storage":"ubi","ubi":{"mtd":"ubi"}}}"#,
+    )
+    .expect("write");
+    assert!(!board_takes_media(root.path()));
+}

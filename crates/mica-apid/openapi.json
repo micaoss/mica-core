@@ -6109,7 +6109,7 @@
         "operationId": "api_v1_storage_media",
         "responses": {
           "200": {
-            "description": "The external media volumes plugged in now, grouped by device, with a generation that changes with them",
+            "description": "The external media volumes plugged in now, grouped by device, with a generation that changes with them; `supported` is false on a board that takes no external media (a `ubi` board), which lists none",
             "content": {
               "application/json": {
                 "schema": {

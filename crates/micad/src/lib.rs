@@ -385,7 +385,11 @@ async fn serve() -> anyhow::Result<()> {
             service = service.with_user_units(units);
         }
         service = service.with_storage_status(Arc::new(storage_status::HostStorage::production()));
-        service = service.with_media(Arc::new(media::HostMedia::production(init)));
+        if media::board_takes_media(Path::new("/")) {
+            service = service.with_media(Arc::new(media::HostMedia::production(init)));
+        } else {
+            service = service.with_media(Arc::new(media::NoMedia));
+        }
         // The diagnostic observers, on the same rule: each reads the host
         // (sysfs, /etc, the journal), so a dry-run daemon is never given one.
         service = service.with_system_info(Arc::new(system_info::HostSystemInfo::production()));

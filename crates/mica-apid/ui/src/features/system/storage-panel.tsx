@@ -89,6 +89,8 @@ export function ExternalMediaPanel() {
   for (const volume of media.data?.items ?? []) {
     devices.set(volume.deviceId, [...(devices.get(volume.deviceId) ?? []), volume])
   }
+  // A board that takes no external media has nothing to offer here.
+  if (media.data?.supported === false) return null
   return (
     <Panel title={t('system.storage.external.title')} description={t('system.storage.external.description')} action={<Usb className="size-5 text-muted-foreground" />}>
       {media.isPending ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{t('system.storage.external.loading')}</p> : null}

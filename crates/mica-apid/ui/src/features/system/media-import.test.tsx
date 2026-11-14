@@ -10,6 +10,7 @@ const MEDIA = {
     id: 'v1', deviceId: 'd1', label: 'UPDATES', transport: 'usb', filesystem: 'vfat',
     sizeBytes: 16_106_127_360, availableBytes: 1_000, state: 'mounted_readonly', busy: false, reason: null,
   }],
+  supported: true,
 }
 
 function candidate(overrides: Record<string, unknown> = {}) {
@@ -59,6 +60,17 @@ describe('import from external storage', () => {
     expect(buttons.map((button) => button.disabled)).toEqual([false, true])
     await userEvent.click(buttons[0])
     expect(await screen.findByText('the archive is not on the volume as it was listed')).toBeTruthy()
+  })
+
+  it('is not offered on a board that takes no external media', async () => {
+    stubFetch({
+      '/api/v1/storage/media': { generation: '', items: [], supported: false },
+      '/api/v1/update/media': { items: [], truncated: [], unreadable: [] },
+    })
+    renderPanel(<MediaImport />)
+
+    // Shown until the device answers, then withdrawn.
+    await waitFor(() => expect(screen.queryByText('Import from external storage')).toBeNull())
   })
 
   it('says when no archive is plugged in, and when a volume was listed in part', async () => {

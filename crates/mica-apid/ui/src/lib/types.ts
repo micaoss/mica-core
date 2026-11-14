@@ -497,6 +497,8 @@ export interface ExternalVolume {
 export interface ExternalMedia {
   generation: string
   items: ExternalVolume[]
+  /// False on a board that takes no external media (a `ubi` board).
+  supported: boolean
 }
 
 /// A mount in a place a user may mount (`userMounts` of the storage status).

@@ -56,6 +56,8 @@ export function MediaImport() {
   })
   const label = (mediaId: string) => media.data?.items.find((volume) => volume.id === mediaId)?.label ?? t('system.update.media.noLabel')
   const items = candidates.data?.items ?? []
+  // A board that takes no external media has no archive to import from one.
+  if (media.data?.supported === false) return null
   return (
     <div className="grid gap-2 border-t pt-4">
       <h3 className="text-sm font-medium">{t('system.update.media.title')}</h3>

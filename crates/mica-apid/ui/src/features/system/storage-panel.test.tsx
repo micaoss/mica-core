@@ -48,7 +48,7 @@ function status(overrides: Partial<StorageStatus> = {}): StorageStatus {
   }
 }
 
-const NO_MEDIA = { generation: '0', items: [] }
+const NO_MEDIA = { generation: '0', items: [], supported: true }
 
 function volume(overrides: Partial<ExternalVolume> = {}): ExternalVolume {
   return {
@@ -185,7 +185,7 @@ describe('user mounts', () => {
 })
 
 describe('external media', () => {
-  const media = (items: ExternalVolume[]) => ({ '/api/v1/storage/status': status(), '/api/v1/storage/media': { generation: '1', items } })
+  const media = (items: ExternalVolume[]) => ({ '/api/v1/storage/status': status(), '/api/v1/storage/media': { generation: '1', items, supported: true } })
 
   it('groups volumes by device with their state, reason and free space', async () => {
     stubFetch(media([
@@ -206,6 +206,14 @@ describe('external media', () => {
     expect(within(sd).getByText(/this device has no driver for the filesystem/)).toBeTruthy()
     expect(within(sd).queryByRole('button', { name: 'Unmount' })).toBeNull()
     expect(within(sd).getByRole('button', { name: 'Eject' })).toBeTruthy()
+  })
+
+  it('is not offered on a board that takes no external media', async () => {
+    stubFetch({ '/api/v1/storage/status': status(), '/api/v1/storage/media': { generation: '', items: [], supported: false } })
+    renderPanel(<StoragePanel />)
+
+    expect(await screen.findByText('Backup and restore')).toBeTruthy()
+    expect(screen.queryByText('External media')).toBeNull()
   })
 
   it('unmounts one volume after a confirmation', async () => {

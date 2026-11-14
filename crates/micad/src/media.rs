@@ -64,6 +64,9 @@ pub struct Inventory {
     pub generation: String,
     /// The volumes, grouped by device in plug order.
     pub items: Vec<Volume>,
+    /// Whether this board takes external media at all: `false` on a `ubi`
+    /// board ([`NoMedia`]), which never lists one.
+    pub supported: bool,
 }
 
 /// One volume of one attached device.
@@ -177,6 +180,39 @@ impl MediaSource for UnavailableMedia {
 
     async fn eject(&self, _device_id: &str) -> Result<Eject> {
         Err(anyhow::anyhow!("this daemon observes no media"))
+    }
+}
+
+/// Whether the board under `root` takes external media: every board but a
+/// `ubi` one, as its signed boot policy says.
+#[must_use]
+pub fn board_takes_media(root: &std::path::Path) -> bool {
+    std::fs::read_to_string(root.join(crate::storage_status::BOOT_POLICY_PATH))
+        .map_or(true, |policy| {
+            crate::storage_status::policy_ubi_mtd(&policy).is_none()
+        })
+}
+
+/// The source of a board that takes no external media (a `ubi` board): an
+/// empty inventory that says so, and no volume or device to act on.
+pub struct NoMedia;
+
+#[async_trait::async_trait]
+impl MediaSource for NoMedia {
+    async fn inventory(&self) -> Result<Inventory> {
+        Ok(Inventory {
+            generation: String::new(),
+            items: Vec::new(),
+            supported: false,
+        })
+    }
+
+    async fn unmount(&self, _id: &str) -> Result<Unmount> {
+        Ok(Unmount::NotFound)
+    }
+
+    async fn eject(&self, _device_id: &str) -> Result<Eject> {
+        Ok(Eject::NotFound)
     }
 }
 
@@ -603,7 +639,11 @@ impl Inner {
         items.extend(removed);
         let generation =
             hex::encode(&digest(&SHA256, serde_json::to_string(&items)?.as_bytes()).as_ref()[..8]);
-        Ok(Inventory { generation, items })
+        Ok(Inventory {
+            generation,
+            items,
+            supported: true,
+        })
     }
 
     fn unmount(&self, id: &str) -> Result<Unmount> {

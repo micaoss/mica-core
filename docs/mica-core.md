@@ -929,7 +929,10 @@ with the boot it was staged in, and the first update-state read of the next boot
 `lastRollback`, for that boot only, whether the booted deployment is the target), reboot override,
 policy); provisioning status and claim; credential recovery and reset; the factory reset;
 diagnostic snapshots; console bundles. `GET /meta` lists the product's features, and the console hides what is absent.
-`GET /api/v1/storage/media` lists the external media plugged in now, one item per volume (every
+`GET /api/v1/storage/media` answers `supported` false on a `ubi` board (its signed boot policy's
+`storage`), which takes no external media: it lists none, an unmount or eject answers 404, and
+the console offers neither the storage page's media nor the manual update's archives. On every
+other board it is true, and it lists the external media plugged in now, one item per volume (every
 partition of each device, supported or not, grouped by `deviceId`): USB mass storage, and SD cards
 (an MMC card of type `SD`; soldered eMMC is never listed). The disks under the devices mounted at
 `/`, `/mnt/system`, `/mnt/data` and `/boot` (through any device-mapper mapping) are the device's

@@ -131,6 +131,7 @@ impl FakeSettings {
             storage_media: std::sync::Mutex::new(serde_json::json!({
                 "generation": "0000000000000000",
                 "items": [],
+                "supported": true,
             })),
             storage_status: std::sync::Mutex::new(serde_json::json!({
                 "tiers": [],

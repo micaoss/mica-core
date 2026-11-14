@@ -70,7 +70,7 @@ describe('facts the device could not observe', () => {
 
   it('states an absent storage tier and an unsupported wear metric', async () => {
     stubFetch({
-      '/api/v1/storage/media': { generation: '0', items: [] },
+      '/api/v1/storage/media': { generation: '0', items: [], supported: true },
       '/api/v1/storage/status': {
         tiers: [
           { name: 'DATA', present: false, mounted: false, check: { recorded: false } },
