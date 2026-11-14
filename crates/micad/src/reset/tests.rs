@@ -60,7 +60,9 @@ fn populated_roots() -> (TempDir, Roots) {
         data: dir.path().join("data"),
         state: dir.path().join("data/state"),
         docker_pid: dir.path().join("docker.pid"),
+        mountinfo: dir.path().join("mountinfo"),
     };
+    write(&roots.mountinfo, "");
     fs::create_dir_all(roots.data.join("meta")).unwrap();
     write(&roots.data.join("meta/lockdown"), "retained");
     write(
@@ -404,7 +406,7 @@ fn an_interrupted_tier_replays_to_the_same_device() {
     // the tree the next boot loads.
     let mut interrupted = fielded_settings();
     stage(&mut interrupted, ResetTier::ApplicationData);
-    clear_application_state(&roots).unwrap();
+    clear_application_state(&roots, &BTreeSet::new()).unwrap();
     assert!(
         interrupted.reset.is_some(),
         "the record must survive the interruption"
@@ -552,12 +554,81 @@ fn reset_and_installer_share_one_data_transaction_lock() {
     assert!(roots.data.join("meta/transaction.lock").exists());
 }
 
+/// The mounts on DATA's own directories, wherever DATA's tree is mounted or
+/// bound: a bind inside DATA on the same device, the `/mica/containers` bind
+/// itself, the user's disk on it, a mount on the `/mica` bind and one on the
+/// `/srv` bind; not a mount whose mountpoint is outside DATA (the root's
+/// `/srv` and `/mica` directories, `/var/mnt`), and not DATA itself.
 #[test]
-fn reset_rejects_nested_binds_even_on_the_same_device() {
-    let base = "30 1 8:3 / /mnt/data rw - ext4 /dev/vda3 rw\n";
-    reject_nested_mounts(Path::new("/mnt/data"), base).unwrap();
-    let bound = format!("{base}31 30 8:3 /state /mnt/data/srv/escape rw - ext4 /dev/vda3 rw\n");
-    assert!(reject_nested_mounts(Path::new("/mnt/data"), &bound).is_err());
+fn the_mounts_on_data_are_found_through_every_bind() {
+    let table = concat!(
+        "25 1 254:0 / / ro - squashfs /dev/dm-0 ro\n",
+        "30 25 8:3 / /mnt/data rw - ext4 /dev/vda3 rw\n",
+        "31 25 8:3 /mica /mica rw - ext4 /dev/vda3 rw\n",
+        "32 31 8:3 /containers /mica/containers rw - ext4 /dev/vda3 rw\n",
+        "33 32 8:17 / /mica/containers/storage rw - xfs /dev/sdb1 rw\n",
+        "34 30 8:3 /state /mnt/data/srv/escape rw - ext4 /dev/vda3 rw\n",
+        "35 31 0:40 / /mica/volumes/my\\040app rw - tmpfs tmpfs rw\n",
+        "36 25 8:3 /srv /srv rw - ext4 /dev/vda3 rw\n",
+        "37 36 8:33 / /srv/backup rw - ext4 /dev/sdc1 rw\n",
+        "38 25 0:50 / /var/mnt/nas rw - nfs4 nas:/x rw\n",
+    );
+    let mounts = data_mounts(Path::new("/mnt/data"), table);
+    let found: Vec<&str> = mounts.iter().map(|path| path.to_str().unwrap()).collect();
+    assert_eq!(
+        found,
+        [
+            "/mnt/data/containers/storage",
+            "/mnt/data/mica/containers",
+            "/mnt/data/mica/volumes/my app",
+            "/mnt/data/srv/backup",
+            "/mnt/data/srv/escape",
+        ]
+    );
+    assert!(data_mounts(Path::new("/mnt/data"), "").is_empty());
+}
+
+/// A mount in a tree the tier clears -- the user's disk at an engine's root
+/// above all -- is left in place with everything under it, and the reset
+/// still clears what is on DATA itself and completes.
+#[test]
+fn every_tier_leaves_a_mount_in_its_trees_in_place() {
+    for (tier, relative) in [
+        (ResetTier::ApplicationData, "containers/storage"),
+        (ResetTier::ApplicationData, "containers/docker"),
+        (ResetTier::ApplicationData, "containers/overlay/deep"),
+        (ResetTier::ApplicationData, "mica/volumes/app/disk"),
+        (ResetTier::ApplicationData, "state/containerd/x"),
+        (ResetTier::ApplicationData, "state/systemd-units/x"),
+        (ResetTier::ApplicationData, "containers/networks/x"),
+        (ResetTier::Configuration, "mica/config/x"),
+    ] {
+        let (dir, roots) = populated_roots();
+        let store = store_at(&dir, &roots);
+        let mut settings = fielded_settings();
+        let mount = roots.data.join(relative);
+        write(&mount.join("the-users-bytes"), "kept");
+        write(
+            &roots.mountinfo,
+            &format!(
+                "30 1 8:3 / {} rw - ext4 /dev/vda3 rw\n31 30 8:17 / {} rw - xfs /dev/sdb1 rw\n",
+                roots.data.display(),
+                mount.display()
+            ),
+        );
+        // Something of DATA's own beside it, which the tier does clear.
+        let beside = mount.parent().unwrap().join("on-data");
+        write(&beside, "cleared");
+        stage(&mut settings, tier);
+        assert_eq!(
+            apply_pending(&store, &mut settings, &roots).unwrap(),
+            Outcome::Applied(tier),
+            "{relative}"
+        );
+        assert!(exists(&mount.join("the-users-bytes")), "{relative}");
+        assert!(!exists(&beside), "{relative}");
+        assert!(settings.reset.is_none(), "{relative}");
+    }
 }
 
 /// A dockerd running beside the reset would have its storage cleared under

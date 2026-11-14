@@ -8,9 +8,15 @@
 //! whose interruption is a third state". A power loss leaves the device either
 //! pre-reset (no record, nothing happened) or mid-reset (record still staged),
 //! and the next boot replays the same tier until the record is gone.
+//!
+//! **No tier crosses into another mount.** A directory of a tree a tier
+//! clears that something is mounted on -- the user's disk at an engine's root,
+//! a bind -- is left in place with everything under it: the user's mounts are
+//! the user's. What is on DATA itself is cleared as before.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -89,6 +95,8 @@ pub struct Roots {
     /// dockerd's pid file. A running dockerd holds its storage under
     /// DATA/containers, so the tiers that clear it refuse to run beside one.
     pub docker_pid: PathBuf,
+    /// The mount table the walks read the mounts on DATA from.
+    pub mountinfo: PathBuf,
 }
 
 impl Roots {
@@ -101,6 +109,7 @@ impl Roots {
             state: data.join("state"),
             data,
             docker_pid: PathBuf::from(DOCKER_PID_FILE),
+            mountinfo: PathBuf::from("/proc/self/mountinfo"),
         }
     }
 
@@ -141,23 +150,159 @@ impl Traversal {
     }
 }
 
-fn preflight_tree(path: &Path, depth: usize, traversal: &mut Traversal) -> Result<()> {
-    traversal.visit(depth)?;
+/// One pass over the trees a tier clears: its bounds, and the directories of
+/// DATA that something is mounted on, which it leaves in place.
+struct Walk {
+    traversal: Traversal,
+    mounts: BTreeSet<PathBuf>,
+}
+
+impl Walk {
+    fn new(mounts: &BTreeSet<PathBuf>) -> Self {
+        Self {
+            traversal: Traversal::new(),
+            mounts: mounts.clone(),
+        }
+    }
+
+    /// Whether the directory `path` is a mount, by the mount table or by a
+    /// device other than its parent's (`parent_dev`); one is logged.
+    fn is_mount(&self, path: &Path, metadata: &fs::Metadata, parent_dev: u64) -> bool {
+        let mounted = self.mounts.contains(path) || metadata.dev() != parent_dev;
+        if mounted {
+            tracing::info!(
+                path = %path.display(),
+                "a mount in a tree the reset clears: left in place with its contents"
+            );
+        }
+        mounted
+    }
+
+    /// Whether a mount lies below the directory `path`, which therefore stays.
+    fn holds_mount(&self, path: &Path) -> bool {
+        self.mounts
+            .iter()
+            .any(|mount| mount != path && mount.starts_with(path))
+    }
+}
+
+/// The device of the directory holding `path`, for the mount check of a walk's
+/// root.
+fn parent_dev(path: &Path) -> Result<u64> {
+    let parent = path.parent().unwrap_or(path);
+    Ok(parent
+        .symlink_metadata()
+        .with_context(|| format!("read {}", parent.display()))?
+        .dev())
+}
+
+/// Whether the walk's root `path` is itself a mount, which it leaves alone.
+fn root_is_mount(path: &Path, walk: &Walk) -> Result<bool> {
+    let metadata = match path.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(metadata.is_dir() && walk.is_mount(path, &metadata, parent_dev(path)?))
+}
+
+fn preflight_tree(path: &Path, depth: usize, parent_dev: u64, walk: &mut Walk) -> Result<()> {
+    walk.traversal.visit(depth)?;
     let metadata = match path.symlink_metadata() {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
     };
-    // Symlinks are removable leaves, never traversal roots.
-    if metadata.is_dir() {
+    // Symlinks are removable leaves, never traversal roots, and a mount is
+    // never entered.
+    if metadata.is_dir() && !walk.is_mount(path, &metadata, parent_dev) {
         for entry in fs::read_dir(path)? {
-            preflight_tree(&entry?.path(), depth + 1, traversal)?;
+            preflight_tree(&entry?.path(), depth + 1, metadata.dev(), walk)?;
         }
     }
     Ok(())
 }
 
-fn preflight_reset(roots: &Roots, tier: ResetTier) -> Result<()> {
+/// The directories under `data` that something is mounted on, read from a
+/// mount table: every mount whose mountpoint is a directory of DATA's own
+/// tree, wherever that tree is mounted or bound (a mount on the `/mica`
+/// bind's `containers/storage` is DATA's `mica/containers/storage`).
+fn data_mounts(data: &Path, mountinfo: &str) -> BTreeSet<PathBuf> {
+    struct Mount {
+        parent: String,
+        device: String,
+        root: PathBuf,
+        point: PathBuf,
+    }
+    let unescape = |field: &str| {
+        PathBuf::from(
+            field
+                .replace("\\040", " ")
+                .replace("\\011", "\t")
+                .replace("\\012", "\n")
+                .replace("\\134", "\\"),
+        )
+    };
+    let mut table = BTreeMap::new();
+    let mut order = Vec::new();
+    for line in mountinfo.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let [id, parent, device, root, point, ..] = fields[..] else {
+            continue;
+        };
+        order.push(id.to_string());
+        table.insert(
+            id.to_string(),
+            Mount {
+                parent: parent.to_string(),
+                device: device.to_string(),
+                root: unescape(root),
+                point: unescape(point),
+            },
+        );
+    }
+    // The mount `data` is on: the deepest one holding it, the last of those
+    // when several are stacked.
+    let mut holder: Option<&Mount> = None;
+    for id in &order {
+        let mount = &table[id];
+        if data.starts_with(&mount.point)
+            && holder.is_none_or(|held| {
+                mount.point.components().count() >= held.point.components().count()
+            })
+        {
+            holder = Some(mount);
+        }
+    }
+    let Some(holder) = holder else {
+        return BTreeSet::new();
+    };
+    let Ok(below) = data.strip_prefix(&holder.point) else {
+        return BTreeSet::new();
+    };
+    let data_in_fs = holder.root.join(below);
+    let mut mounts = BTreeSet::new();
+    for mount in table.values() {
+        let Some(parent) = table.get(&mount.parent) else {
+            continue;
+        };
+        if parent.device != holder.device {
+            continue;
+        }
+        let Ok(relative) = mount.point.strip_prefix(&parent.point) else {
+            continue;
+        };
+        let dentry = parent.root.join(relative);
+        if let Ok(inside) = dentry.strip_prefix(&data_in_fs)
+            && !inside.as_os_str().is_empty()
+        {
+            mounts.insert(data.join(inside));
+        }
+    }
+    mounts
+}
+
+fn preflight_reset(roots: &Roots, tier: ResetTier, mounts: &BTreeSet<PathBuf>) -> Result<()> {
     let targets = match tier {
         ResetTier::Configuration => vec![roots.system().join(CONFIG_DIR)],
         ResetTier::ApplicationData => APPLICATION_DIRS
@@ -171,9 +316,10 @@ fn preflight_reset(roots: &Roots, tier: ResetTier) -> Result<()> {
             .chain([roots.containers()])
             .collect(),
     };
-    let mut traversal = Traversal::new();
+    let mut walk = Walk::new(mounts);
     for target in targets {
-        preflight_tree(&target, 0, &mut traversal)?;
+        let dev = parent_dev(&target)?;
+        preflight_tree(&target, 0, dev, &mut walk)?;
     }
     Ok(())
 }
@@ -230,7 +376,10 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
         .open(lock_path)?;
     lock.try_lock()
         .context("another storage transaction is active")?;
-    preflight_reset(roots, intent.tier)?;
+    let mountinfo = fs::read_to_string(&roots.mountinfo)
+        .with_context(|| format!("read {}", roots.mountinfo.display()))?;
+    let mounts = data_mounts(&roots.data, &mountinfo);
+    preflight_reset(roots, intent.tier, &mounts)?;
     // dockerd starts after micad, so it is not running yet on a sound boot.
     anyhow::ensure!(
         intent.tier == ResetTier::Configuration || !crate::docker::running(&roots.docker_pid),
@@ -251,9 +400,10 @@ pub fn apply_pending(store: &Store, settings: &mut Settings, roots: &Roots) -> R
             // is ordinary at a directory granularity, and it is the same
             // operation tier 2 already performs on `volumes/` and `containers/`.
             let config = roots.system().join(CONFIG_DIR);
-            clear_contents(&config).with_context(|| format!("clear {}", config.display()))?;
+            clear_contents(&config, &mounts)
+                .with_context(|| format!("clear {}", config.display()))?;
         }
-        ResetTier::ApplicationData => clear_application_state(roots)?,
+        ResetTier::ApplicationData => clear_application_state(roots, &mounts)?,
     }
 
     if intent.tier == ResetTier::Configuration {
@@ -341,18 +491,19 @@ fn reseeded_settings(before: &Settings) -> Settings {
 
 /// Tier 2's whole scope: the application layer's
 /// enrolment records on STATE, its subtrees under `/mica`, and the container
-/// store. `/srv` is the user's and stays.
-fn clear_application_state(roots: &Roots) -> Result<()> {
+/// store. `/srv` is the user's and stays, and so does every mount in these
+/// trees.
+fn clear_application_state(roots: &Roots, mounts: &BTreeSet<PathBuf>) -> Result<()> {
     for dir in STATE_APPLICATION_DIRS {
         let path = roots.state.join(dir);
-        clear_contents(&path).with_context(|| format!("clear {}", path.display()))?;
+        clear_contents(&path, mounts).with_context(|| format!("clear {}", path.display()))?;
     }
     for dir in APPLICATION_DIRS {
         let path = roots.system().join(dir);
-        clear_contents(&path).with_context(|| format!("clear {}", path.display()))?;
+        clear_contents(&path, mounts).with_context(|| format!("clear {}", path.display()))?;
     }
     // `/srv` is the user's: no tier opens it.
-    reseed_tree(&roots.containers(), &["networks", "tmp"])
+    reseed_tree(&roots.containers(), &["networks", "tmp"], mounts)
 }
 
 /// Validate physical namespaces before the first removal. A same-device check
@@ -377,8 +528,6 @@ fn validate_roots(roots: &Roots) -> Result<()> {
             path.display()
         );
     }
-    let mounts = fs::read_to_string("/proc/self/mountinfo")?;
-    reject_nested_mounts(&roots.data, &mounts)?;
     for path in STATE_APPLICATION_DIRS
         .iter()
         .map(|p| roots.state.join(p))
@@ -399,34 +548,22 @@ fn validate_roots(roots: &Roots) -> Result<()> {
     Ok(())
 }
 
-fn reject_nested_mounts(data: &Path, mounts: &str) -> Result<()> {
-    for line in mounts.lines() {
-        let Some(path) = line.split_whitespace().nth(4) else {
-            continue;
-        };
-        let path = path
-            .replace("\\040", " ")
-            .replace("\\011", "\t")
-            .replace("\\012", "\n")
-            .replace("\\134", "\\");
-        let path = Path::new(&path);
-        anyhow::ensure!(
-            !path.starts_with(data) || path == data,
-            "unexpected mount inside reset backing storage: {}",
-            path.display()
-        );
+/// Remove every entry inside `dir`, keeping `dir` itself and every mount.
+fn clear_contents(dir: &Path, mounts: &BTreeSet<PathBuf>) -> Result<()> {
+    let mut walk = Walk::new(mounts);
+    if root_is_mount(dir, &walk)? {
+        return Ok(());
     }
-
-    Ok(())
+    clear_directory(dir, 0, &mut walk)
 }
 
-/// Remove every entry inside `dir`, keeping `dir` itself.
-fn clear_contents(dir: &Path) -> Result<()> {
-    clear_directory(dir, 0, &mut Traversal::new())
-}
-
-fn clear_directory(dir: &Path, depth: usize, traversal: &mut Traversal) -> Result<()> {
-    traversal.visit(depth)?;
+fn clear_directory(dir: &Path, depth: usize, walk: &mut Walk) -> Result<()> {
+    walk.traversal.visit(depth)?;
+    let dev = match dir.symlink_metadata() {
+        Ok(metadata) => metadata.dev(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err).with_context(|| format!("read {}", dir.display())),
+    };
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -434,7 +571,7 @@ fn clear_directory(dir: &Path, depth: usize, traversal: &mut Traversal) -> Resul
     };
     for entry in entries {
         let entry = entry.with_context(|| format!("read an entry of {}", dir.display()))?;
-        remove(&entry.path(), &entry.file_type()?, depth + 1, traversal)?;
+        remove(&entry.path(), &entry.file_type()?, depth + 1, dev, walk)?;
     }
     fs::File::open(dir)?.sync_all()?;
     Ok(())
@@ -445,9 +582,13 @@ fn clear_directory(dir: &Path, depth: usize, traversal: &mut Traversal) -> Resul
 /// The declared paths are kept and descended into; everything else is removed.
 /// Descending rather than deleting the whole tree keeps the modes
 /// `mica-data-layout` established, so this module never restates them.
-fn reseed_tree(root: &Path, skeleton: &[&str]) -> Result<()> {
+fn reseed_tree(root: &Path, skeleton: &[&str], mounts: &BTreeSet<PathBuf>) -> Result<()> {
     let declared: BTreeSet<PathBuf> = skeleton.iter().map(PathBuf::from).collect();
-    reseed_dir(root, Path::new(""), &declared, 0, &mut Traversal::new())
+    let mut walk = Walk::new(mounts);
+    if root_is_mount(root, &walk)? {
+        return Ok(());
+    }
+    reseed_dir(root, Path::new(""), &declared, 0, &mut walk)
 }
 
 fn reseed_dir(
@@ -455,9 +596,14 @@ fn reseed_dir(
     relative: &Path,
     declared: &BTreeSet<PathBuf>,
     depth: usize,
-    traversal: &mut Traversal,
+    walk: &mut Walk,
 ) -> Result<()> {
-    traversal.visit(depth)?;
+    walk.traversal.visit(depth)?;
+    let dev = match dir.symlink_metadata() {
+        Ok(metadata) => metadata.dev(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err).with_context(|| format!("read {}", dir.display())),
+    };
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -472,9 +618,12 @@ fn reseed_dir(
         // directory, and leaving it would leave the pretence of a re-seeded
         // tree.
         if file_type.is_dir() && declared.contains(&child) {
-            reseed_dir(&entry.path(), &child, declared, depth + 1, traversal)?;
+            let path = entry.path();
+            if !walk.is_mount(&path, &path.symlink_metadata()?, dev) {
+                reseed_dir(&path, &child, declared, depth + 1, walk)?;
+            }
         } else {
-            remove(&entry.path(), &file_type, depth + 1, traversal)?;
+            remove(&entry.path(), &file_type, depth + 1, dev, walk)?;
         }
     }
     fs::File::open(dir)?.sync_all()?;
@@ -485,11 +634,18 @@ fn remove(
     path: &Path,
     file_type: &fs::FileType,
     depth: usize,
-    traversal: &mut Traversal,
+    parent_dev: u64,
+    walk: &mut Walk,
 ) -> Result<()> {
-    traversal.visit(depth)?;
+    walk.traversal.visit(depth)?;
     let removed = if file_type.is_dir() {
-        clear_directory(path, depth, traversal)?;
+        if walk.is_mount(path, &path.symlink_metadata()?, parent_dev) {
+            return Ok(());
+        }
+        clear_directory(path, depth, walk)?;
+        if walk.holds_mount(path) {
+            return Ok(());
+        }
         fs::remove_dir(path)
     } else {
         fs::remove_file(path)
@@ -497,6 +653,16 @@ fn remove(
     match removed {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        // A directory that is a mountpoint in another mount namespace, or
+        // through a bind this one does not see: what was on DATA under it is
+        // cleared, and the mount stays.
+        Err(err) if err.kind() == std::io::ErrorKind::ResourceBusy => {
+            tracing::info!(
+                path = %path.display(),
+                "a mount elsewhere in a tree the reset clears: left in place"
+            );
+            Ok(())
+        }
         Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
     }
 }

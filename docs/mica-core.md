@@ -374,7 +374,12 @@ absence is reported with its reason rather than as a healthy reading:
   `accounts` (the service accounts, then `mica-accounts build`), and
   refuses to run while `/run/docker.pid` names a live dockerd, whose storage it would clear
   under it. No tier opens `/srv`: it is the user's, and only a factory reset, which makes DATA
-  again, takes DATA's `/srv` with it. A board-declared physical recovery action at boot maps to a tier. A
+  again, takes DATA's `/srv` with it. No tier crosses into a mount either: a directory of a
+  tree it clears that something is mounted on (the mount table's mounts on DATA's own
+  directories, through any bind, or a directory on another device than its parent), such as
+  the user's disk at `/mica/containers/storage`, is left in place with all under it, and a
+  directory whose removal answers busy, a mountpoint in another namespace, stays too; what is
+  on DATA itself is cleared. A board-declared physical recovery action at boot maps to a tier. A
   transient root password lives in `/etc/shadow` until the next boot and in no setting.
 - **Factory reset.** The software stays at its current version; everything configured is
   erased. `FactoryReset` checks the administrator password, has mica-deploy stage the reset
