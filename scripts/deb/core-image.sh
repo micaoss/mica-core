@@ -34,9 +34,12 @@ mkdir -p "${out}"
 image="${out}/${package}_${version}_${arch}.core.img"
 record="${out}/${package}_${version}_${arch}.core.json"
 rm -f "${image}" "${record}"
-# SOURCE_DATE_EPOCH sets every file's time and the filesystem's own.
-SOURCE_DATE_EPOCH="${epoch}" mksquashfs "${tree}" "${image}" -noappend -comp zstd -processors 1 \
-    -all-root -no-xattrs -no-progress -quiet >/dev/null
+# Every file's time and the filesystem's own are the epoch, whatever the tree's
+# times are. SOURCE_DATE_EPOCH, which the package build exports, is unset for
+# it: it would only clamp the times newer than it, and mksquashfs refuses it
+# beside these options.
+env -u SOURCE_DATE_EPOCH mksquashfs "${tree}" "${image}" -noappend -comp zstd -processors 1 \
+    -all-root -no-xattrs -no-progress -quiet -all-time "${epoch}" -mkfs-time "${epoch}" >/dev/null
 data_bytes="$(stat -c %s "${image}")"
 [ $((data_bytes % 4096)) -eq 0 ] || die "${package}: the squashfs is not aligned to 4096-byte verity blocks"
 # The salt is the image's own content identity, as the root's is.
