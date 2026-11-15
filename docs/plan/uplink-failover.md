@@ -1,6 +1,6 @@
 # Uplink reachability and failover
 
-Status: approved by the user (uplink-20261115), with the answers in section 13. Round 1 is implemented on the 0.0.9 line; round 2 is next.
+Status: approved by the user (uplink-20261115), with the answers in section 13. Rounds 1 and 2 are implemented on the 0.0.9 line; round 3 is Base and mica-build.
 
 Facts below are from mica-core main 0c114a5. mica-system-base origin/main was read only.
 

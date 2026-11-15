@@ -317,6 +317,16 @@ default route left behind. A switch moves new connections only; an open one keep
 address and stalls until it reconnects. Each switch is logged as `MICA_UPLINK active=<if>
 previous=<if> reason=<probe|link|recovered|none-up>` and signalled as `UplinkChanged`.
 
+DNS follows the uplinks: an uplink that is `down` while another is active is not asked for
+names. On systemd micad sets resolved's `SetLinkDefaultRoute` false on it, so each lookup goes
+to the other links' servers, true again once it is not down, and the false again every 10 s
+while it lasts, since networkd may reset it when it reconfigures the link. On OpenRC micad
+writes `/run/mica/resolv.order`, one interface name a line, the active uplink first and the
+down ones last, and runs Base's `mica-resolv`, which builds `resolv.conf` in that order; with
+nothing to steer it removes the file and runs `mica-resolv` again. While every uplink is down,
+or the natural one is active with none down, nothing is steered. With the global servers on,
+every lookup goes to them whichever uplink is active.
+
 Services are driven through one trait (`UnitControl`): systemd over D-Bus, with runtime
 enablement; on OpenRC, `rc-service` (`x.service` is `x`, `a@b.service` is `a.b`), with enablement
 a no-op because `/etc/runlevels` is read-only and micad starts what it wants on every boot.
@@ -947,7 +957,7 @@ administrator password. With apid off (`access.web.mode` `off`) those verbs exit
 | `set <path> <value>` | `PUT /api/v1/settings/<path>`, waiting for its task. The value is typed by the setting: a string takes the argument as it is (`mica set hostname 1234` is the string `"1234"`), a switch `true` or `false` only, a number a number, a list or an object JSON; `logging.persistent`, `logging.maxSizeKiB` and `logging.remote` also take `null`. A path the API does not write is typed by its current value and refused by the API; an absent one is refused with its name |
 | `hostname [NAME]` | `hostname`, read or written |
 | `time`, `time zone [ZONE]`, `time zones`, `time servers [SERVER...]` | `GET /api/v1/time/status`; `time.timezone`; `GET /api/v1/time/zones`; `time.ntp.servers` |
-| `network`, `network show <interface>` | `GET /api/v1/network/status`: each interface's state and addresses, or one in full |
+| `network`, `network show <interface>` | `GET /api/v1/network/status`: a table of each interface's state, `INTERNET` (its reachability check's verdict: `up`, `down`, `checking`, `no route`, `blocked`, or `-` with no check) and addresses, `*` on the uplink that carries the traffic; or one in full, with its metric, its check, its counters and the last round's answers (`--json` adds the uplink's entry as `uplink`) |
 | `wifi`, `wifi scan`, `wifi on\|off`, `wifi add <ssid> [--password-file FILE] [--open] [--hidden]`, `wifi remove <ssid>` | `/api/v1/wifi/client`, its scan and its networks; `wifi.client.enabled` |
 | `status` | The board, the running system and the update state, uptime, the interfaces and their addresses, time synchronization and DATA's use: `GetSystemInfo`, `GetUpdateState`, `GetNetworkState`, `GetTimeStatus`, `GetStorageStatus`; one that fails is shown as unavailable |
 | `update` | Section 3.7 |
@@ -1140,7 +1150,15 @@ edits a CAN interface's bit rate, restart delay, CAN FD and data bit rate. Its r
 the main table's IPv4 routes and edits every interface's `routes` in one list (destination,
 optional gateway, interface, metric), staged with the other network changes; it refuses a
 `0.0.0.0/0` route, as the default route follows each interface's gateway, and an interface's own
-page lists its routes read-only. A network write that
+page lists its routes read-only. An interface's page edits its reachability check (`probe`,
+section 3.3) while the interface may carry the default route: switched on, it fills in
+`1.1.1.1` and `8.8.8.8` by TCP on port 53, which the operator may change, remove or add
+`gateway` to, and says that the device will contact them from the interface every interval;
+it shows the four numbers with the time to switch over and back and the cost a day. The page
+shows the check's verdict, whether the interface carries the traffic, a failover in progress
+and the last round's answers; the interface cards and the overview's uplink strip show the
+verdict. `GET /api/v1/network/status` carries `uplinks` (schema `UplinksStatus`). A network
+write that
 removes a WireGuard tunnel records `wireguard-delete` `accepted` in the audit ring, once per
 tunnel and without its name. A write is refused `port_in_use` when a tunnel's listen port is
 another tunnel's or, for a new or changed port, held by a userspace UDP socket on the device
