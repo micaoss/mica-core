@@ -1582,7 +1582,7 @@ export const zhCN: Translation = {
           },
           'application-data': {
             name: '应用数据重置',
-            effect: '移除运维方的应用及其数据：清空 /srv，并将 /mica 下的应用区域重建为空。平台自身的配置和凭据会保留。',
+            effect: '移除运维方的应用及其数据：已声明的容器和服务、它们的存储，以及 /mica 下的应用区域（重建为空）。/srv、平台自身的配置和凭据会保留。',
           },
         },
       },

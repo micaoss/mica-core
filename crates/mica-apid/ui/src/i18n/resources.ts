@@ -1798,7 +1798,7 @@ export const en = {
           },
           'application-data': {
             name: 'application-data reset',
-            effect: 'Removes operator applications and their data: /srv is cleared and the application areas of /mica are recreated empty. The platform\'s own configuration and credentials survive.',
+            effect: 'Removes operator applications and their data: the declared containers and services, their stores, and the application areas of /mica, recreated empty. /srv, the platform\'s own configuration and credentials survive.',
           },
         },
       },
