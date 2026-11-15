@@ -9,6 +9,8 @@ import { bridgeOf, usesInternet, vlansOn } from './model'
 import { Led, ROLES, roleOf, Tag, TEXT, useCanText, useKindLabel, useStatusText, type Role } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus, exitOf, internalPort, undeclaredPort } from './view'
+import { uplinkOf } from './uplink'
+import { InternetBadge } from './uplink-panel'
 
 /// Every interface, grouped by what it is: Ethernet ports, virtual ports
 /// (bridges and VLANs), radios, tunnels and field buses.
@@ -54,6 +56,7 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
   const vlans = vlansOn(map, name)
   const entry = iface.entry
   const obs = applied?.obs
+  const { uplink } = uplinkOf(data.status.data, name)
   // Radios and tunnels are configured on their own tabs.
   const open = () => iface.kind === 'wifi'
     ? navigate({ to: '/network', search: { tab: 'wifi' } })
@@ -100,6 +103,7 @@ function InterfaceCard({ data, name }: { data: NetworkData; name: string }) {
         <span className="text-xs text-muted-foreground">{iface.port && iface.port.label !== kindLabel(iface) ? `${iface.port.label} · ${kindLabel(iface)}` : kindLabel(iface)}</span>
         <span className="flex-1" />
         {exitOf(data.applied) === name ? <Tag tone="exit">{t('network.tags.exit')}</Tag> : null}
+        {uplink && uplink.state !== 'off' ? <InternetBadge uplink={uplink} /> : null}
         {data.session === name ? <Tag tone="info">{t('network.tags.session')}</Tag> : null}
         {!usesInternet(iface.entry, internalPort(data.staged, name)) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null}
         {undeclaredPort(data.staged, name) ? <Tag>{t('network.tags.undeclared')}</Tag> : null}

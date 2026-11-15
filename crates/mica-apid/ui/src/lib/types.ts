@@ -735,6 +735,29 @@ export interface ObservedNetworkInterface {
   }
 }
 
+/// One target's answer in a round of an uplink's check.
+export interface UplinkTargetResult { address: string; method: string; port?: number; ok: boolean; latencyMs?: number; detail?: string }
+/// What the device reports of one uplink's check.
+export interface UplinkObservation {
+  name: string
+  metric: number | null
+  state: 'off' | 'unknown' | 'up' | 'down' | 'noRoute' | 'blocked'
+  since?: string
+  failures?: number
+  successes?: number
+  probe: { enabled: boolean; targets: { address: string; method: string; port?: number }[]; intervalS: number; timeoutMs: number; failuresToDown: number; successesToUp: number } | null
+  lastRound?: { at: string; ok: boolean; targets: UplinkTargetResult[] }
+}
+/// Which uplink carries the traffic, and each uplink's check.
+export interface UplinksStatus {
+  active: string | null
+  natural: string | null
+  /// Whether micad's failover route steers the traffic to `active`.
+  override: boolean
+  lastChange: { at: string; from: string | null; to: string | null; reason: string } | null
+  uplinks: UplinkObservation[]
+}
+
 export interface ObservedNetworkState {
   /// Whether the board declares its ports or the device discovers them;
   /// absent from a device that does not say.
@@ -743,6 +766,8 @@ export interface ObservedNetworkState {
   /// address, as behind a proxy.
   session?: { interface: string | null; localAddress?: string | null }
   interfaces: AvailableFact & { count?: number; entries?: ObservedNetworkInterface[] }
+  /// The uplink engine's view; absent from a device that runs none.
+  uplinks?: UplinksStatus
   defaultRoutes: AvailableFact & {
     count?: number
     entries?: {

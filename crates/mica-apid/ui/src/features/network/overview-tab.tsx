@@ -11,6 +11,7 @@ import { Led, Tag, useKindLabel, useStatusText, useWifiText } from './parts'
 import type { NetworkData } from './use-network'
 import { computeStatus, exitOf, internalPort, type IfaceStatus } from './view'
 import type { NetworkTab } from './network-page'
+import { uplinkOf } from './uplink'
 
 /// What the device runs now: the way out to the internet, the ports, DNS, the
 /// radio and the tunnels; the routes have their own tab. Built on the stored map and the observation, never
@@ -33,6 +34,11 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
   const radio = view.wifi.radio && view.ifaces[view.wifi.radio] ? view.wifi.radio : undefined
   const wifi = view.wifi
   const lanOnly = (name: string) => !usesInternet(view.ifaces[name].entry, internalPort(view, name)) ? <Tag>{t('network.tags.lanOnly')}</Tag> : null
+  // What the uplink's reachability check last said, when it has one.
+  const internet = (name: string) => {
+    const check = uplinkOf(data.status.data, name).uplink
+    return check && check.state !== 'off' ? t(`network.uplink.states.${check.state}`) : undefined
+  }
   const dns = useDns()
   const globalDns = dns.data?.mode === 'global'
   const dnsGroups = dnsLinks(data, dns.data).filter((link) => link.servers.length > 0)
@@ -52,6 +58,7 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
               effective={exit?.interface === name}
               title={t(name === uplink ? 'network.overview.uplink' : 'network.overview.standby', { name })}
               value={view.ifaces[name].obs?.address ?? text.label(status(name))}
+              note={internet(name)}
               onClick={() => open(name)}
             />
           )) : <Chip title={t('network.overview.noUplink')} value="—" />}
@@ -146,12 +153,13 @@ export function OverviewTab({ data, onTab }: { data: NetworkData; onTab: (tab: N
 }
 
 /// An uplink in the strip: the one the default route takes is filled, a
-/// standby is muted.
-function Chip({ title, value, effective, onClick }: { title: string; value: ReactNode; effective?: boolean; onClick?: () => void }) {
+/// standby is muted; `note` is its reachability check's verdict.
+function Chip({ title, value, note, effective, onClick }: { title: string; value: ReactNode; note?: string; effective?: boolean; onClick?: () => void }) {
   const body = (
     <>
       <span className={cn('text-[0.8125rem]', effective ? 'text-primary-foreground/80' : 'text-muted-foreground')}>{title}</span>
       <strong className="font-mono text-sm font-semibold">{value}</strong>
+      {note ? <span className={cn('text-[0.8125rem]', effective ? 'text-primary-foreground/80' : 'text-muted-foreground')}>{note}</span> : null}
     </>
   )
   const style = cn('grid gap-0.5 rounded-lg px-3 py-2 text-left', effective ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')

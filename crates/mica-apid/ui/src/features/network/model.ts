@@ -23,6 +23,12 @@ export interface StaticRoute { destination: string; gateway?: string; metric?: n
 /// A CAN controller's parameters; no restart delay restarts nothing, and no FD is FD off.
 export interface CanConfig { bitrate: number; restartMs?: number; fd?: boolean; dataBitrate?: number }
 
+/// One target of an uplink's reachability check: an IPv4 address or
+/// `gateway`, by `tcp` (with its port, absent is 443) or `icmp`.
+export interface ProbeTarget { address: string; method: 'tcp' | 'icmp'; port?: number }
+/// An uplink's reachability check; the numbers absent are the device's defaults.
+export interface ProbeConfig { enabled: boolean; targets?: ProbeTarget[]; intervalS?: number; timeoutMs?: number; failuresToDown?: number; successesToUp?: number }
+
 export interface IfaceEntry {
   kind?: IfaceKind
   dhcp?: boolean
@@ -37,6 +43,8 @@ export interface IfaceEntry {
   /// `false` keeps the interface off the default route: a lease's gateway is
   /// not used, and a static one is refused. Absent is `true`.
   internet?: boolean
+  /// The uplink's reachability check; absent is off.
+  probe?: ProbeConfig
 }
 
 /// Whether `entry` may carry the default route. An `internal` port the board
@@ -89,6 +97,7 @@ export function normalize(entry: IfaceEntry): IfaceEntry {
   if (entry.routes?.length) out.routes = entry.routes.map((route) => ({ ...route }))
   // An explicit `true` matters on a port the board declares internal.
   if (entry.internet !== undefined) out.internet = entry.internet
+  if (entry.probe) out.probe = clone(entry.probe)
   return out
 }
 

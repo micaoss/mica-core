@@ -1,10 +1,11 @@
+import { probeProblem } from './uplink'
 import { inSubnet, isIPv4, overlaps, parseCidr, usesInternet, type IfaceEntry, type NetworkMap, type ViewKind } from './model'
 
 /// A field the console refuses to stage as it is, with the message's key and
 /// its values. The device remains the authority: these only catch what it
 /// would refuse anyway, before the write.
 export interface Problem { key: string; params?: Record<string, string | number> }
-export type Problems = Partial<Record<'address' | 'gateway' | 'dns' | 'routes' | 'vlanId' | 'parent' | 'listenPort' | 'bitrate', Problem>>
+export type Problems = Partial<Record<'address' | 'gateway' | 'dns' | 'routes' | 'vlanId' | 'parent' | 'listenPort' | 'bitrate' | 'probe', Problem>>
 
 /// The addresses other interfaces hold or will hold, for the overlap check.
 export type AddressBook = { name: string; address: string }[]
@@ -59,6 +60,8 @@ export function validateEntry(name: string, kind: ViewKind, entry: IfaceEntry | 
     }
     if (ipList(entry.static.dns).length) problems.dns = { key: 'network.problems.dns', params: { list: ipList(entry.static.dns).join(', ') } }
   }
+  const probe = probeProblem(entry.probe)
+  if (probe) problems.probe = { key: probe }
   for (const route of entry.routes ?? []) {
     if (!parseCidr(route.destination) || (route.gateway && !isIPv4(route.gateway))) { problems.routes = { key: 'network.problems.route' }; break }
     if (entry.dhcp && !usesInternet(entry, internal) && route.destination === '0.0.0.0/0') { problems.routes = { key: 'network.problems.defaultRouteOffInternet' }; break }

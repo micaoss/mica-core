@@ -23,6 +23,7 @@ import { BackLink, Group, InternetSwitch, Led, Section, StatusLine, Tag, useCanT
 import { useNetwork, type NetworkData } from './use-network'
 import { addressBook, validateEntry, type Problem, type Problems } from './validate'
 import { computeStatus, exitOf, internalPort, undeclaredPort } from './view'
+import { ProbeForm, ProbeView, UplinkLive } from './uplink-panel'
 
 /// One interface: what the device observes on it, and its configuration,
 /// edited into the staged change set. Nothing here writes to the device.
@@ -129,6 +130,7 @@ function Body({ data, name, editing, onEdit }: { data: NetworkData; name: string
     <>
       {data.session === name ? <Callout tone="neutral" title={t('network.detail.sessionTitle', { name })}>{t('network.detail.sessionCopy')}</Callout> : null}
       {applied ? <Observation data={data} name={name} /> : null}
+      {applied ? <UplinkLive data={data} name={name} /> : null}
       <Section
         title={t('network.detail.config')}
         description={editing ? t('network.detail.editHint') : undefined}
@@ -247,6 +249,7 @@ function ConfigView({ data, name }: { data: NetworkData; name: string }) {
               ...(entry.dhcp ? [{ id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry, internalPort(data.staged, name)) ? 'network.values.on' : 'network.values.off') }] : []),
             ]} />
           </Group>
+          {usesInternet(entry, internalPort(data.staged, name)) ? <ProbeView entry={entry} /> : null}
         </>
       )}
       {iface.kind === 'bridge' ? (
@@ -389,6 +392,12 @@ function ConfigForm({ data, name }: { data: NetworkData; name: string }) {
           ) : null}
         </Group>
       )}
+
+      {usesInternet(entry, internalPort(data.staged, name)) ? (
+        <Group title={t('network.uplink.title')}>
+          <ProbeForm entry={entry} problem={problems.probe} onChange={(next) => set(() => next)} />
+        </Group>
+      ) : null}
 
       {iface.kind === 'bridge' ? (
         <Group title={t('network.detail.portsCount', { count: entry.bridge?.ports.length ?? 0 })}>

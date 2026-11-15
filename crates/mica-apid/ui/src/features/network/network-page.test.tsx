@@ -279,6 +279,21 @@ describe('the network page', () => {
     expect(defaults.map((row) => [within(row).getAllByRole('cell')[2].textContent, within(row).getByText(/In use|Standby/).textContent])).toEqual([['eth0', 'In use'], ['wlan0', 'Standby']])
   })
 
+  it('shows each checked uplink\'s verdict in the uplink strip and on its card', async () => {
+    const status = observed({ uplinks: { active: 'eth0', natural: 'eth0', override: false, lastChange: null, uplinks: [
+      { name: 'eth0', metric: 100, state: 'up', probe: null },
+      { name: 'eth1', metric: 20, state: 'off', probe: null },
+    ] } })
+    stubFetch(networkRoutes(configured(), status))
+    open('overview')
+    expect((await screen.findByText('Uplink eth0')).closest('button')!.textContent).toContain('Reachable')
+    cleanup()
+    open('interfaces')
+    const card = await screen.findByRole('link', { name: 'eth0' })
+    expect(within(card).getByText('Reachable')).toBeTruthy()
+    expect(within(screen.getByRole('link', { name: 'eth1' })).queryByText('Not checked')).toBeNull()
+  })
+
   it('shows what the device resolves with on the DNS tab and checks again on request', async () => {
     const fetch = stubFetch({ ...networkRoutes(), 'POST /api/v1/dns/probe': () => jsonResponse({ ok: false, name: 'example.org', latencyMs: null, checkedAt: '2026-10-21T08:01:00Z' }) })
     open('dns')

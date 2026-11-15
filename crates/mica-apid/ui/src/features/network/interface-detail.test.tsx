@@ -43,6 +43,59 @@ describe('one interface', () => {
     expect(screen.getByRole('heading', { name: 'Restore image default' }).className).toContain('text-destructive')
   })
 
+  it('pre-fills the reachability check with the two public resolvers and says the device will contact them', async () => {
+    stubFetch(networkRoutes())
+    open('eth0')
+    expect(await screen.findByText('Off: the device does not check this interface.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    expect(screen.queryByText(/makes the device contact the targets below/)).toBeNull()
+    await userEvent.click(screen.getByRole('switch', { name: 'Check internet reachability' }))
+    expect(screen.getByText(/Switching the check on makes the device contact the targets below from this interface/)).toBeTruthy()
+    const targets = screen.getByRole('group', { name: 'Targets' })
+    expect(within(targets).getAllByRole('textbox', { name: 'Address' }).map((input) => (input as HTMLInputElement).value)).toEqual(['1.1.1.1', '8.8.8.8'])
+    expect(within(targets).getAllByRole('textbox', { name: 'Port' }).map((input) => (input as HTMLInputElement).value)).toEqual(['53', '53'])
+    await userEvent.click(within(targets).getByRole('button', { name: 'Add the gateway' }))
+    expect(within(targets).getAllByRole('textbox', { name: 'Address' })).toHaveLength(3)
+    await userEvent.click(within(screen.getByRole('region', { name: 'Editing eth0' })).getByRole('button', { name: 'Done' }))
+    expect(await screen.findByText('1.1.1.1 tcp/53, 8.8.8.8 tcp/53, gateway icmp')).toBeTruthy()
+  })
+
+  it('holds a target the device would refuse', async () => {
+    stubFetch(networkRoutes())
+    open('eth0')
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit configuration' }))
+    await userEvent.click(screen.getByRole('switch', { name: 'Check internet reachability' }))
+    const address = within(screen.getByRole('group', { name: 'Targets' })).getAllByRole('textbox', { name: 'Address' })[0]
+    await userEvent.clear(address)
+    await userEvent.type(address, 'example.org')
+    expect(screen.getByText('A target is an IPv4 address or the gateway.')).toBeTruthy()
+  })
+
+  it('shows the check\'s verdict, the failover and the last round', async () => {
+    const at = new Date().toISOString()
+    const status = observed({ uplinks: {
+      active: 'eth1', natural: 'eth0', override: true, lastChange: { at, from: 'eth0', to: 'eth1', reason: 'probe' },
+      uplinks: [
+        { name: 'eth0', metric: 100, state: 'down', since: at, failures: 3, successes: 0,
+          probe: { enabled: true, targets: [{ address: '1.1.1.1', method: 'tcp', port: 53 }], intervalS: 10, timeoutMs: 2000, failuresToDown: 3, successesToUp: 5 },
+          lastRound: { at, ok: false, targets: [{ address: '1.1.1.1', method: 'tcp', port: 53, ok: false, detail: 'no answer within 2000 ms' }] } },
+        { name: 'eth1', metric: 110, state: 'up', since: at, failures: 0, successes: 5,
+          probe: { enabled: true, targets: [{ address: 'gateway', method: 'icmp' }], intervalS: 10, timeoutMs: 2000, failuresToDown: 3, successesToUp: 5 },
+          lastRound: { at, ok: true, targets: [{ address: 'gateway', method: 'icmp', ok: true, latencyMs: 2 }] } },
+      ],
+    } })
+    stubFetch(networkRoutes(configured(), status))
+    open('eth0')
+    expect(await screen.findByText('Unreachable')).toBeTruthy()
+    expect(screen.getByText('no answer within 2000 ms')).toBeTruthy()
+    cleanup()
+    open('eth1')
+    expect(await screen.findByText('Reachable')).toBeTruthy()
+    expect(screen.getByText('Carries the traffic')).toBeTruthy()
+    expect(screen.getByText('Failover: the traffic goes through eth1 while eth0 does not answer.')).toBeTruthy()
+    expect(screen.getByText('Answered in 2 ms')).toBeTruthy()
+  })
+
   it('sends the radio to the Wi-Fi tab and a tunnel to its WireGuard page', async () => {
     stubFetch(networkRoutes())
     const radio = open('wlan0')
