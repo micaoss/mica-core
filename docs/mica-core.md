@@ -369,7 +369,12 @@ absence is reported with its reason rather than as a healthy reading:
   installs without `install`.
 - **Power, reset and recovery.** Reboot and power-off are recorded with their caller before they
   run. A staged reset applies one tier: `configuration` or `application-data`.
-  `application-data` also clears DATA/state
+  `configuration` returns the settings to their defaults and clears `/mica/config`, keeping the
+  identity, the device credential, the administrator, the claim, the API tokens, the
+  access-point key and the user's applications: `services.units`, `container.projects` and the
+  paired Bluetooth devices. The container and Bluetooth switches go back to their defaults.
+  `application-data` keeps the settings and takes the applications: their declarations, and
+  DATA/state
   `containerd`, `systemd-units` and `openrc-local` (the user's services, section 3.10) and
   `accounts` (the service accounts, then `mica-accounts build`: on systemd as
   `systemctl restart mica-accounts.service`, so PID 1 binds the new `/etc/passwd` and

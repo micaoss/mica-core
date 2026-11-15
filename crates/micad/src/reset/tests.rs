@@ -175,6 +175,70 @@ fn a_boot_with_no_intent_staged_changes_nothing() {
     assert!(exists(&roots.user().join("operator/report.csv")));
 }
 
+/// Tier 1 resets the configuration and leaves the user's applications to
+/// tier 2: their declarations stay with their stores, so the reconciler
+/// neither removes the units micad installed nor undeclares the containers.
+/// The switches that run them are configuration and go back to the defaults.
+#[test]
+fn tier_one_keeps_the_users_applications() {
+    let (dir, roots) = populated_roots();
+    let store = store_at(&dir, &roots);
+    let mut settings = fielded_settings();
+    settings.services.units.insert(
+        "tailscaled.service".to_string(),
+        micad_settings::UserUnit {
+            kind: micad_settings::Init::Systemd,
+            text: "[Service]\nExecStart=/srv/tailscaled\n".to_string(),
+            conf: None,
+            enabled: true,
+        },
+    );
+    settings.container.enabled = true;
+    settings.container.projects.insert(
+        "app".to_string(),
+        "services:\n  web:\n    image: nginx:1\n".to_string(),
+    );
+    settings
+        .container
+        .project_dirs
+        .insert("app".to_string(), "/srv/app".to_string());
+    settings.bluetooth.enabled = !Settings::default().bluetooth.enabled;
+    settings.bluetooth.devices.insert(
+        "AA:BB:CC:DD:EE:01".to_string(),
+        micad_settings::PairedDevice {
+            name: "phone".to_string(),
+            trusted: true,
+            blocked: false,
+        },
+    );
+    let before = settings.clone();
+    stage(&mut settings, ResetTier::Configuration);
+
+    assert_eq!(
+        apply_pending(&store, &mut settings, &roots).unwrap(),
+        Outcome::Applied(ResetTier::Configuration)
+    );
+
+    assert_eq!(settings.services.units, before.services.units);
+    assert_eq!(settings.container.projects, before.container.projects);
+    assert_eq!(
+        settings.container.project_dirs,
+        before.container.project_dirs
+    );
+    assert_eq!(settings.bluetooth.devices, before.bluetooth.devices);
+    assert_eq!(
+        settings.container.enabled,
+        Settings::default().container.enabled
+    );
+    assert_eq!(
+        settings.bluetooth.enabled,
+        Settings::default().bluetooth.enabled
+    );
+    assert_eq!(settings.hostname, Settings::default().hostname);
+    // What was saved is what a restart loads.
+    assert_eq!(store.load().unwrap().services.units, before.services.units);
+}
+
 /// Tier 1, row 1: STATE re-seeded, everything else in reach
 /// preserved, and the management credential above all.
 #[test]

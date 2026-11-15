@@ -505,6 +505,12 @@ fn reseeded_settings(before: &Settings) -> Settings {
     // would fall back to a key nobody was shown
     // (`docs/factory-ap-key.md`).
     after.wifi.ap.psk = before.wifi.ap.psk.clone();
+    // The user's applications are tier 2's: their declarations stay with
+    // their stores, and the switches that run them go back to the defaults.
+    after.services.units = before.services.units.clone();
+    after.container.projects = before.container.projects.clone();
+    after.container.project_dirs = before.container.project_dirs.clone();
+    after.bluetooth.devices = before.bluetooth.devices.clone();
     after
 }
 
