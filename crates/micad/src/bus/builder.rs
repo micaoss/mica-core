@@ -78,6 +78,13 @@ impl MicadService {
         self
     }
 
+    /// Attach the uplink engine, whose view the observation reports.
+    #[must_use]
+    pub fn with_uplinks(mut self, engine: crate::uplink::Shared) -> Self {
+        self.uplinks = Some(engine);
+        self
+    }
+
     /// Attach the production time-synchronization observer.
     #[must_use]
     pub fn with_time_status(mut self, time_status: Arc<dyn TimeStatusSource>) -> Self {

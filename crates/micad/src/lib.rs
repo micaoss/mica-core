@@ -64,6 +64,7 @@ pub mod update_cli;
 mod update_codes;
 mod update_lifecycle;
 mod update_policy;
+mod uplink;
 mod user_units;
 pub mod web_cli;
 mod wgkeys;
@@ -350,6 +351,7 @@ async fn serve() -> anyhow::Result<()> {
     )
     .with_features(features.clone());
     let mut dns_probe: Option<Arc<network_state::DnsProbe>> = None;
+    let mut uplinks: Option<uplink::Shared> = None;
     // The device code as printed, for the login prompt micad keeps.
     let mut printed_code: Option<String> = None;
     if !dry_run {
@@ -380,6 +382,11 @@ async fn serve() -> anyhow::Result<()> {
         if let Some(probe) = &dns_probe {
             service = service.with_dns_probe(Arc::clone(probe));
         }
+        let engine: uplink::Shared = Arc::new(tokio::sync::Mutex::new(uplink::Engine::new(
+            Arc::new(uplink::Kernel),
+        )));
+        service = service.with_uplinks(Arc::clone(&engine));
+        uplinks = Some(engine);
         service = service.with_logs(Arc::new(logs::HostLogs::production(init)));
         if let Some(units) = units {
             make_upload_dirs(Path::new("/"));
@@ -582,6 +589,9 @@ async fn serve() -> anyhow::Result<()> {
             .await
             .context("look up served MicadService")?;
         tokio::spawn(bus::mdns_upkeep(service_ref.clone()));
+        if let Some(engine) = uplinks {
+            tokio::spawn(bus::uplink_upkeep(service_ref.clone(), engine));
+        }
         tokio::spawn(bus::issue_upkeep(service_ref, printed_code));
     }
     if let Some(probe) = dns_probe {

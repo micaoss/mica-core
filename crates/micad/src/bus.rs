@@ -41,11 +41,13 @@ mod operations;
 mod power;
 mod provisioning;
 mod served;
+mod uplink;
 
 pub use errors::*;
 pub use issue::issue_upkeep;
 pub use mdns::mdns_upkeep;
 pub use served::*;
+pub use uplink::uplink_upkeep;
 
 /// Well-known bus name owned by the daemon.
 pub const BUS_NAME: &str = "com.mica.micad";
@@ -154,6 +156,9 @@ pub struct MicadService {
     /// The resolution check `GetDnsProbe` reads and `ProbeDns` runs; none in
     /// tests and dry-run instances, for the same reason.
     dns_probe: Option<Arc<crate::network_state::DnsProbe>>,
+    /// The uplink engine, whose view `GetObservedNetwork` reports as
+    /// `uplinks`; none in tests and dry-run instances.
+    uplinks: Option<crate::uplink::Shared>,
     /// Read-only time-synchronization observation, on the same default for
     /// the same reason.
     time_status: Arc<dyn TimeStatusSource>,
@@ -358,6 +363,7 @@ impl MicadService {
             wireguard: Arc::new(NoRotation),
             network_state: Arc::new(UnavailableNetworkState),
             dns_probe: None,
+            uplinks: None,
             time_status: Arc::new(UnavailableTimeStatus),
             storage_status: Arc::new(UnavailableStorageStatus),
             media: Arc::new(UnavailableMedia),

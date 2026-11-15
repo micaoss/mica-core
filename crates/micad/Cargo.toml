@@ -57,7 +57,9 @@ if-addrs = "0.15"
 # The SSDP responder's socket and the interface a search arrived on; both
 # already in mdns-sd's graph.
 socket-pktinfo = "0.4"
-socket2 = "0.6"
+# SO_BINDTODEVICE for the uplink probes.
+socket2 = { version = "0.6", features = ["all"] }
+futures-util = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

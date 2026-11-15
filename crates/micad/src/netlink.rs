@@ -634,6 +634,7 @@ fn merge_peers(peers: &mut Vec<WireguardPeerObservation>, more: Vec<WireguardPee
 }
 
 pub mod tunnel;
+pub mod uplink;
 
 #[cfg(test)]
 mod tests;

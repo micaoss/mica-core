@@ -409,6 +409,10 @@ impl MicadService {
             &lines,
         );
         self.board.annotate(&mut observed, &configured);
+        if let Some(engine) = &self.uplinks {
+            let network = self.inner.read().await.settings.network.clone();
+            observed["uplinks"] = engine.lock().await.observation(&network);
+        }
         Ok(observed.to_string())
     }
 
@@ -1265,6 +1269,15 @@ impl MicadService {
         emitter: &SignalEmitter<'_>,
         path: &str,
         value_json: &str,
+    ) -> zbus::Result<()>;
+
+    /// Emitted when the uplink that carries the traffic changes: one JSON
+    /// object `{at, from, to, reason}`, `reason` one of `probe`, `link`,
+    /// `recovered` and `none-up`.
+    #[zbus(signal)]
+    pub(super) async fn uplink_changed(
+        emitter: &SignalEmitter<'_>,
+        change_json: &str,
     ) -> zbus::Result<()>;
 
     /// Emitted whenever an apply task is queued, starts or finishes. The body

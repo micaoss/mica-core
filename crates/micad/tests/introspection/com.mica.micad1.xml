@@ -639,6 +639,14 @@ value.
 <arg name="value_json" type="s"/>
 </signal>
 <!--
+Emitted when the uplink that carries the traffic changes: one JSON
+object `{at, from, to, reason}`, `reason` one of `probe`, `link`,
+`recovered` and `none-up`.
+-->
+<signal name="UplinkChanged">
+<arg name="change_json" type="s"/>
+</signal>
+<!--
 Emitted whenever an apply task is queued, starts or finishes. The body
 is one JSON-encoded [`TaskRecord`].
 -->
