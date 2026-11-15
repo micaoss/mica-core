@@ -10,8 +10,10 @@ const NETWORK_USAGE: &str = "\
 usage: mica network [--json]
        mica network show <interface> [--json]
 
-  (none)  every interface: its state and addresses
-  show    one interface: state, addresses, gateway, DNS";
+  (none)  every interface: its state, whether it reaches the internet, and
+          its addresses; * marks the uplink that carries the traffic
+  show    one interface: state, addresses, gateway, DNS, and its
+          reachability check with the last round";
 
 const WIFI_USAGE: &str = "\
 usage: mica wifi [--json]
@@ -41,16 +43,10 @@ pub fn network(args: &[String], json: bool) -> Result<()> {
         _ => misuse("network", "unknown command or arguments", NETWORK_USAGE),
     };
     let status = api::get("/v1/network/status")?;
-    let interfaces = status["interfaces"].as_array().cloned().unwrap_or_default();
+    let interfaces = entries(&status);
     match name {
         None if json => println!("{status}"),
-        None => {
-            for interface in &interfaces {
-                if interface["name"] != json!("lo") {
-                    println!("{}", line(interface));
-                }
-            }
-        }
+        None => print!("{}", table(&status)),
         Some(name) => {
             let Some(interface) = interfaces.iter().find(|i| i["name"] == json!(name)) else {
                 return Err(super::Failure {
@@ -60,14 +56,105 @@ pub fn network(args: &[String], json: bool) -> Result<()> {
                 }
                 .into());
             };
+            let uplink = uplink(&status, name);
             if json {
+                let mut interface = interface.clone();
+                if let (Some(object), Some(uplink)) = (interface.as_object_mut(), uplink) {
+                    object.insert("uplink".to_string(), uplink.clone());
+                }
                 println!("{interface}");
             } else {
-                print!("{}", detail(interface));
+                print!(
+                    "{}",
+                    detail(interface, uplink, active(&status) == Some(name))
+                );
             }
         }
     }
     Ok(())
+}
+
+/// The interfaces the observation lists.
+fn entries(status: &Value) -> Vec<Value> {
+    status
+        .pointer("/interfaces/entries")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The uplink engine's entry for `name`.
+fn uplink<'a>(status: &'a Value, name: &str) -> Option<&'a Value> {
+    status
+        .pointer("/uplinks/uplinks")?
+        .as_array()?
+        .iter()
+        .find(|uplink| uplink["name"] == json!(name))
+}
+
+/// The uplink that carries the traffic.
+fn active(status: &Value) -> Option<&str> {
+    status.pointer("/uplinks/active").and_then(Value::as_str)
+}
+
+/// Whether the interface reaches the internet, as its check last said:
+/// `up`, `down`, `checking`, `no route`, `blocked`, or `-` with no check.
+fn internet(uplink: Option<&Value>) -> &'static str {
+    match uplink.and_then(|uplink| uplink["state"].as_str()) {
+        Some("up") => "up",
+        Some("down") => "down",
+        Some("unknown") => "checking",
+        Some("noRoute") => "no route",
+        Some("blocked") => "blocked",
+        _ => "-",
+    }
+}
+
+/// Every interface but `lo`, one a line under a header.
+fn table(status: &Value) -> String {
+    let rows: Vec<[String; 4]> = entries(status)
+        .iter()
+        .filter(|interface| interface["name"] != json!("lo"))
+        .map(|interface| {
+            let name = interface["name"].as_str().unwrap_or("?");
+            let mark = if active(status) == Some(name) {
+                "*"
+            } else {
+                ""
+            };
+            [
+                format!("{name}{mark}"),
+                state(interface).to_string(),
+                internet(uplink(status, name)).to_string(),
+                addresses(interface).join(" "),
+            ]
+        })
+        .collect();
+    let header = ["NAME", "STATE", "INTERNET", "ADDRESSES"].map(str::to_string);
+    let width = |column: usize| {
+        std::iter::once(&header)
+            .chain(&rows)
+            .map(|row| row[column].len())
+            .max()
+            .unwrap_or(0)
+    };
+    let widths = [width(0), width(1), width(2)];
+    std::iter::once(&header)
+        .chain(&rows)
+        .map(|row| {
+            let line = format!(
+                "{:w0$}  {:w1$}  {:w2$}  {}",
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                w0 = widths[0],
+                w1 = widths[1],
+                w2 = widths[2]
+            );
+            format!("{}\n", line.trim_end())
+        })
+        .collect()
 }
 
 fn addresses(interface: &Value) -> Vec<String> {
@@ -92,22 +179,9 @@ fn state(interface: &Value) -> &str {
         .unwrap_or("unknown")
 }
 
-/// One interface on one line: name, state, addresses.
-fn line(interface: &Value) -> String {
-    let mut out = format!(
-        "{} {}",
-        interface["name"].as_str().unwrap_or("?"),
-        state(interface)
-    );
-    for address in addresses(interface) {
-        out.push(' ');
-        out.push_str(&address);
-    }
-    out
-}
-
-/// One interface in full.
-fn detail(interface: &Value) -> String {
+/// One interface in full, with its uplink entry; `active` when it carries
+/// the traffic.
+fn detail(interface: &Value, uplink: Option<&Value>, active: bool) -> String {
     let mut out = format!(
         "name: {}\nstate: {}\n",
         interface["name"].as_str().unwrap_or("?"),
@@ -133,6 +207,80 @@ fn detail(interface: &Value) -> String {
     }
     if let Some(ssid) = interface.pointer("/wifi/ssid").and_then(Value::as_str) {
         out.push_str(&format!("wifi: {ssid}\n"));
+    }
+    if let Some(uplink) = uplink {
+        out.push_str(&check(uplink, active));
+    }
+    out
+}
+
+/// A target as `address method[/port]`.
+fn target(target: &Value) -> String {
+    let address = target["address"].as_str().unwrap_or("?");
+    let method = target["method"].as_str().unwrap_or("?");
+    match target["port"].as_u64() {
+        Some(port) => format!("{address} {method}/{port}"),
+        None => format!("{address} {method}"),
+    }
+}
+
+/// The uplink lines of `mica network show`: whether it reaches the internet,
+/// its check, its counters and its last round.
+fn check(uplink: &Value, active: bool) -> String {
+    let mut out = format!(
+        "internet: {}{}\n",
+        internet(Some(uplink)),
+        if active { " (carries the traffic)" } else { "" }
+    );
+    if let Some(metric) = uplink["metric"].as_u64() {
+        out.push_str(&format!("metric: {metric}\n"));
+    }
+    let probe = &uplink["probe"];
+    if probe.is_object() {
+        let targets: Vec<String> = probe["targets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(target)
+            .collect();
+        out.push_str(&format!(
+            "check: {}, every {} s, {} ms timeout, down after {}, up after {}: {}\n",
+            if probe["enabled"] == json!(true) {
+                "on"
+            } else {
+                "off"
+            },
+            probe["intervalS"],
+            probe["timeoutMs"],
+            probe["failuresToDown"],
+            probe["successesToUp"],
+            targets.join(", ")
+        ));
+    }
+    if let Some(since) = uplink["since"].as_str() {
+        out.push_str(&format!(
+            "since: {since} ({} failed, {} good in a row)\n",
+            uplink["failures"], uplink["successes"]
+        ));
+    }
+    let round = &uplink["lastRound"];
+    if let Some(at) = round["at"].as_str() {
+        out.push_str(&format!(
+            "last round: {at} {}\n",
+            if round["ok"] == json!(true) {
+                "ok"
+            } else {
+                "failed"
+            }
+        ));
+        for result in round["targets"].as_array().into_iter().flatten() {
+            let answer = match (result["ok"] == json!(true), result["latencyMs"].as_u64()) {
+                (true, Some(ms)) => format!("ok {ms} ms"),
+                (true, None) => "ok".to_string(),
+                (false, _) => format!("failed: {}", result["detail"].as_str().unwrap_or("?")),
+            };
+            out.push_str(&format!("  {} {answer}\n", target(result)));
+        }
     }
     out
 }
@@ -190,10 +338,8 @@ pub fn wifi(args: &[String], json: bool) -> Result<()> {
         client["interface"].as_str().unwrap_or("?")
     );
     let status = api::get("/v1/network/status")?;
-    if let Some(ssid) = status["interfaces"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    if let Some(ssid) = entries(&status)
+        .iter()
         .find(|i| i["name"] == client["interface"])
         .and_then(|i| i.pointer("/wifi/ssid"))
         .and_then(Value::as_str)
@@ -295,11 +441,70 @@ mod tests {
             "routes": [ { "dest": "0.0.0.0/0", "via": "192.0.2.1" }, { "dest": "192.0.2.0/24" } ],
             "dns": [ "192.0.2.1" ],
         });
-        assert_eq!(line(&interface), "eth0 routable 192.0.2.7/24 fe80::1");
         assert_eq!(
-            detail(&interface),
+            detail(&interface, None, false),
             "name: eth0\nstate: routable\nhardware address: 02:00:00:00:00:01\naddress: 192.0.2.7/24\naddress: fe80::1\ngateway: 192.0.2.1\ndns: 192.0.2.1\n"
         );
+    }
+
+    fn status() -> Value {
+        json!({
+            "interfaces": { "available": true, "count": 4, "entries": [
+                { "name": "lo", "link": { "operationalState": "carrier" } },
+                { "name": "eth0", "link": { "operationalState": "routable" },
+                  "addresses": [ { "address": "192.0.2.7", "prefixLength": 24 } ] },
+                { "name": "eth1", "link": { "operationalState": "routable" },
+                  "addresses": [ { "address": "198.51.100.7", "prefixLength": 24 } ] },
+                { "name": "wlan0", "link": { "operationalState": "no-carrier" } },
+            ] },
+            "uplinks": {
+                "active": "eth1", "natural": "eth0", "override": true,
+                "uplinks": [
+                    { "name": "eth0", "metric": 100, "state": "down",
+                      "since": "2026-11-15T20:00:00Z", "failures": 4, "successes": 0,
+                      "probe": { "enabled": true, "intervalS": 10, "timeoutMs": 2000,
+                                 "failuresToDown": 3, "successesToUp": 5,
+                                 "targets": [ { "address": "1.1.1.1", "method": "tcp", "port": 53 },
+                                              { "address": "gateway", "method": "icmp" } ] },
+                      "lastRound": { "at": "2026-11-15T20:00:40Z", "ok": false, "targets": [
+                          { "address": "1.1.1.1", "method": "tcp", "port": 53, "ok": false,
+                            "detail": "no answer within 2000 ms" },
+                          { "address": "gateway", "method": "icmp", "ok": true, "latencyMs": 1 } ] } },
+                    { "name": "eth1", "metric": 110, "state": "unknown" },
+                ],
+            },
+        })
+    }
+
+    #[test]
+    fn the_list_marks_the_active_uplink_and_says_whether_each_reaches_the_internet() {
+        assert_eq!(
+            table(&status()),
+            "NAME   STATE       INTERNET  ADDRESSES\n\
+             eth0   routable    down      192.0.2.7/24\n\
+             eth1*  routable    checking  198.51.100.7/24\n\
+             wlan0  no-carrier  -\n"
+        );
+    }
+
+    #[test]
+    fn show_prints_the_check_and_its_last_round() {
+        let status = status();
+        assert_eq!(
+            check(uplink(&status, "eth0").unwrap(), false),
+            "internet: down\n\
+             metric: 100\n\
+             check: on, every 10 s, 2000 ms timeout, down after 3, up after 5: 1.1.1.1 tcp/53, gateway icmp\n\
+             since: 2026-11-15T20:00:00Z (4 failed, 0 good in a row)\n\
+             last round: 2026-11-15T20:00:40Z failed\n  \
+             1.1.1.1 tcp/53 failed: no answer within 2000 ms\n  \
+             gateway icmp ok 1 ms\n"
+        );
+        assert_eq!(
+            check(uplink(&status, "eth1").unwrap(), true),
+            "internet: checking (carries the traffic)\nmetric: 110\n"
+        );
+        assert!(uplink(&status, "wlan0").is_none());
     }
 
     #[test]
