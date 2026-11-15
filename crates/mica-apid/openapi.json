@@ -3841,15 +3841,15 @@
           "resources"
         ],
         "summary": "Read the observed network state.",
-        "description": "What the network stack actually sees, distinct from the desired map at\n`/v1/network`: per interface the link and carrier state, the addresses\nwith where each came from, the DHCP lease (`lease`: server, router and\nthe seconds left), the link's DNS servers with their source (`linkDns`),\nits routes, a CAN controller's state and counters (`can`) and a\nWireGuard tunnel's peers with their last handshake and traffic\n(`wireguard`); the default routes; DNS reachability by a single bounded\nprobe through resolved; the Wi-Fi association (`wifi.association`); the\naccess point's clients with the address and hostname each was leased,\nwhether it runs and, when it does not, why (`accessPoint.running`,\n`accessPoint.reason`); and the radio and modem capabilities, with\ncellular explicitly unsupported.\n\nTwo members join what the device sees with the request: `session` names\nthe interface this request arrived on and the address it arrived at, and\na configured interface the device does not have is listed with\n`present: false`. Every other entry is `present: true`.",
+        "description": "What the network stack actually sees, distinct from the desired map at\n`/v1/network`: per interface the link and carrier state, the addresses\nwith where each came from, the DHCP lease (`lease`: server, router and\nthe seconds left), the link's DNS servers with their source (`linkDns`),\nits routes, a CAN controller's state and counters (`can`) and a\nWireGuard tunnel's peers with their last handshake and traffic\n(`wireguard`); the default routes; DNS reachability by a single bounded\nprobe through resolved; the Wi-Fi association (`wifi.association`); the\naccess point's clients with the address and hostname each was leased,\nwhether it runs and, when it does not, why (`accessPoint.running`,\n`accessPoint.reason`); and the radio and modem capabilities, with\ncellular explicitly unsupported.\n\nTwo members join what the device sees with the request: `session` names\nthe interface this request arrived on and the address it arrived at, and\na configured interface the device does not have is listed with\n`present: false`. Every other entry is `present: true`.\n\n`uplinks` is the uplink engine's view: which uplink carries the traffic,\nwhether micad's failover route steers it, and each uplink's reachability\ncheck with its last round.",
         "operationId": "api_v1_network_status",
         "responses": {
           "200": {
-            "description": "`session`, `interfaces`, `defaultRoutes`, `dns`, `wifi`, `accessPoint` and `capabilities`, each carrying `available` or `supported`; absent evidence carries the reason",
+            "description": "`session`, `interfaces`, `defaultRoutes`, `dns`, `wifi`, `accessPoint` and `capabilities`, each carrying `available` or `supported`; absent evidence carries the reason; and `uplinks`",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResourceValue"
+                  "$ref": "#/components/schemas/NetworkStatus"
                 }
               }
             }
@@ -13976,6 +13976,61 @@
           }
         }
       },
+      "NetworkStatus": {
+        "type": "object",
+        "description": "What `GET /api/v1/network/status` answers. The members other than\n`uplinks` are the device's observation as the route describes it.",
+        "required": [
+          "session",
+          "interfaces",
+          "defaultRoutes",
+          "dns",
+          "wifi",
+          "accessPoint",
+          "capabilities"
+        ],
+        "properties": {
+          "accessPoint": {
+            "type": "object"
+          },
+          "board": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`declared` when the board lists its ports, `discover` otherwise."
+          },
+          "capabilities": {
+            "type": "object"
+          },
+          "defaultRoutes": {
+            "type": "object"
+          },
+          "dns": {
+            "type": "object"
+          },
+          "interfaces": {
+            "type": "object"
+          },
+          "session": {
+            "type": "object",
+            "description": "The interface this request arrived on and the address it arrived at."
+          },
+          "uplinks": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UplinksStatus",
+                "description": "The uplink engine's view; absent from a device that runs none."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "wifi": {
+            "type": "object"
+          }
+        }
+      },
       "ObservedInterface": {
         "type": "object",
         "properties": {
@@ -15075,6 +15130,36 @@
       "UpdateState": {
         "description": "The update state document, verbatim from micad: `lifecycle` (state machine,\npolicy, reboot gate), per-slot status, `booted_slot`, `primary`,\n`pending_not_confirmed`, `rollback`, `install` and `last_mark`.\n\n`rollback` is the one place slot state is offered as a decision: micad's\n`rollback_eligibility` resolves the alternate slot, says whether a manual\nrollback is permitted, and names the refusal otherwise. There is no second\nread route for it — this document is the single writer of that fact."
       },
+      "UplinkChange": {
+        "type": "object",
+        "description": "A switch of the active uplink, as `UplinkChanged` carries it.",
+        "required": [
+          "at",
+          "reason"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "RFC 3339, UTC."
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "`probe` (the natural uplink failed its checks), `link` (it lost its\nroute), `recovered` (it is up again) or `none-up` (no uplink may\ncarry the traffic)."
+          },
+          "to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "UplinkProbe": {
         "type": "object",
         "description": "An uplink's reachability check: a round of probes out of the interface\nevery `intervalS` seconds; a round succeeds when any target answers.\nEnabling it makes the device contact its targets.",
@@ -15155,6 +15240,195 @@
             "format": "int32",
             "description": "For `tcp` only, 1 to 65535; absent is 443 (`probe_port`).",
             "minimum": 0
+          }
+        }
+      },
+      "UplinkRound": {
+        "type": "object",
+        "description": "One round of an uplink's check.",
+        "required": [
+          "at",
+          "ok",
+          "targets"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "When it ended, RFC 3339."
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "Whether any target answered."
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UplinkTargetResult"
+            }
+          }
+        }
+      },
+      "UplinkStatus": {
+        "type": "object",
+        "description": "One uplink's reachability.",
+        "required": [
+          "name",
+          "state"
+        ],
+        "properties": {
+          "failures": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Failed rounds in a row; absent with no check.",
+            "minimum": 0
+          },
+          "lastRound": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UplinkRound",
+                "description": "The last round; absent before the first."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metric": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The metric of its own default route; `null` without one.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "probe": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UplinkProbe",
+                "description": "Its check, the defaults filled in; `null` when none is declared."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it took that state, RFC 3339; absent with no check."
+          },
+          "state": {
+            "type": "string",
+            "description": "`off` (no check), `unknown` (checking, no verdict yet), `up`, `down`,\n`noRoute` (no default route on it) or `blocked` (strict reverse-path\nfiltering drops the answers)."
+          },
+          "successes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Good rounds in a row; absent with no check.",
+            "minimum": 0
+          }
+        }
+      },
+      "UplinkTargetResult": {
+        "type": "object",
+        "description": "One target's answer in a round.",
+        "required": [
+          "address",
+          "method",
+          "ok"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why there was no answer."
+          },
+          "latencyMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long the answer took.",
+            "minimum": 0
+          },
+          "method": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The `tcp` port asked.",
+            "minimum": 0
+          }
+        }
+      },
+      "UplinksStatus": {
+        "type": "object",
+        "description": "Which uplink carries the traffic, and each uplink's reachability.",
+        "required": [
+          "override",
+          "uplinks"
+        ],
+        "properties": {
+          "active": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The uplink that carries the traffic: the lowest-metric one that is\n`up`, `unknown` or `off`; `null` when none is."
+          },
+          "lastChange": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UplinkChange",
+                "description": "The last switch of the active uplink; `null` before the first."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "natural": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The uplink the kernel would pick: the lowest metric."
+          },
+          "override": {
+            "type": "boolean",
+            "description": "Whether micad's failover route (protocol 109, metric 10) steers the\ntraffic to `active`."
+          },
+          "uplinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UplinkStatus"
+            },
+            "description": "Every uplink with a default route or a check, by name."
           }
         }
       },

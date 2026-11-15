@@ -346,6 +346,118 @@ pub(crate) struct UplinkProbeTarget {
     pub(super) port: Option<u16>,
 }
 
+/// What `GET /api/v1/network/status` answers. The members other than
+/// `uplinks` are the device's observation as the route describes it.
+#[derive(utoipa::ToSchema)]
+#[schema(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub(crate) struct NetworkStatus {
+    /// The interface this request arrived on and the address it arrived at.
+    #[schema(value_type = Object)]
+    session: Value,
+    #[schema(value_type = Object)]
+    interfaces: Value,
+    #[schema(value_type = Object)]
+    default_routes: Value,
+    #[schema(value_type = Object)]
+    dns: Value,
+    #[schema(value_type = Object)]
+    wifi: Value,
+    #[schema(value_type = Object)]
+    access_point: Value,
+    #[schema(value_type = Object)]
+    capabilities: Value,
+    /// `declared` when the board lists its ports, `discover` otherwise.
+    board: Option<String>,
+    /// The uplink engine's view; absent from a device that runs none.
+    uplinks: Option<UplinksStatus>,
+}
+
+/// Which uplink carries the traffic, and each uplink's reachability.
+#[derive(utoipa::ToSchema)]
+#[schema(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub(crate) struct UplinksStatus {
+    /// The uplink that carries the traffic: the lowest-metric one that is
+    /// `up`, `unknown` or `off`; `null` when none is.
+    active: Option<String>,
+    /// The uplink the kernel would pick: the lowest metric.
+    natural: Option<String>,
+    /// Whether micad's failover route (protocol 109, metric 10) steers the
+    /// traffic to `active`.
+    #[schema(rename = "override")]
+    failover: bool,
+    /// The last switch of the active uplink; `null` before the first.
+    last_change: Option<UplinkChange>,
+    /// Every uplink with a default route or a check, by name.
+    uplinks: Vec<UplinkStatus>,
+}
+
+/// A switch of the active uplink, as `UplinkChanged` carries it.
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct UplinkChange {
+    /// RFC 3339, UTC.
+    at: String,
+    from: Option<String>,
+    to: Option<String>,
+    /// `probe` (the natural uplink failed its checks), `link` (it lost its
+    /// route), `recovered` (it is up again) or `none-up` (no uplink may
+    /// carry the traffic).
+    reason: String,
+}
+
+/// One uplink's reachability.
+#[derive(utoipa::ToSchema)]
+#[schema(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub(crate) struct UplinkStatus {
+    name: String,
+    /// The metric of its own default route; `null` without one.
+    metric: Option<u32>,
+    /// `off` (no check), `unknown` (checking, no verdict yet), `up`, `down`,
+    /// `noRoute` (no default route on it) or `blocked` (strict reverse-path
+    /// filtering drops the answers).
+    state: String,
+    /// When it took that state, RFC 3339; absent with no check.
+    since: Option<String>,
+    /// Failed rounds in a row; absent with no check.
+    failures: Option<u32>,
+    /// Good rounds in a row; absent with no check.
+    successes: Option<u32>,
+    /// Its check, the defaults filled in; `null` when none is declared.
+    probe: Option<UplinkProbe>,
+    /// The last round; absent before the first.
+    last_round: Option<UplinkRound>,
+}
+
+/// One round of an uplink's check.
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct UplinkRound {
+    /// When it ended, RFC 3339.
+    at: String,
+    /// Whether any target answered.
+    ok: bool,
+    targets: Vec<UplinkTargetResult>,
+}
+
+/// One target's answer in a round.
+#[derive(utoipa::ToSchema)]
+#[schema(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub(crate) struct UplinkTargetResult {
+    address: String,
+    method: String,
+    /// The `tcp` port asked.
+    port: Option<u16>,
+    ok: bool,
+    /// How long the answer took.
+    latency_ms: Option<u64>,
+    /// Why there was no answer.
+    detail: Option<String>,
+}
+
 /// One static route.
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

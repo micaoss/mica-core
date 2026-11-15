@@ -364,13 +364,17 @@ pub(crate) async fn api_v1_system_telemetry(
 /// the interface this request arrived on and the address it arrived at, and
 /// a configured interface the device does not have is listed with
 /// `present: false`. Every other entry is `present: true`.
+///
+/// `uplinks` is the uplink engine's view: which uplink carries the traffic,
+/// whether micad's failover route steers it, and each uplink's reachability
+/// check with its last round.
 #[utoipa::path(
     get,
     path = V1_NETWORK_STATUS_PATH,
     context_path = API,
     tag = "resources",
     responses(
-        (status = 200, description = "`session`, `interfaces`, `defaultRoutes`, `dns`, `wifi`, `accessPoint` and `capabilities`, each carrying `available` or `supported`; absent evidence carries the reason", body = ResourceValue),
+        (status = 200, description = "`session`, `interfaces`, `defaultRoutes`, `dns`, `wifi`, `accessPoint` and `capabilities`, each carrying `available` or `supported`; absent evidence carries the reason; and `uplinks`", body = NetworkStatus),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 500, description = "micad failed to observe (`micad_failed`)", body = ApiError),
         (status = 503, description = "The call to micad could not be made (`micad_unreachable`); carries `Retry-After`", body = ApiError),
