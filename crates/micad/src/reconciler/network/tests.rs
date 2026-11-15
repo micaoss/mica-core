@@ -21,7 +21,7 @@ fn the_production_delete_is_networkctl_delete() {
 
 const GOLDEN_DHCP: &str = "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\n\n[DHCPv4]\nRouteMetric=100\nUseMTU=yes\n";
 const GOLDEN_STATIC: &str = "[Match]\nName=eth1\n\n[Network]\n\
-    Address=192.168.1.10/24\nGateway=192.168.1.1\nDNS=1.1.1.1\nDNS=9.9.9.9\n";
+    Address=192.168.1.10/24\nDNS=1.1.1.1\nDNS=9.9.9.9\n\n[Route]\nGateway=192.168.1.1\nMetric=20\n";
 const GOLDEN_EMPTY: &str = "[Match]\nName=eth2\n\n[Network]\n";
 const GOLDEN_VLAN_NETDEV: &str = "[NetDev]\nName=eth0.100\nKind=vlan\n\n[VLAN]\nId=100\n";
 const GOLDEN_VLAN_PARENT: &str = "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nLinkLocalAddressing=yes\nVLAN=eth0.100\n\n[DHCPv4]\nRouteMetric=100\nUseMTU=yes\n";

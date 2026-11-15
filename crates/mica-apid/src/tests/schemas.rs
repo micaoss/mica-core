@@ -54,6 +54,18 @@ pub(super) fn the_network_schema_matches_the_settings_model() {
             metric: Some(200),
         }],
         internet: Some(false),
+        probe: Some(micad_settings::ProbeConfig {
+            enabled: true,
+            targets: vec![micad_settings::ProbeTarget {
+                address: "gateway".to_string(),
+                method: "tcp".to_string(),
+                port: Some(53),
+            }],
+            interval_s: Some(10),
+            timeout_ms: Some(2000),
+            failures_to_down: Some(3),
+            successes_to_up: Some(5),
+        }),
     };
 
     for (schema, model) in [
@@ -82,6 +94,14 @@ pub(super) fn the_network_schema_matches_the_settings_model() {
         (
             "StaticRoute",
             serde_json::to_value(&iface.routes[0]).unwrap(),
+        ),
+        (
+            "UplinkProbe",
+            serde_json::to_value(iface.probe.clone().unwrap()).unwrap(),
+        ),
+        (
+            "UplinkProbeTarget",
+            serde_json::to_value(&iface.probe.clone().unwrap().targets[0]).unwrap(),
         ),
     ] {
         let mut documented: Vec<String> = document["components"]["schemas"][schema]["properties"]

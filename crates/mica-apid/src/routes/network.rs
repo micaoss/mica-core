@@ -167,6 +167,9 @@ pub(crate) async fn api_v1_network_write(
     if !dry_run && let Err(response) = check_network_idle(&state).await {
         return *response;
     }
+    for cfg in entries.values_mut() {
+        micad_settings::store_probe_defaults(cfg);
+    }
     if carries_redacted_psk(entries.values()) {
         let stored = match api_network_entries(&state).await {
             Ok(stored) => stored,
@@ -287,6 +290,7 @@ pub(crate) async fn api_v1_network_iface_write(
     if let Err(response) = restore_preshared_keys(&iface, &mut cfg, &candidate) {
         return *response;
     }
+    micad_settings::store_probe_defaults(&mut cfg);
     // The candidate tree, for the relational rules, which are about two
     // entries at once; the entry's own rules for the one entry the request
     // carries: a stored entry that already holds an unparseable address is

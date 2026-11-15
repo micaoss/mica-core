@@ -31,8 +31,8 @@ use micad_settings::{CanConfig, IfaceKind, IfaceSettings, RouteConfig, Settings,
 use serde_json::json;
 
 use super::{
-    kind_name, route_metrics, validate_dns_override, validate_iface_name, validate_kind_blocks,
-    validate_static,
+    kind_name, route_metric, route_metrics, validate_dns_override, validate_iface_name,
+    validate_kind_blocks, validate_static,
 };
 use crate::openrc::{Commands, Host};
 use crate::reconciler::Reconciler;
@@ -248,7 +248,12 @@ fn resolver_lines(out: &mut String, name: &str, dns: &[String]) {
     let _ = writeln!(out, "    down rm -f {RESOLVERS_DIR}/{name} && {rebuild}");
 }
 
-fn static_stanza(out: &mut String, iface: &str, cfg: &StaticConfig) -> Result<()> {
+fn static_stanza(
+    out: &mut String,
+    iface: &str,
+    cfg: &StaticConfig,
+    metric: Option<u32>,
+) -> Result<()> {
     let (address, prefix) = address_and_prefix(&cfg.address)?;
     if address.is_ipv4() {
         let _ = write!(
@@ -262,8 +267,17 @@ fn static_stanza(out: &mut String, iface: &str, cfg: &StaticConfig) -> Result<()
             "\nauto {iface}\niface {iface} inet6 static\n    address {address}\n    netmask {prefix}\n"
         );
     }
+    // The gateway as a default route at the entry's metric, which ifupdown's
+    // `gateway` option cannot carry.
     if let Some(gateway) = &cfg.gateway {
-        let _ = writeln!(out, "    gateway {gateway}");
+        let gateway = gateway.parse::<IpAddr>()?;
+        let family = if gateway.is_ipv4() { "" } else { " -6" };
+        let mut spec = format!("default via {gateway} dev {iface}");
+        if let Some(metric) = metric {
+            let _ = write!(spec, " metric {metric}");
+        }
+        let _ = writeln!(out, "    up ip{family} route add {spec}");
+        let _ = writeln!(out, "    down ip{family} route del {spec} || :");
     }
     if !cfg.dns.is_empty() {
         resolver_lines(out, iface, &cfg.dns);
@@ -279,22 +293,29 @@ fn static_stanza(out: &mut String, iface: &str, cfg: &StaticConfig) -> Result<()
 /// which Base's udhcpc script reads as `IF_ROUTE_<n>` and applies with
 /// `dev <iface>` once the lease is bound (section 3.8 of docs/mica-core.md).
 /// Only parsed addresses reach the line.
-fn route_lines(out: &mut String, iface: &str, routes: &[RouteConfig], dhcp: bool) -> Result<()> {
+fn route_lines(
+    out: &mut String,
+    iface: &str,
+    routes: &[RouteConfig],
+    dhcp: bool,
+    entry_metric: Option<u32>,
+) -> Result<()> {
     for (index, route) in routes.iter().enumerate() {
+        let metric = route_metric(route, entry_metric);
         let (destination, prefix) = address_and_prefix(&route.destination)?;
         let mut spec = format!("{destination}/{prefix}");
         if let Some(gateway) = &route.gateway {
             let _ = write!(spec, " via {}", gateway.parse::<IpAddr>()?);
         }
         if dhcp {
-            if let Some(metric) = route.metric {
+            if let Some(metric) = metric {
                 let _ = write!(spec, " metric {metric}");
             }
             let _ = writeln!(out, "    route_{} {spec}", index + 1);
             continue;
         }
         let _ = write!(spec, " dev {iface}");
-        if let Some(metric) = route.metric {
+        if let Some(metric) = metric {
             let _ = write!(spec, " metric {metric}");
         }
         let _ = writeln!(out, "    up ip route add {spec}");
@@ -352,7 +373,14 @@ pub(super) fn render(
             continue;
         }
         match &cfg.static_ {
-            Some(static_) => static_stanza(&mut out, iface, static_)?,
+            Some(static_) => {
+                static_stanza(
+                    &mut out,
+                    iface,
+                    static_,
+                    metrics.get(iface.as_str()).copied(),
+                )?;
+            }
             None if cfg.dhcp => dhcp_stanza(
                 &mut out,
                 iface,
@@ -369,6 +397,7 @@ pub(super) fn render(
             iface,
             &cfg.routes,
             cfg.static_.is_none() && cfg.dhcp,
+            metrics.get(iface.as_str()).copied(),
         )?;
     }
     for iface in &ports {

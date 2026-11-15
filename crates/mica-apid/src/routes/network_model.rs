@@ -297,6 +297,53 @@ pub(crate) struct NetworkInterface {
     /// entries only. The servers a lease names are kept either way.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) internet: Option<bool>,
+    /// The uplink's reachability check. Absent is off. Physical, bridge and
+    /// VLAN entries that may carry the default route only
+    /// (`probe_not_allowed`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) probe: Option<UplinkProbe>,
+}
+
+/// An uplink's reachability check: a round of probes out of the interface
+/// every `intervalS` seconds; a round succeeds when any target answers.
+/// Enabling it makes the device contact its targets.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UplinkProbe {
+    /// Whether the check runs; `false` keeps the targets.
+    pub(super) enabled: bool,
+    /// 1 to 4 targets, no duplicates (`probe_targets`). Enabling the check
+    /// with none stores `1.1.1.1` and `8.8.8.8`, each `tcp` to port 53.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) targets: Vec<UplinkProbeTarget>,
+    /// Seconds between rounds, 2 to 300; absent is 10 (`probe_interval`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) interval_s: Option<u32>,
+    /// How long a target has to answer, 200 to 10000 ms and less than the
+    /// interval; absent is 2000 (`probe_timeout`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) timeout_ms: Option<u32>,
+    /// Failed rounds in a row that take the uplink down, 1 to 20; absent
+    /// is 3 (`probe_threshold`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) failures_to_down: Option<u32>,
+    /// Good rounds in a row that bring it up, 1 to 50; absent is 5
+    /// (`probe_threshold`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) successes_to_up: Option<u32>,
+}
+
+/// One target of a reachability check.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub(crate) struct UplinkProbeTarget {
+    /// An IPv4 unicast address, or `gateway`, the uplink's own router
+    /// (`probe_address`).
+    pub(super) address: String,
+    /// `icmp`, an echo, or `tcp`, a connect closed at once (`probe_method`).
+    pub(super) method: String,
+    /// For `tcp` only, 1 to 65535; absent is 443 (`probe_port`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) port: Option<u16>,
 }
 
 /// One static route.
@@ -308,7 +355,9 @@ pub(crate) struct StaticRoute {
     /// The next hop; absent is an on-link route.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) gateway: Option<String>,
-    /// Route metric; absent leaves networkd's default.
+    /// Route metric. A default route's is 20 or more
+    /// (`route_metric_reserved`); absent, a default route takes the entry's
+    /// (20, 21, ... in name order) and any other route networkd's default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) metric: Option<u32>,
 }

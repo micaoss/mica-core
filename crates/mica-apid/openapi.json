@@ -13872,6 +13872,17 @@
             "type": "string",
             "description": "`physical`, `vlan`, `bridge`, `wireguard` or `can`. Absent means\n`physical`.\n\nThe block below is authoritative and the interface name is not:\n`eth0.100` is a convention, not a declaration."
           },
+          "probe": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UplinkProbe",
+                "description": "The uplink's reachability check. Absent is off. Physical, bridge and\nVLAN entries that may carry the default route only\n(`probe_not_allowed`)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "routes": {
             "type": "array",
             "items": {
@@ -14776,7 +14787,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "Route metric; absent leaves networkd's default.",
+            "description": "Route metric. A default route's is 20 or more\n(`route_metric_reserved`); absent, a default route takes the entry's\n(20, 21, ... in name order) and any other route networkd's default.",
             "minimum": 0
           }
         },
@@ -15063,6 +15074,89 @@
       },
       "UpdateState": {
         "description": "The update state document, verbatim from micad: `lifecycle` (state machine,\npolicy, reboot gate), per-slot status, `booted_slot`, `primary`,\n`pending_not_confirmed`, `rollback`, `install` and `last_mark`.\n\n`rollback` is the one place slot state is offered as a decision: micad's\n`rollback_eligibility` resolves the alternate slot, says whether a manual\nrollback is permitted, and names the refusal otherwise. There is no second\nread route for it — this document is the single writer of that fact."
+      },
+      "UplinkProbe": {
+        "type": "object",
+        "description": "An uplink's reachability check: a round of probes out of the interface\nevery `intervalS` seconds; a round succeeds when any target answers.\nEnabling it makes the device contact its targets.",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the check runs; `false` keeps the targets."
+          },
+          "failuresToDown": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Failed rounds in a row that take the uplink down, 1 to 20; absent\nis 3 (`probe_threshold`).",
+            "minimum": 0
+          },
+          "intervalS": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Seconds between rounds, 2 to 300; absent is 10 (`probe_interval`).",
+            "minimum": 0
+          },
+          "successesToUp": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Good rounds in a row that bring it up, 1 to 50; absent is 5\n(`probe_threshold`).",
+            "minimum": 0
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UplinkProbeTarget"
+            },
+            "description": "1 to 4 targets, no duplicates (`probe_targets`). Enabling the check\nwith none stores `1.1.1.1` and `8.8.8.8`, each `tcp` to port 53."
+          },
+          "timeoutMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How long a target has to answer, 200 to 10000 ms and less than the\ninterval; absent is 2000 (`probe_timeout`).",
+            "minimum": 0
+          }
+        }
+      },
+      "UplinkProbeTarget": {
+        "type": "object",
+        "description": "One target of a reachability check.",
+        "required": [
+          "address",
+          "method"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "An IPv4 unicast address, or `gateway`, the uplink's own router\n(`probe_address`)."
+          },
+          "method": {
+            "type": "string",
+            "description": "`icmp`, an echo, or `tcp`, a connect closed at once (`probe_method`)."
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "For `tcp` only, 1 to 65535; absent is 443 (`probe_port`).",
+            "minimum": 0
+          }
+        }
       },
       "VlanParameters": {
         "type": "object",

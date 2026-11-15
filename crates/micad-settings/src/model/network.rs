@@ -72,6 +72,116 @@ pub struct IfaceSettings {
     /// static one. Absent is `true`; physical, bridge and VLAN entries only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub internet: Option<bool>,
+    /// The uplink's reachability check (`docs/mica-core.md` 3.4); absent is
+    /// off. Physical, bridge and VLAN entries that may carry the default
+    /// route only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<ProbeConfig>,
+}
+
+/// How micad checks that an uplink reaches the internet: rounds of probes out
+/// of that interface, every `intervalS` seconds.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProbeConfig {
+    /// Whether the check runs; `false` keeps the targets.
+    #[serde(default)]
+    pub enabled: bool,
+    /// 1 to 4 targets; a round succeeds when any answers. A write that
+    /// enables the check with none stores [`DEFAULT_PROBE_TARGETS`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<ProbeTarget>,
+    /// Seconds between rounds; absent is [`ProbeConfig::INTERVAL_S`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_s: Option<u32>,
+    /// How long a target has to answer, in ms; absent is
+    /// [`ProbeConfig::TIMEOUT_MS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u32>,
+    /// Failed rounds in a row that take the uplink down; absent is
+    /// [`ProbeConfig::FAILURES_TO_DOWN`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failures_to_down: Option<u32>,
+    /// Good rounds in a row that bring it up; absent is
+    /// [`ProbeConfig::SUCCESSES_TO_UP`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successes_to_up: Option<u32>,
+}
+
+impl ProbeConfig {
+    pub const INTERVAL_S: u32 = 10;
+    pub const TIMEOUT_MS: u32 = 2000;
+    pub const FAILURES_TO_DOWN: u32 = 3;
+    pub const SUCCESSES_TO_UP: u32 = 5;
+
+    #[must_use]
+    pub fn interval_s(&self) -> u32 {
+        self.interval_s.unwrap_or(Self::INTERVAL_S)
+    }
+
+    #[must_use]
+    pub fn timeout_ms(&self) -> u32 {
+        self.timeout_ms.unwrap_or(Self::TIMEOUT_MS)
+    }
+
+    #[must_use]
+    pub fn failures_to_down(&self) -> u32 {
+        self.failures_to_down.unwrap_or(Self::FAILURES_TO_DOWN)
+    }
+
+    #[must_use]
+    pub fn successes_to_up(&self) -> u32 {
+        self.successes_to_up.unwrap_or(Self::SUCCESSES_TO_UP)
+    }
+
+    /// The targets a round tries: the declared ones, or
+    /// [`DEFAULT_PROBE_TARGETS`] when there are none.
+    #[must_use]
+    pub fn targets(&self) -> Vec<ProbeTarget> {
+        if self.targets.is_empty() {
+            default_probe_targets()
+        } else {
+            self.targets.clone()
+        }
+    }
+}
+
+/// One thing a probe round tries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProbeTarget {
+    /// An IPv4 unicast address, or `gateway`: the uplink's own router.
+    pub address: String,
+    /// `icmp` (an echo) or `tcp` (a connect to `port`, closed at once).
+    pub method: String,
+    /// For `tcp` only; absent is 443.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+}
+
+impl ProbeTarget {
+    /// The port a `tcp` target connects to when it names none.
+    pub const TCP_PORT: u16 = 443;
+}
+
+/// The targets a check enabled with none stores: two public resolvers on
+/// different networks, each by a TCP connect to port 53. Port 53 rather than
+/// 443: a captive portal or transparent proxy commonly answers any port 443,
+/// which would read a portal that reaches nothing as up, while both
+/// resolvers answer DNS over TCP on 53 as their own service.
+pub const DEFAULT_PROBE_TARGETS: [(&str, u16); 2] = [("1.1.1.1", 53), ("8.8.8.8", 53)];
+
+/// [`DEFAULT_PROBE_TARGETS`] as targets.
+#[must_use]
+pub fn default_probe_targets() -> Vec<ProbeTarget> {
+    DEFAULT_PROBE_TARGETS
+        .iter()
+        .map(|(address, port)| ProbeTarget {
+            address: (*address).to_string(),
+            method: "tcp".to_string(),
+            port: Some(*port),
+        })
+        .collect()
 }
 
 impl IfaceSettings {
@@ -94,7 +204,9 @@ pub struct RouteConfig {
     /// which is what an on-link route is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway: Option<String>,
-    /// Route metric; absent leaves networkd's own default.
+    /// Route metric. A default route's is 20 or more; absent, a default
+    /// route takes the entry's (20, 21, ... in name order) and any other
+    /// route networkd's own default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metric: Option<u32>,
 }

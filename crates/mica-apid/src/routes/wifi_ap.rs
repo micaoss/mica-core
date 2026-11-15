@@ -637,8 +637,9 @@ pub(crate) async fn api_v1_wifi_write(
 /// per-interface route checks one.
 async fn radio_addressing(
     state: &AppState,
-    cfg: micad_settings::IfaceSettings,
+    mut cfg: micad_settings::IfaceSettings,
 ) -> Result<(String, Value), Box<Response>> {
+    micad_settings::store_probe_defaults(&mut cfg);
     let radio = state
         .api
         .get_settings("wifi.client.interface")

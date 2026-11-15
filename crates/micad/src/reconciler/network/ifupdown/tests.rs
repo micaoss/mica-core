@@ -75,9 +75,9 @@ fn dhcp_static_and_unaddressed_interfaces_render_as_ifupdown_stanzas() {
         "# Managed by micad from `network`; the device's network. Do not edit.\n\
 auto lo\niface lo inet loopback\n\
 \nauto eth0\niface eth0 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 100\n    udhcpc_opts -b -S -O mtu\n\
-\nauto eth1\niface eth1 inet static\n    address 192.168.1.10\n    netmask 255.255.255.0\n    gateway 192.168.1.1\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/eth1 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n    down rm -f /run/mica/resolv.d/eth1 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n\
+\nauto eth1\niface eth1 inet static\n    address 192.168.1.10\n    netmask 255.255.255.0\n    up ip route add default via 192.168.1.1 dev eth1 metric 20\n    down ip route del default via 192.168.1.1 dev eth1 metric 20 || :\n    up mkdir -p /run/mica/resolv.d && printf 'nameserver %s\\n' 1.1.1.1 9.9.9.9 >/run/mica/resolv.d/eth1 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n    down rm -f /run/mica/resolv.d/eth1 && { if [ -x /usr/lib/mica/mica-resolv ]; then /usr/lib/mica/mica-resolv; else { cat /run/mica/resolv.d/* 2>/dev/null || :; } >/run/mica/resolv.conf; fi; }\n\
 \nauto eth2\niface eth2 inet manual\n\
-\nauto eth3\niface eth3 inet6 static\n    address fd00::2\n    netmask 64\n    gateway fd00::1\n\
+\nauto eth3\niface eth3 inet6 static\n    address fd00::2\n    netmask 64\n    up ip -6 route add default via fd00::1 dev eth3 metric 21\n    down ip -6 route del default via fd00::1 dev eth3 metric 21 || :\n\
 \nauto eth4\niface eth4 inet dhcp\n    script /usr/lib/mica/mica-udhcpc\n    metric 110\n    udhcpc_opts -b -S -O mtu\n"
     );
 }
@@ -287,6 +287,46 @@ fn iproute2_is_the_first_ip_present_and_not_busybox() {
     assert_eq!(iproute2_ip(&[&absent, &real]), Some(real.clone()));
     assert_eq!(iproute2_ip(&[&linked, &real]), None);
     assert_eq!(iproute2_ip(&[&absent]), None);
+}
+
+/// Each static default route gets its own metric from 20, in name order: a
+/// static gateway, and a declared default route with no metric of its own; a
+/// declared metric is kept.
+#[test]
+fn static_default_routes_get_metrics_from_twenty_in_name_order() {
+    let declared = |metric| RouteConfig {
+        destination: "0.0.0.0/0".to_string(),
+        gateway: Some("10.0.1.1".to_string()),
+        metric,
+    };
+    let network = settings(&[
+        ("eth1", fixed("192.168.1.10/24", Some("192.168.1.1"), &[])),
+        (
+            "eth2",
+            IfaceSettings {
+                routes: vec![declared(None)],
+                ..fixed("10.0.1.10/24", None, &[])
+            },
+        ),
+        ("eth3", fixed("10.0.3.10/24", Some("10.0.3.1"), &[])),
+        (
+            "eth4",
+            IfaceSettings {
+                routes: vec![declared(Some(300))],
+                ..fixed("10.0.4.10/24", None, &[])
+            },
+        ),
+    ])
+    .network;
+    let text = render(&network, &[], None, &crate::board::Board::default()).unwrap();
+    for line in [
+        "up ip route add default via 192.168.1.1 dev eth1 metric 20",
+        "up ip route add 0.0.0.0/0 via 10.0.1.1 dev eth2 metric 21",
+        "up ip route add default via 10.0.3.1 dev eth3 metric 22",
+        "up ip route add 0.0.0.0/0 via 10.0.1.1 dev eth4 metric 300",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
 }
 
 /// Each DHCP link's default route gets its own metric, in name order across

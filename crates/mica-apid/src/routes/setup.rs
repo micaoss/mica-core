@@ -224,7 +224,9 @@ pub(crate) async fn api_v1_setup(
                 Err(response) => return *response,
             };
             for (iface, cfg) in submitted {
-                candidate.insert(iface.clone(), cfg.clone());
+                let mut cfg = cfg.clone();
+                micad_settings::store_probe_defaults(&mut cfg);
+                candidate.insert(iface.clone(), cfg);
             }
             if let Err(response) = relational_refusal(&candidate, NETWORK_SETTINGS_PATH) {
                 return *response;

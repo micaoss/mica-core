@@ -117,9 +117,6 @@ pub(super) fn render_unit(
         }
     } else if let Some(static_cfg) = &cfg.static_ {
         out.push_str(&format!("Address={}\n", static_cfg.address));
-        if let Some(gateway) = &static_cfg.gateway {
-            out.push_str(&format!("Gateway={gateway}\n"));
-        }
         for dns in &static_cfg.dns {
             out.push_str(&format!("DNS={dns}\n"));
         }
@@ -133,12 +130,24 @@ pub(super) fn render_unit(
     // refuses to render it, so a file hand-edited past apid still produces a
     // unit that means what the bridge means.
     if master.is_none() {
+        // A static gateway is a default route at the entry's metric.
+        if let Some(gateway) = cfg
+            .static_
+            .as_ref()
+            .filter(|_| !cfg.dhcp)
+            .and_then(|static_cfg| static_cfg.gateway.as_ref())
+        {
+            out.push_str(&format!("\n[Route]\nGateway={gateway}\n"));
+            if let Some(metric) = metric {
+                out.push_str(&format!("Metric={metric}\n"));
+            }
+        }
         for route in &cfg.routes {
             out.push_str(&format!("\n[Route]\nDestination={}\n", route.destination));
             if let Some(gateway) = &route.gateway {
                 out.push_str(&format!("Gateway={gateway}\n"));
             }
-            if let Some(metric) = route.metric {
+            if let Some(metric) = route_metric(route, metric) {
                 out.push_str(&format!("Metric={metric}\n"));
             }
         }
@@ -190,24 +199,61 @@ pub(super) fn render_unit(
 const ROUTE_METRIC_BASE: u32 = 100;
 const ROUTE_METRIC_STEP: u32 = 10;
 
-/// The default-route metric of each DHCP link this reconciler renders: the
-/// declared ones that address themselves and the undeclared `ports`.
+/// The default-route metric of the first entry with a static default route
+/// (`static.gateway`, or a declared default route with no metric of its
+/// own); each next one, in name order, takes one more. Below every DHCP
+/// link's, so a static gateway still wins, and above micad's failover route
+/// ([`micad_settings::OVERRIDE_METRIC`]), which beats them all.
+const STATIC_METRIC_BASE: u32 = micad_settings::STATIC_METRIC_BASE;
+
+/// The default-route metric of each link this reconciler renders: each DHCP
+/// link (the declared ones that address themselves and the undeclared
+/// `ports`), and each entry with a static default route.
 pub(super) fn route_metrics<'a>(
     network: &'a BTreeMap<String, IfaceSettings>,
     masters: &BTreeMap<&str, &str>,
     ports: &'a BTreeSet<String>,
 ) -> BTreeMap<&'a str, u32> {
+    let routed = |iface: &str, cfg: &IfaceSettings| {
+        cfg.can.is_none() && cfg.kind != IfaceKind::Wireguard && !masters.contains_key(iface)
+    };
     let declared = network
         .iter()
-        .filter(|(iface, cfg)| {
-            cfg.dhcp && cfg.can.is_none() && !masters.contains_key(iface.as_str())
-        })
+        .filter(|(iface, cfg)| cfg.dhcp && routed(iface, cfg))
         .map(|(iface, _)| iface.as_str());
     let links: BTreeSet<&str> = declared.chain(ports.iter().map(String::as_str)).collect();
+    let statics = network
+        .iter()
+        .filter(|(iface, cfg)| routed(iface, cfg) && static_default(cfg))
+        .map(|(iface, _)| iface.as_str());
     links
         .into_iter()
         .zip((ROUTE_METRIC_BASE..).step_by(ROUTE_METRIC_STEP as usize))
+        .chain(statics.zip(STATIC_METRIC_BASE..))
         .collect()
+}
+
+/// Whether `cfg` holds a static default route: a static gateway, or a
+/// declared default route with no metric of its own.
+fn static_default(cfg: &IfaceSettings) -> bool {
+    (!cfg.dhcp
+        && cfg
+            .static_
+            .as_ref()
+            .is_some_and(|static_cfg| static_cfg.gateway.is_some()))
+        || cfg.routes.iter().any(|route| {
+            route.metric.is_none() && micad_settings::is_default_destination(&route.destination)
+        })
+}
+
+/// The metric `route` is rendered with: its own, or, for a default route that
+/// declares none, the entry's ([`route_metrics`]).
+pub(super) fn route_metric(route: &micad_settings::RouteConfig, entry: Option<u32>) -> Option<u32> {
+    route.metric.or_else(|| {
+        micad_settings::is_default_destination(&route.destination)
+            .then_some(entry)
+            .flatten()
+    })
 }
 
 /// The unit of a wired port nobody declared: the image's DHCP, with its
