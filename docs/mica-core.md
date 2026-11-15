@@ -321,9 +321,11 @@ DNS follows the uplinks: an uplink that is `down` while another is active is not
 names. On systemd micad sets resolved's `SetLinkDefaultRoute` false on it, so each lookup goes
 to the other links' servers, true again once it is not down, and the false again every 10 s
 while it lasts, since networkd may reset it when it reconfigures the link. On OpenRC micad
-writes `/run/mica/resolv.order`, one interface name a line, the active uplink first and the
-down ones last, and runs Base's `mica-resolv`, which builds `resolv.conf` in that order; with
-nothing to steer it removes the file and runs `mica-resolv` again. While every uplink is down,
+writes `/run/mica/resolv.order` (through a sibling and a rename), the active uplink first and
+the down ones last, each as its two `resolv.d` file names, `00-<iface>` (the servers a DHCP
+entry declares) then `<iface>` (the lease's, or a static entry's, which its stanza writes), and
+runs Base's `mica-resolv`, which builds `resolv.conf` in that order and skips a name with no
+file; with nothing to steer it removes the file and runs `mica-resolv` again. While every uplink is down,
 or the natural one is active with none down, nothing is steered. With the global servers on,
 every lookup goes to them whichever uplink is active.
 

@@ -519,7 +519,12 @@ async fn the_order_file_is_written_and_removed_with_a_rebuild_each_time() {
     ]);
     follow.follow(&order).await;
     follow.follow(&order).await;
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "eth1\neth0\n");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "00-eth1\neth1\n00-eth0\neth0\n"
+    );
+    let staged: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+    assert_eq!(staged.len(), 1, "nothing staged is left beside the file");
     assert_eq!(commands.calls(), ["/usr/lib/mica/mica-resolv"]);
     follow.follow(&dns::DnsOrder::default()).await;
     follow.follow(&dns::DnsOrder::default()).await;

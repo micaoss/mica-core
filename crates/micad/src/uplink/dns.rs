@@ -6,10 +6,14 @@
 //!   remaining links' servers. The value is resolved's runtime state, which
 //!   networkd may reset when it reconfigures the link, so a down uplink's is
 //!   set again every [`REASSERT`].
-//! - OpenRC: [`ORDER_PATH`], one interface name a line, the active uplink
-//!   first and the down ones last, which Base's `mica-resolv` follows when it
-//!   builds `resolv.conf`; micad runs it after each change. With nothing to
-//!   steer the file is removed and the order is Base's own.
+//! - OpenRC: [`ORDER_PATH`], the active uplink first and the down ones last,
+//!   which Base's `mica-resolv` follows when it builds `resolv.conf`; micad
+//!   writes it through a sibling and a rename, and runs `mica-resolv` after
+//!   each change. With nothing to steer the file is removed and the order is
+//!   Base's own. Each uplink is two lines, its `resolv.d` file names:
+//!   `00-<iface>`, the servers its entry declares beside DHCP, then `<iface>`,
+//!   a lease's (`mica-udhcpc`) or a static entry's. Base skips a name with no
+//!   file.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -171,7 +175,11 @@ impl ResolvOrder {
                 Err(err) => Err(err.into()),
             };
         }
-        let text: String = order.order.iter().map(|name| format!("{name}\n")).collect();
+        let text: String = order
+            .order
+            .iter()
+            .map(|name| format!("00-{name}\n{name}\n"))
+            .collect();
         crate::fswrite::write_config_if_changed(&self.path, &text, 0o644)
     }
 }
