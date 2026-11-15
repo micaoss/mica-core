@@ -146,7 +146,7 @@ One typed tree (`crates/micad-settings`), addressed by dot-paths:
 | Subtree | Contents |
 | --- | --- |
 | `hostname` | The hostname |
-| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`, or `false` on a port the board declares internal, section 3.11): `false` keeps the interface off the default route, section 3.4; a `can` entry has its block alone (below) |
+| `network.<iface>` | `kind` (`physical`, `vlan`, `bridge`, `wireguard`, `can`) and its block, DHCP (optionally with `dns`, servers used instead of the lease's; `dhcp` absent is false) or static addressing, routes, and `internet` (physical, bridge and VLAN entries, the radio's too, which holds the Wi-Fi client's addressing; absent is `true`, or `false` on a port the board declares internal, section 3.11): `false` keeps the interface off the default route, section 3.4; `probe`, the uplink's reachability check (below); a `can` entry has its block alone (below) |
 | `dns` | `global` (`enabled` and up to three IPv4 `servers`, kept while switched off) replaces every interface's servers; `staticRecords` (up to 100 `{id, hostname, address, comment?}`, the address IPv4 and the id unique) go into the hosts file |
 | `access` | SSH (switch, listen addresses, authorized keys), the console, who reaches the API and where it listens (`web`), LAN discovery (`mdns.enabled` and `ssdp.enabled`, sections 3.12 and 3.13; absent is the product's choice, and each is written only once set), whether the cloud's SSH users are administrators (`cloudAdmins.enabled`, section 3.14, on the same rule), the admin password hash, the device credential, API tokens, claim state |
 | `wifi` | `client` (the station, on by default, and its known networks) and `ap` (the access point, off by default). On a product with Wi-Fi, first-boot provisioning turns the access point on (`always`) and the station off, unless the tree already declares a network to join; its SSID and key are the label's (`docs/factory-ap-key.md`) |
@@ -187,7 +187,10 @@ smaller than Ethernet's (GCE's 1460), arrives; networkd ignores it on a link who
 does not declare gets `60-mica-auto-<iface>.network`, the image's DHCP with its metric, which
 sorts before the image's `80-dhcp.network`; declaring the port removes it, and a port the board
 hides gets none (section 3.11). The Wi-Fi client's
-lease has metric 600. A static gateway keeps networkd's metric 0. On OpenRC the same numbers go
+lease has metric 600. A static gateway's default route has metric 20 on the first entry with one
+in name order and 1 more on each next one, so it beats every lease and stays below micad's
+failover route (metric 10, *Uplink failover* below); a declared default route with a metric
+below 20 is refused with `route_metric_reserved`. On OpenRC the same numbers go
 into each DHCP stanza as `metric <n>` and into `/var/lib/mica/wifi/client.env` as `metric=600`, for
 Base's `mica-udhcpc` to give the lease's default route (section 3.8). An interface with
 `internet: false` takes its lease's address and subnet route and no gateway: `[DHCPv4]` and
@@ -208,6 +211,29 @@ already matched the file to the link, so `Name=eth*` adopts like `Name=eth1`, an
 `[DHCPv4] RouteMetric=` and `UseMTU=` or `LinkLocalAddressing=`, so a `60-mica-auto-` unit adopts as DHCP. Anything else (another
 section or key, DHCP for IPv6, servers or an address beside DHCP) is refused as
 `vlan_parent_unsupported`, naming it.
+
+**Uplink reachability check.** `probe` on a physical, bridge or VLAN entry, the radio's too,
+switches on rounds of probes out of that interface; absent, or `enabled: false`, is off, and
+`enabled: false` keeps the targets. It is off by default. Switched on, it makes the device
+contact its targets from every uplink that has it, each round:
+
+| Field | Meaning |
+| --- | --- |
+| `enabled` | Whether the check runs |
+| `targets` | 1 to 4, each `{address, method, port?}`: `address` an IPv4 unicast address or `gateway` (the uplink's own router, the lease's or the static one), `method` `icmp` (one echo request) or `tcp` (a connect, closed at once; a refusal answers too), `port` for `tcp` only, default 443. A write that switches the check on with no targets stores the defaults, `1.1.1.1` and `8.8.8.8` by `tcp` on port 53, so the stored entry names what the device contacts |
+| `intervalS` | Seconds between rounds, 2 to 300, default 10 |
+| `timeoutMs` | Each probe's bound, 200 to 10 000 ms and below `intervalS`, default 2000 |
+| `failuresToDown` | Failed rounds in a row before the uplink is `down`, 1 to 20, default 3 |
+| `successesToUp` | Good rounds in a row before it is `up`, 1 to 50, default 5 |
+
+The default targets are two public resolvers on different networks, and port 53 because both
+serve DNS over TCP there, while a captive portal or transparent proxy commonly answers a
+connect to any port 443, which would make an uplink that reaches nothing look up. A round
+succeeds when any target answers. At the defaults, one target costs about 1.5 MB a day, which
+counts on a metered uplink. A check on an `internet: false`, `wireguard` or `can` entry is
+refused with `probe_not_allowed`; the other codes are `probe_targets`, `probe_address`,
+`probe_method`, `probe_port`, `probe_interval`, `probe_timeout` and `probe_threshold`, each at
+its field. A probe change is a `settings.apply`.
 
 **CAN interfaces.** `kind: "can"` is a CAN controller the kernel registered (`can0`); its
 `can` block:
@@ -272,6 +298,25 @@ rendered only once a network exists. A device provisioned before the default cha
 `conflict` and does not start; the console asks the operator before switching the other role off,
 and a scan without a station answers `reason` `access-point` or `client-off`.
 
+**Uplink failover.** micad's uplink engine never changes the routes networkd and `mica-udhcpc`
+own: each uplink keeps its own default route at its own metric (3.3). It probes every uplink
+whose check is on, out of that uplink alone: each probe socket is bound to the interface
+(`SO_BINDTODEVICE`) and to its IPv4 address, so the uplink's own default route carries it
+whichever is active. Each uplink is `off` (no check), `unknown` (checking, no verdict yet),
+`up`, `down`, `noRoute` (no default route on it: no carrier, no lease; at once, with no
+threshold, and `unknown` again when the route returns) or `blocked` (strict reverse-path
+filtering, `rp_filter` 1 on the interface or `all`, which drops the replies on an uplink that
+is not active). The uplink the kernel would pick, the lowest metric, is the natural one; the
+active one is the lowest-metric uplink that is `up`, `unknown` or `off`. When they differ, micad
+adds one default route of its own via the active uplink, protocol 109, metric 10, in the main
+table, and removes it when they agree again or no uplink is eligible: when every uplink fails,
+the device routes as it would with no check. The engine runs every second and on each
+rtnetlink route, address or link event, so the route comes back as soon as a lease renewal's
+address flush or networkd's reconfigure takes it; at start micad deletes any protocol-109
+default route left behind. A switch moves new connections only; an open one keeps its source
+address and stalls until it reconnects. Each switch is logged as `MICA_UPLINK active=<if>
+previous=<if> reason=<probe|link|recovered|none-up>` and signalled as `UplinkChanged`.
+
 Services are driven through one trait (`UnitControl`): systemd over D-Bus, with runtime
 enablement; on OpenRC, `rc-service` (`x.service` is `x`, `a@b.service` is `a.b`), with enablement
 a no-op because `/etc/runlevels` is read-only and micad starts what it wants on every boot.
@@ -284,7 +329,7 @@ directions, because `SettingsChanged` carries setting values.
 
 | Group | Members |
 | --- | --- |
-| Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged` |
+| Settings and state | `GetSettings`, `SetSettings`, `SetSettingsMany`, `GetTask`, `GetState`, `ReportHealth`, `ForgetService`; signals `SettingsChanged`, `TaskChanged`, `UplinkChanged` (`{at, from, to, reason}`, 3.4) |
 | Observation | `GetNetworkState`, `GetObservedNetwork`, `GetTimeStatus`, `GetStorageStatus`, `GetStorageMedia`, `GetSystemInfo`, `GetDeviceCode`, `GetTelemetry`, `GetFailureEvidence`, `GetLog`, `GetLogOfBoot`, `GetContainers`, `GetContainerLog`, `ScanWifi`, `TestDnsServers`, `GetDnsProbe`, `ProbeDns`, `GetBluetooth` |
 | Actions | `Reboot`, `PowerOff`, `SetTransientRootPassword`, `RotateWireguardKey`, `UnmountMedia`, `EjectMedia`, `FactoryReset` (the administrator password, or none from a caller the bus knows as uid 0, the requester and its source; a refusal is `com.mica.micad1.Error.FactoryResetRefused`, its description the JSON `{code, message}`) and `GetFactoryReset` (section 3.7) |
 | Claim and BLE provisioning | `Claim` (one write, refused `com.mica.micad1.Error.AlreadyClaimed` once the device has an administrator, so two claims cannot both land), `AdminPasswordSet` and `AdminLoggedIn` (the BLE verifier and lockout, `docs/ble-provisioning.md`); `GetBleProvisioning`, `OpenBleProvisioning` (a `manual` window, answering its temp code) and `CloseBleProvisioning`. While a session holds the radio, `SetSettings`, `SetSettingsMany` and `Claim` refuse writes reaching `wifi` with `com.mica.micad1.Error.WifiLocked` (apid: 423 `wifi_locked`) |
@@ -309,6 +354,10 @@ absence is reported with its reason rather than as a healthy reading:
   route get` answers) marks each IPv4 default route `effective` when it leaves by that link and
   gateway; without an answer no route carries the field. Each running access point carries the
   `channel` and `frequencyMhz` hostapd's `STATUS` reports, absent while it is still choosing one.
+- **Uplinks** (`uplinks` in the observed network, section 3.4): `active`, `natural`,
+  `override` and `lastChange`, and per uplink its `metric`, `state`, `since`, the round counters,
+  its check's settings and the last round with each target's answer (`ok`, `latencyMs` or
+  `detail`).
 - **Resolution check** (`GetDnsProbe`, `ProbeDns`): `0.debian.pool.ntp.org` looked up every
   60 s and on demand, within 3 s, through resolved's `ResolveHostname` with
   `SD_RESOLVED_NO_CACHE`, or on OpenRC through the C library's resolver; the last result is

@@ -1,6 +1,6 @@
 # Uplink reachability and failover
 
-Status: proposal (uplink-20261115), approved in principle by the user. Nothing here is implemented. It lands on the 0.0.9 line once approved.
+Status: approved by the user (uplink-20261115), with the answers in section 13. Round 1 is implemented on the 0.0.9 line; round 2 is next.
 
 Facts below are from mica-core main 0c114a5. mica-system-base origin/main was read only.
 
@@ -64,13 +64,14 @@ Details:
 - **Methods.** Both are implemented in micad, with no package and no new capability:
   - `icmp`: echo request over a raw ICMP socket (CAP_NET_RAW, which micad has as root).
   - `tcp`: a connect to `port`, closed at once. It needs no capability.
-- **What I recommend.**
-  - `icmp` to the gateway: a router rarely listens on TCP, and an echo is cheapest.
-  - `tcp` to an internet address on a port real traffic uses (443, or 53). Many upstreams filter or rate-limit ICMP. A TCP handshake proves the path the device's traffic takes, and it is the only one of the two that works through a NAT that drops ICMP.
-  - The gateway alone proves only the first hop. The console suggests one gateway check plus two internet addresses on different networks.
+- **Default targets (the user's choice).**
+  - `1.1.1.1` and `8.8.8.8`, both `tcp` on port 53. A write that switches the check on with no targets stores these two, so the stored entry names what the device contacts.
+  - Port 53, not 443: both resolvers serve DNS over TCP on 53, while a captive portal or transparent proxy commonly answers a connect to any 443, which would make a dead uplink look up.
+  - TCP rather than ICMP: many upstreams filter or rate-limit ICMP, and a handshake proves the path the device's traffic takes.
+  - The user may edit them or add `gateway` (an `icmp` echo to the uplink's router is cheapest, but proves only the first hop).
 - **Targets.**
   - 1 to 4 per uplink, each `{ "address": "<IPv4>" | "gateway", "method": "icmp" | "tcp", "port": 1..65535 }`.
-  - `port` is only for `tcp`; it defaults to 443.
+  - `port` is only for `tcp`; it defaults to 443 on a target that names none (the default targets name 53).
   - `gateway` is the uplink's own router: the lease's, or the static gateway.
   - Addresses only: no host names (section 8).
 - **One round.**
@@ -119,8 +120,8 @@ Details:
   "probe": {
     "enabled": true,
     "targets": [
-      { "address": "gateway", "method": "icmp" },
-      { "address": "192.0.2.10", "method": "tcp", "port": 443 }
+      { "address": "1.1.1.1", "method": "tcp", "port": 53 },
+      { "address": "8.8.8.8", "method": "tcp", "port": 53 }
     ],
     "intervalS": 10,
     "timeoutMs": 2000,
@@ -133,7 +134,7 @@ Details:
 The numeric fields are optional; absent means the default. Validation codes, each at its field path:
 
 - `probe_not_allowed`: on an `internet: false`, `wireguard` or `can` entry.
-- `probe_targets`: none, more than 4, or duplicates.
+- `probe_targets`: more than 4, or duplicates (none, while switched on, stores the defaults).
 - `probe_address`: not an IPv4 unicast address or `gateway`; loopback, multicast, `0.0.0.0` and the broadcast address are refused.
 - `probe_method`: not `icmp` or `tcp`.
 - `probe_port`: out of range, or given with `icmp`.
@@ -161,7 +162,7 @@ A probe change is a `settings.apply` task: no unit is rewritten, and the engine 
   - Static servers on a static entry follow their entry like a lease's.
 - **Console.**
   - The network page shows per uplink a reachability badge (reachable / unreachable / checking / not checked / no route) and the active marker. It also shows the last round's targets.
-  - The interface editor gets a "Reachability check" section with the targets, the four numbers and the traffic cost line.
+  - The interface editor gets a "Reachability check" section with the targets, pre-filled with the two defaults and editable (or `gateway` added), the four numbers and the traffic cost line. Its help says plainly that switching it on makes the device contact those addresses. The check is off by default.
 - **`mica network`.** It gains an `INTERNET` column (`up`, `down`, `checking`, `-`, `no route`) and a `*` on the active uplink. `mica network show <if>` prints the probe settings, the state, its counters and the last round's targets. `--json` is the observation's `uplinks`.
   - No write verb now. `mica` cannot change interface entries yet, and a probe is part of the entry, written through the network route with its validation. Adding `network.<if>.probe` alone to `mica set` would be a second write path to one entry. That belongs with a later `mica network set`, if wanted.
 - **Docs.**
@@ -197,7 +198,7 @@ A probe change is a `settings.apply` task: no unit is rewritten, and the engine 
   - settings validation for every code;
   - the observation JSON;
   - the CLI table and `show`.
-- **Netlink golden bytes:** the override's `RTM_NEWROUTE` and `RTM_DELROUTE` (main table, protocol 109, metric 10, gateway, oif), the protocol-109 default-route dump filter, and the route and link group subscription. Same style as netlink/tunnel/tests.rs.
+- **Netlink golden bytes:** the override's `RTM_NEWROUTE` and `RTM_DELROUTE` (main table, protocol 109, metric 10, gateway, output interface), the protocol-109 default-route dump filter, and the route and link group subscription. Same style as netlink/tunnel/tests.rs.
 - **Probe sockets:** an ICMP echo and a TCP connect bound to a device, against a veth peer in a namespace. Part of the VM case, since it needs root.
 - **Core VM case** (ignored test, booted in QEMU like the tunnels' vm.rs):
   - Two "ISP" namespaces, each behind a veth pair. Each has an upstream namespace holding the probe target, reached over a second veth.
@@ -218,14 +219,14 @@ A probe change is a `settings.apply` task: no unit is rewritten, and the engine 
 
 | Round | Content | Effort |
 | --- | --- | --- |
-| 1 (core) | Settings model and validation; the metric plan (static gateways 20+n, override 10) on both inits; probe sockets; state machine; selection; override route writes with golden bytes; route monitor and re-assertion; observation `uplinks`; `UplinkChanged` and the log line; unit tests; the core VM case. | about 3 days |
-| 2 (core) | DNS following (resolved on systemd; the order file on OpenRC once Base has it); API and OpenAPI; console status and editor in both locales; `mica network`; docs. | about 2 days |
+| 1 (core) | Settings model and validation, with the API model and OpenAPI for `probe`; the stored default targets; the metric plan (static gateways 20+n, override 10) on both inits; probe sockets; state machine; selection; override route writes with golden bytes; route monitor and re-assertion; observation `uplinks`; `UplinkChanged` and the log line; unit tests; the core VM case; docs/mica-core.md 3.3 to 3.6. | about 3 days |
+| 2 (core) | DNS following (resolved on systemd; the order file on OpenRC once Base has it); the status schema in OpenAPI; console status and editor in both locales; `mica network`; docs. | about 2 days |
 | 3 (build, Base) | Base's `mica-resolv` order; mica-build's two-uplink suites on both inits. | Base small; build about 1 day |
 
 Each core round gates once and is pushed on the 0.0.9 line. A release follows only on the user's word.
 
-## 13. Questions for the user
+## 13. The user's answers
 
-1. Static gateways move from metric 0 to 20+n, so micad's override can sit above them. Static still beats DHCP. Agreed?
-2. Defaults: 10 s interval, 2 s timeout, 3 failures to down, 5 successes to up. Agreed, or different?
-3. Should the console pre-fill suggested internet targets when the check is switched on? Pre-filling names a third party (e.g. a public resolver) that the device would contact. The image currently contacts only its NTP pool. My recommendation: no pre-fill. Show the gateway check plus an empty address field with an example in the help text.
+1. Static gateways move from metric 0 to 20+n: agreed.
+2. Defaults 10 s interval, 2 s timeout, 3 failures to down, 5 successes to up: agreed.
+3. Default targets: `1.1.1.1` and `8.8.8.8` by `tcp` on port 53 (section 4). The console pre-fills them and lets the user edit them or add `gateway`; the settings store them explicitly once the check is on. The check stays off by default, and the docs and the console's help say that switching it on makes the device contact those addresses.
