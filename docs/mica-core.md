@@ -964,7 +964,10 @@ apply, and `mica doctor` collects the diagnostic snapshot
 Under `network` apid listens where `access.web` says (`GET`/`PUT /api/v1/web`, the console's
 access page), read at start from `/run/mica/apid.json`: by default plain HTTP on 8080 and no HTTPS,
 so it takes neither 80 nor 443 from another service. With `httpsEnabled` it serves HTTPS on
-`httpsPort` (default 8443) with its self-signed identity and the HTTP port only redirects there;
+`httpsPort` (default 8443) with its self-signed identity and the HTTP port only redirects there:
+every request but the SSDP description answers `308 Permanent Redirect`, whose `Location` is
+`https://` the request's host (its port dropped), `:<httpsPort>` unless that is 443, and the
+same path and query, so a client repeats the method and body there;
 the session cookie is `Secure` exactly then. A port another enabled listener (SSH, MQTT) holds is
 refused; out of `network` the ports hold none. A change restarts apid on the new listeners, or
 stops it. `mica-apid --healthcheck` asks `/healthz` on the local socket, and passes without

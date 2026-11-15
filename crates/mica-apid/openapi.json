@@ -10657,7 +10657,7 @@
           "resources"
         ],
         "summary": "Move the console: who reaches the API, its ports, and whether it serves\nHTTPS.",
-        "description": "**A `PUT` replaces the whole subtree.** Answers the apply task's id; the\n`web` reconciler then restarts apid on the new listeners, or stops it for\n`off`, so this connection ends and the console is reached at the new\naddress, or no longer at all. With HTTPS enabled the HTTP port only\nredirects to it.",
+        "description": "**A `PUT` replaces the whole subtree.** Answers the apply task's id; the\n`web` reconciler then restarts apid on the new listeners, or stops it for\n`off`, so this connection ends and the console is reached at the new\naddress, or no longer at all. With HTTPS enabled the HTTP port answers\n`308 Permanent Redirect` to it, path and query kept.",
         "operationId": "api_v1_web_write",
         "requestBody": {
           "content": {
@@ -15097,7 +15097,7 @@
           "httpPort": {
             "type": "integer",
             "format": "int32",
-            "description": "TCP port of the HTTP listener. It serves the console, or only\nredirects to HTTPS when that is enabled. Default 8080.",
+            "description": "TCP port of the HTTP listener. It serves the console, or, when HTTPS\nis enabled, answers every request but the SSDP description with `308\nPermanent Redirect` to the same host, path and query on `httpsPort`.\nDefault 8080.",
             "minimum": 0
           },
           "httpsEnabled": {

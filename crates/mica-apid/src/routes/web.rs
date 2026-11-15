@@ -21,8 +21,10 @@ pub(crate) struct WebConfiguration {
     /// `off`: nobody; apid does not run. Leaving `network` from here needs
     /// SSH on with an authorized key, the way back (`mica web network`).
     pub(super) mode: WebModeValue,
-    /// TCP port of the HTTP listener. It serves the console, or only
-    /// redirects to HTTPS when that is enabled. Default 8080.
+    /// TCP port of the HTTP listener. It serves the console, or, when HTTPS
+    /// is enabled, answers every request but the SSDP description with `308
+    /// Permanent Redirect` to the same host, path and query on `httpsPort`.
+    /// Default 8080.
     pub(super) http_port: u16,
     /// Whether apid serves HTTPS with its self-signed identity. Default off.
     pub(super) https_enabled: bool,
@@ -80,8 +82,8 @@ pub(crate) async fn api_v1_web_read(
 /// **A `PUT` replaces the whole subtree.** Answers the apply task's id; the
 /// `web` reconciler then restarts apid on the new listeners, or stops it for
 /// `off`, so this connection ends and the console is reached at the new
-/// address, or no longer at all. With HTTPS enabled the HTTP port only
-/// redirects to it.
+/// address, or no longer at all. With HTTPS enabled the HTTP port answers
+/// `308 Permanent Redirect` to it, path and query kept.
 #[utoipa::path(
     put,
     path = V1_WEB_PATH,

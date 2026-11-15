@@ -132,3 +132,34 @@ pub(super) async fn the_http_listener_serves_the_description_and_redirects_the_r
         "https://192.168.1.24:9443/api/v1/meta"
     );
 }
+
+// The redirect is 308, so a client repeats a POST there; the query stays,
+// and an HTTPS port of 443 is left out of `Location`.
+#[tokio::test]
+pub(super) async fn the_redirect_is_permanent_and_keeps_the_method_s_target() {
+    let fake = std::sync::Arc::new(crate::settings_api::FakeSettings::new(mqtt_tree(false)));
+    for (port, location) in [
+        (443, "https://edge.local/api/v1/login?next=%2F"),
+        (8443, "https://edge.local:8443/api/v1/login?next=%2F"),
+    ] {
+        let router = redirect_app(
+            port,
+            crate::routes::AppState::new(fake.clone(), SIGNING_KEY),
+        );
+        let response = send(
+            &router,
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/login?next=%2F")
+                .header("host", "edge.local:8080")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT, "{port}");
+        assert_eq!(
+            header_value(&response, axum::http::header::LOCATION),
+            location
+        );
+    }
+}
