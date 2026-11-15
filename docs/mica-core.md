@@ -959,7 +959,7 @@ how to bring it back, and makes no further request.
 On the device, root's commands work in every mode, over the bus to micad: `mica web status`
 names the mode and the listeners, `mica web network|local|off` sets the mode and waits for it to
 apply, and `mica doctor` collects the diagnostic snapshot
-`POST /api/v1/diagnostics` makes, into the same store, and prints its path.
+`POST /api/v1/diagnostics/snapshots` makes, into the same store, and prints its path.
 
 Under `network` apid listens where `access.web` says (`GET`/`PUT /api/v1/web`, the console's
 access page), read at start from `/run/mica/apid.json`: by default plain HTTP on 8080 and no HTTPS,

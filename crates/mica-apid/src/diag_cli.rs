@@ -1,6 +1,6 @@
 //! `mica doctor`: a diagnostic snapshot made on the device, with no apid.
 //!
-//! The snapshot is the one `POST /api/v1/diagnostics` makes, collected over
+//! The snapshot is the one `POST /api/v1/diagnostics/snapshots` makes, collected over
 //! the system bus and published to the same store, so it is there whatever
 //! `access.web.mode` says.
 
