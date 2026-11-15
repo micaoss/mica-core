@@ -1335,7 +1335,11 @@ naming only the extension's own modules, and `firmware` (paths below `firmware/`
 A module name is a path's file name without `.ko`, `-` read as `_`. Paths are relative, of plain
 components, at most four deep. An extension counts only when the manifest of its mapped image
 agrees with its descriptor and the kernel it is to run on has its kernel id, release and arch
-(`mica_deploy::driver_ext::check`); nothing on the device installs one yet.
+(`mica_deploy::driver_ext::check`). The device installs and removes one with mica-deploy
+(`extension-install`, `extension-remove`, 6.3), on trial until a boot confirms it. micad and the
+API drive it (3.7, 4), and the runkit maps and loads it at boot (6.5). An extension signed by the
+owner's key needs that owner's certificate enrolled first (`owner-cert-add`, 6.3), which takes
+effect at the next boot.
 
 **Sets.** `mica/set/v1`, signed with the release key in the same envelope, is the components of
 one kind, channel and architecture: `kind` (lowercase letters and digits), `channel` (`general`,
