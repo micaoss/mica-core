@@ -78,6 +78,13 @@ fn bus_errors_map_onto_the_exit_codes() {
             EXIT_FAILED,
             "update_in_progress",
         ),
+        (
+            fdo(zbus::fdo::Error::Failed(
+                r#"{"code":"data_encrypted","message":"DATA is encrypted"}"#.into(),
+            )),
+            EXIT_FAILED,
+            "data_encrypted",
+        ),
     ] {
         let failure = bus_failure(&error);
         assert_eq!(

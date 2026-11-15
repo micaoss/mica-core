@@ -410,7 +410,7 @@ absence is reported with its reason rather than as a healthy reading:
   only `{"factoryReset": true}` erases DATA in place and keeps `meta/` (6.5); micad then stages
   the request in `meta/` itself. It is refused, with a `code`, when the booted runkit does not
   carry it out (`factory_reset_unsupported`: it writes no `/run/mica/runkit.json`, or says
-`false`, as on an encrypted DATA), on an
+`false`), on an encrypted DATA (`data_encrypted`: the runkit says `"dataEncrypted": true`), on an
   unclaimed device (`not_claimed`), while an update is installing, holds the transaction lock or
   waits for its reboot (`update_in_progress`), while a deployment or set is on trial
   (`trial_pending`), and on a wrong password (`password_incorrect`). After 3 wrong passwords
@@ -1705,7 +1705,7 @@ read one format.
   That request stays until the erase is done, so an interrupted one starts again at the next
   boot; an entry it cannot remove is counted in its record and the boot goes on, and an
   unreadable request is set aside as `factory-reset.json.invalid` without erasing. The runkit
-  writes `/run/mica/runkit.json` (`{"factoryReset": true, "factoryResetVersion": 2}`) to say it
+  writes `/run/mica/runkit.json` (`{"factoryReset": true, "factoryResetVersion": 2, "dataEncrypted": false}`) to say it
   carries the reset out, and of which version; a reader that knows only `factoryReset` sees it
   as before. On a `gpt` board an ext4 on DATA smaller than its partition, as a grow the root
   started (`systemd-growfs`) leaves when a power cut stops it, is mounted and unmounted once
@@ -1768,7 +1768,8 @@ console gets `MICA_DATA stage=on|off|locked formatted=… [reason=…] [cipher=�
 mount the runkit copies SYSTEM's `firmware.json` into DATA's `meta/` when it has none, and keeps a
 first format's recovery passphrase in `meta/data-recovery-key` (mode 0600); the passphrase is
 never written to the console or a log. An encrypted DATA has no factory reset yet: its boot
-writes `"factoryReset": false` to `/run/mica/runkit.json` and leaves a staged reset unapplied.
+writes `"factoryReset": false, "dataEncrypted": true` to `/run/mica/runkit.json` and leaves a
+staged reset unapplied; micad refuses a reset there with `data_encrypted`.
 The exit ramdisk owns `mica-data` as it owns the verity mappings, and removes it once DATA is
 unmounted. The root's own mount of DATA is the one the runkit made: an encrypted product's
 `/etc/fstab` names no DATA line, since the root has no device-mapper udev rules and systemd keeps

@@ -86,13 +86,25 @@ impl FactoryReset {
         self.version().is_some()
     }
 
+    /// Whether the booted runkit says DATA is encrypted, which it does not
+    /// reset.
+    #[must_use]
+    pub fn data_encrypted(&self) -> bool {
+        self.capabilities_json()
+            .is_some_and(|value| value["dataEncrypted"] == json!(true))
+    }
+
+    fn capabilities_json(&self) -> Option<Value> {
+        mica_fs::read_bounded(&self.capabilities, 4096)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+    }
+
     /// The version of the reset the booted runkit carries out: 1 erases DATA
     /// in place, 2 makes it again and returns the system to the running
     /// deployment.
     fn version(&self) -> Option<u64> {
-        let value = mica_fs::read_bounded(&self.capabilities, 4096)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())?;
+        let value = self.capabilities_json()?;
         (value["factoryReset"] == json!(true))
             .then(|| value["factoryResetVersion"].as_u64().unwrap_or(1))
     }

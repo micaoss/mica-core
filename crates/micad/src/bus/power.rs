@@ -115,8 +115,9 @@ impl MicadService {
             .map_err(|err| fdo::Error::Failed(format!("reboot: {err}")))
     }
 
-    /// Why a factory reset cannot run now, the password aside: the booted
-    /// runkit does not carry one out, the device is not claimed, an update is
+    /// Why a factory reset cannot run now, the password aside: DATA is
+    /// encrypted, the booted runkit does not carry one out, the device is not
+    /// claimed, an update is
     /// being installed or awaits its reboot, or a deployment or core set is on
     /// trial.
     pub(super) async fn factory_reset_refusal(&self) -> Option<Refusal> {
@@ -124,6 +125,17 @@ impl MicadService {
             .factory_reset
             .as_ref()
             .is_some_and(|reset| reset.supported());
+        if !supported
+            && self
+                .factory_reset
+                .as_ref()
+                .is_some_and(|reset| reset.data_encrypted())
+        {
+            return Some(Refusal::new(
+                "data_encrypted",
+                "this device's DATA is encrypted, and its boot does not reset an encrypted DATA",
+            ));
+        }
         if !supported {
             return Some(Refusal::new(
                 "factory_reset_unsupported",

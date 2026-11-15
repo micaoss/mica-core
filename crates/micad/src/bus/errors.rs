@@ -136,7 +136,7 @@ pub(super) fn transient_to_fdo(err: anyhow::Error) -> fdo::Error {
 
 /// D-Bus error name for a refused factory reset; the description is JSON,
 /// `{"code", "message"}`, `code` being the API's: `not_claimed`,
-/// `factory_reset_unsupported`, `update_in_progress`, `trial_pending`,
+/// `data_encrypted`, `factory_reset_unsupported`, `update_in_progress`, `trial_pending`,
 /// `password_incorrect` or `login_throttled`.
 pub const FACTORY_RESET_REFUSED_ERROR: &str = "com.mica.micad1.Error.FactoryResetRefused";
 

@@ -1547,6 +1547,7 @@ export const zhCN: Translation = {
       last: '上次恢复出厂设置完成于 {{time}} UTC，由{{by}}发起。',
       by: { console: '控制台', api: 'API', cli: '设备命令行' },
       refusals: {
+        data_encrypted: '此设备的数据分区（DATA）已加密，其启动程序不对加密的数据分区执行恢复出厂设置。',
         factory_reset_unsupported: '此设备的启动程序尚不能执行恢复出厂设置，需要更新的系统。',
         not_claimed: '设备尚未被认领，上面没有任何配置。',
         update_in_progress: '有更新正在安装或等待重启，请先完成它。',

@@ -667,9 +667,11 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
     // receipt, whose readers refuse fields they do not know.
     fs::write(
         factory_reset::CAPABILITIES,
-        serde_json::to_vec(
-            &serde_json::json!({ "factoryReset": !data_encrypted, "factoryResetVersion": 2 }),
-        )?,
+        serde_json::to_vec(&serde_json::json!({
+            "factoryReset": !data_encrypted,
+            "factoryResetVersion": 2,
+            "dataEncrypted": data_encrypted,
+        }))?,
     )?;
     fs::write("/run/mica/deployment.json", &envelope)?;
     fs::write(core_set::BOOT_FILE, serde_json::to_vec(&core_boot)?)?;

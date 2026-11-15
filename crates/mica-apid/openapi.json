@@ -7070,7 +7070,7 @@
             }
           },
           "409": {
-            "description": "The reset cannot run now: the device's boot does not carry one out (`factory_reset_unsupported`), the device is not claimed (`not_claimed`), an update is being installed or awaits its reboot (`update_in_progress`), or a deployment or core set is on trial (`trial_pending`)",
+            "description": "The reset cannot run now: DATA is encrypted and the boot does not reset it (`data_encrypted`), the device's boot does not carry one out (`factory_reset_unsupported`), the device is not claimed (`not_claimed`), an update is being installed or awaits its reboot (`update_in_progress`), or a deployment or core set is on trial (`trial_pending`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -13331,7 +13331,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "`factory_reset_unsupported`, `not_claimed`, `update_in_progress` or\n`trial_pending`."
+            "description": "`data_encrypted`, `factory_reset_unsupported`, `not_claimed`,\n`update_in_progress` or `trial_pending`."
           },
           "message": {
             "type": "string"

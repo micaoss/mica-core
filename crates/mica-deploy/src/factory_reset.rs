@@ -27,7 +27,8 @@ pub const REQUEST: &str = "factory-reset.json";
 pub const DONE: &str = "factory-reset-done.json";
 /// Written by a runkit that carries out a staged reset: `{"factoryReset":
 /// true}`. A device whose runkit predates the reset has no such file, and
-/// the reset is not offered there.
+/// the reset is not offered there. `"dataEncrypted": true` says the reset
+/// is off because DATA is encrypted.
 pub const CAPABILITIES: &str = "/run/mica/runkit.json";
 /// Where a request that cannot be read is moved, so it never erases.
 pub const INVALID: &str = "factory-reset.json.invalid";

@@ -148,6 +148,7 @@ pub(super) async fn a_wrong_password_is_refused_and_backs_off_like_a_login() {
 pub(super) async fn micad_s_refusals_are_conflicts_named_by_their_code() {
     for code in [
         "not_claimed",
+        "data_encrypted",
         "factory_reset_unsupported",
         "update_in_progress",
         "trial_pending",

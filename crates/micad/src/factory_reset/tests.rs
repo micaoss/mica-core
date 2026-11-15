@@ -26,6 +26,21 @@ fn only_a_runkit_that_says_so_supports_the_reset() {
 }
 
 #[test]
+fn the_runkit_says_whether_data_is_encrypted() {
+    let (dir, reset) = device();
+    assert!(!reset.data_encrypted(), "no file");
+    for (text, want) in [
+        (r#"{"factoryReset":false,"dataEncrypted":true}"#, true),
+        (r#"{"factoryReset":true,"dataEncrypted":false}"#, false),
+        (r#"{"factoryReset":false}"#, false),
+        (r#"{"dataEncrypted":"true"}"#, false),
+    ] {
+        fs::write(dir.path().join("run/runkit.json"), text).unwrap();
+        assert_eq!(reset.data_encrypted(), want, "{text}");
+    }
+}
+
+#[test]
 fn a_staged_reset_is_the_runkit_s_request() {
     let (dir, reset) = device();
     reset.stage(Requester::Cli, "uid 0", 1_700_000_000).unwrap();

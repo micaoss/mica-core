@@ -160,8 +160,8 @@ pub(crate) struct FactoryResetStaged {
 /// Why a factory reset cannot run now.
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub(crate) struct FactoryResetRefusal {
-    /// `factory_reset_unsupported`, `not_claimed`, `update_in_progress` or
-    /// `trial_pending`.
+    /// `data_encrypted`, `factory_reset_unsupported`, `not_claimed`,
+    /// `update_in_progress` or `trial_pending`.
     pub(super) code: String,
     pub(super) message: String,
 }
@@ -245,7 +245,7 @@ pub(crate) async fn api_v1_factory_reset_status(
         (status = 400, description = "The body is not JSON (`request_invalid`)", body = ApiError),
         (status = 401, description = "No stored bearer token or authenticated browser session (`not_authenticated`)", body = ApiError),
         (status = 403, description = "The password is not the administrator's (`password_incorrect`), or a browser session mutation omitted or supplied the wrong CSRF token (`csrf_invalid`)", body = ApiError),
-        (status = 409, description = "The reset cannot run now: the device's boot does not carry one out (`factory_reset_unsupported`), the device is not claimed (`not_claimed`), an update is being installed or awaits its reboot (`update_in_progress`), or a deployment or core set is on trial (`trial_pending`)", body = ApiError),
+        (status = 409, description = "The reset cannot run now: DATA is encrypted and the boot does not reset it (`data_encrypted`), the device's boot does not carry one out (`factory_reset_unsupported`), the device is not claimed (`not_claimed`), an update is being installed or awaits its reboot (`update_in_progress`), or a deployment or core set is on trial (`trial_pending`)", body = ApiError),
         (status = 422, description = "The body is not this shape, or the password is empty (`validation_failed`)", body = ApiError),
         (status = 429, description = "Too many wrong passwords; retry shortly (`login_throttled`)", body = ApiError),
         (status = 500, description = "micad failed to stage it (`micad_failed`)", body = ApiError),
@@ -337,6 +337,7 @@ fn factory_reset_refusal(err: &anyhow::Error) -> Option<(&'static str, StatusCod
         "password_incorrect" => ("password_incorrect", StatusCode::FORBIDDEN),
         "login_throttled" => ("login_throttled", StatusCode::TOO_MANY_REQUESTS),
         "not_claimed" => ("not_claimed", StatusCode::CONFLICT),
+        "data_encrypted" => ("data_encrypted", StatusCode::CONFLICT),
         "factory_reset_unsupported" => ("factory_reset_unsupported", StatusCode::CONFLICT),
         "update_in_progress" => ("update_in_progress", StatusCode::CONFLICT),
         "trial_pending" => ("trial_pending", StatusCode::CONFLICT),

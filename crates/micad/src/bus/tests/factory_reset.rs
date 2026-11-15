@@ -182,6 +182,30 @@ pub(super) async fn a_runkit_without_the_reset_refuses_it() {
 }
 
 #[tokio::test]
+pub(super) async fn an_encrypted_data_is_its_own_refusal() {
+    let (service, _calls, dir) = claimed(MockDeployments::default());
+    std::fs::write(
+        dir.path().join("run/runkit.json"),
+        r#"{"factoryReset":false,"factoryResetVersion":2,"dataEncrypted":true}"#,
+    )
+    .unwrap();
+
+    let fault = service
+        .request_factory_reset(":1.5", PASSWORD.into(), false, "cli", "uid 0")
+        .await
+        .unwrap_err();
+    let ResetFault::Refused(json) = fault else {
+        panic!("not a refusal");
+    };
+    let refusal: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(refusal["code"], "data_encrypted");
+    let message = refusal["message"].as_str().unwrap();
+    assert!(message.contains("encrypted"), "{message}");
+    assert!(!message.contains("newer"), "{message}");
+    assert!(!staged(&dir));
+}
+
+#[tokio::test]
 pub(super) async fn an_update_or_a_trial_comes_first() {
     // An installed deployment awaiting its reboot.
     let (service, _calls, dir) = claimed(MockDeployments {

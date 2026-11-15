@@ -1761,6 +1761,7 @@ export const en = {
       last: 'Last factory reset completed {{time}} UTC, requested from {{by}}.',
       by: { console: 'the console', api: 'the API', cli: 'the device\'s command line' },
       refusals: {
+        data_encrypted: 'This device\'s DATA is encrypted, and its boot does not reset an encrypted DATA.',
         factory_reset_unsupported: 'This device\'s boot cannot carry out a factory reset yet; it needs a newer system.',
         not_claimed: 'The device is not claimed, and nothing on it is configured.',
         update_in_progress: 'An update is being installed or waits for its reboot. Finish it first.',
