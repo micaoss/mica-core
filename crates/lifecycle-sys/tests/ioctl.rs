@@ -2,7 +2,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use lifecycle_sys::{
-    clear_loop, loop_status, watchdog_keepalive, watchdog_support, watchdog_timeout,
+    clear_loop, loop_status, watchdog_keepalive, watchdog_set_timeout, watchdog_support,
+    watchdog_timeout,
 };
 
 #[test]
@@ -20,6 +21,10 @@ fn unrelated_regular_descriptor_returns_errno_without_writes_or_close() {
     );
     assert_eq!(
         watchdog_keepalive(&file).unwrap_err(),
+        rustix::io::Errno::NOTTY
+    );
+    assert_eq!(
+        watchdog_set_timeout(&file, 120).unwrap_err(),
         rustix::io::Errno::NOTTY
     );
     assert_eq!(loop_status(&file).unwrap_err(), rustix::io::Errno::NOTTY);

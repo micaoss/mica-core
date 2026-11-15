@@ -106,16 +106,62 @@ pub struct Partitions {
 /// standard partition array.
 const MAX_PARTITION: u32 = 128;
 
-/// Which watchdog the device arms, by the identity its driver reports.
-///
-/// Absent, the device arms `watchdog0`. A board whose kernel registers more
-/// than one watchdog names the one its loader started, so the choice is the
-/// board's declaration and never the kernel's probe order.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+/// The boot watchdog: which one the device arms, how long the root's init
+/// has to start feeding it, and how long a trial boot has to be confirmed
+/// (`docs/mica-core.md` 6.5).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Watchdog {
-    /// `/sys/class/watchdog/watchdog<N>/identity`, exactly.
-    pub identity: String,
+    /// `/sys/class/watchdog/watchdog<N>/identity`, exactly. Absent, the
+    /// device arms `watchdog0`. A board whose kernel registers more than one
+    /// watchdog names the one its loader started, so the choice is the
+    /// board's declaration and never the kernel's probe order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    /// The timeout, in seconds, the runkit sets at the handover to the root's
+    /// init; absent, [`Watchdog::HANDOVER_S`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handover_s: Option<u32>,
+    /// How long, in seconds of uptime, a trial boot has to be confirmed
+    /// before it is failed; absent, [`Watchdog::CONFIRM_S`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_s: Option<u32>,
+}
+
+impl Watchdog {
+    pub const HANDOVER_S: u32 = 120;
+    pub const HANDOVER_RANGE: std::ops::RangeInclusive<u32> = 30..=600;
+    pub const CONFIRM_S: u32 = 900;
+    pub const CONFIRM_RANGE: std::ops::RangeInclusive<u32> = 120..=7200;
+
+    pub fn handover_s(&self) -> u32 {
+        self.handover_s.unwrap_or(Self::HANDOVER_S)
+    }
+
+    pub fn confirm_s(&self) -> u32 {
+        self.confirm_s.unwrap_or(Self::CONFIRM_S)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if let Some(identity) = &self.identity {
+            ensure!(
+                (1..=32).contains(&identity.len())
+                    && identity.bytes().all(|b| (b' '..=b'~').contains(&b)),
+                "invalid watchdog identity"
+            );
+        }
+        ensure!(
+            self.handover_s
+                .is_none_or(|s| Self::HANDOVER_RANGE.contains(&s)),
+            "invalid watchdog handoverS"
+        );
+        ensure!(
+            self.confirm_s
+                .is_none_or(|s| Self::CONFIRM_RANGE.contains(&s)),
+            "invalid watchdog confirmS"
+        );
+        Ok(())
+    }
 }
 
 const MIB: u64 = 1024 * 1024;
@@ -341,17 +387,15 @@ impl BoardFacts {
             Storage::Ubi => self.validate_ubi()?,
         }
         if let Some(watchdog) = &self.watchdog {
-            ensure!(
-                (1..=32).contains(&watchdog.identity.len())
-                    && watchdog
-                        .identity
-                        .bytes()
-                        .all(|b| (b' '..=b'~').contains(&b)),
-                "invalid watchdog identity"
-            );
+            watchdog.validate()?;
         }
         self.reserves.validate(self.boot)?;
         Ok(())
+    }
+
+    /// The board's watchdog declaration, its defaults when it has none.
+    pub fn watchdog(&self) -> Watchdog {
+        self.watchdog.clone().unwrap_or_default()
     }
 
     /// A `gpt` board's partitions, records and loader.

@@ -61,10 +61,15 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         );
     }
     // Arming is synchronous and precedes access to deployment storage. The
-    // signed cmdline fixes the timeout; NOWAYOUT keeps it armed across exec.
+    // driver's timeout serves until the handover, which sets the board's;
+    // NOWAYOUT keeps it armed across exec.
     let watchdog = shutdown::resolve_watchdog(
         Path::new("/sys/class/watchdog"),
-        config.board.watchdog.as_ref().map(|w| w.identity.as_str()),
+        config
+            .board
+            .watchdog
+            .as_ref()
+            .and_then(|w| w.identity.as_deref()),
     )?;
     control.supervisor.arm(&watchdog)?;
     control.storage.watchdog = watchdog;
@@ -757,6 +762,13 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
         )?;
     }
     fs::copy("/etc/mica/boot.json", "/newroot/run/mica/boot-policy.json")?;
+    // The root's init feeds the watchdog armed here, and has the board's
+    // handover window to start.
+    control.supervisor.hand_over(
+        &control.storage.watchdog,
+        config.board.watchdog().handover_s(),
+        Path::new("/newroot"),
+    )?;
     eprintln!("mica-init: verified deployment {id}; support mounted before system init");
     if let Ok(status) = fs::read_to_string("/newroot/proc/self/status") {
         let peak = status.lines().find_map(|line| {

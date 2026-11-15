@@ -1656,7 +1656,7 @@ Nothing here knows a board by name. The `board` section of the signed boot polic
 `boot` (`uefi` or `uboot-fit`), `kernel` (`uki` or `fit`), `partitions` (the GPT numbers of the
 boot partition, SYSTEM and DATA), `firmware` (the target a firmware receipt carries: `efi`,
 `disk-range` or an eMMC boot area), `records` (the FIT record geometry), and optionally
-`watchdog`, `reserves` (free space kept on SYSTEM, the ESP and DATA, 1 MiB to 1 GiB) and
+`watchdog` (below), `reserves` (free space kept on SYSTEM, the ESP and DATA, 1 MiB to 1 GiB) and
 `dataQuotas` (`false` mounts DATA without project quotas), `bootTrust` and `storage` (below).
 The section is validated before use, and the disk is held to the stated geometry before anything
 is written. The policy is read by field name, in any order; its producer writes it as canonical
@@ -1690,6 +1690,17 @@ read one format.
 ### 6.5 mica-runkit and lifecycle-sys
 
 `mica-runkit` is one static executable selected by the name it runs as:
+`watchdog`, in the `board` section, has three optional fields:
+- `identity`: the watchdog the runkit arms, by the exact `identity` its driver reports in
+  `/sys/class/watchdog/watchdog<N>/identity` (1 to 32 printable ASCII characters). Exactly one
+  watchdog must match. Absent, it is `watchdog0`.
+- `handoverS`: the timeout the runkit sets at the handover to the root's init, 30 to 600 s,
+  default 120 (6.5).
+- `confirmS`: how long a trial boot has to be confirmed, in seconds of uptime, 120 to 7200,
+  default 900 (6.3).
+
+A value outside its bounds, or another field, refuses the policy.
+
 
 - **`init`**, PID 1 of the signed initramfs: requires dm-verity signature enforcement, arms the
   watchdog, reads the policy, authenticates the selected deployment, opens root and support as
@@ -1699,10 +1710,18 @@ read one format.
   driver extensions and composes or binds modules and firmware (below), seeds the persistent
   machine identity, and hands over to the root's init. No network and no shell exist at this stage.
   The watchdog is held close-on-exec and its NOWAYOUT is required, so the exec into the root's
-  init closes it unstopped: the kernel's `watchdog: watchdog0: watchdog did not stop!` (KERN_CRIT,
-  shown by `dmesg` and `journalctl -b -p err`) is printed by design at every boot, and the timer
-  keeps running until the root feeds it (systemd's `RuntimeWatchdogSec`, or the `mica-watchdog`
-  service on OpenRC).
+  init closes it unstopped: the kernel's `watchdog: watchdog<N>: watchdog did not stop!`
+  (KERN_CRIT, shown by `dmesg` and `journalctl -b -p err`) is printed by design at every boot,
+  and the timer keeps running until the root feeds it (systemd's `RuntimeWatchdogSec`, or the
+  `mica-watchdog` service on OpenRC). Until the handover the driver's own timeout serves. At the
+  handover the runkit names the armed watchdog to the root's init, so the root feeds that one
+  and no other: `/run/systemd/system.conf.d/50-mica-watchdog.conf` (`[Manager]`,
+  `WatchdogDevice=/dev/watchdog<N>`) for systemd, and `/run/mica/watchdog.env`
+  (`WATCHDOG_DEVICE=/dev/watchdog<N>`) for Base's OpenRC feeder. It then sets the timeout to the
+  policy's `handoverS`, within the driver's `min_timeout` and `max_timeout`, logs
+  `mica-init: watchdog<N> handed over with a <set>s timeout (policy <p>s, asked <a>s)`, and feeds
+  it once more. A driver that cannot set a timeout keeps its own, and the log says so. The root's
+  init so has the board's handover window, from the exec, to start feeding.
   A factory reset staged on SYSTEM (3.7) is carried out at a boot of the deployment it names;
   one for another deployment, or one that cannot be read, waits and resets nothing. Before DATA
   is mounted the runkit makes it again: on a `gpt` board, once the partition is held to the

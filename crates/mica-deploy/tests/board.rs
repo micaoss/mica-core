@@ -412,7 +412,7 @@ fn the_watchdog_is_the_one_the_policy_names() {
     s["watchdog"] = json!({"identity": "Synopsys DesignWare Watchdog"});
     let facts = read(&s, "arm64").unwrap();
     assert_eq!(
-        facts.watchdog.map(|w| w.identity).as_deref(),
+        facts.watchdog.and_then(|w| w.identity).as_deref(),
         Some("Synopsys DesignWare Watchdog")
     );
     for bad in [
@@ -425,6 +425,45 @@ fn the_watchdog_is_the_one_the_policy_names() {
         let error = format!("{:#}", read(&s, "arm64").expect_err("a bad identity"));
         assert!(error.contains("invalid watchdog identity"), "{error}");
     }
+}
+
+/// The handover window and the trial's confirm budget are the board's
+/// declaration within their bounds, the defaults when it declares none, and
+/// a value outside the bounds is refused.
+#[test]
+fn the_watchdog_windows_are_bounded_with_defaults() {
+    let facts = read(&section("cx3576"), "arm64").unwrap();
+    assert_eq!(
+        (facts.watchdog().handover_s(), facts.watchdog().confirm_s()),
+        (120, 900)
+    );
+    let mut s = section("cx3576");
+    s["watchdog"] = json!({"handoverS": 30, "confirmS": 7200});
+    let facts = read(&s, "arm64").unwrap();
+    assert_eq!(facts.watchdog().identity, None);
+    assert_eq!(
+        (facts.watchdog().handover_s(), facts.watchdog().confirm_s()),
+        (30, 7200)
+    );
+    s["watchdog"] = json!({"handoverS": 600, "confirmS": 120});
+    assert!(read(&s, "arm64").is_ok());
+    for (bad, field) in [
+        (json!({"handoverS": 29}), "handoverS"),
+        (json!({"handoverS": 601}), "handoverS"),
+        (json!({"confirmS": 119}), "confirmS"),
+        (json!({"confirmS": 7201}), "confirmS"),
+    ] {
+        let mut s = section("cx3576");
+        s["watchdog"] = bad;
+        let error = format!("{:#}", read(&s, "arm64").expect_err(field));
+        assert!(
+            error.contains(&format!("invalid watchdog {field}")),
+            "{error}"
+        );
+    }
+    let mut s = section("cx3576");
+    s["watchdog"] = json!({"handoverSeconds": 120});
+    assert!(read(&s, "arm64").is_err());
 }
 
 /// A loader a boot ROM reads from before the first partition is declared

@@ -80,6 +80,7 @@ pub struct LoopStatus {
 const GET_SUPPORT: u32 = 0x80285700;
 const GET_TIMEOUT: u32 = 0x80045707;
 const KEEPALIVE: u32 = 0x80045705;
+const SET_TIMEOUT: u32 = 0xC0045706;
 const GET_LOOP: u32 = 0x4c05;
 const CLEAR_LOOP: u32 = 0x4c01;
 
@@ -92,6 +93,7 @@ const _: () = {
     assert!(GET_SUPPORT == ioctl::opcode::read::<WatchdogInfo>(b'W', 0));
     assert!(GET_TIMEOUT == ioctl::opcode::read::<i32>(b'W', 7));
     assert!(KEEPALIVE == ioctl::opcode::read::<i32>(b'W', 5));
+    assert!(SET_TIMEOUT == ioctl::opcode::read_write::<i32>(b'W', 6));
 };
 
 /// Read Linux watchdog capabilities; errors do not imply that it is armed.
@@ -115,6 +117,20 @@ pub fn watchdog_timeout(fd: impl AsFd) -> io::Result<u64> {
     // both supported ABIs). The unique borrow and live fd last through ioctl.
     unsafe {
         ioctl::ioctl(fd, Updater::<GET_TIMEOUT, _>::new(&mut value))?;
+    }
+    u64::try_from(value).map_err(|_| io::Errno::INVAL)
+}
+
+/// Ask the driver for a timeout of `seconds`; the answer is the timeout it
+/// set, which a driver may round.
+#[allow(unsafe_code)]
+pub fn watchdog_set_timeout(fd: impl AsFd, seconds: u32) -> io::Result<u64> {
+    let mut value = i32::try_from(seconds).map_err(|_| io::Errno::INVAL)?;
+    // SAFETY: Linux WDIOC_SETTIMEOUT reads one initialized C int and writes
+    // the timeout it set back into it. The unique borrow and live fd last
+    // through the synchronous ioctl.
+    unsafe {
+        ioctl::ioctl(fd, Updater::<SET_TIMEOUT, _>::new(&mut value))?;
     }
     u64::try_from(value).map_err(|_| io::Errno::INVAL)
 }

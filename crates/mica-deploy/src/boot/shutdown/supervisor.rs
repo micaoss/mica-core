@@ -46,6 +46,32 @@ pub fn resolve_watchdog(class: &Path, identity: Option<&str>) -> Result<String> 
     Ok(found.remove(0))
 }
 
+/// What the root's init is told about the watchdog the runkit armed: each
+/// file's path under the new root and its contents. systemd reads the drop-in
+/// as PID 1 starts; Base's OpenRC feeder reads the environment file.
+pub fn handover_files(name: &str) -> [(&'static str, String); 2] {
+    [
+        (
+            "run/systemd/system.conf.d/50-mica-watchdog.conf",
+            format!("[Manager]\nWatchdogDevice=/dev/{name}\n"),
+        ),
+        (
+            "run/mica/watchdog.env",
+            format!("WATCHDOG_DEVICE=/dev/{name}\n"),
+        ),
+    ]
+}
+
+/// The timeout asked of the driver at the handover: `asked` within the
+/// driver's `min_timeout` and `max_timeout`, each when it reports one.
+pub fn handover_timeout(asked: u32, min: Option<u32>, max: Option<u32>) -> u32 {
+    let at_least = asked.max(min.unwrap_or(0));
+    max.map_or(at_least, |max| at_least.min(max))
+}
+
+/// `WDIOF_SETTIMEOUT`: the driver takes `WDIOC_SETTIMEOUT`.
+const WDIOF_SETTIMEOUT: u32 = 0x0080;
+
 /// How long one console line waits for a slow console within a shutdown:
 /// longer than a console that backs up stalls before it takes more.
 pub const LINE_WAIT_MS: u64 = 5000;
@@ -126,6 +152,41 @@ impl Supervisor {
         );
         lifecycle_sys::watchdog_keepalive(fd)?;
         self.armed = true;
+        self.last_kick = self.now_ms();
+        Ok(())
+    }
+    /// Hand the armed watchdog `name` to the root under `newroot`: name it to
+    /// the root's init ([`handover_files`]), set its timeout to `seconds`
+    /// within what the driver allows, and feed it once more, so the root's
+    /// feeder has that long from the exec.
+    pub fn hand_over(&mut self, name: &str, seconds: u32, newroot: &Path) -> Result<()> {
+        ensure!(self.armed, "the watchdog was not armed");
+        for (path, contents) in handover_files(name) {
+            let path = newroot.join(path);
+            fs::create_dir_all(path.parent().context("handover file has no directory")?)?;
+            fs::write(path, contents)?;
+        }
+        let class = Path::new("/sys/class/watchdog").join(name);
+        let bound = |file: &str| {
+            read_text(class.join(file), 64)
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+        };
+        let asked = handover_timeout(seconds, bound("min_timeout"), bound("max_timeout"));
+        let fd = self.watchdog.as_ref().context("watchdog missing")?;
+        if lifecycle_sys::watchdog_support(fd)?.options & WDIOF_SETTIMEOUT == 0 {
+            eprintln!(
+                "mica-init: {name} keeps its {}s timeout: its driver sets none",
+                self.timeout
+            );
+        } else {
+            self.timeout = lifecycle_sys::watchdog_set_timeout(fd, asked)?;
+            eprintln!(
+                "mica-init: {name} handed over with a {}s timeout (policy {seconds}s, asked {asked}s)",
+                self.timeout
+            );
+        }
+        lifecycle_sys::watchdog_keepalive(fd)?;
         self.last_kick = self.now_ms();
         Ok(())
     }

@@ -296,6 +296,95 @@ fn watchdog_errors_and_short_metadata_never_create_a_fresh_budget() {
     assert_eq!(error.to_string(), "a reboot is never forced");
 }
 
+// The handover names the armed watchdog to either init and asks the driver
+// for the policy's window within the driver's bounds; nothing is handed over
+// before the watchdog is armed, and a driver failure is the boot's.
+#[test]
+fn the_handover_names_the_armed_watchdog_and_bounds_its_window() {
+    assert_eq!(handover_timeout(120, None, None), 120);
+    assert_eq!(handover_timeout(120, Some(1), Some(65535)), 120);
+    assert_eq!(handover_timeout(120, Some(1), Some(60)), 60);
+    assert_eq!(handover_timeout(30, Some(60), Some(600)), 60);
+
+    let root = tempfile::tempdir().unwrap();
+    let mut supervisor = Supervisor::new();
+    let error = supervisor
+        .hand_over("watchdog1", 120, root.path())
+        .unwrap_err();
+    assert_eq!(error.to_string(), "the watchdog was not armed");
+    assert!(!root.path().join("run").exists());
+
+    supervisor.watchdog = Some(tempfile::tempfile().unwrap());
+    supervisor.armed = true;
+    assert!(supervisor.hand_over("watchdog1", 120, root.path()).is_err());
+    assert_eq!(
+        fs::read_to_string(
+            root.path()
+                .join("run/systemd/system.conf.d/50-mica-watchdog.conf")
+        )
+        .unwrap(),
+        "[Manager]\nWatchdogDevice=/dev/watchdog1\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("run/mica/watchdog.env")).unwrap(),
+        "WATCHDOG_DEVICE=/dev/watchdog1\n"
+    );
+}
+
+// The VM case: a guest with softdog and an i6300ESB, as the lifecycle suite
+// boots one. The policy names softdog, which is not watchdog0; the handover
+// names it to the root's init and sets the policy's window on it, and the
+// i6300ESB is never started. The guest is reset by softdog `handoverS` after
+// the last feed, which the harness measures.
+#[test]
+#[ignore = "needs a VM with softdog and an i6300ESB, run as root"]
+fn vm_handover() {
+    let class = std::path::Path::new("/sys/class/watchdog");
+    let name = resolve_watchdog(class, Some("Software Watchdog")).unwrap();
+    let other = if name == "watchdog0" {
+        "watchdog1"
+    } else {
+        "watchdog0"
+    };
+    assert_eq!(
+        fs::read_to_string(class.join(other).join("identity"))
+            .unwrap()
+            .trim(),
+        "i6300ESB timer"
+    );
+    let root = tempfile::tempdir().unwrap();
+    let mut supervisor = Supervisor::new();
+    supervisor.arm(&name).unwrap();
+    supervisor.hand_over(&name, 120, root.path()).unwrap();
+    assert_eq!(
+        fs::read_to_string(
+            root.path()
+                .join("run/systemd/system.conf.d/50-mica-watchdog.conf")
+        )
+        .unwrap(),
+        format!("[Manager]\nWatchdogDevice=/dev/{name}\n")
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("run/mica/watchdog.env")).unwrap(),
+        format!("WATCHDOG_DEVICE=/dev/{name}\n")
+    );
+    let fd = supervisor.watchdog.as_ref().unwrap();
+    assert_eq!(lifecycle_sys::watchdog_timeout(fd).unwrap(), 120);
+    assert_eq!(
+        fs::read_to_string(class.join(&name).join("state"))
+            .unwrap()
+            .trim(),
+        "active"
+    );
+    assert_eq!(
+        fs::read_to_string(class.join(other).join("state"))
+            .unwrap()
+            .trim(),
+        "inactive"
+    );
+    println!("VM_HANDOVER PASS {name} timeout=120 other={other} inactive");
+}
+
 #[test]
 fn supervisor_drains_large_output_without_blocking_wait() {
     let mut supervisor = Supervisor::new();
