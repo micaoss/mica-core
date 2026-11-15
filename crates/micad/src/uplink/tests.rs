@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -381,6 +381,150 @@ fn an_echo_is_answered_only_by_its_own_reply() {
         )))
     );
     assert!(probe::Target::of(&gateway, None).is_err());
+}
+
+/// The keys of every object among `values`, together.
+fn keys_of(values: &[&serde_json::Value]) -> BTreeSet<String> {
+    values
+        .iter()
+        .filter_map(|value| value.as_object())
+        .flat_map(|object| object.keys().cloned())
+        .collect()
+}
+
+// The observation is what apid's OpenAPI document says `uplinks` is: the
+// committed `openapi.json`'s schemas name exactly the keys the engine writes.
+#[tokio::test]
+async fn the_observation_matches_the_api_schema() {
+    let document: serde_json::Value =
+        serde_json::from_str(include_str!("../../../mica-apid/openapi.json")).unwrap();
+    let schema = |name: &str| -> BTreeSet<String> {
+        document["components"]["schemas"][name]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{name} is documented"))
+            .keys()
+            .cloned()
+            .collect()
+    };
+    let fake = Arc::new(Fake::default());
+    fake.route(2, 100);
+    fake.route(3, 110);
+    fake.route(4, 120);
+    fake.reachable
+        .lock()
+        .unwrap()
+        .insert("eth1".to_string(), true);
+    let mut engine = Engine::new(Arc::clone(&fake) as Arc<dyn Host>);
+    let mut settings = network(&["eth0", "eth1"]);
+    for cfg in settings.values_mut() {
+        cfg.probe.as_mut().unwrap().targets = vec![
+            ProbeTarget {
+                address: "gateway".to_string(),
+                method: "icmp".to_string(),
+                port: None,
+            },
+            ProbeTarget {
+                address: "192.0.2.10".to_string(),
+                method: "tcp".to_string(),
+                port: Some(53),
+            },
+        ];
+    }
+    engine.tick(&settings);
+    rounds(&mut engine, &settings, 2).await;
+    let seen = engine.observation(&settings);
+    let uplinks: Vec<&serde_json::Value> = seen["uplinks"].as_array().unwrap().iter().collect();
+    assert_eq!(
+        uplinks.len(),
+        3,
+        "two checked uplinks and one without a check"
+    );
+    let rounds: Vec<&serde_json::Value> = uplinks.iter().map(|u| &u["lastRound"]).collect();
+    let targets: Vec<&serde_json::Value> = rounds
+        .iter()
+        .filter_map(|round| round["targets"].as_array())
+        .flatten()
+        .collect();
+    assert_eq!(keys_of(&[&seen]), schema("UplinksStatus"));
+    assert_eq!(keys_of(&[&seen["lastChange"]]), schema("UplinkChange"));
+    assert_eq!(keys_of(&uplinks), schema("UplinkStatus"));
+    assert_eq!(keys_of(&rounds), schema("UplinkRound"));
+    assert_eq!(keys_of(&targets), schema("UplinkTargetResult"));
+    let probes: Vec<&serde_json::Value> = uplinks.iter().map(|u| &u["probe"]).collect();
+    assert_eq!(keys_of(&probes), schema("UplinkProbe"));
+}
+
+#[test]
+fn dns_follows_the_active_uplink() {
+    let names = |order: &dns::DnsOrder| order.order.join(",");
+    let quiet = [
+        candidate("eth0", 2, 100, State::Up),
+        candidate("eth1", 3, 110, State::Off),
+    ];
+    assert_eq!(dns::order(&quiet), dns::DnsOrder::default());
+
+    let failover = [
+        candidate("eth0", 2, 100, State::Down),
+        candidate("eth1", 3, 110, State::Up),
+        candidate("wlan0", 4, 600, State::Unknown),
+    ];
+    let order = dns::order(&failover);
+    assert_eq!(names(&order), "eth1,wlan0,eth0");
+    assert_eq!(order.down.iter().collect::<Vec<_>>(), ["eth0"]);
+
+    // A lower-ranked uplink down while the natural one carries the traffic.
+    let backup_down = [
+        candidate("eth0", 2, 100, State::Up),
+        candidate("eth1", 3, 110, State::Down),
+    ];
+    assert_eq!(names(&dns::order(&backup_down)), "eth0,eth1");
+
+    // Every uplink down: as without the check.
+    let all_down = [
+        candidate("eth0", 2, 100, State::Down),
+        candidate("eth1", 3, 110, State::Down),
+    ];
+    assert_eq!(dns::order(&all_down), dns::DnsOrder::default());
+}
+
+#[test]
+fn resolved_is_called_for_changes_and_again_when_due() {
+    let set = |names: &[&str]| names.iter().map(|n| (*n).to_string()).collect();
+    let calls = |was: &[&str], now: &[&str], due| {
+        dns::resolved_calls(&set(was), &set(now), due)
+            .into_iter()
+            .map(|(name, on)| format!("{name}={on}"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(calls(&[], &["eth0"], false), ["eth0=false"]);
+    assert!(calls(&["eth0"], &["eth0"], false).is_empty());
+    assert_eq!(calls(&["eth0"], &["eth0"], true), ["eth0=false"]);
+    assert_eq!(
+        calls(&["eth0"], &["eth1"], false),
+        ["eth0=true", "eth1=false"]
+    );
+    assert!(calls(&[], &[], true).is_empty());
+}
+
+#[tokio::test]
+async fn the_order_file_is_written_and_removed_with_a_rebuild_each_time() {
+    use dns::Follow as _;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("resolv.order");
+    let commands = Arc::new(crate::openrc::FakeCommands::default());
+    let follow = dns::ResolvOrder::new(path.clone(), "/usr/lib/mica/mica-resolv", commands.clone());
+    let order = dns::order(&[
+        candidate("eth0", 2, 100, State::Down),
+        candidate("eth1", 3, 110, State::Up),
+    ]);
+    follow.follow(&order).await;
+    follow.follow(&order).await;
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "eth1\neth0\n");
+    assert_eq!(commands.calls(), ["/usr/lib/mica/mica-resolv"]);
+    follow.follow(&dns::DnsOrder::default()).await;
+    follow.follow(&dns::DnsOrder::default()).await;
+    assert!(!path.exists());
+    assert_eq!(commands.calls().len(), 2);
 }
 
 #[cfg(test)]

@@ -590,7 +590,12 @@ async fn serve() -> anyhow::Result<()> {
             .context("look up served MicadService")?;
         tokio::spawn(bus::mdns_upkeep(service_ref.clone()));
         if let Some(engine) = uplinks {
-            tokio::spawn(bus::uplink_upkeep(service_ref.clone(), engine));
+            let dns: Arc<dyn uplink::dns::Follow> = if openrc {
+                Arc::new(uplink::dns::ResolvOrder::production())
+            } else {
+                Arc::new(uplink::dns::Resolved::default())
+            };
+            tokio::spawn(bus::uplink_upkeep(service_ref.clone(), engine, dns));
         }
         tokio::spawn(bus::issue_upkeep(service_ref, printed_code));
     }

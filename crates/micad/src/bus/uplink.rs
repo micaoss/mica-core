@@ -9,8 +9,12 @@ use zbus::object_server::InterfaceRef;
 use super::MicadService;
 
 /// Run `engine` for as long as the daemon runs, over `service`'s settings,
-/// emitting `UplinkChanged` on each switch.
-pub async fn uplink_upkeep(service: InterfaceRef<MicadService>, engine: crate::uplink::Shared) {
+/// emitting `UplinkChanged` on each switch, with `dns` following it.
+pub async fn uplink_upkeep(
+    service: InterfaceRef<MicadService>,
+    engine: crate::uplink::Shared,
+    dns: Arc<dyn crate::uplink::dns::Follow>,
+) {
     let inner = Arc::clone(&service.get().await.inner);
     let emitter = service.signal_emitter().clone();
     crate::uplink::run(
@@ -29,6 +33,7 @@ pub async fn uplink_upkeep(service: InterfaceRef<MicadService>, engine: crate::u
             }
             .boxed()
         },
+        dns,
     )
     .await;
 }

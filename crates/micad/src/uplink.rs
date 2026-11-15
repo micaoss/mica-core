@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 
 use crate::netlink::uplink::DefaultRoute;
 
+pub mod dns;
 pub mod probe;
 
 /// An uplink's reachability, as the engine holds it.
@@ -453,6 +454,12 @@ impl Engine {
         }
     }
 
+    /// Which uplinks' DNS servers are asked, and in what order.
+    #[must_use]
+    pub fn dns_order(&self) -> dns::DnsOrder {
+        dns::order(&self.candidates)
+    }
+
     /// The observation's `uplinks`.
     #[must_use]
     pub fn observation(&self, network: &BTreeMap<String, IfaceSettings>) -> Value {
@@ -601,8 +608,9 @@ pub type Shared = Arc<tokio::sync::Mutex<Engine>>;
 
 /// Run `engine` for as long as the daemon runs: a pass every [`TICK`] and on
 /// every route, address or link event, over the settings `network` reads.
-/// Each change of the active uplink goes to `changed`.
-pub async fn run<F, N>(engine: Shared, network: N, changed: F)
+/// Each change of the active uplink goes to `changed`, and after each pass
+/// `dns` follows the uplinks.
+pub async fn run<F, N>(engine: Shared, network: N, changed: F, dns: Arc<dyn dns::Follow>)
 where
     N: Fn() -> futures_util::future::BoxFuture<'static, BTreeMap<String, IfaceSettings>>
         + Send
@@ -635,7 +643,12 @@ where
             () = tokio::time::sleep(TICK) => {}
         }
         let settings = network().await;
-        let change = engine.lock().await.tick(&settings);
+        let (change, order) = {
+            let mut engine = engine.lock().await;
+            let change = engine.tick(&settings);
+            (change, engine.dns_order())
+        };
+        dns.follow(&order).await;
         if let Some(change) = change {
             tracing::info!(
                 "MICA_UPLINK active={} previous={} reason={}",
