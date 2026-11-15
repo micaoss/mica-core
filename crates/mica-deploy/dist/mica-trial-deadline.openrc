@@ -1,0 +1,20 @@
+#!/sbin/openrc-run
+# mica-trial-deadline.service's counterpart, in the boot runlevel by the link
+# this package ships: a trial boot not confirmed within the boot policy's
+# board.watchdog.confirmS seconds of uptime is failed and rebooted; any other
+# boot is left alone. The wait runs in the background, so the service is
+# started at once and never holds the boot.
+
+description="Fail a trial boot that is not confirmed in time"
+
+depend() {
+    need mica-data-layout
+    use mica-syslogd
+}
+
+start() {
+    ebegin "Starting the trial deadline"
+    (/usr/bin/mica-deploy trial-deadline 2>&1 | logger -t mica-trial-deadline -p daemon.notice) \
+        </dev/null >/dev/null 2>&1 &
+    eend 0
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=Fail a trial boot that is not confirmed in time
+# A trial boot not confirmed within the boot policy's board.watchdog.confirmS
+# seconds of uptime is failed and rebooted; any other boot is left alone. It
+# starts before the rest of userspace, so a trial that hangs before the health
+# gate is still counted, and nothing waits on it.
+DefaultDependencies=no
+After=local-fs.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/mica-deploy trial-deadline
+
+[Install]
+WantedBy=multi-user.target

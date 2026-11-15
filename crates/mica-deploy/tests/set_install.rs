@@ -711,9 +711,21 @@ fn a_paired_set_is_composed_with_its_deployment_and_the_old_one_is_bound() {
         }
     );
 
+    // On trial while its entry counts, and while its pending set is not
+    // settled once the entry is confirmed; the running deployment, confirmed
+    // with the current set, is not.
+    assert!(device.store.on_trial(&other(), &boot, None, &[]).unwrap());
+    assert!(
+        !device
+            .store
+            .on_trial(&running(), &booted(&first_id, false), None, &[])
+            .unwrap()
+    );
     device.entry(&other(), None);
+    assert!(device.store.on_trial(&other(), &boot, None, &[]).unwrap());
     assert!(device.store.sets_need_settling(&other(), &boot).unwrap());
     assert_eq!(device.settle_as(&other(), &boot), SetSettlement::Committed);
+    assert!(!device.store.on_trial(&other(), &boot, None, &[]).unwrap());
     assert_eq!(
         device.state(),
         SetState {

@@ -1521,8 +1521,9 @@ by the `component-contract-fixtures` example, signed with test-only keys, and co
 
 `/usr/bin/mica-deploy <command>` prints JSON, exits non-zero on failure and bounds every read by
 a budget (`--max-bytes`): `status`, `check`, `fetch`, `import`, `install`, `set-check`,
-`set-fetch`, `set-install`, `booted`, `confirm`, `reject`, `rollback`, `fail-boot`, `probe`,
-`discard`, `gc`, `firmware-readback`, `extension-install`, `extension-remove`. micad names the source, the channel and the budget; left
+`set-fetch`, `set-install`, `booted`, `confirm`, `reject`, `rollback`, `fail-boot`,
+`trial-deadline`, `probe`, `discard`, `gc`, `firmware-readback`, `extension-install`,
+`extension-remove`. micad names the source, the channel and the budget; left
 out, they are the device's, resolved as micad resolves them (section 6.2): `source.url` of
 `/mica/config/updates.json` over the image's `update.source`, the channel each names for the
 kind of set, else `general`, and `source.maxBytes`, else 500 MB.
@@ -1649,6 +1650,19 @@ init up and not in `maintenance` or `stopping`, and micad answering on the bus w
 carries it (`if-installed=micad`), so a device without micad confirms on the init alone and
 `mica-deploy update` keeps it updatable. Failed units are reported, never fatal.
 
+**The trial deadline.** A trial boot has `board.watchdog.confirmS` seconds of uptime (6.4) to be
+confirmed. A boot is on trial while it tries something a confirm has not settled: its deployment
+on a counted entry or record, the core set it composed while that set is pending, or the
+extension change it mapped. `mica-deploy trial-deadline`, started first in userspace by the
+mica-deploy package's `mica-trial-deadline` unit (systemd) or boot-runlevel script (OpenRC),
+prints `{"trial": false}` and exits at once on any other boot. On a trial boot it waits until
+`confirmS`, takes the store's lock (waiting up to 600 s for a confirm that holds it) and looks
+again: confirmed by then, it prints `{"trial": false, "confirmed": true}`. Otherwise it does what
+`fail-boot` does and reboots, which spends one of the trial's tries, so a trial that never
+reaches the health gate falls back as a failed one does. A fallback it cannot record, or a DATA
+it cannot reach, powers the device off, as the health gate's failure path does. A confirmed boot
+is never failed for being slow.
+
 ### 6.4 The board, from the signed policy
 
 Nothing here knows a board by name. The `board` section of the signed boot policy
@@ -1676,6 +1690,17 @@ kernel, its initramfs and the keys in it together. Such a board has no verified 
 `storage`, in the `board` section, is `gpt` (the default, and never written), the block layout
 above, or `ubi`, raw NAND (6.6).
 
+`watchdog`, in the `board` section, has three optional fields:
+- `identity`: the watchdog the runkit arms, by the exact `identity` its driver reports in
+  `/sys/class/watchdog/watchdog<N>/identity` (1 to 32 printable ASCII characters). Exactly one
+  watchdog must match. Absent, it is `watchdog0`.
+- `handoverS`: the timeout the runkit sets at the handover to the root's init, 30 to 600 s,
+  default 120 (6.5).
+- `confirmS`: how long a trial boot has to be confirmed, in seconds of uptime, 120 to 7200,
+  default 900 (6.3).
+
+A value outside its bounds, or another field, refuses the policy.
+
 `dataFormat`, only on a `gpt` board, is how a factory reset makes DATA again (3.7): `features`
 (`mke2fs -O`, which must include `project` and `quota` while quotas are on), `bytesPerInode`
 (`mke2fs -i`, a power of two from 4 KiB to 1 MiB) and `secureErase` (`true` discards the whole
@@ -1690,17 +1715,6 @@ read one format.
 ### 6.5 mica-runkit and lifecycle-sys
 
 `mica-runkit` is one static executable selected by the name it runs as:
-`watchdog`, in the `board` section, has three optional fields:
-- `identity`: the watchdog the runkit arms, by the exact `identity` its driver reports in
-  `/sys/class/watchdog/watchdog<N>/identity` (1 to 32 printable ASCII characters). Exactly one
-  watchdog must match. Absent, it is `watchdog0`.
-- `handoverS`: the timeout the runkit sets at the handover to the root's init, 30 to 600 s,
-  default 120 (6.5).
-- `confirmS`: how long a trial boot has to be confirmed, in seconds of uptime, 120 to 7200,
-  default 900 (6.3).
-
-A value outside its bounds, or another field, refuses the policy.
-
 
 - **`init`**, PID 1 of the signed initramfs: requires dm-verity signature enforcement, arms the
   watchdog, reads the policy, authenticates the selected deployment, opens root and support as

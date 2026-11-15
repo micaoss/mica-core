@@ -180,19 +180,31 @@ impl Device {
             .remove_extension(name, kernel, &[key()], &self.deployment)
     }
 
-    /// Confirm a boot that mapped the pending change, alone.
+    /// Confirm a boot that mapped the pending change, alone: that boot is on
+    /// trial until the confirm settles it.
     fn commit(&self) -> SetSettlement {
         let id = extensions::read_state(&self.store.system)
             .unwrap()
             .pending_id()
             .unwrap();
-        self.store
-            .settle_extensions(
-                &self.deployment,
-                Some(&extensions::BootTrial { paired: false, id }),
-                &[key()],
-            )
-            .unwrap()
+        let trial = extensions::BootTrial { paired: false, id };
+        let core = mica_deploy::core_set::CoreBoot {
+            core_set_id: String::new(),
+            pending: false,
+            paired: false,
+        };
+        let on_trial = || {
+            self.store
+                .on_trial(&self.deployment, &core, Some(&trial), &[key()])
+                .unwrap()
+        };
+        assert!(on_trial());
+        let settled = self
+            .store
+            .settle_extensions(&self.deployment, Some(&trial), &[key()])
+            .unwrap();
+        assert!(!on_trial());
+        settled
     }
 
     fn builds(&self) -> Vec<(String, String)> {

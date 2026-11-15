@@ -53,6 +53,8 @@ Updating by hand, with or without micad:
 
 The steps, as micad runs them:
   probe | discard | gc | confirm | booted | fail-boot | reject <id>
+  trial-deadline  on a trial boot, wait until confirmS seconds of uptime;
+                  unless the boot was confirmed by then, fail it and reboot
   factory-reset --by <console|api|cli> --source <text> | --finish
   check [--source <url>]
   fetch [--source <url>]
@@ -135,6 +137,8 @@ enum Action {
     Discard,
     Booted,
     FailBoot,
+    /// Fail a trial boot that is not confirmed in time, and reboot.
+    TrialDeadline,
     FirmwareReadback {
         manifest: PathBuf,
         record: bool,
@@ -472,6 +476,7 @@ impl Cli {
             "discard" => Action::Discard,
             "booted" => Action::Booted,
             "fail-boot" => Action::FailBoot,
+            "trial-deadline" => Action::TrialDeadline,
             "firmware-readback" => Action::FirmwareReadback {
                 record: words.flag("record"),
                 manifest: words
@@ -917,6 +922,15 @@ fn execute() -> Result<()> {
         receipt.content_verified,
         "running content is not authenticated"
     );
+    if matches!(cli.command, Action::TrialDeadline) {
+        return trial_deadline(
+            &store,
+            &receipt,
+            &keys,
+            backend,
+            policy.board.watchdog().confirm_s(),
+        );
+    }
     let _lock = store.lock()?;
     // The first command of the root after the runkit made DATA again
     // finishes the reset on SYSTEM; until then nothing that would change what
@@ -1411,18 +1425,7 @@ fn execute() -> Result<()> {
             store.settle_extensions(&receipt.deployment_id, booted_trial.as_ref(), &keys)?;
             Ok(json!(state))
         }
-        // A boot that failed with a set or an extension change alone on
-        // trial is that trial's failure, and the trial has already paid for
-        // it: the deployment is kept.
-        Action::FailBoot if booted_core.pending && !booted_core.paired => {
-            Ok(json!({"retired": false, "setTrial": "core"}))
-        }
-        Action::FailBoot if booted_trial.as_ref().is_some_and(|trial| !trial.paired) => {
-            Ok(json!({"retired": false, "setTrial": "extensions"}))
-        }
-        Action::FailBoot => store
-            .fail_boot(&receipt)
-            .map(|retired| json!({"retired": retired})),
+        Action::FailBoot => fail_boot(&store, &receipt, &booted_core, booted_trial.as_ref()),
         Action::Reject { id } => store.reject(&id).map(|value| json!(value)),
         Action::Rollback { .. } => store.rollback(&receipt).map(|value| json!(value)),
         Action::Install {
@@ -1549,6 +1552,7 @@ fn execute() -> Result<()> {
         | Action::Probe
         | Action::Discard
         | Action::Booted
+        | Action::TrialDeadline
         | Action::FirmwareReadback { .. }
         | Action::Check { .. }
         | Action::Fetch { .. }
@@ -1800,6 +1804,111 @@ fn finish_factory_reset(
 
 /// Say what an update installed, which runs from the next boot, and reboot
 /// when asked to.
+/// What a failed boot does to the store. A boot that failed with a set or an
+/// extension change alone on trial is that trial's failure, and the trial has
+/// already paid for it: the deployment is kept.
+fn fail_boot(
+    store: &DeploymentStore,
+    receipt: &BootReceipt,
+    core: &CoreBoot,
+    trial: Option<&mica_deploy::extensions::BootTrial>,
+) -> Result<serde_json::Value> {
+    if core.pending && !core.paired {
+        return Ok(json!({"retired": false, "setTrial": "core"}));
+    }
+    if trial.is_some_and(|trial| !trial.paired) {
+        return Ok(json!({"retired": false, "setTrial": "extensions"}));
+    }
+    store
+        .fail_boot(receipt)
+        .map(|retired| json!({"retired": retired}))
+}
+
+/// How long the deadline waits for a transaction that holds the store, such
+/// as a confirm settling the trial.
+const DEADLINE_LOCK_WAIT: Duration = Duration::from_secs(600);
+
+/// Fail a trial boot that is not confirmed within `confirm_s` seconds of
+/// uptime (`docs/mica-core.md` 6.5): fail-boot, then a reboot, which spends
+/// one of the trial's tries. A boot with nothing on trial, or one confirmed
+/// in time, is left alone however slow it is. As the health gate's failure
+/// path, a fallback that cannot be recorded, or a DATA that cannot be
+/// reached, powers off.
+fn trial_deadline(
+    store: &DeploymentStore,
+    receipt: &BootReceipt,
+    keys: &[[u8; 32]],
+    backend: BootKind,
+    confirm_s: u32,
+) -> Result<()> {
+    let core = core_boot()?;
+    let trial = mica_deploy::extensions::booted(Path::new(mica_deploy::extensions::BOOT_FILE))?
+        .and_then(|record| record.trial);
+    let on_trial = || store.on_trial(&receipt.deployment_id, &core, trial.as_ref(), keys);
+    if !on_trial()? {
+        println!("{}", json!({"trial": false}));
+        return Ok(());
+    }
+    eprintln!(
+        "mica-deploy: this boot is on trial; it is failed unless confirmed within {confirm_s}s of boot"
+    );
+    let deadline = Duration::from_secs(confirm_s.into());
+    loop {
+        let up = uptime()?;
+        if up >= deadline {
+            break;
+        }
+        thread::sleep(deadline - up);
+    }
+    let waited = Instant::now();
+    let _lock = loop {
+        match store.lock() {
+            Ok(lock) => break lock,
+            Err(error) if error.is::<SharedDataFailure>() => return power_off(error),
+            Err(_) if waited.elapsed() < DEADLINE_LOCK_WAIT => {
+                thread::sleep(Duration::from_secs(1))
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    if !on_trial()? {
+        println!("{}", json!({"trial": false, "confirmed": true}));
+        return Ok(());
+    }
+    eprintln!("mica-deploy: the trial was not confirmed within {confirm_s}s; failing the boot");
+    match writable(backend, false, || {
+        fail_boot(store, receipt, &core, trial.as_ref())
+    }) {
+        Ok(failed) => {
+            println!("{failed}");
+            command("reboot", &[])?;
+            Ok(())
+        }
+        Err(error) => power_off(error),
+    }
+}
+
+/// The time since boot, suspend included.
+fn uptime() -> Result<Duration> {
+    let text = std::fs::read_to_string("/proc/uptime")?;
+    let seconds: f64 = text
+        .split_whitespace()
+        .next()
+        .context("empty /proc/uptime")?
+        .parse()?;
+    Ok(Duration::from_secs_f64(seconds))
+}
+
+/// A failed boot whose fallback cannot be recorded needs recovery: power off
+/// rather than boot it again.
+fn power_off(error: anyhow::Error) -> Result<()> {
+    eprintln!(
+        "mica-deploy: cannot record the failed boot ({error:#}); recovery required, powering off"
+    );
+    command("poweroff", &[])?;
+    Err(error)
+}
+
 fn finish(what: &str, reboot: bool) -> Result<()> {
     if !reboot {
         println!("{what}; reboot to run it (or run again with --reboot)");
@@ -1919,6 +2028,10 @@ mod tests {
         assert!(matches!(
             parse("fail-boot").unwrap().command,
             Action::FailBoot
+        ));
+        assert!(matches!(
+            parse("trial-deadline").unwrap().command,
+            Action::TrialDeadline
         ));
         let cli = parse("--max-bytes 536870912 import /run/mica/import/update.micaupd").unwrap();
         assert_eq!(cli.max_bytes, Some(536_870_912));

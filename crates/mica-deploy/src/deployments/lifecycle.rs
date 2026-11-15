@@ -7,6 +7,25 @@ use std::{collections::BTreeSet, fs};
 use super::*;
 
 impl DeploymentStore {
+    /// Whether the boot of the deployment `booted`, which composed `core` and
+    /// mapped the extension change `trial` if any, tries something a confirm
+    /// has not settled yet: the deployment on a counted entry, the core set
+    /// while it is pending, or the extension change.
+    pub fn on_trial(
+        &self,
+        booted: &str,
+        core: &crate::core_set::CoreBoot,
+        trial: Option<&crate::extensions::BootTrial>,
+        keys: &[[u8; 32]],
+    ) -> Result<bool> {
+        Ok(self
+            .entries()?
+            .iter()
+            .any(|entry| entry.id == booted && entry.tries_left.is_some())
+            || (core.pending && self.sets_need_settling(booted, core)?)
+            || (trial.is_some() && self.extensions_need_settling(booted, trial, keys)?))
+    }
+
     pub fn describe(&self, keys: &[[u8; 32]]) -> Result<Vec<DeploymentStatus>> {
         use crate::components::{authenticate_deployment, component_id};
         self.entries()?
