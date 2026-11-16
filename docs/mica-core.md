@@ -190,7 +190,10 @@ hides gets none (section 3.11). The Wi-Fi client's
 lease has metric 600. A static gateway's default route has metric 20 on the first entry with one
 in name order and 1 more on each next one, so it beats every lease and stays below micad's
 failover route (metric 10, *Uplink failover* below); a declared default route with a metric
-below 20 is refused with `route_metric_reserved`. On OpenRC the same numbers go
+below 20 is refused with `route_metric_reserved`. Every writer meets the network map's rules
+and its stored defaults (a check's targets, below) in micad's own write path, the one every
+settings write takes: apid's routes, BLE provisioning, a settings path over the bus and `mica`
+alike; apid also checks first, to answer each refusal by field. On OpenRC the same numbers go
 into each DHCP stanza as `metric <n>` and into `/var/lib/mica/wifi/client.env` as `metric=600`, for
 Base's `mica-udhcpc` to give the lease's default route (section 3.8). An interface with
 `internet: false` takes its lease's address and subnet route and no gateway: `[DHCPv4]` and
@@ -313,17 +316,24 @@ table, and removes it when they agree again or no uplink is eligible: when every
 the device routes as it would with no check. The engine runs every second and on each
 rtnetlink route, address or link event, so the route comes back as soon as a lease renewal's
 address flush or networkd's reconfigure takes it; at start micad deletes any protocol-109
-default route left behind. A switch moves new connections only; an open one keeps its source
+default route left behind. micad tells its route by the protocol, read over rtnetlink; BusyBox
+`ip route` on OpenRC does not print the protocol, so there it shows as the default route with
+`metric 10`. A switch moves new connections only; an open one keeps its source
 address and stalls until it reconnects. Each switch is logged as `MICA_UPLINK active=<if>
 previous=<if> reason=<probe|link|recovered|none-up>` and signalled as `UplinkChanged`.
 
 DNS follows the uplinks: an uplink that is `down` while another is active is not asked for
-names. On systemd micad sets resolved's `SetLinkDefaultRoute` false on it, so each lookup goes
-to the other links' servers, true again once it is not down, and the false again every 10 s
-while it lasts, since networkd may reset it when it reconfigures the link. On OpenRC micad
+names. On systemd micad sets `SetLinkDefaultRoute` false on it, so each lookup goes to the other
+links' servers, true again once it is not down, and the false again every 10 s while it lasts,
+since networkd may reset it when it reconfigures the link. resolved takes the call for a link
+networkd does not manage; for one it does, resolved answers `LinkBusy` and micad makes the call
+to networkd (`org.freedesktop.network1.Manager.SetLinkDefaultRoute`), as `resolvectl` does,
+which reloads nothing and leaves DHCP alone. On OpenRC micad
 writes `/run/mica/resolv.order` (through a sibling and a rename), the active uplink first and
 the down ones last, each as its two `resolv.d` file names, `00-<iface>` (the servers a DHCP
-entry declares) then `<iface>` (the lease's, or a static entry's, which its stanza writes), and
+entry declares) then `<iface>` (the lease's, or a static entry's, which its stanza writes; a DHCP
+entry with its own servers asks the lease for none, so its `<iface>` exists only when the server
+sends DNS unasked), and
 runs Base's `mica-resolv`, which builds `resolv.conf` in that order and skips a name with no
 file; with nothing to steer it removes the file and runs `mica-resolv` again. While every uplink is down,
 or the natural one is active with none down, nothing is steered. With the global servers on,
