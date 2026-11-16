@@ -2,13 +2,15 @@
 //!
 //! Renders `access.web` into the file apid reads at start, then keeps apid
 //! running for `network` and `local` and stopped for `off`; a running apid is
-//! restarted when the file changed. Nothing enables apid at boot: this
-//! reconciler starts it, after micad is ready.
+//! restarted when the settings differ from what it started with: the file as
+//! it was, or apid's defaults when there was none, as at boot, where the file
+//! is on `/run` and an apid OpenRC started already runs. Nothing enables apid
+//! at boot under systemd: this reconciler starts it, after micad is ready.
 
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use micad_settings::{APID_LISTENERS_PATH, Settings, WebMode};
+use micad_settings::{APID_LISTENERS_PATH, Settings, WebMode, WebSettings};
 use serde_json::json;
 
 use super::Reconciler;
@@ -54,8 +56,10 @@ impl<C: UnitControl> Reconciler for WebReconciler<C> {
         let web = settings.access.web;
         let mut rendered = serde_json::to_string_pretty(&web).context("render apid listeners")?;
         rendered.push('\n');
-        let changed = write_config_if_changed(&self.path, &rendered, LISTENERS_MODE)
+        let started_with = started_with(&self.path);
+        write_config_if_changed(&self.path, &rendered, LISTENERS_MODE)
             .with_context(|| format!("write {}", self.path.display()))?;
+        let changed = started_with != web;
         // The apid that asked for the change answers before this runs: the
         // write is an apply task, and the restart or stop follows the answer.
         let state = self.control.active_state(APID_UNIT).await?;
@@ -86,6 +90,15 @@ impl<C: UnitControl> Reconciler for WebReconciler<C> {
             "apid": action,
         }))
     }
+}
+
+/// The settings a running apid read from `path`, as apid reads them: the
+/// defaults when the file is absent or does not parse.
+fn started_with(path: &std::path::Path) -> WebSettings {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -136,21 +149,39 @@ mod tests {
         let web = reconciler(&dir, "active");
         let mut settings = Settings::default();
         web.apply(&settings).await.unwrap();
-        assert_eq!(
-            calls(&web, "restart apid.service"),
-            1,
-            "the file did not exist before"
-        );
-
         let state = web.apply(&settings).await.unwrap();
         assert_eq!(state["apid"], json!("none"));
-        assert_eq!(calls(&web, "restart apid.service"), 1);
+        assert_eq!(calls(&web, "restart apid.service"), 0);
 
         settings.access.web.https_enabled = true;
         let state = web.apply(&settings).await.unwrap();
         assert_eq!(state["apid"], json!("restarted"));
-        assert_eq!(calls(&web, "restart apid.service"), 2);
+        assert_eq!(calls(&web, "restart apid.service"), 1);
         assert_eq!(calls(&web, "start apid.service"), 0);
+    }
+
+    /// A boot where apid already runs (OpenRC): with no file on `/run` it
+    /// started on its defaults, so default settings restart nothing, and
+    /// any others restart it once.
+    #[tokio::test]
+    async fn a_boot_restarts_a_running_apid_only_off_its_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let web = reconciler(&dir, "active");
+        assert_eq!(
+            web.apply(&Settings::default()).await.unwrap()["apid"],
+            json!("none")
+        );
+        assert!(dir.path().join("apid.json").exists());
+
+        let dir = tempfile::tempdir().unwrap();
+        let web = reconciler(&dir, "active");
+        let mut settings = Settings::default();
+        settings.access.web.http_port = 80;
+        assert_eq!(
+            web.apply(&settings).await.unwrap()["apid"],
+            json!("restarted")
+        );
+        assert_eq!(web.apply(&settings).await.unwrap()["apid"], json!("none"));
     }
 
     /// `off` stops a running apid and starts none; `local` runs it.
