@@ -553,3 +553,52 @@ async fn a_wireguard_tunnel_out_of_its_rules_is_refused() {
     }
     assert!(fake.calls().is_empty());
 }
+
+/// The contract with Base's `mica-resolv` and micad's DNS order: every
+/// `resolv.d` file an uplink's stanza writes, a static entry's servers as
+/// `<iface>` and a DHCP entry's own as `00-<iface>` (its lease's, from
+/// `mica-udhcpc`, as `<iface>`), is a line of the order, so its servers
+/// follow the active uplink.
+#[test]
+fn every_resolver_file_an_uplink_writes_is_named_by_the_dns_order() {
+    let network = settings(&[
+        (
+            "eth0",
+            IfaceSettings {
+                dns: vec!["9.9.9.9".to_string()],
+                ..dhcp()
+            },
+        ),
+        (
+            "eth1",
+            fixed("192.168.50.2/24", Some("192.168.50.1"), &["192.0.2.53"]),
+        ),
+    ])
+    .network;
+    let text = render(
+        &network,
+        &["eth0".into(), "eth1".into()],
+        None,
+        &crate::board::Board::default(),
+    )
+    .unwrap();
+    let written: Vec<&str> = text
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix("up mkdir -p /run/mica/resolv.d && ")
+        })
+        .filter_map(|line| line.split(" >/run/mica/resolv.d/").nth(1))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .collect();
+    assert_eq!(written, ["00-eth0", "eth1"]);
+    let order = crate::uplink::dns::order_text(&crate::uplink::dns::DnsOrder {
+        order: vec!["eth1".into(), "eth0".into()],
+        down: ["eth0".to_string()].into(),
+    });
+    assert_eq!(order, "00-eth1\neth1\n00-eth0\neth0\n");
+    let lines: Vec<&str> = order.lines().collect();
+    for name in written.iter().chain(&["eth0"]) {
+        assert!(lines.contains(name), "{name} is not in the order");
+    }
+}

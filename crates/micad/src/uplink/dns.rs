@@ -67,6 +67,17 @@ pub fn order(candidates: &[Candidate]) -> DnsOrder {
     DnsOrder { order, down }
 }
 
+/// The text of [`ORDER_PATH`] for `order`: per uplink its two `resolv.d`
+/// file names, `00-<iface>` then `<iface>`.
+#[must_use]
+pub fn order_text(order: &DnsOrder) -> String {
+    order
+        .order
+        .iter()
+        .map(|name| format!("00-{name}\n{name}\n"))
+        .collect()
+}
+
 /// Brings the resolver to an order.
 #[async_trait::async_trait]
 pub trait Follow: Send + Sync {
@@ -175,12 +186,7 @@ impl ResolvOrder {
                 Err(err) => Err(err.into()),
             };
         }
-        let text: String = order
-            .order
-            .iter()
-            .map(|name| format!("00-{name}\n{name}\n"))
-            .collect();
-        crate::fswrite::write_config_if_changed(&self.path, &text, 0o644)
+        crate::fswrite::write_config_if_changed(&self.path, &order_text(order), 0o644)
     }
 }
 
