@@ -26,6 +26,8 @@ import { inSubnet, intToIp, ipToInt, isIPv4, normalizeStaticRoutingIntent, overl
 import { useDns } from './dns-tab'
 import { Group, InternetSwitch, Section, useWifiText } from './parts'
 import { countryName, ELSEWHERE, EUROPE } from './regulatory'
+import { probeProblem } from './uplink'
+import { ProbeForm, ProbeView, UplinkLive } from './uplink-panel'
 import type { NetworkData } from './use-network'
 
 interface WifiNetwork { ssid: string; psk?: string; hidden: boolean; priority: number; autoConnect?: boolean }
@@ -158,6 +160,7 @@ export function WifiTab({ data, onEditing }: { data: NetworkData; onEditing: (ed
       <Section title={t('network.wifi.state')}>
         <StateFacts data={data} />
       </Section>
+      {wifi.mode === 'client' && radio ? <UplinkLive data={data} name={radio} /> : null}
 
       {listMode === 'client' ? <ClientLists data={data} locked={locked} /> : null}
       {listMode === 'ap' && wifi.mode === 'ap' ? <Stations data={data} /> : null}
@@ -264,6 +267,8 @@ function draftErrors(draft: Draft, data: NetworkData, allowed: number[] | undefi
   } else if (draft.customDns && !entry.dns?.length) errors.dns = t('network.detail.dnsRequired')
   const dns = entry.dhcp ? entry.dns : entry.static?.dns
   if ((dns ?? []).some((server) => !isIPv4(server))) errors.dns = t('network.problems.dns', { list: (dns ?? []).filter((server) => !isIPv4(server)).join(', ') })
+  const probe = probeProblem(entry.probe)
+  if (probe) errors.probe = t(probe)
   return errors
 }
 
@@ -365,6 +370,7 @@ function ConfigView({ data }: { data: NetworkData }) {
             ...(entry.dhcp ? [{ id: 'internet', label: t('network.fields.internet'), value: t(usesInternet(entry, internal) ? 'network.values.on' : 'network.values.off') }] : []),
           ]} />
         </Group>
+        {usesInternet(entry, internal) ? <ProbeView entry={entry} /> : null}
       </div>
     )
   }
@@ -381,6 +387,7 @@ function ConfigForm({ draft, setDraft, errors, current, allowed, internal, apOff
   // A static client's gateway is its default route, written as `internet`.
   const setEntry = (next: IfaceEntry) => setDraft({ ...draft, addressing: normalizeStaticRoutingIntent(next) })
   const globalDns = useDns().data?.global.enabled
+  const probeKey = probeProblem(entry.probe)
   return (
     <div className="grid gap-5">
       <ToggleField
@@ -492,6 +499,11 @@ function ConfigForm({ draft, setDraft, errors, current, allowed, internal, apOff
               </FormField>
             </div>
           )}
+          {usesInternet(entry, internal) ? (
+            <Group title={t('network.uplink.title')}>
+              <ProbeForm entry={entry} problem={probeKey ? { key: probeKey } : undefined} onChange={setEntry} />
+            </Group>
+          ) : null}
         </>
       )}
     </div>

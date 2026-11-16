@@ -640,6 +640,54 @@ describe('the Wi-Fi tab as a client', () => {
     expect(screen.queryByRole('button', { name: 'Access point' })).toBeNull()
   })
 
+  it('offers the reachability check on the radio\'s addressing and writes it through the Wi-Fi route', async () => {
+    const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'w' }) })
+    open('wifi')
+    await screen.findByText('-52 dBm · Strong')
+    expect(screen.getByText('Off: the device does not check this interface.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    expect(screen.queryByText(/makes the device contact the targets below/)).toBeNull()
+    await userEvent.click(screen.getByRole('switch', { name: 'Check internet reachability' }))
+    expect(screen.getByText(/Switching the check on makes the device contact the targets below from this interface/)).toBeTruthy()
+    const targets = screen.getByRole('group', { name: 'Targets' })
+    expect(within(targets).getAllByRole('textbox', { name: 'Address' }).map((input) => (input as HTMLInputElement).value)).toEqual(['1.1.1.1', '8.8.8.8'])
+    await userEvent.click(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodyOf(fetch, 'PUT', '/api/v1/wifi')).toEqual({ enabled: true, mode: 'client', client: { addressing: { dhcp: true, probe: { enabled: true, targets: [{ address: '1.1.1.1', method: 'tcp', port: 53 }, { address: '8.8.8.8', method: 'tcp', port: 53 }] } } } }))
+  })
+
+  it('holds a radio check target the device would refuse', async () => {
+    stubFetch(joined())
+    open('wifi')
+    await screen.findByText('-52 dBm · Strong')
+    await userEvent.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    await userEvent.click(screen.getByRole('switch', { name: 'Check internet reachability' }))
+    const address = within(screen.getByRole('group', { name: 'Targets' })).getAllByRole('textbox', { name: 'Address' })[0]
+    await userEvent.clear(address)
+    await userEvent.type(address, 'example.org')
+    expect(screen.getAllByText('A target is an IPv4 address or the gateway.').length).toBeGreaterThan(0)
+    expect(within(screen.getByRole('region', { name: /Editing/ })).getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('shows the radio\'s check verdict and the failover on the Wi-Fi tab', async () => {
+    const at = new Date().toISOString()
+    const routes = joined() as Record<string, unknown>
+    const status = routes['/api/v1/network/status'] as ReturnType<typeof observed>
+    status.uplinks = {
+      active: 'wlan0', natural: 'eth0', override: true, lastChange: { at, from: 'eth0', to: 'wlan0', reason: 'probe' },
+      uplinks: [
+        { name: 'eth0', metric: 100, state: 'down', since: at, failures: 3, successes: 0, probe: { enabled: true, targets: [{ address: '1.1.1.1', method: 'tcp', port: 53 }], intervalS: 10, timeoutMs: 2000, failuresToDown: 3, successesToUp: 5 } },
+        { name: 'wlan0', metric: 600, state: 'up', since: at, failures: 0, successes: 5,
+          probe: { enabled: true, targets: [{ address: '8.8.8.8', method: 'tcp', port: 53 }], intervalS: 10, timeoutMs: 2000, failuresToDown: 3, successesToUp: 5 },
+          lastRound: { at, ok: true, targets: [{ address: '8.8.8.8', method: 'tcp', port: 53, ok: true, latencyMs: 9 }] } },
+      ],
+    }
+    stubFetch(routes)
+    open('wifi')
+    expect(await screen.findByText('Carries the traffic')).toBeTruthy()
+    expect(screen.getByText('Failover: the traffic goes through wlan0 while eth0 does not answer.')).toBeTruthy()
+    expect(screen.getByText('Answered in 9 ms')).toBeTruthy()
+  })
+
   it('keeps the radio client off the internet through its addressing', async () => {
     const fetch = stubFetch({ ...joined(), 'PUT /api/v1/wifi': () => jsonResponse({ taskId: 'w' }) })
     open('wifi')

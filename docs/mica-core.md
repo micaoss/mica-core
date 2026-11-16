@@ -1159,7 +1159,9 @@ section 3.3) while the interface may carry the default route: switched on, it fi
 it shows the four numbers with the time to switch over and back and the cost a day. The page
 shows the check's verdict, whether the interface carries the traffic, a failover in progress
 and the last round's answers; the interface cards and the overview's uplink strip show the
-verdict. `GET /api/v1/network/status` carries `uplinks` (schema `UplinksStatus`). A network
+verdict. The Wi-Fi tab does the same for the radio's station addressing: the same editor in its
+configuration, written with the addressing through `PUT /api/v1/wifi`, and the check's status
+beside the radio's state. `GET /api/v1/network/status` carries `uplinks` (schema `UplinksStatus`). A network
 write that
 removes a WireGuard tunnel records `wireguard-delete` `accepted` in the audit ring, once per
 tunnel and without its name. A write is refused `port_in_use` when a tunnel's listen port is
