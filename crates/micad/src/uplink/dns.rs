@@ -1,11 +1,14 @@
 //! DNS following the active uplink: an uplink that is down while another
 //! carries the traffic is not asked for names.
 //!
-//! - systemd: resolved's `SetLinkDefaultRoute` false on each down uplink and
-//!   true again once it is not; resolved then sends each lookup to the
-//!   remaining links' servers. The value is resolved's runtime state, which
-//!   networkd may reset when it reconfigures the link, so a down uplink's is
-//!   set again every [`REASSERT`].
+//! - systemd: `SetLinkDefaultRoute` false on each down uplink and true again
+//!   once it is not; resolved then sends each lookup to the remaining links'
+//!   servers. resolved refuses it for a link networkd manages (`LinkBusy`),
+//!   whose DNS settings are networkd's: there networkd's own
+//!   `SetLinkDefaultRoute` sets it, as `resolvectl` does, with no reload and
+//!   no DHCP restart. The value is runtime state, which networkd may reset
+//!   when it reconfigures the link, so a down uplink's is set again every
+//!   [`REASSERT`].
 //! - OpenRC: [`ORDER_PATH`], the active uplink first and the down ones last,
 //!   which Base's `mica-resolv` follows when it builds `resolv.conf`; micad
 //!   writes it through a sibling and a rename, and runs `mica-resolv` after
@@ -29,6 +32,8 @@ pub const ORDER_PATH: &str = "/run/mica/resolv.order";
 const MICA_RESOLV: &str = "/usr/lib/mica/mica-resolv";
 /// How often a down uplink's resolved setting is set again.
 pub const REASSERT: Duration = Duration::from_secs(10);
+/// resolved's answer for a link whose DNS settings networkd manages.
+const LINK_BUSY: &str = "org.freedesktop.resolve1.LinkBusy";
 
 /// Which uplinks' servers are asked, and in what order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -118,7 +123,7 @@ impl Resolved {
         let connection = zbus::Connection::system()
             .await
             .map_err(|err| format!("system bus: {err}"))?;
-        connection
+        match connection
             .call_method(
                 Some("org.freedesktop.resolve1"),
                 "/org/freedesktop/resolve1",
@@ -127,8 +132,21 @@ impl Resolved {
                 &(index, enable),
             )
             .await
-            .map(drop)
-            .map_err(|err| err.to_string())
+        {
+            Ok(_) => Ok(()),
+            Err(zbus::Error::MethodError(error, _, _)) if error.as_str() == LINK_BUSY => connection
+                .call_method(
+                    Some("org.freedesktop.network1"),
+                    "/org/freedesktop/network1",
+                    Some("org.freedesktop.network1.Manager"),
+                    "SetLinkDefaultRoute",
+                    &(index, enable),
+                )
+                .await
+                .map(drop)
+                .map_err(|err| format!("networkd: {err}")),
+            Err(err) => Err(err.to_string()),
+        }
     }
 }
 

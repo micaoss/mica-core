@@ -534,3 +534,4 @@ async fn the_order_file_is_written_and_removed_with_a_rebuild_each_time() {
 
 #[cfg(test)]
 mod vm;
+mod vm_systemd;
