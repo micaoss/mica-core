@@ -11,6 +11,7 @@ mod factory_reset;
 mod features;
 mod install;
 mod latest;
+mod network_rules;
 mod observers;
 mod power;
 mod provisioning;

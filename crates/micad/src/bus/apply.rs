@@ -117,6 +117,30 @@ impl MicadService {
                     });
                 }
             }
+            // The network rules and the stored defaults, for the entries this
+            // write adds or changes: every writer (apid, BLE provisioning, a
+            // settings path over the bus, `mica`) meets them here.
+            if candidate.network != inner.settings.network {
+                for cfg in candidate.network.values_mut() {
+                    micad_settings::store_probe_defaults(cfg);
+                }
+                let carried: Vec<&str> = candidate
+                    .network
+                    .iter()
+                    .filter(|(iface, cfg)| inner.settings.network.get(*iface) != Some(*cfg))
+                    .map(|(iface, _)| iface.as_str())
+                    .collect();
+                if let Some(violation) =
+                    micad_settings::map_violations(&candidate.network, &carried)
+                        .into_iter()
+                        .next()
+                {
+                    return Err(SettingsError::Validation {
+                        path: path.to_string(),
+                        message: format!("{}: {}", violation.code, violation.message),
+                    });
+                }
+            }
             // The peers' route rules, for the peers this write changes: every
             // route that writes the network (a peer, an interface, the whole
             // map, a settings path) meets them here.
