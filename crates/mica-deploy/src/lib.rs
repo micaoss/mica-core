@@ -18,6 +18,7 @@ pub mod factory_reset;
 pub mod firmware;
 pub mod fit_env;
 pub mod owner_certs;
+pub mod power;
 pub mod set_state;
 pub mod ubi;
 pub mod update_set;

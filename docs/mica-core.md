@@ -1723,14 +1723,20 @@ carries it (`if-installed=micad`), so a device without micad confirms on the ini
 confirmed. A boot is on trial while it tries something a confirm has not settled: its deployment
 on a counted entry or record, the core set it composed while that set is pending, or the
 extension change it mapped. `mica-deploy trial-deadline`, started first in userspace by the
-mica-deploy package's `mica-trial-deadline` unit (systemd) or boot-runlevel script (OpenRC),
+mica-deploy package's `mica-trial-deadline` unit (systemd) or sysinit script (OpenRC, beside
+`mica-watchdog` and before the boot runlevel's DATA work, so a hang there meets the deadline too),
 prints `{"trial": false}` and exits at once on any other boot. On a trial boot it waits until
 `confirmS`, takes the store's lock (waiting up to 600 s for a confirm that holds it) and looks
 again: confirmed by then, it prints `{"trial": false, "confirmed": true}`. Otherwise it does what
 `fail-boot` does and reboots, which spends one of the trial's tries, so a trial that never
-reaches the health gate falls back as a failed one does. A fallback it cannot record, or a DATA
-it cannot reach, powers the device off, as the health gate's failure path does. A confirmed boot
-is never failed for being slow.
+reaches the health gate falls back as a failed one does. A fallback it cannot record powers the
+device off, as the health gate's failure path does. A DATA it cannot reach is not written: it
+reboots, because every try is spent before the root starts (the loader's counter for a
+deployment: systemd-boot's `+N` entry on UEFI, micaboot's record attempts on FIT boards; the
+runkit's `meta/set-trial.json` for a set or an extension change), so the trial still runs out and
+falls back. A confirmed boot is never failed for being slow. mica-deploy reboots and powers off
+through the root's init (`systemctl reboot|poweroff`, or `openrc-shutdown --reboot|--poweroff
+now` when `product.conf` says `INIT=openrc`), for the deadline and for every `--reboot`.
 
 ### 6.4 The board, from the signed policy
 

@@ -13,7 +13,9 @@ use mica_deploy::{
         BootBackend, BootReceipt, DeploymentStore, KernelExtensions, SetTarget, SharedDataFailure,
         Target, read_bounded,
     },
-    factory_reset, set_state,
+    factory_reset,
+    power::Power,
+    set_state,
     ubi::SysUbi,
     update_set::SetKind,
 };
@@ -583,6 +585,13 @@ fn command(program: &str, args: &[&str]) -> Result<String> {
         }
         thread::sleep(Duration::from_millis(20));
     }
+}
+/// Reboot or power off through the running root's init.
+fn power(power: mica_deploy::power::Power) -> Result<()> {
+    let root = Path::new("/");
+    let (program, args) = mica_deploy::power::command(root, mica_deploy::power::init(root)?, power);
+    command(&program.to_string_lossy(), args)?;
+    Ok(())
 }
 fn remount(path: &str, mode: &str) -> Result<()> {
     command("/bin/mount", &["-o", &format!("remount,{mode}"), path])?;
@@ -1564,7 +1573,7 @@ fn execute() -> Result<()> {
     })?;
     println!("{}", serde_json::to_string(&result)?);
     if reboot {
-        command("reboot", &[])?;
+        power(Power::Reboot)?;
     }
     Ok(())
 }
@@ -1832,8 +1841,11 @@ const DEADLINE_LOCK_WAIT: Duration = Duration::from_secs(600);
 /// uptime (`docs/mica-core.md` 6.5): fail-boot, then a reboot, which spends
 /// one of the trial's tries. A boot with nothing on trial, or one confirmed
 /// in time, is left alone however slow it is. As the health gate's failure
-/// path, a fallback that cannot be recorded, or a DATA that cannot be
-/// reached, powers off.
+/// path, a fallback that cannot be recorded powers off. A DATA that cannot be
+/// reached is not written at all: the boot is rebooted, as every try of a
+/// trial is spent before the root starts (the loader's counter for a
+/// deployment, the runkit's on DATA for a set or extension change), so the
+/// trial still runs out and falls back.
 fn trial_deadline(
     store: &DeploymentStore,
     receipt: &BootReceipt,
@@ -1864,7 +1876,7 @@ fn trial_deadline(
     let _lock = loop {
         match store.lock() {
             Ok(lock) => break lock,
-            Err(error) if error.is::<SharedDataFailure>() => return power_off(error),
+            Err(error) if error.is::<SharedDataFailure>() => return unreachable(error),
             Err(_) if waited.elapsed() < DEADLINE_LOCK_WAIT => {
                 thread::sleep(Duration::from_secs(1))
             }
@@ -1881,11 +1893,22 @@ fn trial_deadline(
     }) {
         Ok(failed) => {
             println!("{failed}");
-            command("reboot", &[])?;
+            power(Power::Reboot)?;
             Ok(())
         }
+        Err(error) if error.is::<SharedDataFailure>() => unreachable(error),
         Err(error) => power_off(error),
     }
+}
+
+/// A trial boot past its deadline whose DATA cannot be reached: reboot
+/// without recording; the try is already spent.
+fn unreachable(error: anyhow::Error) -> Result<()> {
+    eprintln!(
+        "mica-deploy: DATA cannot be reached ({error:#}); rebooting without recording, the try is already spent"
+    );
+    power(Power::Reboot)?;
+    Err(error)
 }
 
 /// The time since boot, suspend included.
@@ -1905,7 +1928,7 @@ fn power_off(error: anyhow::Error) -> Result<()> {
     eprintln!(
         "mica-deploy: cannot record the failed boot ({error:#}); recovery required, powering off"
     );
-    command("poweroff", &[])?;
+    power(Power::PowerOff)?;
     Err(error)
 }
 
@@ -1915,7 +1938,7 @@ fn finish(what: &str, reboot: bool) -> Result<()> {
         return Ok(());
     }
     println!("{what}; rebooting");
-    command("reboot", &[])?;
+    power(Power::Reboot)?;
     Ok(())
 }
 

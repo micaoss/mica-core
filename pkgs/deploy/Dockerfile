@@ -18,9 +18,9 @@ RUN set -eu; \
     install -D -m 0644 /in/copyright       /stage/usr/share/doc/mica-deploy/copyright; \
     install -D -m 0644 /in/dist/mica-trial-deadline.service /stage/usr/lib/systemd/system/mica-trial-deadline.service; \
     install -D -m 0755 /in/dist/mica-trial-deadline.openrc  /stage/etc/init.d/mica-trial-deadline; \
-    install -d -m 0755 /stage/etc/systemd/system/multi-user.target.wants /stage/etc/runlevels/boot; \
+    install -d -m 0755 /stage/etc/systemd/system/multi-user.target.wants /stage/etc/runlevels/sysinit; \
     ln -s /usr/lib/systemd/system/mica-trial-deadline.service /stage/etc/systemd/system/multi-user.target.wants/mica-trial-deadline.service; \
-    ln -s /etc/init.d/mica-trial-deadline /stage/etc/runlevels/boot/mica-trial-deadline; \
+    ln -s /etc/init.d/mica-trial-deadline /stage/etc/runlevels/sysinit/mica-trial-deadline; \
     shlibs_mica_deploy="$(shlibs.sh /stage "${MICA_DEB_ARCH}")"; \
     bun /tools/src/cli.ts deb pack --root /stage --control /in/control/mica-deploy.control \
             --substitute "shlibs:Depends=${shlibs_mica_deploy}" \

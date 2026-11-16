@@ -1,15 +1,18 @@
 #!/sbin/openrc-run
-# mica-trial-deadline.service's counterpart, in the boot runlevel by the link
-# this package ships: a trial boot not confirmed within the boot policy's
+# mica-trial-deadline.service's counterpart, in the sysinit runlevel by the
+# link this package ships: a trial boot not confirmed within the boot policy's
 # board.watchdog.confirmS seconds of uptime is failed and rebooted; any other
-# boot is left alone. The wait runs in the background, so the service is
-# started at once and never holds the boot.
+# boot is left alone. It starts beside mica-watchdog, before the boot
+# runlevel's DATA work (mica-data-layout), so a boot that hangs anywhere after
+# the feeder starts still meets its deadline; the runkit has mounted DATA
+# before the init runs. The wait runs in the background, so the service is
+# started at once and never holds the boot. Its lines reach the system log
+# once mica-syslogd runs.
 
 description="Fail a trial boot that is not confirmed in time"
 
 depend() {
-    need mica-data-layout
-    use mica-syslogd
+    need mica-kernfs dev
 }
 
 start() {
