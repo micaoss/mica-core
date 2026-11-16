@@ -265,6 +265,9 @@ pub struct Engine {
     candidates: Vec<Candidate>,
     active: Option<String>,
     natural: Option<String>,
+    /// Whether an uplink has been active since the engine started: the
+    /// first one is where it starts, every later change is a switch.
+    started: bool,
     last_change: Option<Change>,
     rounds: (RoundSender, RoundReceiver),
 }
@@ -282,6 +285,7 @@ impl Engine {
             candidates: Vec::new(),
             active: None,
             natural: None,
+            started: false,
             last_change: None,
             rounds: tokio::sync::mpsc::unbounded_channel(),
         }
@@ -372,8 +376,10 @@ impl Engine {
         if active == self.active {
             return None;
         }
-        // The first uplinks the engine sees are where it starts, not a switch.
-        if previous_natural.is_none() && self.active.is_none() {
+        // The first uplink the engine sees active is where it starts, not a
+        // switch; once one has been, coming back from none is a change.
+        if !self.started {
+            self.started = active.is_some();
             self.active = active;
             return None;
         }

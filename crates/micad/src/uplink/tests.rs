@@ -309,6 +309,34 @@ async fn the_engine_steers_past_a_dead_uplink_and_back() {
     assert!(fake.overrides().is_empty());
 }
 
+// Every route gone at once (an apply's address flush) is `none-up`; the first
+// uplink back is a change too, `recovered`, with its own `lastChange`.
+#[tokio::test]
+async fn coming_back_from_no_uplink_is_a_change() {
+    let fake = Arc::new(Fake::default());
+    fake.route(2, 100);
+    fake.route(3, 110);
+    let mut engine = Engine::new(Arc::clone(&fake) as Arc<dyn Host>);
+    let settings = network(&["eth0", "eth1"]);
+    assert_eq!(engine.tick(&settings), None);
+
+    fake.routes.lock().unwrap().clear();
+    let change = engine.tick(&settings).unwrap();
+    assert_eq!(
+        (change.from.as_deref(), change.to.as_deref(), change.reason),
+        (Some("eth0"), None, "none-up")
+    );
+
+    fake.route(2, 100);
+    let change = engine.tick(&settings).unwrap();
+    assert_eq!(
+        (change.from.as_deref(), change.to.as_deref(), change.reason),
+        (None, Some("eth0"), "recovered")
+    );
+    assert_eq!(engine.last_change, Some(change));
+    assert_eq!(engine.observation(&settings)["active"], "eth0");
+}
+
 // An uplink that loses its default route is `noRoute` at once and must earn
 // `up` again when the route comes back; the failover follows the loss as a
 // `link` change. A stale failover route from an earlier run is cleared at
