@@ -1739,16 +1739,29 @@ on a counted entry or record, the core set it composed while that set is pending
 extension change it mapped. `mica-deploy trial-deadline`, started first in userspace by the
 mica-deploy package's `mica-trial-deadline` unit (systemd) or sysinit script (OpenRC, beside
 `mica-watchdog` and before the boot runlevel's DATA work, so a hang there meets the deadline too),
-prints `{"trial": false}` and exits at once on any other boot. On a trial boot it waits until
-`confirmS`, takes the store's lock (waiting up to 600 s for a confirm that holds it) and looks
-again: confirmed by then, it prints `{"trial": false, "confirmed": true}`. Otherwise it does what
-`fail-boot` does and reboots, which spends one of the trial's tries, so a trial that never
-reaches the health gate falls back as a failed one does. A fallback it cannot record powers the
-device off, as the health gate's failure path does. A DATA it cannot reach is not written: it
+prints `{"trial": false}` and exits at once on any other boot. It tells a trial boot from what
+the loader and the runkit left, so it needs no mount the init makes (on OpenRC the ESP is mounted
+in the boot runlevel): the core set on trial (`pending` in `/run/mica/core.json`), the extension
+change mapped (`/run/mica/extensions.json`), and the deployment on a counted entry. On UEFI the
+last is systemd-boot's `LoaderBootCountPath` variable, which the loader sets for the boot exactly
+when it counted the entry it boots (`LoaderEntrySelected` names the entry without its counter);
+on FIT and UBI boards it is the records, on the raw boot partition or in UBI volumes, which the
+runkit's SYSTEM and DATA mounts make reachable before the init. On a trial boot it waits until
+`confirmS`, only then opens the store (SYSTEM, DATA and the ESP), takes its lock (waiting up to
+600 s for a confirm that holds it) and looks again: confirmed by then, it prints `{"trial":
+false, "confirmed": true}`. Otherwise it does what `fail-boot` does and reboots, which spends one
+of the trial's tries, so a trial that never reaches the health gate falls back as a failed one
+does. A fallback it cannot record powers the device off, as the health gate's failure path does.
+A store it cannot reach, DATA or an ESP that a boot hung before mounting, is not written: it
 reboots, because every try is spent before the root starts (the loader's counter for a
 deployment: systemd-boot's `+N` entry on UEFI, micaboot's record attempts on FIT boards; the
 runkit's `meta/set-trial.json` for a set or an extension change), so the trial still runs out and
-falls back. A confirmed boot is never failed for being slow. mica-deploy reboots and powers off
+falls back. A confirmed boot is never failed for being slow. It reboots or powers off through the
+init and, if the init has not stopped it within 300 s, through the kernel after a sync:
+openrc-init takes a request only between runlevels, so a boot hung inside one never acts on
+`openrc-shutdown`. On OpenRC its lines go to the kernel
+log, which exists before any syslogd and reaches the system log through `mica-klogd`; an error and
+a failed exit are logged at error level, so they reach the console too. mica-deploy reboots and powers off
 through the root's init (`systemctl reboot|poweroff`, or `openrc-shutdown --reboot|--poweroff
 now` when `product.conf` says `INIT=openrc`), for the deadline and for every `--reboot`.
 

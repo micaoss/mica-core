@@ -593,6 +593,29 @@ pub fn selected_entry(entry: &str) -> Result<String, BootError> {
     Ok(id.to_owned())
 }
 
+/// systemd-boot's `LoaderEntrySelected`: the entry it booted, without its
+/// counter.
+pub const ENTRY_SELECTED_VARIABLE: &str =
+    "/sys/firmware/efi/efivars/LoaderEntrySelected-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f";
+
+/// systemd-boot's `LoaderBootCountPath`, set for this boot only when the
+/// loader counted the entry it booted (renamed it to its next `+N-M` name),
+/// and absent otherwise. It is the one record of a counted boot outside the
+/// ESP: `LoaderEntrySelected` names the entry without its counter.
+pub const BOOT_COUNT_VARIABLE: &str =
+    "/sys/firmware/efi/efivars/LoaderBootCountPath-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f";
+
+/// The deployment whose entry `LoaderBootCountPath` (`bytes`, as efivarfs
+/// gives it) names: `\loader\entries\mica-<id>+N-M.conf`.
+pub fn counted_entry(bytes: &[u8]) -> Result<String, BootError> {
+    let path = utf16_variable(bytes)?;
+    let file = path
+        .strip_prefix("\\loader\\entries\\")
+        .filter(|file| file.contains('+'))
+        .ok_or(BootError("invalid boot count path"))?;
+    selected_entry(file)
+}
+
 pub fn utf16_variable(bytes: &[u8]) -> Result<String, BootError> {
     if bytes.len() < 6 || bytes.len() > 512 || !bytes.len().is_multiple_of(2) {
         return Err(BootError("invalid EFI variable length"));

@@ -110,7 +110,7 @@ pub(super) fn boot(control: &mut BootControl, attempt: &mut Option<BootAttempt>)
                 "nosuid,nodev,noexec",
             )?;
             let selected = utf16_variable(&bounded_file(
-                "/sys/firmware/efi/efivars/LoaderEntrySelected-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f",
+                mica_deploy::boot::ENTRY_SELECTED_VARIABLE,
                 512,
             )?)?;
             let id = selected_entry(&selected)?;

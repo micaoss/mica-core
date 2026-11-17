@@ -3,11 +3,13 @@
 # link this package ships: a trial boot not confirmed within the boot policy's
 # board.watchdog.confirmS seconds of uptime is failed and rebooted; any other
 # boot is left alone. It starts beside mica-watchdog, before the boot
-# runlevel's DATA work (mica-data-layout), so a boot that hangs anywhere after
-# the feeder starts still meets its deadline; the runkit has mounted DATA
-# before the init runs. The wait runs in the background, so the service is
-# started at once and never holds the boot. Its lines reach the system log
-# once mica-syslogd runs.
+# runlevel's DATA work (mica-data-layout) and the ESP, so a boot that hangs
+# anywhere after the feeder starts still meets its deadline: it needs only
+# what the loader and the runkit left, and opens the store at the deadline.
+# The wait runs in the background, so the service is started at once and never
+# holds the boot. Its lines go to the kernel log, which exists before any
+# syslogd and reaches the system log through mica-klogd; an error and a
+# failed exit are logged as errors, so they show on the console too.
 
 description="Fail a trial boot that is not confirmed in time"
 
@@ -17,7 +19,18 @@ depend() {
 
 start() {
     ebegin "Starting the trial deadline"
-    (/usr/bin/mica-deploy trial-deadline 2>&1 | logger -t mica-trial-deadline -p daemon.notice) \
-        </dev/null >/dev/null 2>&1 &
+    (
+        {
+            /usr/bin/mica-deploy trial-deadline 2>&1
+            echo "mica-deploy exited with status $?"
+        } | while IFS= read -r line; do
+            case "$line" in
+            "mica-deploy exited with status 0") ;;
+            Error:* | "mica-deploy exited with status "*)
+                printf '<3>mica-trial-deadline: %s\n' "$line" >/dev/kmsg ;;
+            *) printf '<5>mica-trial-deadline: %s\n' "$line" >/dev/kmsg ;;
+            esac
+        done
+    ) </dev/null >/dev/null 2>&1 &
     eend 0
 }

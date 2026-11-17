@@ -1,7 +1,7 @@
 // Tests and fixtures answer a broken expectation by panicking.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use mica_deploy::boot::{selected_entry, utf16_variable};
+use mica_deploy::boot::{counted_entry, selected_entry, utf16_variable};
 
 #[test]
 fn normalizes_only_native_deployment_entries() {
@@ -163,5 +163,36 @@ fn the_root_s_product_file_says_whether_it_runs_openrc() {
             openrc,
             "{text}"
         );
+    }
+}
+
+/// `LoaderBootCountPath` as systemd-boot sets it: the entry's path on the ESP
+/// under its next, counted name.
+#[test]
+fn reads_the_deployment_the_loader_counted() {
+    let variable = |path: &str| {
+        let mut bytes = vec![6, 0, 0, 0];
+        for c in path.encode_utf16().chain([0]) {
+            bytes.extend(c.to_le_bytes());
+        }
+        bytes
+    };
+    let id = "a".repeat(64);
+    for counter in ["2-1", "1-2", "0-3"] {
+        assert_eq!(
+            counted_entry(&variable(&format!(
+                "\\loader\\entries\\mica-{id}+{counter}.conf"
+            )))
+            .unwrap(),
+            id
+        );
+    }
+    for path in [
+        format!("\\loader\\entries\\mica-{id}.conf"),
+        format!("\\EFI\\Linux\\mica-{id}+2-1.conf"),
+        format!("mica-{id}+2-1.conf"),
+        format!("\\loader\\entries\\other-{id}+2-1.conf"),
+    ] {
+        assert!(counted_entry(&variable(&path)).is_err(), "{path}");
     }
 }

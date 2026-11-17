@@ -819,24 +819,17 @@ fn execute() -> Result<()> {
         receipt.backend == backend,
         "boot receipt backend differs from signed policy"
     );
-    let boot = match &policy.board.ubi {
-        Some(ubi) => {
-            let ubi = SysUbi::attached(&ubi.mtd)?;
-            let table = std::fs::read_to_string("/proc/self/mountinfo")?;
-            let number = ubi.number();
-            ubifs_mount(&table, "/mnt/system", &format!("ubi{number}:system"), false)?;
-            ubifs_mount(&table, "/mnt/data", &format!("ubi{number}:data"), true)
-                .context(SharedDataFailure)?;
-            BootBackend::Ubi {
-                ubi: std::sync::Arc::new(ubi),
-            }
-        }
-        None => gpt_storage(&policy)?,
-    };
-    let store = DeploymentStore::new("/mnt/system".into(), boot, "/mnt/data/meta".into())
-        .with_reserves(policy.board.reserves)
-        .with_boot_trust(policy.board.boot_trust)
-        .with_staged("/mica/updates/verified".into());
+    // The deadline starts in the init's first stage, before the mounts the
+    // init makes (the ESP on an OpenRC root): it opens the store only when
+    // the deadline comes.
+    if matches!(cli.command, Action::TrialDeadline) {
+        ensure!(
+            receipt.content_verified,
+            "running content is not authenticated"
+        );
+        return trial_deadline(&policy, &receipt, &keys);
+    }
+    let store = open_store(&policy)?;
     if matches!(cli.command, Action::Booted) {
         ensure!(
             receipt.content_verified,
@@ -931,15 +924,6 @@ fn execute() -> Result<()> {
         receipt.content_verified,
         "running content is not authenticated"
     );
-    if matches!(cli.command, Action::TrialDeadline) {
-        return trial_deadline(
-            &store,
-            &receipt,
-            &keys,
-            backend,
-            policy.board.watchdog().confirm_s(),
-        );
-    }
     let _lock = store.lock()?;
     // The first command of the root after the runkit made DATA again
     // finishes the reset on SYSTEM; until then nothing that would change what
@@ -1837,27 +1821,26 @@ fn fail_boot(
 /// as a confirm settling the trial.
 const DEADLINE_LOCK_WAIT: Duration = Duration::from_secs(600);
 
-/// Fail a trial boot that is not confirmed within `confirm_s` seconds of
-/// uptime (`docs/mica-core.md` 6.5): fail-boot, then a reboot, which spends
+/// Fail a trial boot that is not confirmed within the board's `confirmS`
+/// seconds of uptime (`docs/mica-core.md` 6.5): fail-boot, then a reboot, which spends
 /// one of the trial's tries. A boot with nothing on trial, or one confirmed
 /// in time, is left alone however slow it is. As the health gate's failure
-/// path, a fallback that cannot be recorded powers off. A DATA that cannot be
-/// reached is not written at all: the boot is rebooted, as every try of a
+/// path, a fallback that cannot be recorded powers off. A store that cannot be
+/// reached at the deadline (DATA, or the ESP a boot that hung never mounted)
+/// is not written at all: the boot is rebooted, as every try of a
 /// trial is spent before the root starts (the loader's counter for a
 /// deployment, the runkit's on DATA for a set or extension change), so the
 /// trial still runs out and falls back.
-fn trial_deadline(
-    store: &DeploymentStore,
-    receipt: &BootReceipt,
-    keys: &[[u8; 32]],
-    backend: BootKind,
-    confirm_s: u32,
-) -> Result<()> {
+///
+/// It starts before the init mounts anything: whether the boot is on trial
+/// comes from what the loader and the runkit left ([`boot_tries`]), and the
+/// store is opened only at the deadline.
+fn trial_deadline(policy: &Policy, receipt: &BootReceipt, keys: &[[u8; 32]]) -> Result<()> {
+    let confirm_s = policy.board.watchdog().confirm_s();
     let core = core_boot()?;
     let trial = mica_deploy::extensions::booted(Path::new(mica_deploy::extensions::BOOT_FILE))?
         .and_then(|record| record.trial);
-    let on_trial = || store.on_trial(&receipt.deployment_id, &core, trial.as_ref(), keys);
-    if !on_trial()? {
+    if !boot_tries(policy, receipt, &core, trial.is_some())? {
         println!("{}", json!({"trial": false}));
         return Ok(());
     }
@@ -1872,6 +1855,15 @@ fn trial_deadline(
         }
         thread::sleep(deadline - up);
     }
+    let store = match open_store(policy) {
+        Ok(store) => store,
+        Err(error) if error.is::<SharedDataFailure>() => return unreachable(error),
+        Err(error) if policy.board.boot == BootKind::Uefi && !mount_point("/boot")? => {
+            return unreachable(error.context("the ESP is not mounted"));
+        }
+        Err(error) => return Err(error),
+    };
+    let on_trial = || store.on_trial(&receipt.deployment_id, &core, trial.as_ref(), keys);
     let waited = Instant::now();
     let _lock = loop {
         match store.lock() {
@@ -1888,27 +1880,95 @@ fn trial_deadline(
         return Ok(());
     }
     eprintln!("mica-deploy: the trial was not confirmed within {confirm_s}s; failing the boot");
-    match writable(backend, false, || {
-        fail_boot(store, receipt, &core, trial.as_ref())
+    match writable(policy.board.boot, false, || {
+        fail_boot(&store, receipt, &core, trial.as_ref())
     }) {
         Ok(failed) => {
             println!("{failed}");
-            power(Power::Reboot)?;
-            Ok(())
+            deadline_power(Power::Reboot)
         }
         Err(error) if error.is::<SharedDataFailure>() => unreachable(error),
         Err(error) => power_off(error),
     }
 }
 
-/// A trial boot past its deadline whose DATA cannot be reached: reboot
+/// How long the deadline leaves the init to take the machine down before it
+/// does so itself: longer than an orderly shutdown takes.
+const INIT_GRACE: Duration = Duration::from_secs(300);
+
+/// Reboot or power off for the deadline: through the init and, if the init
+/// has not stopped this process within [`INIT_GRACE`], through the kernel
+/// after a sync. openrc-init takes a request only between runlevels, so on a
+/// boot hung inside one, `openrc-shutdown` is never acted on.
+fn deadline_power(what: Power) -> Result<()> {
+    if let Err(error) = power(what) {
+        eprintln!("mica-deploy: the init refused the request ({error:#})");
+    }
+    thread::sleep(INIT_GRACE);
+    eprintln!(
+        "mica-deploy: the init did not act within {}s; the kernel does",
+        INIT_GRACE.as_secs()
+    );
+    rustix::fs::sync();
+    rustix::system::reboot(match what {
+        Power::Reboot => rustix::system::RebootCommand::Restart,
+        Power::PowerOff => rustix::system::RebootCommand::PowerOff,
+    })?;
+    Ok(())
+}
+
+/// A trial boot past its deadline whose store cannot be reached: reboot
 /// without recording; the try is already spent.
 fn unreachable(error: anyhow::Error) -> Result<()> {
     eprintln!(
-        "mica-deploy: DATA cannot be reached ({error:#}); rebooting without recording, the try is already spent"
+        "mica-deploy: the store cannot be reached ({error:#}); rebooting without recording, the try is already spent"
     );
-    power(Power::Reboot)?;
+    deadline_power(Power::Reboot)?;
     Err(error)
+}
+
+/// Whether this boot tries something a confirm has not settled, from what the
+/// loader and the runkit left before the init ran, so that nothing the init
+/// mounts is needed: the core set the runkit composed while it is pending
+/// (`/run/mica/core.json`), the extension change it mapped (`trial`, from
+/// `/run/mica/extensions.json`), or a counted entry of the deployment. On
+/// UEFI the last is the loader's `LoaderBootCountPath`, which systemd-boot
+/// sets exactly when it counted the entry it boots; the ESP's entries are
+/// read only at the deadline. A FIT or UBI board's records are on its raw
+/// boot partition or in UBI volumes, which the runkit's SYSTEM and DATA
+/// mounts make reachable before the init: they are read now.
+fn boot_tries(
+    policy: &Policy,
+    receipt: &BootReceipt,
+    core: &CoreBoot,
+    trial: bool,
+) -> Result<bool> {
+    if core.pending || trial {
+        return Ok(true);
+    }
+    match policy.board.boot {
+        BootKind::Uefi => {
+            ensure!(
+                Path::new(mica_deploy::boot::ENTRY_SELECTED_VARIABLE).exists(),
+                "the loader's variables cannot be read"
+            );
+            match std::fs::read(mica_deploy::boot::BOOT_COUNT_VARIABLE) {
+                Ok(bytes) => {
+                    ensure!(
+                        mica_deploy::boot::counted_entry(&bytes)? == receipt.deployment_id,
+                        "the loader counted another deployment's entry"
+                    );
+                    Ok(true)
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+                Err(error) => Err(error.into()),
+            }
+        }
+        BootKind::UbootFit => Ok(open_store(policy)?
+            .entries()?
+            .iter()
+            .any(|entry| entry.id == receipt.deployment_id && entry.tries_left.is_some())),
+    }
 }
 
 /// The time since boot, suspend included.
@@ -1928,7 +1988,7 @@ fn power_off(error: anyhow::Error) -> Result<()> {
     eprintln!(
         "mica-deploy: cannot record the failed boot ({error:#}); recovery required, powering off"
     );
-    power(Power::PowerOff)?;
+    deadline_power(Power::PowerOff)?;
     Err(error)
 }
 
@@ -1940,6 +2000,38 @@ fn finish(what: &str, reboot: bool) -> Result<()> {
     println!("{what}; rebooting");
     power(Power::Reboot)?;
     Ok(())
+}
+
+/// The deployment store on the boot medium the policy states, with SYSTEM,
+/// DATA and, on UEFI, the ESP at `/boot` held to it.
+fn open_store(policy: &Policy) -> Result<DeploymentStore> {
+    let boot = match &policy.board.ubi {
+        Some(ubi) => {
+            let ubi = SysUbi::attached(&ubi.mtd)?;
+            let table = std::fs::read_to_string("/proc/self/mountinfo")?;
+            let number = ubi.number();
+            ubifs_mount(&table, "/mnt/system", &format!("ubi{number}:system"), false)?;
+            ubifs_mount(&table, "/mnt/data", &format!("ubi{number}:data"), true)
+                .context(SharedDataFailure)?;
+            BootBackend::Ubi {
+                ubi: std::sync::Arc::new(ubi),
+            }
+        }
+        None => gpt_storage(policy)?,
+    };
+    Ok(
+        DeploymentStore::new("/mnt/system".into(), boot, "/mnt/data/meta".into())
+            .with_reserves(policy.board.reserves)
+            .with_boot_trust(policy.board.boot_trust)
+            .with_staged("/mica/updates/verified".into()),
+    )
+}
+
+/// Whether anything is mounted at `path`.
+fn mount_point(path: &str) -> Result<bool> {
+    Ok(std::fs::read_to_string("/proc/self/mountinfo")?
+        .lines()
+        .any(|line| line.split_whitespace().nth(4) == Some(path)))
 }
 
 /// The boot medium of a `gpt` board, with SYSTEM and DATA mounted from the
