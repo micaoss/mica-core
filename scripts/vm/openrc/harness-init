@@ -1,0 +1,23 @@
+#!/bin/sh
+# The runkit's part, as far as the trial deadline reads it, then openrc-init
+# as PID 1: the kernel file systems and /run, efivarfs with the loader's
+# variables as systemd-boot leaves them, SYSTEM read-only and DATA read-write,
+# and the runkit's files in /run/mica. The ESP stays unmounted.
+set -eu
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs -o mode=0755,nosuid dev /dev
+exec </dev/console >/dev/console 2>&1
+mount -t tmpfs -o mode=0755,nosuid,nodev run /run
+mount -t efivarfs -o nosuid,nodev,noexec efivarfs /sys/firmware/efi/efivars
+guid=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+for variable in /harness/efivars/*; do
+    [ -e "$variable" ] || continue
+    cat "$variable" >"/sys/firmware/efi/efivars/${variable##*/}-$guid"
+done
+mkdir -p /run/mica
+cp /harness/run/* /run/mica/
+mount -t ext4 -o ro,nodev,nosuid PARTUUID="$(cat /harness/system-uuid)" /mnt/system
+mount -t ext4 -o rw,nodev,nosuid,noatime PARTUUID="$(cat /harness/data-uuid)" /mnt/data
+echo "VM openrc case=$(cat /harness/case) kernel=$(uname -r)"
+exec /sbin/openrc-init

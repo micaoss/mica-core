@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+# The `hang` case: a boot that hangs in the boot runlevel before
+# mica-data-layout, so DATA's layout never runs and the ESP is never mounted.
+
+description="Hang before mica-data-layout"
+
+depend() {
+    need mica-kernfs
+    before mica-data-layout
+}
+
+start() {
+    echo "VM hanging before mica-data-layout" >/dev/console
+    while :; do sleep 3600; done
+}

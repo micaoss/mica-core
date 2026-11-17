@@ -1,0 +1,34 @@
+#!/sbin/openrc-run
+# The case's checks, in the default runlevel: whether the trial deadline still
+# runs once sysinit and boot are done; in the `confirmed` case, the confirm's
+# change to the ESP (the deployment's entry loses its counter) well before
+# confirmS; then, past confirmS, the end of a boot nothing rebooted.
+
+description="Trial deadline VM checks"
+
+depend() {
+    after *
+}
+
+start() {
+    if pgrep -f 'mica-deploy trial-deadline' >/dev/null; then
+        echo "VM deadline-alive=yes"
+    else
+        echo "VM deadline-alive=no"
+    fi >/dev/console
+    (
+        if [ "$(cat /harness/case)" = confirmed ]; then
+            sleep 20
+            mount -o remount,rw /boot
+            for entry in /boot/loader/entries/mica-*+*.conf; do
+                mv "$entry" "${entry%%+*}.conf"
+            done
+            mount -o remount,ro /boot
+            echo "VM confirmed $(ls /boot/loader/entries)" >/dev/console
+        fi
+        end=$(($(cat /harness/confirm-s) + 30))
+        while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do sleep 5; done
+        echo "VM_TEST_END" >/dev/console
+        openrc-shutdown --poweroff now
+    ) </dev/null >/dev/null 2>&1 &
+}
