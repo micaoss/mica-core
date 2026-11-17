@@ -5,7 +5,7 @@
 //! reconfigures the link.
 //!
 //! Ignored: it needs a running systemd with networkd and resolved; it runs
-//! booted in a VM.
+//! booted in a VM: `MICA_VM_KERNEL=<bzImage> scripts/vm/run.sh dns-systemd`.
 
 use std::process::Command;
 use std::time::Duration;

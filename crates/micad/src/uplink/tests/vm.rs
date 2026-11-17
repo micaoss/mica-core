@@ -3,7 +3,7 @@
 //! "internet" namespace that holds the probe target.
 //!
 //! Ignored: it needs root and iproute2's `ip` on `PATH`; it runs booted in a
-//! VM.
+//! VM: `MICA_VM_KERNEL=<bzImage> scripts/vm/run.sh failover`.
 
 use std::process::Command;
 

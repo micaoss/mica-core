@@ -1,0 +1,15 @@
+[Unit]
+Description=micad VM test
+Wants=systemd-networkd.service systemd-resolved.service
+After=systemd-networkd.service systemd-resolved.service dbus.service
+
+[Service]
+Type=oneshot
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/ttyS0
+Environment=RUST_BACKTRACE=1
+ExecStart=/bin/sh -c 'echo "VM systemd boot kernel=$(uname -r)"; /test --ignored --exact "$(cat /test-name)" --nocapture --test-threads=1; echo "VM_TEST_EXIT=$?"; systemctl poweroff --no-block'
+
+[Install]
+WantedBy=multi-user.target

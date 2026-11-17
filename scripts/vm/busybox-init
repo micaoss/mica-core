@@ -1,0 +1,12 @@
+#!/bin/busybox sh
+# The busybox guest's init: mounts, then the one micad test, then power off.
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+mount -t tmpfs run /run
+mkdir -p /run/netns /var/run /tmp && ln -s /run/netns /var/run/netns
+echo "VM busybox boot kernel=$(uname -r)"
+PATH=/opt/tools:/bin RUST_BACKTRACE=1 /test --ignored --exact "$(cat /test-name)" --nocapture --test-threads=1
+echo "VM_TEST_EXIT=$?"
+poweroff -f
