@@ -24,7 +24,7 @@ name=$1
 shift
 command=(/vm/inside.sh "$guest" "$test")
 if [ "$guest" = openrc ]; then
-    [ "$#" -gt 0 ] || set -- held hang confirmed plain
+    [ "$#" -gt 0 ] || set -- held hang slow confirmed plain
     command=(/vm/deadline.sh "$@")
 fi
 for tool in docker tar; do command -v "$tool" >/dev/null; done

@@ -1757,9 +1757,11 @@ reboots, because every try is spent before the root starts (the loader's counter
 deployment: systemd-boot's `+N` entry on UEFI, micaboot's record attempts on FIT boards; the
 runkit's `meta/set-trial.json` for a set or an extension change), so the trial still runs out and
 falls back. A confirmed boot is never failed for being slow. It reboots or powers off through the
-init and, if the init has not stopped it within 300 s, through the kernel after a sync:
+init and, if the init has not stopped it within 300 s, through the kernel after a sync.
 openrc-init takes a request only between runlevels, so a boot hung inside one never acts on
-`openrc-shutdown`. On OpenRC its lines go to the kernel
+`openrc-shutdown`: an OpenRC whose `/run/openrc/softlevel` does not turn to `shutdown` within
+15 s (OpenRC writes it before it stops anything) has not begun, and the kernel reboots at once;
+one that has begun keeps the 300 s for an orderly shutdown, however slow. On OpenRC its lines go to the kernel
 log, which exists before any syslogd and reaches the system log through `mica-klogd`; an error and
 a failed exit are logged at error level, so they reach the console too. mica-deploy reboots and powers off
 through the root's init (`systemctl reboot|poweroff`, or `openrc-shutdown --reboot|--poweroff

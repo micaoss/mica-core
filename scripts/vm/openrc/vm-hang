@@ -11,5 +11,7 @@ depend() {
 
 start() {
     echo "VM hanging before mica-data-layout" >/dev/console
+    # What OpenRC records while the runlevel starts, past the deadline.
+    (sleep 125; echo "VM softlevel while hung=$(cat /run/openrc/softlevel)" >/dev/console) &
     while :; do sleep 3600; done
 }

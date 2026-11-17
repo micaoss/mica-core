@@ -5,7 +5,10 @@
 #   held       a counted boot nothing confirms: failed and rebooted at confirmS
 #   hang       the same boot hung before mica-data-layout (no ESP mounted):
 #              rebooted at confirmS without recording, by the kernel once
-#              openrc-init, stuck in the boot runlevel, has not acted
+#              openrc-init, stuck in the boot runlevel, has not begun the
+#              shutdown within 15 s
+#   slow       the held boot whose orderly shutdown takes 40 s: the init
+#              finishes it, no kernel reboot cuts it short
 #   confirmed  a counted boot confirmed before confirmS: left alone
 #   plain      a boot of an uncounted entry: the deadline exits at once
 set -euo pipefail
@@ -70,6 +73,10 @@ run_case() {
         install -m 0755 /vm/openrc/vm-hang "$root/etc/init.d/vm-hang"
         ln -s /etc/init.d/vm-hang "$root/etc/runlevels/boot/"
     fi
+    if [ "$case" = slow ]; then
+        install -m 0755 /vm/openrc/vm-slow "$root/etc/init.d/vm-slow"
+        ln -s /etc/init.d/vm-slow "$root/etc/runlevels/default/"
+    fi
     echo INIT=openrc >"$root/usr/lib/mica/product.conf"
     printf 'PARTUUID=%s /boot vfat ro,noatime,nosuid,nodev,noexec,umask=0077 0 0\nPARTUUID=%s /mnt/data ext4 noatime 0 2\n' \
         "$esp_uuid" "$data_uuid" >"$root/etc/fstab"
@@ -100,28 +107,40 @@ EOF
         -kernel /vm/bzImage -initrd "$dir/root.cpio.gz" \
         -append "console=ttyS0 rdinit=/harness-init panic=-1" 2>&1 \
         | tr -d '\r' | sed -u 's/\x1b\[[0-9;?]*[A-Za-z]//g' >"$dir/console.log" || :
-    grep -E '^VM|mica-trial-deadline|reboot: ' "$dir/console.log" | sed "s/^/[$case] /"
+    grep -E '^VM|mica-trial-deadline|reboot: |PID1' "$dir/console.log" | sed "s/^/[$case] /"
     check "$case" "$dir/console.log"
 }
 
 expect() { grep -q -e "$2" "$1" || { echo "FAIL: missing: $2"; return 1; }; }
 refuse() { ! grep -q -e "$2" "$1" || { echo "FAIL: present: $2"; return 1; }; }
 
+# A held trial failed at confirmS and rebooted by the init's orderly shutdown.
+failed_by_the_init() {
+    local log=$1
+    expect "$log" 'VM deadline-alive=yes' &&
+        expect "$log" 'mica-trial-deadline: mica-deploy: the trial was not confirmed within 120s; failing the boot' &&
+        expect "$log" 'mica-trial-deadline: {"retired":false}' &&
+        expect "$log" 'PID1: Received "reboot" from FIFO' &&
+        expect "$log" 'VM shutting down, softlevel=shutdown' &&
+        expect "$log" 'reboot: Restarting system' && refuse "$log" 'the kernel does'
+}
+
 check() {
     local case=$1 log=$2
     case "$case" in
-    held)
-        expect "$log" 'VM deadline-alive=yes' &&
-            expect "$log" 'mica-trial-deadline: mica-deploy: the trial was not confirmed within 120s; failing the boot' &&
-            expect "$log" 'mica-trial-deadline: {"retired":false}' &&
-            expect "$log" 'reboot: Restarting system' && refuse "$log" 'VM_TEST_END'
+    held) failed_by_the_init "$log" && refuse "$log" 'VM_TEST_END' ;;
+    slow)
+        failed_by_the_init "$log" && expect "$log" 'VM slow stop begins, softlevel=shutdown' &&
+            expect "$log" 'VM slow stop done'
         ;;
     hang)
         expect "$log" 'VM hanging before mica-data-layout' &&
             expect "$log" 'the ESP is not mounted' &&
             expect "$log" 'rebooting without recording, the try is already spent' &&
-            expect "$log" 'the init did not act within 300s; the kernel does' &&
-            expect "$log" 'reboot: Restarting system' && refuse "$log" 'VM deadline-alive'
+            expect "$log" 'VM softlevel while hung=boot' &&
+            expect "$log" 'openrc-init has not begun the shutdown within 15s, it is inside a runlevel; the kernel does' &&
+            expect "$log" 'reboot: Restarting system' && refuse "$log" 'VM deadline-alive' &&
+            refuse "$log" 'PID1: Received'
         ;;
     confirmed)
         expect "$log" 'VM deadline-alive=yes' && expect "$log" "VM confirmed mica-$id.conf" &&

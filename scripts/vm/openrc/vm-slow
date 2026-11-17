@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+# The `slow` case: an orderly shutdown that takes 40 s, as a service that
+# stops slowly does, which the deadline's backstop must not cut short.
+
+description="Stop slowly"
+
+depend() {
+    need mica-kernfs
+}
+
+start() {
+    :
+}
+
+stop() {
+    echo "VM slow stop begins, softlevel=$(cat /run/openrc/softlevel)" >/dev/console
+    sleep 40
+    echo "VM slow stop done" >/dev/console
+}

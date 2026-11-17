@@ -32,3 +32,7 @@ start() {
         openrc-shutdown --poweroff now
     ) </dev/null >/dev/null 2>&1 &
 }
+
+stop() {
+    echo "VM shutting down, softlevel=$(cat /run/openrc/softlevel)" >/dev/console
+}

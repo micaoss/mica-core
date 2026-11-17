@@ -1892,29 +1892,61 @@ fn trial_deadline(policy: &Policy, receipt: &BootReceipt, keys: &[[u8; 32]]) -> 
     }
 }
 
-/// How long the deadline leaves the init to take the machine down before it
-/// does so itself: longer than an orderly shutdown takes.
+/// How long the deadline leaves an init that is taking the machine down
+/// before it does so itself: longer than an orderly shutdown takes.
 const INIT_GRACE: Duration = Duration::from_secs(300);
+
+/// How long openrc-init has to begin a shutdown it was asked for.
+const OPENRC_BEGIN: Duration = Duration::from_secs(15);
+
+/// OpenRC's record of its runlevel: `openrc reboot|shutdown` writes
+/// `shutdown` here before it stops anything; while a runlevel starts it holds
+/// that runlevel.
+const OPENRC_SOFTLEVEL: &str = "/run/openrc/softlevel";
 
 /// Reboot or power off for the deadline: through the init and, if the init
 /// has not stopped this process within [`INIT_GRACE`], through the kernel
 /// after a sync. openrc-init takes a request only between runlevels, so on a
-/// boot hung inside one, `openrc-shutdown` is never acted on.
+/// boot hung inside one `openrc-shutdown` is never acted on: an OpenRC that
+/// has not begun its shutdown within [`OPENRC_BEGIN`] is stuck, and the
+/// kernel reboots at once.
 fn deadline_power(what: Power) -> Result<()> {
+    let openrc = mica_deploy::power::init(Path::new("/"))? == mica_deploy::power::Init::Openrc;
     if let Err(error) = power(what) {
         eprintln!("mica-deploy: the init refused the request ({error:#})");
     }
-    thread::sleep(INIT_GRACE);
-    eprintln!(
-        "mica-deploy: the init did not act within {}s; the kernel does",
-        INIT_GRACE.as_secs()
-    );
+    if openrc && !openrc_going_down() {
+        eprintln!(
+            "mica-deploy: openrc-init has not begun the shutdown within {}s, it is inside a runlevel; the kernel does",
+            OPENRC_BEGIN.as_secs()
+        );
+    } else {
+        thread::sleep(INIT_GRACE);
+        eprintln!(
+            "mica-deploy: the init did not finish within {}s; the kernel does",
+            INIT_GRACE.as_secs()
+        );
+    }
     rustix::fs::sync();
     rustix::system::reboot(match what {
         Power::Reboot => rustix::system::RebootCommand::Restart,
         Power::PowerOff => rustix::system::RebootCommand::PowerOff,
     })?;
     Ok(())
+}
+
+/// Whether OpenRC begins its shutdown within [`OPENRC_BEGIN`].
+fn openrc_going_down() -> bool {
+    let started = Instant::now();
+    loop {
+        if std::fs::read_to_string(OPENRC_SOFTLEVEL).is_ok_and(|level| level.trim() == "shutdown") {
+            return true;
+        }
+        if started.elapsed() >= OPENRC_BEGIN {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
 }
 
 /// A trial boot past its deadline whose store cannot be reached: reboot
