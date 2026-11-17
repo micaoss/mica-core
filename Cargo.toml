@@ -82,7 +82,7 @@ tower = { version = "0.5", features = ["util"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "cookies", "form"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 rustix = { version = "1", features = ["fs"] }
-zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # The mDNS responder (section 3.12): its own thread on mio, no async runtime
 # and no D-Bus. Without `logging`, which would only feed the `log` facade.
 mdns-sd = { version = "0.21", default-features = false }
