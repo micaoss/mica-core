@@ -1,8 +1,10 @@
 //! The rules a `network` write is held to beyond [`crate::network_rules`]'s:
 //! each carried entry's own address, gateway, routes and DNS servers, and
 //! the rules between entries (overlapping subnets, default-route metrics,
-//! VLAN ids). apid runs them on its network routes and micad on a BLE
-//! `setNetwork`, so both refuse the same map with the same codes.
+//! VLAN ids, a tunnel port a service holds). micad's write path runs them on
+//! every write of the network, and apid first on its routes to answer each
+//! refusal by field, so every writer meets the same rules with the same
+//! codes.
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -531,6 +533,55 @@ pub fn references_to(entries: &BTreeMap<String, IfaceSettings>, iface: &str) -> 
                     .is_some_and(|bridge| bridge.ports.iter().any(|port| port == iface))
         })
         .map(|(name, _)| name.clone())
+        .collect()
+}
+
+/// The UDP ports userspace sockets hold, from `udp` and `udp6` under `dir`.
+/// A kernel socket (inode 0), such as a WireGuard device's own, is not one:
+/// the tunnel holding it is in the map.
+pub fn held_udp_ports(dir: &std::path::Path) -> std::collections::BTreeSet<u16> {
+    ["udp", "udp6"]
+        .iter()
+        .filter_map(|table| std::fs::read_to_string(dir.join(table)).ok())
+        .flat_map(|text| {
+            text.lines()
+                .skip(1)
+                .filter_map(|line| {
+                    let columns: Vec<&str> = line.split_whitespace().collect();
+                    if *columns.get(9)? == "0" {
+                        return None;
+                    }
+                    u16::from_str_radix(columns.get(1)?.rsplit_once(':')?.1, 16).ok()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// A tunnel whose listen port is new or changed and that a service on the
+/// device holds is `port_in_use`.
+pub fn listener_violations(
+    entries: &BTreeMap<String, IfaceSettings>,
+    stored: &BTreeMap<String, IfaceSettings>,
+    held: &std::collections::BTreeSet<u16>,
+) -> Vec<NetworkViolation> {
+    entries
+        .iter()
+        .filter_map(|(iface, cfg)| {
+            let port = cfg.wireguard.as_ref()?.listen_port?;
+            let before = stored
+                .get(iface)
+                .and_then(|stored| stored.wireguard.as_ref()?.listen_port);
+            (before != Some(port) && held.contains(&port)).then(|| {
+                NetworkViolation::new(
+                    iface,
+                    "wireguard.listenPort",
+                    "port_in_use",
+                    serde_json::json!({ "port": port }),
+                    format!("a service on the device holds UDP port {port}"),
+                )
+            })
+        })
         .collect()
 }
 

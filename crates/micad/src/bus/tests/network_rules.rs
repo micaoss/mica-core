@@ -45,3 +45,36 @@ async fn a_check_without_targets_is_stored_with_the_defaults() {
         serde_json::to_value(micad_settings::default_probe_targets()).unwrap()
     );
 }
+
+/// A tunnel's new listen port that a service on the device holds is refused
+/// with `port_in_use`, read from the UDP socket table at write time.
+#[tokio::test]
+async fn a_tunnel_port_a_service_holds_is_refused_on_the_bus() {
+    let (service, dir) = service_with_wireguard();
+    let proc_net = dir.path().join("net");
+    std::fs::create_dir_all(&proc_net).unwrap();
+    std::fs::write(
+        proc_net.join("udp"),
+        "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
+         \x20  0: 00000000:CA76 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 4242 2 0000000000000000 0\n",
+    )
+    .unwrap();
+    let service = service.with_proc_net(proc_net);
+    let tunnel = |port: u16| {
+        serde_json::json!({
+            "kind": "wireguard",
+            "dhcp": false,
+            "static": { "address": "10.202.0.1/24" },
+            "wireguard": { "listenPort": port },
+        })
+    };
+    let err = service
+        .persist_setting("network.wg0", tunnel(51830))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("port_in_use"), "{err}");
+    service
+        .persist_setting("network.wg0", tunnel(51831))
+        .await
+        .expect("a free port lands");
+}

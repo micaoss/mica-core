@@ -118,8 +118,9 @@ impl MicadService {
                 }
             }
             // The network rules and the stored defaults, for the entries this
-            // write adds or changes: every writer (apid, BLE provisioning, a
-            // settings path over the bus, `mica`) meets them here.
+            // write adds or changes, and a tunnel's new port a service holds
+            // (read now): every writer (apid, BLE provisioning, a settings
+            // path over the bus, `mica`) meets them here.
             if candidate.network != inner.settings.network {
                 for cfg in candidate.network.values_mut() {
                     micad_settings::store_probe_defaults(cfg);
@@ -130,9 +131,19 @@ impl MicadService {
                     .filter(|(iface, cfg)| inner.settings.network.get(*iface) != Some(*cfg))
                     .map(|(iface, _)| iface.as_str())
                     .collect();
+                let held = self
+                    .proc_net
+                    .as_deref()
+                    .map(micad_settings::held_udp_ports)
+                    .unwrap_or_default();
                 if let Some(violation) =
                     micad_settings::map_violations(&candidate.network, &carried)
                         .into_iter()
+                        .chain(micad_settings::listener_violations(
+                            &candidate.network,
+                            &inner.settings.network,
+                            &held,
+                        ))
                         .next()
                 {
                     return Err(SettingsError::Validation {

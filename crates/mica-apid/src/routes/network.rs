@@ -196,7 +196,11 @@ pub(crate) async fn api_v1_network_write(
         return *response;
     }
     if let Err(response) = violations_refusal(
-        listener_violations(&entries, &current, &held_udp_ports(&state.proc_net)),
+        micad_settings::listener_violations(
+            &entries,
+            &current,
+            &micad_settings::held_udp_ports(&state.proc_net),
+        ),
         NETWORK_SETTINGS_PATH,
     ) {
         return *response;
@@ -296,10 +300,10 @@ pub(crate) async fn api_v1_network_iface_write(
     // carries: a stored entry that already holds an unparseable address is
     // not this request's fault and must not make an edit to a different
     // interface fail.
-    let listeners = listener_violations(
+    let listeners = micad_settings::listener_violations(
         &NetworkEntries::from([(iface.clone(), cfg.clone())]),
         &candidate,
-        &held_udp_ports(&state.proc_net),
+        &micad_settings::held_udp_ports(&state.proc_net),
     );
     candidate.insert(iface.clone(), cfg.clone());
     let adopted = match adopt_vlan_parents(&state, &mut candidate, &path).await {

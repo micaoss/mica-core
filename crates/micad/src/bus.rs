@@ -178,6 +178,9 @@ pub struct MicadService {
     /// The root the device code is read under (`GetDeviceCode`); `None`
     /// reads nothing, on the same rule.
     device_root: Option<std::path::PathBuf>,
+    /// Where the UDP socket tables are read (`udp`, `udp6`), for a tunnel's
+    /// port a service holds; `None` holds none, on the same rule.
+    proc_net: Option<std::path::PathBuf>,
     /// The factory reset (`FactoryReset`); `None` is a daemon that cannot
     /// stage one, on the same rule.
     factory_reset: Option<Arc<crate::factory_reset::FactoryReset>>,
@@ -370,6 +373,7 @@ impl MicadService {
             system_info: Arc::new(UnavailableSystemInfo),
             telemetry: Arc::new(UnavailableTelemetry),
             device_root: None,
+            proc_net: None,
             factory_reset: None,
             rollback_record: None,
             password_backoff: Arc::default(),

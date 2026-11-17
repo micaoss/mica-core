@@ -85,9 +85,10 @@ pub use network_rules::{
     validate_can, validate_peers, validate_topology,
 };
 pub use network_write::{
-    MAX_PROBE_TARGETS, OVERRIDE_METRIC, STATIC_METRIC_BASE, entry_violations,
-    is_default_destination, map_violations, references_to, relational_violations, routing_problem,
-    store_probe_defaults, valid_cidr, valid_ipv4, validate_static_address, write_violations,
+    MAX_PROBE_TARGETS, OVERRIDE_METRIC, STATIC_METRIC_BASE, entry_violations, held_udp_ports,
+    is_default_destination, listener_violations, map_violations, references_to,
+    relational_violations, routing_problem, store_probe_defaults, valid_cidr, valid_ipv4,
+    validate_static_address, write_violations,
 };
 pub use path::{json_path_get, path_segments, quote_path_segment};
 pub use recovery::{

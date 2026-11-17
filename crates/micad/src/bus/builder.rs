@@ -221,6 +221,14 @@ impl MicadService {
         self
     }
 
+    /// Read the UDP socket tables under `dir` when a write sets a tunnel's
+    /// listen port.
+    #[must_use]
+    pub fn with_proc_net(mut self, dir: std::path::PathBuf) -> Self {
+        self.proc_net = Some(dir);
+        self
+    }
+
     /// Attach the factory reset (`FactoryReset`, `GetFactoryReset`).
     #[must_use]
     pub fn with_factory_reset(mut self, reset: Arc<crate::factory_reset::FactoryReset>) -> Self {

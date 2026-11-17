@@ -193,7 +193,8 @@ failover route (metric 10, *Uplink failover* below); a declared default route wi
 below 20 is refused with `route_metric_reserved`. Every writer meets the network map's rules
 and its stored defaults (a check's targets, below) in micad's own write path, the one every
 settings write takes: apid's routes, BLE provisioning, a settings path over the bus and `mica`
-alike; apid also checks first, to answer each refusal by field. On OpenRC the same numbers go
+alike, including a tunnel port a service holds (`port_in_use`, below); apid also checks first,
+with the same functions, to answer each refusal by field. On OpenRC the same numbers go
 into each DHCP stanza as `metric <n>` and into `/var/lib/mica/wifi/client.env` as `metric=600`, for
 Base's `mica-udhcpc` to give the lease's default route (section 3.8). An interface with
 `internet: false` takes its lease's address and subnet route and no gateway: `[DHCPv4]` and
@@ -1176,7 +1177,8 @@ write that
 removes a WireGuard tunnel records `wireguard-delete` `accepted` in the audit ring, once per
 tunnel and without its name. A write is refused `port_in_use` when a tunnel's listen port is
 another tunnel's or, for a new or changed port, held by a userspace UDP socket on the device
-(`/proc/net/udp`, `udp6`; a WireGuard device's own kernel socket is not one). `GET
+(`/proc/net/udp`, `udp6`, read by micad when the write lands; a WireGuard device's own kernel
+socket is not one). `GET
 /api/v1/network/wireguard/defaults` answers the first free `wg<N>`, `10.<N>.0.1/24` (then
 `172.16.<N>.1/24`) and listen port from 51821, past declared and observed names and subnets,
 peers' allowed IPs, observed routes and held ports, and the held ports themselves.

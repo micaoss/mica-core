@@ -403,6 +403,7 @@ async fn serve() -> anyhow::Result<()> {
         service = service.with_system_info(Arc::new(system_info::HostSystemInfo::production()));
         service = service.with_telemetry(Arc::new(telemetry::SysfsTelemetry::production()));
         service = service.with_device_root(std::path::PathBuf::from("/"));
+        service = service.with_proc_net(std::path::PathBuf::from("/proc/net"));
         printed_code = device_code::announce(
             std::path::Path::new("/"),
             std::path::Path::new(device_code::ISSUE_PATH),

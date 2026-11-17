@@ -7,8 +7,7 @@ use std::net::Ipv4Addr;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
-use micad_settings::NetworkViolation;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::*;
 
@@ -32,55 +31,6 @@ pub(crate) struct WireguardDefaults {
     /// The UDP ports services on the device hold, for a client choosing past
     /// changes the device has not seen yet.
     pub(super) udp_ports_in_use: Vec<u16>,
-}
-
-/// The UDP ports userspace sockets hold, from `udp` and `udp6` under `dir`.
-/// A kernel socket (inode 0), such as a WireGuard device's own, is not one:
-/// the tunnel holding it is in the map.
-pub(super) fn held_udp_ports(dir: &std::path::Path) -> BTreeSet<u16> {
-    ["udp", "udp6"]
-        .iter()
-        .filter_map(|table| std::fs::read_to_string(dir.join(table)).ok())
-        .flat_map(|text| {
-            text.lines()
-                .skip(1)
-                .filter_map(|line| {
-                    let columns: Vec<&str> = line.split_whitespace().collect();
-                    if *columns.get(9)? == "0" {
-                        return None;
-                    }
-                    u16::from_str_radix(columns.get(1)?.rsplit_once(':')?.1, 16).ok()
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
-/// A tunnel whose listen port is new or changed and that a service on the
-/// device holds is `port_in_use`.
-pub(super) fn listener_violations(
-    entries: &NetworkEntries,
-    stored: &NetworkEntries,
-    held: &BTreeSet<u16>,
-) -> Vec<NetworkViolation> {
-    entries
-        .iter()
-        .filter_map(|(iface, cfg)| {
-            let port = cfg.wireguard.as_ref()?.listen_port?;
-            let before = stored
-                .get(iface)
-                .and_then(|stored| stored.wireguard.as_ref()?.listen_port);
-            (before != Some(port) && held.contains(&port)).then(|| {
-                NetworkViolation::new(
-                    iface,
-                    "wireguard.listenPort",
-                    "port_in_use",
-                    json!({ "port": port }),
-                    format!("a service on the device holds UDP port {port}"),
-                )
-            })
-        })
-        .collect()
 }
 
 /// `a.b.c.d/p` as the network and the prefix.
@@ -190,6 +140,6 @@ pub(crate) async fn api_v1_network_wireguard_defaults(
         Err(response) => return *response,
     };
     let observed = state.api.get_observed_network().await.unwrap_or_default();
-    let held = held_udp_ports(&state.proc_net);
+    let held = micad_settings::held_udp_ports(&state.proc_net);
     api_response(StatusCode::OK, defaults(&entries, &observed, &held))
 }
