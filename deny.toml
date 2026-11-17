@@ -25,4 +25,8 @@ deny = [
 # Vulnerabilities are errors by default in the version-2 schema;
 # unmaintained advisories only warn.
 unmaintained = "all"
-ignore = []
+ignore = [
+    # chrono: unmaintained, all versions, no fixed release. mica moves its
+    # timestamps to jiff; the plan is docs/plan/chrono-to-jiff.md.
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained with no fixed version; migration to jiff is planned in docs/plan/chrono-to-jiff.md" },
+]
